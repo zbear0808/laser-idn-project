@@ -102,6 +102,14 @@
               (keyword? ref) (name ref)
               :else (str ref)))))
 
+(defn known-ref?
+  "Is ref something a cue can be sent to: All, an automatic group, the
+   group of a projector that exists, or a stored group?"
+  [state ref]
+  (boolean (or (contains? group-defs ref)
+               (when-let [id (laser-of ref)] (contains? (:projectors state) id))
+               (contains? (:zone-groups state) ref))))
+
 
 ;; Stable identity
 
@@ -339,6 +347,34 @@
   (into #{}
         (mapcat (fn [[id p]] (when (pred p) (reaching state id))))
         (:projectors state)))
+
+
+;; What the pickers list
+
+(defn target-groups
+  "Everything a cue can be sent to, in the pickers' order: All; Left, Right,
+   Center, Odd, Even; each laser's own group, in rig order (\"(off)\" while
+   it is off: it reaches nothing then); then your groups by name. Each is
+   {:id :name :color :description :kind}, :kind one of :all :auto :laser
+   :custom; a laser's also has :projector-id. state needs :projectors,
+   :rig and :zone-groups."
+  [state]
+  (let [projectors (or (:projectors state) {})
+        derived (for [ref (cons :all auto-refs)]
+                  (assoc (group-defs ref) :id ref :kind (if (= :all ref) :all :auto)))
+        lasers (for [id (effective-order (get-in state [:rig :order]) projectors)
+                     :let [n (projector-name state id)]]
+                 {:id (laser-ref id)
+                  :name (cond-> n (not (enabled? (get projectors id))) (str " (off)"))
+                  :color laser-color
+                  :description (str "Just " n ".")
+                  :kind :laser
+                  :projector-id id})
+        custom (->> (:zone-groups state)
+                    (remove (comp derived-ref? key))
+                    (map (fn [[id g]] (assoc g :id id :kind :custom)))
+                    (sort-by (fn [g] [(str/lower-case (str (:name g))) (name (:id g))])))]
+    (vec (concat derived lasers custom))))
 
 
 ;; The scan's matching (04 §4)

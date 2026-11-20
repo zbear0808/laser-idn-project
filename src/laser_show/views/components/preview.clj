@@ -11,10 +11,12 @@
    LaserPoints are vectors [x y r g b] with NORMALIZED values: x, y in -1..1,
    r, g, b in 0..1."
   (:require [cljfx.api :as fx]
+            [clojure.string :as str]
             [laser-show.animation.show-time :as show-time]
             [laser-show.subs :as subs]
             [laser-show.common.util :as u]
             [laser-show.views.components.clock-view :as clock-view]
+            [laser-show.views.components.zone-chips :as zone-chips]
             [laser-show.views.components.measured :as measured])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.paint Color]
@@ -197,12 +199,21 @@
 ;; Zone Selector Components
 
 
+(defn- zone-id-text
+  "A ref as part of a node id: its namespace and name, dots and slashes as
+   dashes (:auto/left is auto-left, :auto.laser/p1 auto-laser-p1), so the
+   automatic Left and a kept \"Left (manual)\" (:left) don't share one."
+  [zone-id]
+  (if zone-id
+    (str/replace (str (when-let [space (namespace zone-id)] (str space "-")) (name zone-id)) "." "-")
+    "all"))
+
 (defn zone-selector-popup-item
-  "Single item in the zone selector popup menu."
-  [{:keys [cell-index zone-id zone-name zone-color selected?]}]
+  "Single item in the zone selector popup menu; a built-in group (locked?)
+   shows a lock."
+  [{:keys [cell-index zone-id zone-name zone-color selected? locked?]}]
   {:fx/type :h-box
-   :id (str "preview-zone-option-" cell-index "-"
-            (if zone-id (name zone-id) "all"))
+   :id (str "preview-zone-option-" cell-index "-" (zone-id-text zone-id))
    :spacing 6
    :alignment :center-left
    :padding {:left 8 :right 8 :top 6 :bottom 6}
@@ -218,6 +229,8 @@
                        {:fx/type :label
                         :text zone-name
                         :style "-fx-text-fill: white; -fx-font-size: 11;"}
+                       (when locked?
+                         (zone-chips/lock-graphic {:kind :auto}))
                        (when selected?
                          {:fx/type :label
                           :text "✓"
@@ -227,7 +240,7 @@
   "Popup menu for selecting zone group for a preview cell.
    Positioned below the label in a stack-pane."
   [{:keys [fx/context cell-index]}]
-  (let [zone-groups (fx/sub-ctx context subs/zone-groups-list)
+  (let [zone-groups (fx/sub-ctx context subs/target-groups)
         cell-config (fx/sub-ctx context subs/preview-cell-config cell-index)
         current-zone-id (:zone-group-id cell-config)
         ;; Build items: Master (nil) first, then all zone groups
@@ -237,13 +250,14 @@
      ;; Use translate-y to position below the label
      :style "-fx-background-color: #2D2D2D; -fx-padding: 4; -fx-background-radius: 4; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.5), 8, 0, 0, 2); -fx-translate-y: 22;"
      :on-mouse-exited {:event/type :preview/close-zone-selector}
-     :children (vec (for [{:keys [id name color]} items]
+     :children (vec (for [{:keys [id name color] :as item} items]
                       {:fx/type zone-selector-popup-item
                        :cell-index cell-index
                        :zone-id id
                        :zone-name name
                        :zone-color (or color "#808080")
-                       :selected? (= id current-zone-id)}))}))
+                       :selected? (= id current-zone-id)
+                       :locked? (zone-chips/locked? item)}))}))
 
 (defn zone-selector-label
   "Clickable zone label that opens the zone selector popup."
@@ -298,7 +312,7 @@
   [{:keys [fx/context cell-index width height]}]
   (let [cell-config (fx/sub-ctx context subs/preview-cell-config cell-index)
         zone-id (:zone-group-id cell-config)
-        zone-groups (fx/sub-ctx context subs/zone-groups-list)
+        zone-groups (fx/sub-ctx context subs/target-groups)
         zone-group (u/seek #(= (:id %) zone-id) zone-groups)
         zone-name (or (:name zone-group)
                       (if zone-id (name zone-id) "Master"))

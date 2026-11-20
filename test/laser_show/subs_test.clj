@@ -661,6 +661,33 @@
                                                 (assoc-in [:config :vibes :library :vibe-2 :hit :cells] [])))
                                    subs/vibes-tab-label)))))
 
+(deftest target-groups-order-test
+  (let [s (-> base-state
+              (assoc :projectors {:r {:name "Laser R" :host "10.0.0.7"}
+                                  :l {:name "Laser L" :host "10.0.0.5"}
+                                  :off {:name "Spare" :host "10.0.0.9" :enabled? false}})
+              (assoc :zone-groups {:graphics {:name "Graphics" :color "#9B59B6"}
+                                   :group-balcony {:name "Balcony" :color "#123456"}
+                                   :left {:name "Left (manual)" :color "#4A90D9"}}))
+        groups (fx/sub-ctx (context s) subs/target-groups)]
+    (is (= [:all :auto/left :auto/right :auto/center :auto/odd :auto/even
+            :auto.laser/l :auto.laser/r :auto.laser/off
+            :group-balcony :graphics :left]
+           (mapv :id groups))
+        "All; the automatic groups; the lasers in rig order; your groups by name")
+    (is (= [:all :auto :auto :auto :auto :auto :laser :laser :laser :custom :custom :custom] (mapv :kind groups)))
+    (is (= ["All" "Left" "Right" "Center" "Odd" "Even" "Laser L" "Laser R" "Spare (off)" "Balcony" "Graphics" "Left (manual)"]
+           (mapv :name groups))
+        "a laser that is off says so")
+    (is (= {:id :auto/left :name "Left" :color "#4A90D9" :kind :auto} (select-keys (second groups) [:id :name :color :kind])))
+    (is (= "#4A6FA5" (:color (nth groups 6))))
+    (is (= (nth groups 6) (get (fx/sub-ctx (context s) subs/target-groups-by-id) :auto.laser/l)))
+    (testing "a show that still stores All lists it once, as the built-in"
+      (is (= 1 (count (filter #(= :all (:id %))
+                              (fx/sub-ctx (context (assoc-in s [:zone-groups :all] {:name "All"})) subs/target-groups)))))))
+  (testing "the pickers' All is the built-in one, listed once"
+    (is (= [:all] (mapv :id (take 1 (fx/sub-ctx (context base-state) subs/target-groups)))))))
+
 (deftest vibe-audience-groups-follow-the-order-test
   (let [s (-> base-state
               (templates/apply-starter-vibes)

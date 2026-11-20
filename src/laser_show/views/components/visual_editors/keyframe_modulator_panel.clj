@@ -400,7 +400,7 @@
                                (< selected-idx (count keyframes)))
                       (nth keyframes selected-idx))
         zone-groups (when (= param-type :zone-group-id)
-                      (fx/sub-ctx context subs/zone-groups-list))]
+                      (fx/sub-ctx context subs/target-groups))]
     {:fx/type :h-box
      :alignment :center-left
      :spacing 10
@@ -428,9 +428,9 @@
                                    {:fx/type :combo-box
                                     :value selected-item
                                     :items items
-                                    :button-cell (fn [item] {:text (or (:name item) "Select Zone")})
+                                    :button-cell (fn [item] (zone-chips/with-lock {:text (or (:name item) "Select Zone")} item))
                                     :cell-factory {:fx/cell-type :list-cell
-                                                   :describe (fn [item] {:text (or (:name item) "")})}
+                                                   :describe (fn [item] (zone-chips/with-lock {:text (or (:name item) "")} item))}
                                     :on-value-changed (fn [new-item]
                                                         (when new-item
                                                           (assoc on-update-param :value (:id new-item))))}]})
@@ -575,7 +575,7 @@
                                  :param-type param-type
                                  :param-key actual-param-key
                                  :zone-groups (when (= param-type :zone-group-id)
-                                                (fx/sub-ctx context subs/zone-groups-list))
+                                                (fx/sub-ctx context subs/target-groups))
                                  :on-select (assoc base-event
                                                    :event/type :keyframe/select)
                                  :on-add (assoc base-event

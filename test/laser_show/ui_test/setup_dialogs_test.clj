@@ -214,11 +214,11 @@
     (ui/click! robot "#zone-group-delete-button")
     (ui/wait-for! #(window-showing? "Delete \"Balcony\"?"))
     (ui/assert-text! "#confirm-details" "A1 Intro")
-    (ui/select! robot "#confirm-choice" ":graphics")
-    (ui/wait-for! #(= :graphics (get-in (app-state) [:ui :dialogs :confirm :choice-value])))
+    (ui/select! robot "#confirm-choice" ":auto/left")
+    (ui/wait-for! #(= :auto/left (get-in (app-state) [:ui :dialogs :confirm :choice-value])))
     (ui/click! robot "#confirm-ok")
     (ui/wait-for! #(nil? (get-in (app-state) [:zone-groups :group-balcony])))
-    (is (= :graphics (cue-zone)) "the cue now goes to Graphics")
+    (is (= :auto/left (cue-zone)) "the cue now goes to Left, the automatic group")
     (ui/wait-for! #(not (window-showing? "Delete \"Balcony\"?")))))
 
 (deftest all-has-no-delete-test

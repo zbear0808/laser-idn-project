@@ -25,12 +25,14 @@
    - Test patterns"
   (:require [clojure.tools.logging :as log]
             [clojure.string :as str]
+            [laser-show.events.handlers.zone-groups :as zone-groups]
             [laser-show.events.helpers :as h]
             [laser-show.common.util :as u]
             [laser-show.idn.stream :as stream]
             [laser-show.animation.safety :as safety]
             [laser-show.animation.test-pattern :as test-pattern]
             [laser-show.events.safety-guard :as guard]
+            [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]))
 
 
@@ -362,17 +364,30 @@
     (if (and (string? n) (not (str/blank? n))) n (name projector-id))))
 
 (defn- handle-projectors-request-remove
-  "Ask before removing a projector (the shared confirm dialog)."
+  "Ask before removing a projector (the shared confirm dialog). When cues are
+   pinned to it (they name its own group, :auto.laser/<id>), it says how
+   many, and asks where they go, All by default, as deleting a group does
+   (04 S-13)."
   [{:keys [projector-id state]}]
   (if-not (contains? (:projectors state) projector-id)
     {:state state}
-    {:state (assoc-in state [:ui :dialogs :confirm]
-                      {:open? true
-                       :title (str "Remove " (projector-label state projector-id) "?")
-                       :message "Its calibration goes too. If it's still on the network, the next scan finds it again, turned off."
-                       :confirm-label "Remove"
-                       :danger? true
-                       :confirm-event {:event/type :projectors/remove :projector-id projector-id}})}))
+    (let [pin (rig/laser-ref projector-id)
+          cues (refs/cues-using (get-in state [:chains :cue-chains]) pin)]
+      {:state (assoc-in state [:ui :dialogs :confirm]
+                        (cond-> {:open? true
+                                 :title (str "Remove " (projector-label state projector-id) "?")
+                                 :message (str "Its calibration goes too. If it's still on the network, the next scan finds it again, turned off."
+                                               (when (seq cues)
+                                                 (str " " (zone-groups/plural (count cues) "cue" "cues")
+                                                      (if (= 1 (count cues)) " is" " are") " pinned to it.")))
+                                 :confirm-label "Remove"
+                                 :danger? true
+                                 :confirm-event {:event/type :projectors/remove :projector-id projector-id}}
+                          (seq cues) (assoc :details (zone-groups/cue-list-text state cues)
+                                            :choice {:key :retarget-to
+                                                     :label "Send its cues to:"
+                                                     :options (zone-groups/retarget-options state pin)}
+                                            :choice-value :all)))})))
 
 (defn- drop-discovered-output
   "The Discover list without the output host's service-id, so it doesn't keep
@@ -387,23 +402,37 @@
 (defn- handle-projectors-remove
   "Remove a projector, its calibration chain, its editor and list state, its
    virtual projectors and its place in the rig order, and clear the selection
-   and calibration mode that point at it. While streaming, the output-sync
-   middleware stops its engine. An unknown id changes nothing."
-  [{:keys [projector-id state]}]
+   and calibration mode that point at it. Cues pinned to it go to
+   :retarget-to (zone-groups/retarget-value: All by default, nil or :inherit
+   for Nothing), with a notice, so nothing names it any more. While
+   streaming, the output-sync middleware stops its engine. An unknown id
+   changes nothing."
+  [{:keys [projector-id state] :as event}]
   (if-let [{:keys [host service-id]} (get-in state [:projectors projector-id])]
-    (let [clear-if (fn [s path] (if (= projector-id (get-in s path)) (assoc-in s path nil) s))]
-      {:state (-> state
-                  (update :projectors dissoc projector-id)
-                  (update-in [:chains :projector-effects] dissoc projector-id)
-                  (update-in [:ui :projector-effect-ui-state] dissoc projector-id)
-                  (update :list-ui dissoc [:projector-effects projector-id])
-                  (update :virtual-projectors
-                          #(into {} (remove (fn [[_ vp]] (= projector-id (:parent-projector-id vp)))) %))
-                  (update-in [:rig :order] #(filterv (complement #{projector-id}) %))
-                  (clear-if [:projector-ui :active-projector])
-                  (clear-if [:projector-ui :calibrating-projector-id])
-                  (update-in [:projector-ui :identify] dissoc projector-id)
-                  (update-in [:projector-ui :discovered-devices] drop-discovered-output host service-id))})
+    (let [clear-if (fn [s path] (if (= projector-id (get-in s path)) (assoc-in s path nil) s))
+          pin (rig/laser-ref projector-id)
+          pinned (count (refs/cues-using (get-in state [:chains :cue-chains]) pin))
+          target (zone-groups/retarget-value state pin event)
+          removed (-> state
+                      (refs/replace-refs {pin target})
+                      (update :projectors dissoc projector-id)
+                      (update-in [:chains :projector-effects] dissoc projector-id)
+                      (update-in [:ui :projector-effect-ui-state] dissoc projector-id)
+                      (update :list-ui dissoc [:projector-effects projector-id])
+                      (update :virtual-projectors
+                              #(into {} (remove (fn [[_ vp]] (= projector-id (:parent-projector-id vp)))) %))
+                      (update-in [:rig :order] #(filterv (complement #{projector-id}) %))
+                      (clear-if [:projector-ui :active-projector])
+                      (clear-if [:projector-ui :calibrating-projector-id])
+                      (update-in [:projector-ui :identify] dissoc projector-id)
+                      (update-in [:projector-ui :discovered-devices] drop-discovered-output host service-id))]
+      (if (pos? pinned)
+        (h/show-notice removed
+                       (str "Removed " (projector-label state projector-id) " · "
+                            (zone-groups/plural pinned "cue" "cues") " now "
+                            (if target (str "go to " (rig/ref-name state target)) "inherit"))
+                       :info)
+        {:state removed}))
     {:state state}))
 
 

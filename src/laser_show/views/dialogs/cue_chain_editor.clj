@@ -25,6 +25,7 @@
             [laser-show.views.components.preset-param-editor :as preset-param-editor]
             [laser-show.views.components.effect-parameter-editor :as effect-param-editor]
             [laser-show.views.components.effect-bank :as effect-bank]
+            [laser-show.views.components.zone-chips :as zone-chips]
             [laser-show.routing.zone-effects :as zone-effects]
             [laser-show.common.util :as u])
   (:import [javafx.scene.input KeyCode KeyEvent]))
@@ -122,10 +123,10 @@
                  :tooltip {:fx/type :tooltip
                            :text "Where the cue's presets go, unless one names its own zone"}
                  :button-cell (fn [group]
-                                {:text (or (:name group) "All")})
+                                (zone-chips/with-lock {:text (or (:name group) "All")} group))
                  :cell-factory {:fx/cell-type :list-cell
                                 :describe (fn [group]
-                                            {:text (or (:name group) "All")})}
+                                            (zone-chips/with-lock {:text (or (:name group) "All")} group))}
                  :on-value-changed {:event/type :cue-chain/set-destination-zone-group
                                     :col col
                                     :row row}}]}))
@@ -215,14 +216,16 @@
                         (fn [zg]
                           (let [zid (:id zg)
                                 active? (= zid current-zone)]
-                            {:fx/type :check-menu-item
-                             :text (str (if active? "✓ " "   ") (:name zg (name zid)))
-                             :selected active?
-                             :on-action {:event/type :cue-chain/set-item-zone
-                                         :col col
-                                         :row row
-                                         :item-path item-path
-                                         :zone-group-id zid}}))
+                            (zone-chips/with-lock
+                             {:fx/type :check-menu-item
+                              :text (str (if active? "✓ " "   ") (:name zg (name zid)))
+                              :selected active?
+                              :on-action {:event/type :cue-chain/set-item-zone
+                                          :col col
+                                          :row row
+                                          :item-path item-path
+                                          :zone-group-id zid}}
+                             zg)))
                         zone-groups)
             all-zone-items (into inherit-item zone-items)]
         {:fx/type :context-menu
@@ -262,10 +265,10 @@
                  :pref-width 180
                  :items options
                  :button-cell (fn [opt]
-                                {:text (or (:name opt) "All")})
+                                (zone-chips/with-lock {:text (or (:name opt) "All")} opt))
                  :cell-factory {:fx/cell-type :list-cell
                                 :describe (fn [opt]
-                                            {:text (or (:name opt) "All")})}
+                                            (zone-chips/with-lock {:text (or (:name opt) "All")} opt))}
                  :on-value-changed {:event/type :cue-chain/set-item-zone
                                     :col col
                                     :row row
@@ -472,8 +475,9 @@
         ;; Merge ui-modes and item-effects-ui together so effects can access both
         effect-dialog-data (merge dialog-data item-effects-ui {:item-effects-ui item-effects-ui})
 
-        ;; Get zone groups for destination picker in footer and routing labels
-        zone-groups (fx/sub-ctx context subs/zone-groups-list)
+        ;; Where cues can go (All, the automatic groups, each laser, yours),
+        ;; for the destination picker in the footer and the routing labels
+        zone-groups (fx/sub-ctx context subs/target-groups)
         zone-groups-by-id (into {} (map (juxt :id identity)) zone-groups)
         default-zone-id (get-in cue-chain [:destination-zone :zone-group-id] :all)
 

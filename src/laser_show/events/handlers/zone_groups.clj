@@ -77,13 +77,13 @@
         (update :projectors #(strip (or % {})))
         (update :virtual-projectors #(strip (or % {}))))))
 
-(defn- plural [n one many]
+(defn plural [n one many]
   (str n " " (if (= 1 n) one many)))
 
 (defn- group-name [state group-id]
   (rig/ref-name state group-id))
 
-(defn- cue-list-text
+(defn cue-list-text
   "The cues as their cells and names, \"A1 Intro · C2 Drop\": at most six, then
    \"and n more\"."
   [state cells]
@@ -95,16 +95,17 @@
     (str/join " · " (cond-> (mapv label shown)
                       (pos? more) (conj (str "and " more " more"))))))
 
-(defn- retarget-options
-  "Where a deleted group's cues can go: All (built in), the other groups by
-   name, and Nothing (they inherit). Never the group itself."
-  [state group-id]
-  (let [others (->> (apply dissoc (:zone-groups state) group-id (filter rig/derived-ref? (keys (:zone-groups state))))
-                    (sort-by (fn [[id g]] [(str/lower-case (or (:name g) "")) (name id)]))
-                    (mapv (fn [[id g]] {:value id :text (or (:name g) (name id))})))]
-    (-> [{:value :all :text (group-name state :all)}]
-        (into others)
-        (conj {:value :inherit :text "Nothing (they inherit)"}))))
+(defn retarget-options
+  "Where the cues of a group or laser that goes (ref) can go: every target
+   the pickers list (routing.rig/target-groups: All first, the automatic
+   groups, each laser, your groups by name), and Nothing (they inherit).
+   Never ref itself."
+  [state ref]
+  (-> (into []
+            (comp (remove #(= ref (:id %)))
+                  (map (fn [g] {:value (:id g) :text (:name g)})))
+            (rig/target-groups state))
+      (conj {:value :inherit :text "Nothing (they inherit)"})))
 
 (defn- handle-zone-groups-request-remove
   "Ask before deleting a zone group: which cues and projectors use it, and,
@@ -135,15 +136,17 @@
                                                      :options (retarget-options state group-id)}
                                             :choice-value :all)))})))
 
-(defn- retarget-value
-  "Where the deleted group's references go: :retarget-to, All when it's
-   absent, the deleted group itself or no group; nil (they inherit) for
-   :inherit or an explicit nil."
-  [state group-id event]
+(defn retarget-value
+  "Where the references to ref (a group or laser that goes) go:
+   :retarget-to, All when it's absent, ref itself or nothing a cue can be
+   sent to (routing.rig/known-ref?: All, an automatic group, a laser that
+   exists, a stored group); nil (they inherit) for :inherit or an explicit
+   nil."
+  [state ref event]
   (let [target (get event :retarget-to :all)]
     (cond
       (or (nil? target) (= :inherit target)) nil
-      (or (= target group-id) (not (contains? (:zone-groups state) target))) :all
+      (or (= target ref) (not (rig/known-ref? state target))) :all
       :else target)))
 
 (defn- handle-zone-groups-remove

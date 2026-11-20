@@ -738,6 +738,24 @@
      :virtual-projectors vps}))
 
 
+;; Level 2: Where cues can go (routing.rig)
+
+
+(defn target-groups
+  "Everything a zone picker offers, in order (routing.rig/target-groups):
+   All; Left, Right, Center, Odd, Even; each laser; your groups by name.
+   Each {:id :name :color :description :kind}."
+  [context]
+  (rig/target-groups {:projectors (fx/sub-val context :projectors)
+                      :rig (fx/sub-val context :rig)
+                      :zone-groups (fx/sub-val context :zone-groups)}))
+
+(defn target-groups-by-id
+  "target-groups as {id group}."
+  [context]
+  (into {} (map (juxt :id identity)) (fx/sub-ctx context target-groups)))
+
+
 ;; Level 2: Input Device Subscriptions (MIDI, OSC)
 
 

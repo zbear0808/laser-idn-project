@@ -492,6 +492,16 @@
 ;; Zone Selector Visual Editor - Simple Zone Group Dropdown
 
 
+(defn- zone-swatch
+  "A zone's colour, and a lock when it is built in (zone-chips/lock-graphic)."
+  [item]
+  (when item
+    {:fx/type :h-box
+     :spacing 4
+     :alignment :center-left
+     :children (filterv some? [{:fx/type :circle :radius 6 :fill (or (:color item) "#666666")}
+                               (zone-chips/lock-graphic item)])}))
+
 (defn zone-selector-visual-editor
   "Simple zone group selector dropdown.
 
@@ -501,7 +511,7 @@
    - :event-template - Base event with :domain, :entity-key, :effect-path"
   [{:keys [fx/context current-params event-template]}]
   (let [{:keys [domain entity-key effect-path]} event-template
-        zone-groups (fx/sub-ctx context subs/zone-groups-list)
+        zone-groups (fx/sub-ctx context subs/target-groups)
         target-zone (get current-params :target-zone :all)
         items (zone-chips/zone-options zone-groups)
         selected-item (or (u/seek #(= (:id %) target-zone) items)
@@ -517,17 +527,11 @@
                  :items items
                  :button-cell (fn [item]
                                 {:text (or (:name item) "Select Zone")
-                                 :graphic (when item
-                                            {:fx/type :circle
-                                             :radius 6
-                                             :fill (or (:color item) "#666666")})})
+                                 :graphic (zone-swatch item)})
                  :cell-factory {:fx/cell-type :list-cell
                                 :describe (fn [item]
                                             {:text (or (:name item) "")
-                                             :graphic (when item
-                                                        {:fx/type :circle
-                                                         :radius 6
-                                                         :fill (or (:color item) "#666666")})})}
+                                             :graphic (zone-swatch item)})}
                  :on-value-changed (fn [new-item]
                                      (when new-item
                                        (events/dispatch!

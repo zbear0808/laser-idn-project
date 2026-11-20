@@ -15,6 +15,7 @@
             [laser-show.css.core :as css]
             [laser-show.views.components.inline-edit :as inline-edit]
             [laser-show.views.components.visual-editors.timeline-editor :as timeline-editor]
+            [laser-show.views.components.zone-chips :as zone-chips]
             [laser-show.common.util :as u])
   (:import [javafx.scene.input KeyCode KeyEvent]))
 
@@ -37,10 +38,10 @@
                  :pref-width 150
                  :items zone-groups
                  :button-cell (fn [group]
-                                {:text (or (:name group) "All")})
+                                (zone-chips/with-lock {:text (or (:name group) "All")} group))
                  :cell-factory {:fx/cell-type :list-cell
                                 :describe (fn [group]
-                                            {:text (or (:name group) "All")})}
+                                            (zone-chips/with-lock {:text (or (:name group) "All")} group))}
                  :on-value-changed {:event/type :cue-chain/set-destination-zone-group
                                     :col col
                                     :row row}}]}))
@@ -93,8 +94,8 @@
         ;; Only this cell's chain: edits to other cues don't re-render the dialog
         cue-chain (fx/sub-ctx context subs/cue-cell-chain col row)
 
-        ;; Zone groups
-        zone-groups (fx/sub-ctx context subs/zone-groups-list)
+        ;; Where cues can go: All, the automatic groups, each laser, yours
+        zone-groups (fx/sub-ctx context subs/target-groups)
         destination-zone-id (get-in cue-chain [:destination-zone :zone-group-id])
 
         ;; Timeline UI state: this cue's view, plus editor-wide prefs
@@ -119,7 +120,7 @@
        :col col
        :row row
        :cue cue-chain
-       :zone-groups (fx/sub-ctx context subs/zone-groups-by-id)
+       :zone-groups (fx/sub-ctx context subs/target-groups-by-id)
        :destination-zone-id destination-zone-id
        :timeline-ui timeline-ui
        :timeline-prefs timeline-prefs

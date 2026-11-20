@@ -236,9 +236,9 @@
     (is (= "A1 Intro · C2 Drop" (:details dialog)))
     (is (= :retarget-to (get-in dialog [:choice :key])))
     (is (= :all (:choice-value dialog)) "All by default")
-    (is (= [:all :crowd :graphics :inherit]
+    (is (= [:all :auto/left :auto/right :auto/center :auto/odd :auto/even :auto.laser/proj-1 :crowd :graphics :inherit]
            (mapv :value (get-in dialog [:choice :options])))
-        "All (built in, though no group stores it), the other groups by name, and Nothing; never the group itself")
+        "every target the pickers list (All first, the automatic groups, each laser, your other groups by name), and Nothing; never the group itself")
     (is (= {:event/type :zone-groups/remove :group-id :group-balcony} (:confirm-event dialog))))
   (testing "a group nothing uses asks with no choice"
     (let [dialog (get-in (zone-groups/handle {:event/type :zone-groups/request-remove
@@ -270,6 +270,19 @@
            (get-in (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony :state balcony-state})
                    [:state :ui :notice :text]))
         "All by its name, though no group stores it")))
+
+(deftest remove-can-retarget-to-an-automatic-group-test
+  (doseq [[target text] [[:auto/left "Left"] [:auto/even "Even"] [:auto.laser/proj-1 "Test Projector"]]]
+    (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
+                                             :retarget-to target :state balcony-state}))]
+      (is (= target (get-in state [:chains :cue-chains [0 0] :items 0 :zone-group-id])) (str target))
+      (is (= target (get-in state [:chains :cue-chains [1 2] :destination-zone :zone-group-id])))
+      (is (= (str "Deleted Balcony · 2 cues now go to " text) (get-in state [:ui :notice :text]))
+          "named as the pickers name it")))
+  (testing "a laser that isn't there is no target: All"
+    (is (= :all (get-in (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
+                                             :retarget-to :auto.laser/gone :state balcony-state})
+                        [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))))
 
 (deftest remove-to-nothing-inherits-test
   (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony

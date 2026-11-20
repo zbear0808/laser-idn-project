@@ -15,6 +15,7 @@
    [laser-show.events.core :as events]
    [laser-show.events.handlers.projector :as projectors]
    [laser-show.events.safety-guard :as guard]
+   [laser-show.routing.refs :as refs]
    [laser-show.routing.rig :as rig]
    [laser-show.state.domains :refer [build-initial-state]]))
 
@@ -644,6 +645,51 @@
         (is (= [:p2] (get-in removed [:rig :order])))
         (is (= [:p2 :p1] (get-in undone [:rig :order])))
         (is (some? (get-in undone [:projectors :p1])))))))
+
+(deftest remove-retargets-the-lasers-pins-test
+  (let [pinned (-> removable-state
+                   (assoc-in [:chains :cue-chains [0 0]] {:name "Intro" :destination-zone {:zone-group-id :auto.laser/p1}
+                                                          :items []})
+                   (assoc-in [:chains :cue-chains [1 0]] {:name "Drop" :items [{:id "i" :type :preset :preset-id :circle
+                                                                               :zone-group-id :auto.laser/p1}]})
+                   (assoc-in [:chains :cue-chains [2 0]] {:name "Other" :items [{:id "j" :type :preset :preset-id :circle
+                                                                                :zone-group-id :auto.laser/p2}]}))
+        removed (fn [& {:as opts}] (:state (projectors/handle (merge {:event/type :projectors/remove :projector-id :p1
+                                                                     :state pinned}
+                                                                    opts))))]
+    (testing "asked first: how many cues are pinned to it, and where they go (All by default)"
+      (let [dialog (get-in (projectors/handle {:event/type :projectors/request-remove :projector-id :p1 :state pinned})
+                           [:state :ui :dialogs :confirm])
+            options (mapv :value (get-in dialog [:choice :options]))]
+        (is (= (str "Its calibration goes too. If it's still on the network, the next scan finds it again, turned off. "
+                    "2 cues are pinned to it.")
+               (:message dialog)))
+        (is (= "A1 Intro · A2 Drop" (:details dialog)))
+        (is (= {:key :retarget-to :label "Send its cues to:"} (select-keys (:choice dialog) [:key :label])))
+        (is (= :all (:choice-value dialog)))
+        (is (= [:all :auto/left] (take 2 options)))
+        (is (some #{:auto.laser/p2} options) "another laser can take them")
+        (is (not (some #{:auto.laser/p1} options)) "never the laser that goes")
+        (is (= :inherit (peek options)))
+        (is (= {:event/type :projectors/remove :projector-id :p1} (:confirm-event dialog)))))
+    (testing "removed, its cues go where you chose"
+      (let [state (removed :retarget-to :auto/left)]
+        (is (= :auto/left (get-in state [:chains :cue-chains [0 0] :destination-zone :zone-group-id])))
+        (is (= :auto/left (get-in state [:chains :cue-chains [1 0] :items 0 :zone-group-id])))
+        (is (= :auto.laser/p2 (get-in state [:chains :cue-chains [2 0] :items 0 :zone-group-id])) "another laser's stay")
+        (is (empty? (refs/cues-using (get-in state [:chains :cue-chains]) :auto.laser/p1))
+            "and nothing names it any more (invariant 12)")
+        (is (= "Removed Laser L · 2 cues now go to Left" (get-in state [:ui :notice :text])))))
+    (testing "with no choice made, to All; Nothing lets them inherit"
+      (is (= :all (get-in (removed) [:chains :cue-chains [0 0] :destination-zone :zone-group-id])))
+      (is (= :all (get-in (removed :retarget-to :auto.laser/p1) [:chains :cue-chains [1 0] :items 0 :zone-group-id]))
+          "not to itself")
+      (is (not (contains? (get-in (removed :retarget-to :inherit) [:chains :cue-chains [1 0] :items 0]) :zone-group-id))))
+    (testing "a laser no cue is pinned to asks as before, and removes as before"
+      (is (nil? (get-in (projectors/handle {:event/type :projectors/request-remove :projector-id :p1 :state removable-state})
+                        [:state :ui :dialogs :confirm :choice])))
+      (is (nil? (get-in (projectors/handle {:event/type :projectors/remove :projector-id :p1 :state removable-state})
+                        [:state :ui :notice]))))))
 
 (deftest remove-projector-stops-its-engine-test
   (let [result (events/handle-event-pipeline {:event/type :projectors/remove :projector-id :p1
