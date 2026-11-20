@@ -7,6 +7,7 @@
             [laser-show.animation.show-time :as show-time]
             [laser-show.backend.multi-engine :as me]
             [laser-show.backend.output-errors :as output-errors]
+            [laser-show.animation.safety :as safety]
             [laser-show.events.core :as events]
             [laser-show.services.frame-service :as fs]
             [laser-show.services.show-clock :as show-clock]
@@ -491,5 +492,73 @@
         (is (nil? (warning)))))
     (finally
       (output-errors/clear!)
+      (swap! effects/!effect-registry #(apply dissoc % (map :id failing-calibration-effects))))))
+
+
+;; Safety zones (zones plan Z1): the last stage of every frame
+
+
+(def ^:private lit-line
+  "A lit line from the middle to x = 0.4."
+  [[0.0 0.0 0.0 0.0 0.0] [0.4 0.0 1.0 1.0 1.0]])
+
+(def ^:private double-size-pin
+  {:id (random-uuid) :effect-id :corner-pin :enabled? true
+   :params {:tl-x -2.0 :tl-y 2.0 :tr-x 2.0 :tr-y 2.0 :bl-x -2.0 :bl-y -2.0 :br-x 2.0 :br-y -2.0}})
+
+(defn- inside-limit? [[x0 y0 x1 y1] frame]
+  (every? (fn [[x y]] (and (<= (- x0 1e-9) x (+ x1 1e-9)) (<= (- y0 1e-9) y (+ y1 1e-9)))) frame))
+
+(deftest safety-runs-after-projector-effects-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:projectors :p] {:zone-groups [:all] :safety {:limit [-0.5 -0.5 0.5 0.5]}})
+                          (assoc-in [:chains :projector-effects :p :items] [double-size-pin])))
+  (let [out (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:all lit-line}}]))]
+    (is (seq out))
+    (is (inside-limit? [-0.5 -0.5 0.5 0.5] out) "the corner pin pushed the line to 0.8; safety cut it at 0.5")
+    (is (some #(and (< (Math/abs (- 0.5 (% 0))) 1e-9) (pos? (% 2))) out) "lit up to the limit")
+    (is (= {:tick 1} (select-keys (meta out) [:tick])) "the frame still carries its tick")))
+
+(deftest no-safety-zone-sends-the-same-frame-test
+  (state/swap-state! #(assoc-in % [:projectors :p] {:zone-groups [:all]}))
+  (let [cues [{:cell [0 0] :zone-frames {:all lit-line}}]]
+    (is (= lit-line (#'me/projector-frame :p (snapshot cues))))))
+
+(deftest failing-safety-sends-an-empty-frame-test
+  (let [original safety/apply-safety]
+    (state/swap-state! #(-> %
+                            (assoc-in [:projectors :p] {:zone-groups [:all] :safety {:limit [-0.5 -0.5 0.5 0.5]}})
+                            (assoc-in [:projectors :q] {:zone-groups [:all]})))
+    (with-redefs [safety/apply-safety (fn [s frame]
+                                        (if (= [-0.5 -0.5 0.5 0.5] (:limit (safety/normalize s)))
+                                          (throw (ex-info "test: safety failed" {}))
+                                          (original s frame)))]
+      (let [snap (snapshot [{:cell [0 0] :zone-frames {:all lit-line}}])
+            out (#'me/projector-frame :p snap)]
+        (is (= [] out) "the projector sends a void frame")
+        (is (= {:tick 1} (select-keys (meta out) [:tick])) "and counts the tick")
+        (is (re-find #"test: safety failed" (get-in (output-errors/snapshot) [[:safety :p] :message])))
+        (is (= lit-line (#'me/projector-frame :q snap)) "the other projector still draws")))))
+
+(deftest unreadable-safety-fails-closed-test
+  (state/swap-state! #(assoc-in % [:projectors :p] {:zone-groups [:all] :safety {:limit [0.0 0.0]}}))
+  (is (= [] (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:all lit-line}}]))))
+  (is (some? (get (output-errors/snapshot) [:safety :p])))
+  (testing "and it clears once the zone can be read"
+    (state/swap-state! #(assoc-in % [:projectors :p :safety] {:limit [-0.9 -0.9 0.9 0.9]}))
+    (is (seq (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:all lit-line}}]))))
+    (is (nil? (get (output-errors/snapshot) [:safety :p])))))
+
+(deftest failing-calibration-is-still-clipped-test
+  (run! effects/register-effect! failing-calibration-effects)
+  (try
+    (state/swap-state! #(-> %
+                            (assoc-in [:projectors :p] {:zone-groups [:all] :safety {:limit [-0.3 -0.3 0.3 0.3]}})
+                            (assoc-in [:chains :projector-effects :p :items]
+                                      [{:id (random-uuid) :effect-id :test-calibration-fails-per-point :enabled? true :params {}}])))
+    (let [out (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:all lit-line}}]))]
+      (is (seq out))
+      (is (inside-limit? [-0.3 -0.3 0.3 0.3] out) "a skipped calibration effect can't move light past the limit"))
+    (finally
       (swap! effects/!effect-registry #(apply dissoc % (map :id failing-calibration-effects))))))
 

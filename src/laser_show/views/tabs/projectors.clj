@@ -256,7 +256,7 @@
   "One line for a projector's output status, or nil when it isn't streaming.
    The fps is how many new frames the projector draws per second; a warning
    (a calibration effect skipped because it fails) comes last."
-  [{:keys [state fps scan-limited? error warning]}]
+  [{:keys [state kind fps scan-limited? error warning]}]
   (case state
     :streaming (cond-> (cond
                          (nil? fps) "Streaming"
@@ -264,7 +264,7 @@
                          :else (format "Streaming · %.1f fps" (double fps)))
                  warning (str " · " warning))
     :starting "Starting…"
-    :error (str "Error: " error)
+    :error (if (= :safety kind) error (str "Error: " error))
     nil))
 
 (defn- projector-list-item
@@ -313,6 +313,8 @@
                                             :wrap-text true
                                             :max-width 200
                                             :style-class ["text-small" "label-secondary"]}
+                                     (:detail output-status) (assoc :tooltip {:fx/type :tooltip
+                                                                              :text (:detail output-status)})
                                      (= :error state) (assoc :style (str "-fx-text-fill: " (css/red) ";"))
                                      (and (= :streaming state) (:warning output-status))
                                      (assoc :style (str "-fx-text-fill: " (css/orange) ";")))))}

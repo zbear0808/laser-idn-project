@@ -17,7 +17,10 @@
   (is (nil? (output-status-text nil)) "not streaming: no line")
   (is (= "Streaming · 59.8 fps · Corner Pin skipped"
          (output-status-text {:state :streaming :fps 59.8 :warning "Corner Pin skipped"}))
-      "a skipped calibration effect is named"))
+      "a skipped calibration effect is named")
+  (is (= "Safety error: output off"
+         (output-status-text {:state :error :kind :safety :error "Safety error: output off" :detail "boom"}))
+      "a safety error says the output is off, without \"Error: \""))
 
 (deftest parse-scan-rate-test
   (doseq [[text expected] [["25000" 25000] ["25 000" 25000] ["25,000" 25000] [" 30000 " 30000]

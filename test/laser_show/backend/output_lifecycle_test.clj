@@ -382,6 +382,26 @@
         (is (stop-streaming!))))))
 
 
+(deftest safety-error-shows-in-status-test
+  (init-with-projectors! {:a (projector 1 true)})
+  (let [status #(get-in (state/get-raw-state) [:backend :streaming :status :projectors :a])
+        lit [[0.0 0.0 1.0 1.0 1.0] [0.5 0.0 1.0 1.0 1.0]]]
+    (try
+      (with-redefs-fn {#'me/projector-frame (constantly lit)}
+        (fn []
+          (dispatch! {:event/type :idn/start-multi-streaming})
+          (is (dac/wait-for! #(= :streaming (:state (status))) 3000) (pr-str (status)))
+          (output-errors/report! [:safety :a] (ex-info "test: zone unreadable" {}))
+          (is (dac/wait-for! #(= :safety (:kind (status))) 3000) (pr-str (status)))
+          (is (= {:state :error :kind :safety :error "Safety error: output off"}
+                 (select-keys (status) [:state :kind :error])))
+          (is (re-find #"test: zone unreadable" (:detail (status))))
+          (output-errors/ok! [:safety :a])
+          (is (dac/wait-for! #(= :streaming (:state (status))) 3000) "and it streams again once it works")
+          (is (stop-streaming!))))
+      (finally
+        (output-errors/ok! [:safety :a])))))
+
 (deftest skipped-calibration-shows-as-a-warning-test
   (init-with-projectors! {:a (projector 1 true)})
   (let [status #(get-in (state/get-raw-state) [:backend :streaming :status :projectors :a])

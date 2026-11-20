@@ -170,10 +170,13 @@
 ;; Status
 
 (defn- engine-status [e errors id]
-  (let [error (some #(:message (get errors [% id])) [:engine :provider :projector-effects])
+  (let [safety-error (:message (get errors [:safety id]))
+        error (some #(:message (get errors [% id])) [:engine :provider :projector-effects])
         ^Thread thread @(:thread e)
         {:keys [frames-sent draw-fps scan-limited?]} (engine/get-stats e)]
     (cond
+      ;; First: it is why the projector is dark (multi-engine guard-safety)
+      safety-error {:state :error :kind :safety :error "Safety error: output off" :detail safety-error}
       error {:state :error :error error}
       (and thread (not (.isAlive thread))) {:state :error :error "The streaming thread ended"}
       (zero? frames-sent) {:state :starting}
@@ -190,7 +193,9 @@
    :fps is how many new frames the projector draws per second
    (streaming-engine/update-stats :draw-fps); :scan-limited? is there when its
    scan rate, not the send rate, sets that; :warning names the calibration
-   effects skipped because they fail (multi-engine report-skips!)."
+   effects skipped because they fail (multi-engine report-skips!). A
+   projector whose safety stage fails is {:state :error :kind :safety :error
+   \"Safety error: output off\" :detail <message>}."
   []
   (let [registry @!registry
         {:keys [wanted failed busy?]} @!intent

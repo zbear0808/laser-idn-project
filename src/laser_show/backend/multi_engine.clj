@@ -29,6 +29,7 @@
             [laser-show.state.extractors :as ex]
             [laser-show.animation.chains :as chains]
             [laser-show.animation.effects :as effects]
+            [laser-show.animation.safety :as safety]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.idn.output-config :as output-config]))
 
@@ -137,13 +138,38 @@
   (ex-info "Show clock stalled"
            {:stale-ms (quot (- (long now-ns) (long (:at-ns snapshot))) 1000000)}))
 
+(defn- stamp
+  "frame with the snapshot's {:tick :at-ns}, so the engine knows which tick it sends."
+  [snapshot frame]
+  (with-meta frame (select-keys snapshot [:tick :at-ns])))
+
+(defn- guard-safety
+  "The last stage of every frame a projector sends: (f zone)'s frame inside
+   the projector's safety zone (animation.safety, zones plan Z1). Reading and
+   normalizing the zone, f and apply-safety are one step: if anything in it
+   throws, a zone that can't be read included, the projector sends an empty
+   frame and [:safety projector-id] says why (it fails closed). Either way the
+   frame carries the snapshot's {:tick :at-ns}."
+  [raw-state projector-id snapshot f]
+  (try
+    (let [zone (safety/normalize (get-in raw-state [:projectors projector-id :safety]))
+          out (safety/apply-safety zone (f zone))]
+      (output-errors/ok! [:safety projector-id])
+      (stamp snapshot out))
+    (catch Throwable e
+      (output-errors/report! [:safety projector-id] e)
+      (stamp snapshot []))))
+
 (defn- projector-frame
   "The projector's frame for the show clock's tick in snapshot: each cue's
    frames for its zones, joined, then its projector effects at the first
    cue's timing. Nil before the first tick, while nothing is playing and when
-   none of the cues reach its zones. A snapshot older than show-time/STALE_MS
-   throws \"Show clock stalled\". The frame carries the snapshot's
-   {:tick :at-ns} as metadata, so the engine knows which tick it sends."
+   none of the cues reach its zones. Its safety zone comes last
+   (guard-safety): it clips what the projector effects made, and if it fails
+   the projector sends an empty frame. A snapshot older than
+   show-time/STALE_MS throws \"Show clock stalled\". The frame carries the
+   snapshot's {:tick :at-ns} as metadata, so the engine knows which tick it
+   sends."
   [projector-id snapshot]
   (when snapshot
     (let [now (System/nanoTime)]
@@ -167,8 +193,8 @@
                              (if combined-frame (count combined-frame) "nil"))))
         
         (when combined-frame
-          (let [frame (apply-projector-effects combined-frame projector-id (:projector-ctx snapshot))]
-            (with-meta frame (select-keys snapshot [:tick :at-ns]))))))))
+          (guard-safety raw-state projector-id snapshot
+                        (fn [_] (apply-projector-effects combined-frame projector-id (:projector-ctx snapshot)))))))))
 
 (defn- create-projector-frame-provider
   "Create a frame provider function for a specific projector or virtual projector.
