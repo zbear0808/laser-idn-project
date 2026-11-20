@@ -1,7 +1,7 @@
 # Phase Z1: safety zones, the test pattern and Identify
 
 **Written:** 2026-11-19 at `d298801`. **Reviewed and re-checked at `70f7db8`** (`master`, after vibe Phases 4b and 5 and the fader fix `0faa18c`): every line below is at `70f7db8`. **Re-check every path and line at HEAD before starting.**
-**Status:** Proposed. Not to be built yet (D-8). Q-Z1-1 is answered (D-34).   **Needs:** nothing. It goes well with Z0, whose confirm dialog it reuses (02 §4); without Z0 it brings that dialog itself. It can be built alongside Z2.   **Size:** ~4–5 d.
+**Status:** **Built** (`ae4c065`..`3e14382`, branch `zones-z1`, built in a worktree alongside Z2 and vibe Phase 7); not yet on `master`. **Still owed: the real-projector check in §9**, which decides `edge-dwell` (1 until then). The as-built note is §13. Q-Z1-1 is answered (D-34); Q-Z1-2, -3 and -4 were built as ★ A.   **Needs:** nothing. It goes well with Z0, whose confirm dialog it reuses (02 §4); without Z0 it brings that dialog itself. It can be built alongside Z2.   **Size:** ~4–5 d.
 **Implements:** spec §10 (`01-model-and-routing-spec.md`), D-28 (edits on a live laser), D-29 (fail closed) and D-34 (a notice after Open). It also gives Z3 what its doc assumes (05 §1, "Z1 row"): `[:projectors id :safety :limit]`, a stage after the projector effects that reports under `[:safety id]`, and a test-pattern branch that replaces a laser's content before its projector effects, with no composition and no fit guard (05 S-13).
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks anything that doesn't exist yet.
@@ -380,3 +380,78 @@ Write the failing tests first in each step.
 - **Q-Z1-2 · Identify with streaming off.** ★ **A** Disabled, with a note: "Turn on Stream to see it on the laser". **B** Briefly stream just that laser.
 - **Q-Z1-3 · Test-pattern brightness ceiling.** The slider stops at 50% today (`events/handlers/projector.clj:386`). ★ **A** Keep 50%. **B** 100%, with a warning colour above 50%.
 - **Q-Z1-4 · Undo or Redo that would grow a live laser's area.** Undo is one history for the whole show, so a ⌘Z meant for something else can undo a zone made smaller during the show. ★ **A** Ask with the same dialog (§4, `history`). **B** Just restore: it puts back a zone that was in force before. Either way, Escape during a drag doesn't ask: it puts back the zone from before the drag.
+
+## 13. As built (2026-11-19, `ae4c065`..`3e14382`)
+
+Built in worktree `zones-z1` off `989c315` (Z0 on `master`), at the same time as Z2 (worktree `zones-z2`) and vibe Phase 7 (`vibe-phase7`). Not yet rebased or merged.
+
+### Where it landed
+
+| # | Commit | Step (§10) |
+|---|---|---|
+| 1 | `ae4c065` | NEW `animation/safety.clj`: `normalize`, `identity?`, `inside?`, `intervals`, `apply-safety`, `widens?`, `mirror-x`, `edge-dwell` (1) |
+| 2 | `15462c4` | `multi-engine` `guard-safety` and `stamp`; `output-runtime/engine-status` looks at `[:safety id]` first and gives `{:state :error :kind :safety :error "Safety error: output off" :detail msg}`; the status line shows it as it is, with `:detail` as the tooltip |
+| 3 | `a8a7ee6` | NEW `animation/test_pattern.clj` (`content-layer`, `safety-layer`, `identify-on?`, `identify-ms`); `multi-engine` `test-pattern-mode`, `test-pattern-frame`, `show-frame`; `[:projector-ui :identify]`; `reset-session` clears the test pattern and Identify; the `frame-service` docstring |
+| 4 | `7039d0e` | `:projectors/identify`, `:projectors/identify-ended`; `multi-engine/now-ms`, a var; Z0's remove also clears `:identify` |
+| 5 | `129bafd` | `:projectors/set-safety`, `add-blocked-area`, `remove-blocked-area`, `copy-safety`; the Undo and Redo check; the four undo labels; NEW `events/safety_guard.clj` |
+| 6 | `a62cdb1` | the D-34 notice after Open |
+| 7 | `8296e28` | NEW `views/components/safety_editor.clj` (SAFETY ZONE); the calibration row becomes TEST PATTERN with Identify and its notes |
+| 8 | `1727a28` | `#projectors-subtitle` mentions safety zones again; one sentence in QUICKSTART step 3 |
+| – | `3e14382` | `safety-round-trips-test` (§9 listed it; written last) |
+
+### Deviations from the plan
+
+- **`outputting?` and the shared "ask first" live in a NEW `events/safety_guard.clj`**, not in the projector handlers. `history.clj` needs them too, and requiring the projector handlers from it would risk a require cycle. It holds `outputting?`, `ask` (the shared confirm, with the parked event), `parked`, `asking?`, `growing` (the outputting projectors whose zone a change widens), `projector-name` and `names-text`. Identify uses it too.
+- **`projector-frame` is split in two.** It keeps the stale check and the test-pattern branches; NEW `show-frame` does each cue's zones, the projector effects and `guard-safety`. Z3 changes `show-frame`.
+- **More than one projector in a question:** an Undo that widens two says "Undo gives Laser L and Laser R a larger area while they are on." While the confirm is already open, another widening (an edit, Undo or Redo) is dropped.
+- **The editor's buttons are in two rows**, [+ Add blocked area] [Reset], then [Copy to…] [Mirror to…]: §7's one row doesn't fit the panel's right column at 1200 px. **Copy to… and Mirror to… are hidden, not disabled,** when there is no other projector or the zone can't be read, so they need no note. Each lists the other projectors, and "Every other projector" when there are two or more.
+- **TEST PATTERN is a small section,** not one row: its header, then [Show test pattern] [Identify], then one note, then Brightness while the pattern is on (as before). In one row the buttons were cut short. **One note at a time:** with the pattern on and streaming off, only "Not streaming: turn on Stream to see it on the laser" shows, which covers Identify too.
+- **A zone that can't be read** shows "This safety zone can't be read, so the projector stays dark. Reset it to draw a new one." (`#safety-unreadable`; not in §7). The canvas draws the default zone and can't be dragged, and Add blocked area is off. `widens?` counts any readable zone as wider than an unreadable one, so Reset or a typed number asks on a live laser.
+- **While a widening drag waits for its answer,** the canvas also draws the stored limit in grey under the dashed preview.
+- **`add-blocked-area` cuts its 0.4 × 0.2 area to the limit** when the limit is smaller. It, `remove-blocked-area` (also with a bad index) and `copy-safety` change nothing when the zone can't be read. `copy-safety` skips the source and unknown ids.
+- **The number fields** take a comma as the decimal point, and refuse a number outside -1..1, showing the stored value again. The fix for `cancelled-field-shows-the-stored-zone-test` puts the `:fx/key` (index, dialog open, stored zone) on each field in its row's children. Inside the field's own description it did nothing.
+- **Tests beyond §9:** `nothing-new-lit-test` (invariant 3 on its own), `test-pattern-replaces-the-show-test`, `add-blocked-area-test`, `safety-events-have-undo-labels-test`, `escape-puts-back-the-zone-test`. Z0's `subtitle-promises-no-safety-zones-test` is now `subtitle-mentions-safety-zones-test`.
+
+### Tests added
+
+- `laser-show.animation.safety-test` (NEW): 17 tests, 426,124 assertions (the seeded random frames).
+- `laser-show.animation.test-pattern-test` (NEW): `content-layer-is-white-at-brightness-test`, `safety-layer-outlines-stay-visible-test`, `identify-flashes-test`.
+- `laser-show.backend.multi-engine-test`: `safety-runs-after-projector-effects-test`, `no-safety-zone-sends-the-same-frame-test`, `failing-safety-sends-an-empty-frame-test`, `unreadable-safety-fails-closed-test`, `failing-calibration-is-still-clipped-test`, `test-pattern-shows-with-nothing-playing-test`, `test-pattern-replaces-the-show-test`, `master-doesnt-dim-the-test-pattern-test`, `blackout-hides-the-test-pattern-test`, `blackout-leaves-a-grid-cue-alone-test`, `identify-flashes-then-stops-test`.
+- `laser-show.backend.output-lifecycle-test`: `safety-error-shows-in-status-test`. `laser-show.views.tabs.projectors-test`: `output-status-text-test` gains the safety case.
+- `laser-show.events.projector-handlers-test`: `outputting-is-streaming-and-wanted-test`, the four `identify-…` tests, `set-safety-normalizes-test`, `shrinking-a-live-zone-applies-at-once-test`, `growing-a-live-zone-asks-first-test`, `parked-event-carries-no-state-test`, `confirmed-growth-applies-test`, `growing-an-off-laser-applies-at-once-test`, `add-blocked-area-test`, `removing-a-blocked-area-asks-when-live-test`, `copy-and-mirror-safety-test`, `safety-events-on-a-missing-projector-change-nothing-test`.
+- `laser-show.events.history-handlers-test`: `undo-that-grows-a-live-zone-asks-test`, `safety-events-have-undo-labels-test`.
+- `laser-show.events.output-sync-test`: `safety-change-requests-no-refresh-test`.
+- `laser-show.events.menu-file-handlers-test`: `open-says-where-safety-comes-from-test`; `new-and-open-take-the-notice-away-test` changed for Open.
+- `laser-show.state.persistent-test`: `open-and-new-stop-the-test-pattern-test`, `safety-round-trips-test`.
+- UI, `laser-show.ui-test.safety-editor-test` (NEW): `drag-the-limit-in-test`, `escape-puts-back-the-zone-test`, `drag-a-blocked-area-test`, `add-and-remove-a-blocked-area-test`, `number-fields-commit-test`, `growing-while-streaming-asks-test`, `cancelled-field-shows-the-stored-zone-test`, `identify-needs-stream-test`.
+- UI, `laser-show.ui-test.setup-dialogs-test`: `subtitle-mentions-safety-zones-test`.
+
+### Red first
+
+| Step | Before the change |
+|---|---|
+| 1 | `safety-test` couldn't load: no namespace |
+| 2 | the engine and status tests: 9 failures, 2 errors |
+| 3, 4 | red only as a load or compile error that stopped the run (the functions didn't exist yet), so these tests were **never seen failing one by one** |
+| 5 | the same: the run stopped because `events.safety-guard` didn't exist. `safety-change-requests-no-refresh-test` was written after the handlers and passed on its first run |
+| 6 | 5 failures (4 in `open-says-where-safety-comes-from-test`, 1 in the changed notice test) |
+| 7 | the editor was written **before** its tests. Their first run found one real bug: a refused field kept its text (`cancelled-field-shows-the-stored-zone-test` timed out), and one wrong number in a test. `escape-puts-back-the-zone-test` was checked red by turning off the editor's Escape handling: 1 error |
+| 8 | `subtitle-mentions-safety-zones-test`: 1 error (the old text) |
+| – | `safety-round-trips-test` passed on its first run: Save already writes the whole projector map |
+
+### Verification
+
+| Where | Unit suite (`clj -M:mac-arm:test`) | UI suite (`clj -M:test-ui:mac-arm:test-ui-headless`) |
+|---|---|---|
+| the branch at `1727a28` | 1,205 tests, 460,863 assertions, 0 failures | 151 tests, 722 assertions, 0 failures |
+| the branch at `3e14382` (one unit test more) | 1,206 tests, 460,864 assertions, 0 failures | (no change to the app or UI tests) |
+
+**Not done: the real-projector check (§9).** Nothing here has been seen on a laser. Before relying on a blocked area in front of people, try one at low brightness: a line swept through it and a shape that jumps across it, at 25 and 40 kpps, and look for light bleeding into the area where the beam comes back on. That decides `edge-dwell`.
+
+### For the merge
+
+- Z2 moves `output-status-text` and `status-indicator` into `rig_strip.clj`; step 2 changed both (the `:kind :safety` case).
+- Both edit the `:projectors/remove` handler and the handler's `case` rows in `events/handlers/projector.clj`, `state/domains.clj` and `state/persistent.clj`.
+- Z2 changes `get-projector-zone-groups` in `multi-engine`; Z1 split `projector-frame` around it.
+- Z2's inspector should mount `safety-editor/safety-section` and the TEST PATTERN section where the config panel has them now.
+
