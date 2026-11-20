@@ -499,3 +499,45 @@
     (is (= 120.0 (get-in s [:timing :bpm])))
     (is (false? (:open? (confirm-dialog s))))
     (is (false? (get-in s [:project :dirty?])))))
+
+
+;; Exit after the rig file couldn't be written (zones plan ZR)
+
+
+(def ^:private rig-not-saved
+  (-> clean-document-state
+      (assoc-in [:rig-file :path] "/tmp/never-written/rig.edn")
+      (update :rig-file assoc :status :write-failed :error "No space left on device")))
+
+(deftest exit-after-a-failed-rig-write-asks-first-test
+  (let [result (menu/handle {:event/type :file/exit :state rig-not-saved})
+        asked (:state result)]
+    (is (not (contains? result :system/exit)) "it doesn't quit yet")
+    (is (= {:open? true :reason :rig :error "No space left on device"
+            :pending {:event/type :file/exit :force? true :rig-force? true}}
+           (confirm-dialog asked))
+        "it asks, with its own text")
+    (testing "Quit anyway quits"
+      (let [discarded (menu/handle {:event/type :file/confirm-discard :state asked})]
+        (is (false? (:open? (confirm-dialog (:state discarded)))))
+        (is (= {:system/exit true} (menu/handle (assoc (:dispatch discarded) :state (:state discarded)))))))
+    (testing "Try again writes the rig now, and quits once it is written"
+      (let [retried (menu/handle {:event/type :file/confirm-retry :state asked})]
+        (is (false? (:open? (confirm-dialog (:state retried)))))
+        (is (nil? (:reason (confirm-dialog (:state retried)))))
+        (is (= {:event/type :rig/retry-write :then {:event/type :file/exit :force? true :rig-force? true}}
+               (:dispatch retried)))
+        (let [written (events/handle-event-pipeline (assoc (:dispatch retried) :state (:state retried)))]
+          (is (= {:event/type :file/exit :force? true :rig-force? true}
+                 (get-in written [:rig/write :then]))
+              "the write carries the exit, for :rig/written to dispatch"))))
+    (testing "Cancel stays"
+      (is (false? (:open? (confirm-dialog (:state (menu/handle {:event/type :file/confirm-cancel :state asked}))))))))
+  (testing "a show with unsaved changes too: its question first, then the rig's"
+    (let [both (assoc-in rig-not-saved [:project :dirty?] true)
+          first-q (confirm-dialog (:state (menu/handle {:event/type :file/exit :state both})))]
+      (is (nil? (:reason first-q)) "the show's question")
+      (is (= :rig (:reason (confirm-dialog (:state (menu/handle {:event/type :file/exit :force? true :state both}))))))))
+  (testing "a rig that is saved: Exit quits at once"
+    (is (= {:system/exit true}
+           (menu/handle {:event/type :file/exit :state (assoc-in rig-not-saved [:rig-file :status] :saved)})))))

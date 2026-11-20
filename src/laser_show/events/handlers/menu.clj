@@ -36,6 +36,13 @@
   (and (not force?)
        (boolean (get-in state [:project :dirty?]))))
 
+(defn- rig-guard-needed?
+  "True when Exit would quit with rig changes the rig file couldn't take
+   (zones plan ZR), and that wasn't already confirmed."
+  [state {:keys [rig-force?]}]
+  (and (not rig-force?)
+       (= :write-failed (get-in state [:rig-file :status]))))
+
 (defn- ask-first
   "Open the unsaved-changes dialog for event (ignored if it is already open)."
   [state event]
@@ -45,8 +52,21 @@
                        :open? true
                        :pending (select-keys event [:event/type]))}))
 
+(defn- ask-about-the-rig
+  "Open the same dialog with the rig's question (reason :rig): its last
+   changes couldn't be written. Quit anyway continues with Exit, past both
+   questions; Try again writes the rig, then quits."
+  [state]
+  (if (get-in state (conj confirm-path :open?))
+    {:state state}
+    {:state (update-in state confirm-path assoc
+                       :open? true
+                       :reason :rig
+                       :error (get-in state [:rig-file :error])
+                       :pending {:event/type :file/exit :force? true :rig-force? true})}))
+
 (defn- close-confirm [state]
-  (update-in state confirm-path assoc :open? false :pending nil))
+  (update-in state confirm-path #(-> % (assoc :open? false :pending nil) (dissoc :reason :error))))
 
 (defn- handle-file-new-project
   "Replace the document with a fresh starter project.
@@ -191,13 +211,15 @@
   {:state state})
 
 (defn- handle-file-exit
-  "Exit the application. Asks first when the project has unsaved changes.
-   Also the handler for closing the main window."
+  "Exit the application. Asks first when the project has unsaved changes,
+   then when the rig file couldn't take the last rig changes (zones plan
+   ZR). Also the handler for closing the main window."
   [{:keys [state] :as event}]
   (log/debug "File > Exit")
-  (if (guard-needed? state event)
-    (ask-first state event)
-    {:system/exit true}))
+  (cond
+    (guard-needed? state event) (ask-first state event)
+    (rig-guard-needed? state event) (ask-about-the-rig state)
+    :else {:system/exit true}))
 
 
 ;; Unsaved-changes dialog buttons
@@ -230,6 +252,15 @@
                                :state closed
                                :then (assoc pending :force? true)))
       {:state closed})))
+
+(defn- handle-file-confirm-retry
+  "The rig's question, Try again: write the rig now, and carry on with the
+   parked Exit once it is written. Another failure ends the chain, with the
+   rig's status line saying why."
+  [{:keys [state]}]
+  (let [pending (pending-action state)]
+    (cond-> {:state (close-confirm state)}
+      pending (assoc :dispatch {:event/type :rig/retry-write :then (assoc pending :force? true)}))))
 
 
 ;; Edit Menu Events
@@ -422,6 +453,7 @@
     :file/export (handle-file-export event)
     :file/exit (handle-file-exit event)
     :file/confirm-save (handle-file-confirm-save event)
+    :file/confirm-retry (handle-file-confirm-retry event)
     :file/confirm-discard (handle-file-confirm-discard event)
     :file/confirm-cancel (handle-file-confirm-cancel event)
     

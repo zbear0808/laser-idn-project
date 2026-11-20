@@ -201,3 +201,20 @@
     (ui/wait-for! #(nil? (ui/query "#rig-report-pin-projector-10-0-0-9-1")))
     (is (true? (get-in (app-state) [:project :dirty?])) "a show edit: unsaved")
     (is (= "Re-pin Cues" (get-in (app-state) [:history :undo-stack 0 :description])))))
+
+
+;; Closing the window after the rig file couldn't be written
+
+(deftest closing-after-a-failed-rig-write-asks-test
+  (let [exits (atom 0)
+        stage (ui/main-window)]
+    (events/set-exit-fn! #(swap! exits inc))
+    (try
+      (state/swap-state! update :rig-file assoc :path (rig-path) :status :write-failed :error "No space left on device")
+      (ui/on-fx-thread #(javafx.event.Event/fireEvent stage (javafx.stage.WindowEvent. stage javafx.stage.WindowEvent/WINDOW_CLOSE_REQUEST)))
+      (ui/assert-text! "#unsaved-message" "Your last rig changes couldn't be saved: No space left on device.")
+      (ui/assert-visible! "#unsaved-retry")
+      (is (zero? @exits) "it doesn't quit yet")
+      (ui/click! (ui/robot) "#unsaved-discard")
+      (ui/wait-for! #(= 1 @exits))
+      (finally (events/set-exit-fn! nil)))))
