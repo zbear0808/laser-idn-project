@@ -25,6 +25,7 @@
             [laser-show.views.components.preset-param-editor :as preset-param-editor]
             [laser-show.views.components.effect-parameter-editor :as effect-param-editor]
             [laser-show.views.components.effect-bank :as effect-bank]
+            [laser-show.views.components.load-warning :as load-warning]
             [laser-show.views.components.zone-chips :as zone-chips]
             [laser-show.routing.zone-effects :as zone-effects]
             [laser-show.common.util :as u])
@@ -608,6 +609,11 @@
                                                     :item selected-item
                                                     :selected-effect-ids selected-effect-ids
                                                     :dialog-data effect-dialog-data})])}]}
+
+                ;; While the cue is too heavy for a laser (zones plan Z3)
+                {:fx/type load-warning/cue-load-warning
+                 :col col
+                 :row row}
 
                 ;; Footer with destination zone dropdown, trigger mode, and close button;
                 ;; nothing in it shrinks below its text

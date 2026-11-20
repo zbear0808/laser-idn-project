@@ -15,6 +15,7 @@
             [laser-show.css.core :as css]
             [laser-show.views.components.inline-edit :as inline-edit]
             [laser-show.views.components.visual-editors.timeline-editor :as timeline-editor]
+            [laser-show.views.components.load-warning :as load-warning]
             [laser-show.views.components.zone-chips :as zone-chips]
             [laser-show.common.util :as u])
   (:import [javafx.scene.input KeyCode KeyEvent]))
@@ -139,6 +140,11 @@
                :on-cancel {:event/type :ui/update-dialog-data
                            :dialog-id :timeline-cue-editor
                            :editing-name? false}}}
+
+      ;; While the cue is too heavy for a laser (zones plan Z3)
+      {:fx/type load-warning/cue-load-warning
+       :col col
+       :row row}
 
       ;; Footer
       {:fx/type :h-box

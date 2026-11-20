@@ -41,6 +41,15 @@
         :-fx-border-color border-subtle
         :-fx-border-width ["1px" "0px" "0px" "0px"]}
        
+       ;; Above the footer while the cue is too heavy for a laser (zones plan Z3)
+       ".dialog-warning-line"
+       {:-fx-background-color bg-primary
+        :-fx-text-fill (:orange theme/base-colors)
+        :-fx-font-size 11
+        :-fx-padding ["6px" "12px"]
+        :-fx-border-color border-subtle
+        :-fx-border-width ["1px" "0px" "0px" "0px"]}
+       
        ".dialog-section"
        {:-fx-background-color bg-primary
         :-fx-padding 8

@@ -112,4 +112,10 @@
 
        ".grid-cell-trigger-indicator"
        {:-fx-text-fill blue
-        :-fx-font-size 9}})))
+        :-fx-font-size 9}
+
+       ;; A playing cue too heavy for a laser (zones plan Z3)
+       ".grid-cell-warning-indicator"
+       {:-fx-text-fill orange
+        :-fx-font-size 9
+        :-fx-font-weight "bold"}})))

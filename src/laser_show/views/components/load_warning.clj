@@ -1,9 +1,12 @@
 (ns laser-show.views.components.load-warning
-  "What a laser's load says (plans/2026-11-19-zones/05 §7): pure texts the
-   rig cards, the toolbar's LOW FPS chip and the cue warnings share. The
-   numbers come rounded from the output status (output-runtime/status :load)
-   and the show clock's (:cue-warnings)."
-  (:require [clojure.string :as str]))
+  "What a laser's load and a heavy cue say (plans/2026-11-19-zones/05 §7):
+   pure texts the rig cards, the toolbar's LOW FPS chip, the grid's cue cells
+   and the cue editors share, and the line above the editors' footers
+   (cue-load-warning). The numbers come rounded from the output status
+   (output-runtime/status :load) and the show clock's (:cue-warnings)."
+  (:require [cljfx.api :as fx]
+            [clojure.string :as str]
+            [laser-show.subs :as subs]))
 
 (defn grouped
   "n with a comma between thousands (\"25,000\"), whatever the machine's
@@ -75,3 +78,44 @@
   [{:keys [points-in budget min-fps scan-rate]}]
   (str (grouped points-in) " points a frame. " (grouped budget) " fit " min-fps " fps at "
        (grouped scan-rate) " pts/s"))
+
+
+;; A cue too heavy for a laser (subs/cue-warning)
+
+(defn- kpps
+  "25000 as \"25\", 27500 as \"27.5\"."
+  [scan-rate]
+  (let [k (/ (double scan-rate) 1000.0)]
+    (if (== k (Math/rint k)) (str (long k)) (str k))))
+
+(defn cue-warning-text
+  "A cue cell's tooltip: \"Too heavy for Laser C: about 12 fps (minimum
+   20)\"; nil for no warning."
+  [{:keys [laser fps min-fps] :as w}]
+  (when w
+    (str "Too heavy for " laser ": about " fps " fps (minimum " min-fps ")")))
+
+(defn cue-line-text
+  "The line above a cue editor's footer: \"⚠ ~2,010 points: about 12 fps on
+   Laser C (25 kpps). Most points: Circle (1,999). Simplify it, or lower
+   Laser C's minimum.\" \"Most points\" only once the item counts arrive
+   (the render counts them while the editor is open); nil for no warning."
+  [{:keys [laser points fps scan-rate item item-name] :as w}]
+  (when w
+    (str "⚠ ~" (grouped points) " points: about " fps " fps on " laser " (" (kpps scan-rate) " kpps)."
+         (when (and item item-name) (str " Most points: " item-name " (" (grouped (:points item)) ")."))
+         " Simplify it, or lower " laser "'s minimum.")))
+
+(defn cue-load-warning
+  "The line above the footer of the cue at col, row's editor (both editors)
+   while the cue is too heavy for a laser; out of the layout otherwise."
+  [{:keys [fx/context col row]}]
+  (let [text (cue-line-text (fx/sub-ctx context subs/cue-warning col row))]
+    {:fx/type :label
+     :id "cue-load-warning"
+     :text (or text "")
+     :wrap-text true
+     :max-width Double/MAX_VALUE
+     :style-class "dialog-warning-line"
+     :visible (some? text)
+     :managed (some? text)}))

@@ -25,6 +25,7 @@
            cell (fx/sub-ctx context cell-display-data 0 0)]  ; Computed
        ...))"
   (:require [cljfx.api :as fx]
+            [clojure.string :as str]
             [laser-show.state.extractors :as ex]
             [laser-show.vibes.faders :as faders]
             [laser-show.vibes.library :as library]
@@ -33,6 +34,7 @@
             [laser-show.css.core :as css]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.chains :as chains]
+            [laser-show.animation.presets :as presets]
             [laser-show.animation.safety :as safety]
             [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
@@ -427,6 +429,30 @@
                     :reduced-pct (:reduced-pct load)})))
          (sort-by (juxt :fps (comp str :id)))
          vec)))
+
+(defn- item-name
+  "What a cue's editor calls its top-level item id: its own name, else its
+   preset's (\"Circle\"), else \"Group\" for a group; nil when it isn't there."
+  [chain id]
+  (when-let [item (some #(when (= id (:id %)) %) (:items chain))]
+    (let [n (:name item)]
+      (cond
+        (and (string? n) (not (str/blank? n))) n
+        (:preset-id item) (or (get-in presets/presets-by-id [(:preset-id item) :name]) (name (:preset-id item)))
+        :else "Group"))))
+
+(defn cue-warning
+  "The warning of the cue at col, row while it is too heavy for a laser (the
+   show clock's [:backend :streaming :cue-warnings], zones plan Z3): {:projector
+   :points :fps :min-fps :scan-rate :item {:id :points}} with :laser, its name,
+   and while its editor is open :item-name, the name of its item with the most
+   points; nil when it has none."
+  [context col row]
+  (when-let [w (fx/sub-val context get-in [:backend :streaming :cue-warnings [col row]])]
+    (let [chain (fx/sub-val context get-in [:chains :cue-chains [col row]])
+          item (when-let [id (get-in w [:item :id])] (item-name chain id))]
+      (cond-> (assoc w :laser (rig/projector-name {:projectors (fx/sub-val context :projectors)} (:projector w)))
+        item (assoc :item-name item)))))
 
 (defn connection-status
   "Streaming status for the toolbar.

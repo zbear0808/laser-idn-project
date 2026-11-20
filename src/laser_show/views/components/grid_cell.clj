@@ -22,6 +22,7 @@
             [laser-show.subs :as subs]
             [laser-show.events.core :as events]
             [laser-show.vibes.reactions :as reactions]
+            [laser-show.views.components.load-warning :as load-warning]
             [laser-show.views.components.shortcuts :as shortcuts]
             [laser-show.views.components.drag-drop-cell :as drag-drop])
   (:import [javafx.scene.input MouseEvent MouseButton]))
@@ -205,10 +206,21 @@
                                                  :pref-width 8
                                                  :pref-height 8
                                                  :style-class "grid-cell-active-indicator"})
-                                              (when (:has-trigger? display-data)
-                                                {:fx/type :label
-                                                 :text "⚡"
-                                                 :style-class "grid-cell-trigger-indicator"})])}]}]
+                                              (when (or (:has-trigger? display-data) (:warning display-data))
+                                                {:fx/type :h-box
+                                                 :alignment :center
+                                                 :spacing 3
+                                                 :children (filterv some?
+                                                                    [(when (:has-trigger? display-data)
+                                                                       {:fx/type :label
+                                                                        :text "⚡"
+                                                                        :style-class "grid-cell-trigger-indicator"})
+                                                                     ;; too heavy for a laser (zones plan Z3)
+                                                                     (when (:warning display-data)
+                                                                       {:fx/type :label
+                                                                        :id (format "%s-cell-warning-%d-%d" (name cell-type) col row)
+                                                                        :text "⚠"
+                                                                        :style-class "grid-cell-warning-indicator"})])})])}]}]
     (if has-context-menu?
       (cond-> {:fx/type :label
                :content-display :graphic-only
@@ -250,11 +262,14 @@
         learning? (= learning-target {:type :trigger-cue :target [col row]})
         ;; In play while Stop blacks the output out: held, not playing
         held? (and (:active? display-data) (fx/sub-ctx context subs/output-held?))
+        ;; Too heavy for a laser, while it plays (zones plan Z3)
+        warning (fx/sub-ctx context subs/cue-warning col row)
         cell-display-data (assoc display-data
                                  :active? (and (:active? display-data) (not held?))
                                  :held? held?
                                  :has-trigger? has-trigger?
-                                 :learning? learning?)
+                                 :learning? learning?
+                                 :warning warning)
         open-editor-event (if timeline?
                             {:event/type :timeline-cue-editor/open}
                             {:event/type :cue-chain/open-editor})
@@ -316,6 +331,7 @@
      :drag-config {:drag-type :grid-cell
                    :on-drop {:event/type :grid/move-cell}}
      :label-fn cell-label
+     :tooltip-fn (comp load-warning/cue-warning-text :warning)
      :context-menu-items (into base-menu-items trigger-menu-items)}))
 
 

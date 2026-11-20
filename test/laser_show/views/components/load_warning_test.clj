@@ -40,3 +40,16 @@
   (is (= [:ok :near :near :over] (mapv lw/meter-level [79 80 100 101])) "green under 80%, amber to 100%, red past it")
   (is (= "3,000 points a frame. 1,250 fit 20 fps at 25,000 pts/s" (lw/meter-tooltip (load))))
   (is (= "1,234,560" (lw/grouped 1234560)) "thousands, whatever the machine's locale"))
+
+(deftest cue-warning-text-test
+  (let [w {:laser "Laser C" :projector :p2 :points 2010 :fps 12 :min-fps 20 :scan-rate 25000}]
+    (is (= "Too heavy for Laser C: about 12 fps (minimum 20)" (lw/cue-warning-text w)) "the cell's tooltip")
+    (is (= "⚠ ~2,010 points: about 12 fps on Laser C (25 kpps). Simplify it, or lower Laser C's minimum."
+           (lw/cue-line-text w))
+        "the editor's line, until the item counts arrive")
+    (is (= "⚠ ~2,010 points: about 12 fps on Laser C (25 kpps). Most points: Circle (2,000). Simplify it, or lower Laser C's minimum."
+           (lw/cue-line-text (assoc w :item {:id :x :points 2000} :item-name "Circle"))))
+    (is (= "⚠ ~2,010 points: about 12 fps on Laser C (27.5 kpps). Simplify it, or lower Laser C's minimum."
+           (lw/cue-line-text (assoc w :scan-rate 27500))))
+    (is (nil? (lw/cue-warning-text nil)))
+    (is (nil? (lw/cue-line-text nil)))))

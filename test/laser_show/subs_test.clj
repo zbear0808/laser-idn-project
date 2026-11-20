@@ -824,3 +824,24 @@
     (is (= {:load (load 16 40) :low? true} (fx/sub-ctx ctx subs/projector-load :p1)))
     (is (nil? (fx/sub-ctx ctx subs/projector-load :p4)) "not streaming: no load")
     (is (= [] (fx/sub-ctx (context (domains/build-initial-state)) subs/low-fps-projectors)) "nothing streaming")))
+
+(deftest cue-warning-sub-test
+  (let [ring #uuid "00000000-0000-0000-0000-0000000000a1"
+        named #uuid "00000000-0000-0000-0000-0000000000a2"
+        warning {:projector :p3 :points 1750 :fps 14 :min-fps 20 :scan-rate 25000 :item {:id ring :points 1200}}
+        state (-> (domains/build-initial-state)
+                  (assoc :projectors {:p3 {:name "Laser R"}})
+                  (assoc-in [:chains :cue-chains [2 0]] {:items [{:id ring :type :preset :preset-id :circle}
+                                                                 {:id named :type :preset :preset-id :wave :name "Swell"}]})
+                  (assoc-in [:backend :streaming :cue-warnings] {[2 0] warning}))
+        ctx (context state)]
+    (is (= (assoc warning :laser "Laser R" :item-name "Circle") (fx/sub-ctx ctx subs/cue-warning 2 0))
+        "with the laser's name, and its heaviest item's (a preset's)")
+    (is (nil? (fx/sub-ctx ctx subs/cue-warning 3 0)) "a cue with none")
+    (is (= "Swell" (:item-name (fx/sub-ctx (context (assoc-in state [:backend :streaming :cue-warnings [2 0] :item :id] named))
+                                           subs/cue-warning 2 0)))
+        "an item's own name first")
+    (is (not (contains? (fx/sub-ctx (context (update-in state [:backend :streaming :cue-warnings [2 0]] dissoc :item))
+                                    subs/cue-warning 2 0)
+                        :item-name))
+        "no item counts (its editor is closed): no item")))
