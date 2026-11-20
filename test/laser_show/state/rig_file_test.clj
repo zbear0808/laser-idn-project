@@ -69,6 +69,32 @@
         (is (= {} (get-in applied [:chains :projector-effects])))
         (is (= {:order [:p] :middle :split :split-width 0.75} (:rig applied)))))))
 
+(deftest rig-changed-ignores-show-edits-test
+  (let [s (rigged)]
+    (is (false? (rig-file/rig-changed? s s)))
+    (doseq [[label edit] [["a cue" #(assoc-in % [:chains :cue-chains [1 1]] {:items []})]
+                          ["an effect cell" #(assoc-in % [:chains :effect-chains [0 3] :active?] false)]
+                          ["the tempo" #(assoc-in % [:timing :bpm] 99.0)]
+                          ["the show's config" #(assoc-in % [:config :cue :trigger-mode] :toggle)]
+                          ["a group no laser is in" #(assoc-in % [:zone-groups :group-beams :name] "Beams 2")]
+                          ["a new group" #(assoc-in % [:zone-groups :group-new] {:id :group-new :name "New"})]
+                          ["the selection" #(assoc-in % [:projector-ui :active-projector] :projector-10-0-0-5-1)]
+                          ["the rig file's own status" #(assoc-in % [:rig-file :written-at] 5)]]]
+      (is (false? (rig-file/rig-changed? s (edit s))) label)))
+  (testing "a rig path rebuilt with the same value isn't a change"
+    (let [s (rigged)]
+      (is (false? (rig-file/rig-changed? s (update s :projectors #(into {} %))))))))
+
+(deftest rig-changed-sees-a-renamed-member-group-test
+  (let [s (rigged)]
+    (doseq [[label edit] [["a projector" #(assoc-in % [:projectors :projector-10-0-0-5-1 :name] "Stage L")]
+                          ["a virtual projector" #(assoc-in % [:virtual-projectors :vp-2] {:name "VP 2"})]
+                          ["the order" #(assoc-in % [:rig :order] [])]
+                          ["the calibration" #(assoc-in % [:chains :projector-effects :projector-10-0-0-5-1 :items] [])]
+                          ["the definition of a group Laser L is in" #(assoc-in % [:zone-groups :graphics :name] "Gfx")]
+                          ["that group's colour" #(assoc-in % [:zone-groups :graphics :color] "#000000")]]]
+      (is (true? (rig-file/rig-changed? s (edit s))) label))))
+
 (deftest group-copy-keeps-groups-with-lasers-test
   (let [beams {:id :group-beams :name "Beams" :color "#123456"}
         state (-> (rigged)

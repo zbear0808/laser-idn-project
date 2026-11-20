@@ -21,6 +21,7 @@
             [laser-show.views.components.safety-editor :as safety-editor]
             [laser-show.views.components.list :as list]
             [laser-show.views.components.commit-field :as commit-field]
+            [laser-show.views.components.rig-file-status :as rig-file-status]
             [laser-show.views.components.rig-strip :as rig-strip]))
 
 
@@ -586,6 +587,8 @@
                            :id "projectors-subtitle"
                            :text "Put your lasers in order, left to right. The groups follow the order."
                            :style "-fx-text-fill: #808080; -fx-font-size: 11;"}]}
+              ;; The rig file: saved, saving, or why not (zones plan ZR)
+              {:fx/type rig-file-status/rig-file-status}
               {:fx/type rig-strip/rig-header}
               {:fx/type rig-strip/rig-strip}
               {:fx/type projector-config-panel

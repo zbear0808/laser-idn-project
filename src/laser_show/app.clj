@@ -18,6 +18,9 @@
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
+            [laser-show.state.persistent :as persistent]
+            [laser-show.state.rig-file :as rig-file]
+            [laser-show.state.rig-store :as rig-store]
             [laser-show.state.templates :as templates]
             [laser-show.events.core :as events]
             [laser-show.views.root :as root]
@@ -121,11 +124,56 @@
 
 (declare stop! exit!)
 
+(defn- starter-state
+  "A fresh starter document: the starter cues, vibes and the Master."
+  []
+  (-> (domains/build-initial-state)
+      (templates/apply-starter-cue-chains)
+      (templates/apply-starter-vibes)
+      (templates/apply-starter-effects)
+      (history/mark-clean)))
+
+(defn- load-rig
+  "state on this machine's rig, the file at path (plans/2026-11-19-zones/09):
+   locked for this window if no other has it (else read only, Q-ZR-4), read
+   (rig-store/read!: whatever it holds, the app starts) and applied, the
+   show's groups joined by the rig's (its group copy), and [:rig-file] set.
+   Returns {:state :notice (the read's, for after mounting) :recovered? (the
+   backup is in use: write it to rig.edn at once)}. A read-only window never
+   moves a file aside."
+  [state path]
+  (let [locked? (rig-store/lock! path)
+        {:keys [status doc notice]} (rig-store/read! path {:read-only? (not locked?)})
+        read-only? (or (not locked?) (= :newer status))
+        modified (let [f (java.io.File. ^String path)] (when (.exists f) (.lastModified f)))
+        rigged (-> (cond-> state doc (rig-file/apply-rig-document doc))
+                   (update :rig-file merge {:path path
+                                            :status (if locked? status :locked)
+                                            :read-only? read-only?
+                                            :written-at (when doc modified)}))
+        ;; The show's groups joined by the rig's, in the saved baseline too,
+        ;; so the show isn't unsaved for it
+        join-groups #(update % :zone-groups merge (get-in rigged [:rig-file :group-copy]))]
+    (log/info "Rig file" path (name (get-in rigged [:rig-file :status])) (when read-only? "(read only)"))
+    {:state (-> rigged join-groups (history/backfill-baseline join-groups))
+     :notice notice
+     :recovered? (and (= :recovered status) (not read-only?))}))
+
+(defn- after-rig-loaded!
+  "Once the window is up: the rig read's notice, and a recovered rig written
+   back to rig.edn (else the next start would find no file and start empty)."
+  [{:keys [notice recovered?]}]
+  (when notice
+    (events/dispatch! {:event/type :rig/startup-notice :text notice :level :warning}))
+  (when recovered?
+    (events/dispatch! {:event/type :rig/retry-write})))
+
 (defn start!
   "Start the laser show application.
    
-   Initializes state, creates renderer, and mounts the UI.
-   Auto-scans for IDN devices on startup.
+   Initializes state on this machine's rig (its file, ~/LaserShowProjects/rig.edn),
+   creates renderer, and mounts the UI.
+   Auto-scans for IDN devices on startup, matched against the loaded rig.
    Returns the app instance."
   []
   ;; Configure Timbre logging levels (used by beat-carabiner transitive dependency)
@@ -140,24 +188,24 @@
     (Platform/setImplicitExit false)
     (log/info "Dev mode: Window close will not exit JVM"))
 
-  ;; Initialize with base state, then apply starter templates for fresh projects
-  (state/init-state! (-> (domains/build-initial-state)
-                         (templates/apply-starter-cue-chains)
-                         (templates/apply-starter-vibes)
-                         (templates/apply-starter-effects)
-                         (history/mark-clean)))
+  ;; A fresh starter document on this machine's rig
+  (let [rig (load-rig (starter-state) (persistent/default-rig-file))]
+    (state/init-state! (:state rig))
 
-  (init-styles!)
+    (init-styles!)
 
-  (output-runtime/open!)
-  (output-runtime/install-shutdown-hook!)
+    (output-runtime/open!)
+    (output-runtime/install-shutdown-hook!)
+    (rig-store/install-shutdown-hook!)
 
-  (let [app (create-app)]
-    (reset! *app app)
-    ;; Wire dispatch! to use app's handler (wrapped with async agent)
-    (events/set-dispatch-fn! (:handler app))
-    (events/set-exit-fn! #(exit!))
-    (input-mapper/set-dispatch-fn! events/dispatch!))
+    (let [app (create-app)]
+      (reset! *app app)
+      ;; Wire dispatch! to use app's handler (wrapped with async agent)
+      (events/set-dispatch-fn! (:handler app))
+      (events/set-exit-fn! #(exit!))
+      (input-mapper/set-dispatch-fn! events/dispatch!))
+
+    (after-rig-loaded! rig))
 
   ;; After dispatch! reaches the agent, so the clock's reports queue there
   (show-clock/start!)
@@ -218,11 +266,22 @@
       (catch Exception e
         (log/warn "Error disconnecting from Carabiner:" (.getMessage e))))))
 
+(defn- stop-rig-file!
+  "Write the rig change still pending (within 2 s), then let go of the rig
+   file's lock, so the next window can write it."
+  []
+  (try
+    (rig-store/flush! 2000)
+    (catch Exception e
+      (log/warn "Error writing the rig file:" (.getMessage e))))
+  (rig-store/unlock!))
+
 (defn stop!
   "Stop the mounted cljfx application and release application-owned services:
    the UI, the show clock, the input mapper, the streaming engines (the
-   output runtime is drained), input devices and the Carabiner link. dispatch!
-   falls back to the synchronous handler afterwards.
+   output runtime is drained), input devices, the Carabiner link and the rig
+   file (its pending change written, its lock let go). dispatch! falls back
+   to the synchronous handler afterwards.
 
    This is intentionally idempotent so UI fixtures can safely call it from
    `finally` blocks after a failed startup or test."
@@ -234,6 +293,7 @@
   (stop-streaming!)
   (stop-input-devices!)
   (disconnect-link!)
+  (stop-rig-file!)
   (events/set-exit-fn! nil)
   (events/set-dispatch-fn! nil)
   (reset! *app nil)
@@ -256,23 +316,27 @@
    This is intended for TestFX and other UI integration tests. The supplied
    state is isolated at the cljfx context level, while the normal event
    handler and production root view remain in use. No show clock runs: tests
-   tick it by hand (show-clock/tick!), and show time starts from nothing."
+   tick it by hand (show-clock/tick!), and show time starts from nothing.
+
+   No rig file is read or written unless the state names one in
+   [:rig-file :path] (a test's temp folder): then it is locked, read and
+   saved as app/start! does with the real one, so no test reaches the user's
+   ~/LaserShowProjects/rig.edn."
   ([]
-   (start-test! (-> (domains/build-initial-state)
-                    (templates/apply-starter-cue-chains)
-                    (templates/apply-starter-vibes)
-                    (templates/apply-starter-effects)
-                    (history/mark-clean))))
+   (start-test! (starter-state)))
   ([initial-state]
    (stop!)
-   (state/init-state! initial-state)
-   (show-time/reset-runtime!)
-   (init-styles!)
-   (output-runtime/open!)
-   (let [app (create-app)]
-     (reset! *app app)
-     (events/set-dispatch-fn! (:handler app))
-     app)))
+   (let [path (get-in initial-state [:rig-file :path])
+         rig (if path (load-rig initial-state path) {:state initial-state})]
+     (state/init-state! (:state rig))
+     (show-time/reset-runtime!)
+     (init-styles!)
+     (output-runtime/open!)
+     (let [app (create-app)]
+       (reset! *app app)
+       (events/set-dispatch-fn! (:handler app))
+       (after-rig-loaded! rig)
+       app))))
 
 
 

@@ -1,7 +1,7 @@
 (ns laser-show.events.rig-handlers-test
   "The rig strip's events (plans/2026-11-19-zones/04 §6): moving a card,
-   the middle laser and the split width. Undoable, unsaved, and never an
-   engine restart."
+   the middle laser and the split width. Undoable, never an unsaved change
+   (the rig file saves itself, 09), and never an engine restart."
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.events.core :as events]
             [laser-show.events.handlers :as handlers]
@@ -77,18 +77,18 @@
         "a drag of the slider is one step")
     (is (= 0.75 (get-in (:state (pipeline dragged {:event/type :history/undo})) [:rig :split-width])))))
 
-(deftest reorder-is-undoable-and-unsaved-test
+(deftest reorder-is-undoable-and-saves-itself-test
   (let [clean (history/mark-clean (rig-state))
         moved (:state (pipeline clean {:event/type :rig/move-projector :projector-id :c :target :a :side :before}))
         nudged (:state (pipeline moved {:event/type :rig/nudge-projector :projector-id :c :delta 1}))
         undone (:state (pipeline nudged {:event/type :history/undo}))
         undone-twice (:state (pipeline undone {:event/type :history/undo}))]
-    (is (true? (get-in moved [:project :dirty?])) "an unsaved change")
+    (is (false? (get-in moved [:project :dirty?])) "not an unsaved change: the rig file saves itself (zones plan ZR)")
     (is (= [:a :c :b] (order nudged)))
     (is (= ["Move Projector" "Move Projector"] (mapv :description (get-in nudged [:history :undo-stack]))))
     (is (= [:c :a :b] (order undone)))
     (is (= [] (order undone-twice)))
-    (is (false? (get-in undone-twice [:project :dirty?])) "back to the saved order")
+    (is (false? (get-in undone-twice [:project :dirty?])))
     (testing "the middle laser too"
       (is (= ["Change Middle Laser"]
              (mapv :description (get-in (:state (pipeline clean {:event/type :rig/set-middle :middle :both}))

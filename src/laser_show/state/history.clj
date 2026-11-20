@@ -14,12 +14,16 @@
    Document policy (see plans/2026-11-08-undo-history-boundary.md):
    | Data                                              | Undo? | Unsaved? |
    |---------------------------------------------------|-------|----------|
-   | content (chains, projectors, zone groups, the     | yes   | yes      |
-   |   rig, grid, [:config :grid/:input])              |       |          |
+   | show content (cue and effect chains, zone groups, | yes   | yes      |
+   |   grid, [:config :grid/:input/:vibes])            |       |          |
+   | rig (projectors, virtual projectors, the rig,     | yes   | no: the  |
+   |   [:chains :projector-effects])                   |       | rig file |
+   |                                                   |       | saves it |
    | prefs ([:config <prefs-config-keys>])             | no    | yes      |
    | live: [:timing :bpm], effect cell :active?,       | no    | no       |
    |   item fields in live-item-paths                  |       |          |
-   Everything above is still written when the project is saved."
+   Everything above is still written when the project is saved; the rig
+   also has a file of its own, saved by itself (zones plan ZR, state.rig-file)."
   (:require [clojure.walk :as walk]
             [laser-show.common.util :as u]))
 
@@ -127,7 +131,8 @@
     (equiv-ignoring-live? a b)))
 
 (defn- chains-changed?
-  [old-chains new-chains]
+  "Did a chain domain that domain? accepts change?"
+  [old-chains new-chains domain?]
   (boolean
    (and (not (identical? old-chains new-chains))
         (some (fn [domain]
@@ -140,7 +145,7 @@
                                  (and (not (identical? oe ne))
                                       (not (entry-equiv? domain oe ne)))))
                              (into (set (keys o)) (keys n))))))
-              (into (set (keys old-chains)) (keys new-chains))))))
+              (filter domain? (into (set (keys old-chains)) (keys new-chains)))))))
 
 (defn- config-changed?
   [old-config new-config include-key?]
@@ -151,26 +156,43 @@
                      (differs? (get old-config k) (get new-config k))))
               (into (set (keys old-config)) (keys new-config))))))
 
-(defn- content-changed?
+(def ^:private rig-chain-domains
+  "The chain domains that are the rig's: the projectors' calibration."
+  #{:projector-effects})
+
+(defn show-content-changed?
+  "True when the show's undoable content differs between two documents: the
+   grid, the zone group definitions, config without prefs, the cue and
+   effect chains."
   [old-doc new-doc]
   (boolean
-   (or (some #(differs? (get old-doc %) (get new-doc %))
-             [:grid :projectors :virtual-projectors :zone-groups :rig])
+   (or (some #(differs? (get old-doc %) (get new-doc %)) [:grid :zone-groups])
        (config-changed? (:config old-doc) (:config new-doc) (complement prefs-config-keys))
-       (chains-changed? (:chains old-doc) (:chains new-doc)))))
+       (chains-changed? (:chains old-doc) (:chains new-doc) (complement rig-chain-domains)))))
+
+(defn rig-content-changed?
+  "True when the rig differs between two documents: the projectors, the
+   virtual projectors, [:rig] and the projectors' calibration chains. Undoable,
+   but never unsaved: the rig file saves itself (zones plan ZR)."
+  [old-doc new-doc]
+  (boolean
+   (or (some #(differs? (get old-doc %) (get new-doc %)) [:projectors :virtual-projectors :rig])
+       (chains-changed? (:chains old-doc) (:chains new-doc) rig-chain-domains))))
 
 (defn undoable-changed?
-  "True when undoable content differs between two documents (from extract-document-state).
-   Ignores BPM, effect cell :active?, live item fields and config prefs."
+  "True when undoable content differs between two documents (from extract-document-state):
+   the show's or the rig's. Ignores BPM, effect cell :active?, live item fields and config prefs."
   [old-doc new-doc]
-  (content-changed? old-doc new-doc))
+  (or (show-content-changed? old-doc new-doc)
+      (rig-content-changed? old-doc new-doc)))
 
 (defn persisted-changed?
   "True when anything that counts as an unsaved change differs between two documents:
-   undoable content plus config prefs. Ignores live state."
+   the show's undoable content plus config prefs. Ignores live state, and the
+   rig, which is saved in its own file."
   [old-doc new-doc]
   (boolean
-   (or (content-changed? old-doc new-doc)
+   (or (show-content-changed? old-doc new-doc)
        (config-changed? (:config old-doc) (:config new-doc) prefs-config-keys))))
 
 

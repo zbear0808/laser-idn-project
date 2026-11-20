@@ -500,6 +500,28 @@
                  :doc "Active continuous interaction transaction ({:baseline-snapshot ... :label ... :source-id ...}) or nil"}})
 
 
+(defstate rig-file
+  "This machine's rig file (plans/2026-11-19-zones/09, state.rig-store): where
+   it is and how saving it goes. Runtime: not a document root, never saved
+   with a show, never reset by New or Open."
+  {:path {:default nil
+          :doc "The rig file (persistent/default-rig-file, set at startup); nil: no rig file (unit and UI tests unless they name one, the REPL), so nothing is read or written"}
+   :status {:default :none
+            :doc "How it went: the startup read's (rig-store/read!: :missing :ok :recovered :reset :newer), :locked (another window has it), then :saved or :write-failed after each write"}
+   :read-only? {:default false
+                :doc "Another window has the rig file, or it comes from a newer build: the rig is used, but never written"}
+   :written-at {:default nil
+                :doc "When the file was last written (ms): by this window, or before it started"}
+   :error {:default nil
+           :doc "Why the last write failed, for the status line and Exit's question"}
+   :requested {:default 0
+               :doc "Writes asked for this session (rig-autosave/write-request numbers each)"}
+   :written {:default 0
+             :doc "The newest request a write answered (:rig/written or :rig/write-failed): a write is pending while it is below :requested"}
+   :group-copy {:default {}
+                :doc "The rig file's copy of the groups its lasers are in (rig-file/group-copy), as last written or read"}})
+
+
 ;; State Builder
 
 

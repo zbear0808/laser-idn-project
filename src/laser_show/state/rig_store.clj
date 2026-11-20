@@ -111,16 +111,17 @@
    - :reset with a notice and no doc: the same, with no backup that reads;
    - :newer with its doc (the file's, or the backup's with the notice): from
      a newer build, so the app uses it read only.
-   opts: :now (ms, the time in the kept file's name) and :zone (for the
-   times), for tests."
+   opts: :read-only? (another window has the file: one that can't be read
+   is left where it is); :now (ms, the time in the kept file's name) and
+   :zone (for the times), for tests."
   ([path] (read! path {}))
-  ([path {:keys [now zone] :or {now (System/currentTimeMillis) zone (ZoneId/systemDefault)}}]
+  ([path {:keys [now zone read-only?] :or {now (System/currentTimeMillis) zone (ZoneId/systemDefault)}}]
    (let [file (io/file path)]
      (if-not (.exists file)
        {:status :missing}
        (if-let [doc (parse file)]
          {:status (if (rig-file/newer? doc) :newer :ok) :doc doc}
-         (let [kept (keep-aside! file now zone)
+         (let [kept (when-not read-only? (keep-aside! file now zone))
                backup (sibling path ".bak")
                backup-doc (when (.exists backup) (parse backup))]
            (if backup-doc
@@ -224,11 +225,17 @@
 
 (defn lock!
   "Take path's lock for the session: true, or false when another window has
-   the rig (it is then read only, Q-ZR-4)."
+   the rig (it is then read only, Q-ZR-4). A lock file that can't be made
+   (no folder, no permission) doesn't stop the app: true, this window writes
+   the rig, and a write that fails says why."
   [path]
-  (if-let [k (try-lock path)]
-    (do (reset! !session k) true)
-    false))
+  (try
+    (if-let [k (try-lock path)]
+      (do (reset! !session k) true)
+      false)
+    (catch Exception e
+      (log/warn "The rig file can't be locked, so this window writes it anyway:" (str path) (.getMessage e))
+      true)))
 
 (defn unlock!
   "Let go of the session's lock, if one is held."
@@ -271,16 +278,17 @@
 
 (defn submit!
   "Keep doc as the rig to write to path, in place of one not written yet,
-   and write it write-delay-ms after the last submit, on the rig-writer
-   thread. on-result gets {:at ms} or {:error reason} there; a superseded
-   rig's never does."
-  [path doc on-result]
-  (let [^ScheduledExecutorService writer @!writer]
-    (locking !pending
-      (when-let [^ScheduledFuture task (:task @!pending)]
-        (.cancel task false))
-      (reset! !pending {:path path :doc doc :on-result on-result
-                        :task (.schedule writer ^Runnable write-pending! (long write-delay-ms) TimeUnit/MILLISECONDS)}))))
+   and write it delay-ms (write-delay-ms) after the last submit, on the
+   rig-writer thread. on-result gets {:at ms} or {:error reason} there; a
+   superseded rig's never does."
+  ([path doc on-result] (submit! path doc on-result write-delay-ms))
+  ([path doc on-result delay-ms]
+   (let [^ScheduledExecutorService writer @!writer]
+     (locking !pending
+       (when-let [^ScheduledFuture task (:task @!pending)]
+         (.cancel task false))
+       (reset! !pending {:path path :doc doc :on-result on-result
+                         :task (.schedule writer ^Runnable write-pending! (long delay-ms) TimeUnit/MILLISECONDS)})))))
 
 (defn flush!
   "Write the pending rig now, waiting up to timeout-ms for it (and for a

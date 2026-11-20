@@ -194,8 +194,10 @@
         ;; Effect should be enabled by default
         (is (true? (:enabled? new-effect))))
       
-      ;; Project should be marked dirty
-      (is (history/derive-dirty (:state event) (:state result)))))
+      ;; Calibration is the rig's: undoable, saved by the rig file, not an unsaved show change (zones plan ZR)
+      (is (history/undoable-changed? (history/extract-document-state (:state event))
+                                     (history/extract-document-state (:state result))))
+      (is (false? (history/derive-dirty (:state event) (:state result))))))
   
   (testing "Adds corner-pin calibration effect"
     (let [event {:event/type :projectors/add-effect

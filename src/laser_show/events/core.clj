@@ -26,7 +26,7 @@
      ...) runs the follow-up inline through run-inline, in the same turn
    - Effects that work later on another thread (futures: scan, learn,
      :dispatch-later; the FX thread: file chooser; the output runtime's status
-     thread) only do their side effect there. Their result goes through the
+     thread; the rig writer) only do their side effect there. Their result goes through the
      dispatch fn the effect was given, which queues it on the agent behind the
      current event
    - The streaming lifecycle effects only queue a command on the output
@@ -57,8 +57,10 @@
             [laser-show.state.core :as state]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.state.persistent :as persistent]
+            [laser-show.state.rig-store :as rig-store]
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.history :as history-handlers]
+            [laser-show.events.handlers.rig-autosave :as rig-autosave]
             [laser-show.events.handlers.timeline :as timeline-handlers]
             [laser-show.events.show-lock :as show-lock]
             [laser-show.backend.output-runtime :as output-runtime]
@@ -190,6 +192,22 @@
     (run-inline (assoc on-loaded :file-path file-path :contents contents) dispatch)
     (when on-failed
       (run-inline (assoc on-failed :file-path file-path) dispatch))))
+
+(defn- effect-rig-write
+  "Effect that hands the rig to the rig writer (state.rig-store/submit!): it
+   writes the newest one half a second after the last change (at once with
+   :now?), on its own thread, so a drag never waits for the disk. The result
+   comes back later through dispatch, as :rig/written (with :then, the event
+   to continue with) or :rig/write-failed.
+   Args: {:path :doc :seq :then :now?}"
+  [{:keys [path doc seq then now?]} dispatch]
+  (rig-store/submit! path doc
+                     (fn [{:keys [at error]}]
+                       (dispatch (if error
+                                   {:event/type :rig/write-failed :path path :seq seq :error error}
+                                   (cond-> {:event/type :rig/written :path path :seq seq :at at}
+                                     then (assoc :then then)))))
+                     (if now? 0 rig-store/write-delay-ms)))
 
 ;; Clipboard Effects (for effect chain editor)
 
@@ -459,7 +477,9 @@
    unsaved-changes flag derived for every event
    (see handlers/history.clj), then the output sync: a change to what the
    engines are built from (undo included) requests a refresh while streaming
-   (handlers/output_sync.clj). Then, in dev mode only, the lost-update check
+   (handlers/output_sync.clj), and the rig autosave: a change to the rig
+   (undo included) requests a write of the rig file
+   (handlers/rig_autosave.clj). Then, in dev mode only, the lost-update check
    tags the :state effect with the event's snapshot. Outermost, with-fx-event
    puts a map event's :fx/event value where its view wrote the placeholder.
 
@@ -471,6 +491,7 @@
       history-handlers/wrap-history
       history-handlers/wrap-dirty
       output-sync/wrap-output-sync
+      rig-autosave/wrap-rig-autosave
       wrap-lost-update-check
       with-fx-event))
 
@@ -497,6 +518,8 @@
    - :output/write-status - store the output status at its path only
    - :project/save - write project zip to disk, then :on-saved (inline)
    - :project/load - read project zip from disk, then :on-loaded (inline)
+   - :rig/write - hand the rig file's contents to the rig writer; :rig/written
+     or :rig/write-failed comes back (later, rig-writer thread)
    - :fx/show-file-chooser - show file open/save dialog (later, FX thread)
    - :system/exit - end the application through the fn registered with set-exit-fn!
    - :system/open-url - open a URL in the system browser
@@ -517,6 +540,8 @@
    ;; Project persistence
    :project/save effect-save-project
    :project/load effect-load-project
+   ;; The rig file
+   :rig/write effect-rig-write
    ;; File chooser dialog
    :fx/show-file-chooser effect-show-file-chooser
    ;; System

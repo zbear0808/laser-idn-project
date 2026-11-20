@@ -58,6 +58,19 @@
            :zone-groups (group-copy state)}
           rig-paths))
 
+(defn- differs? [a b]
+  (and (not (identical? a b)) (not= a b)))
+
+(defn rig-changed?
+  "Did the rig the file holds change from old to new: a rig path (an equal
+   value rebuilt doesn't count), or the definition of a group the rig's
+   lasers are in (the group copy)?"
+  [old new]
+  (boolean
+   (or (some #(differs? (get-in old %) (get-in new %)) rig-paths)
+       (and (not (identical? (:zone-groups old) (:zone-groups new)))
+            (not= (group-copy old) (group-copy new))))))
+
 (defn- map-or-nil? [v]
   (or (nil? v) (map? v)))
 

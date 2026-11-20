@@ -3,8 +3,14 @@
    projectors, the middle laser, the split width, and the bar that shows
    where a dragged card would land. Pure. A move writes the whole effective
    order, so the first one fixes every card's place. None of them restarts
-   an engine: the frame provider reads the rig live."
-  (:require [laser-show.routing.rig :as rig]))
+   an engine: the frame provider reads the rig live.
+
+   And the rig file's (09 §6): a write's result, Retry, and the startup
+   notice. The writes themselves are asked for by the pipeline
+   (handlers/rig_autosave.clj)."
+  (:require [laser-show.events.handlers.rig-autosave :as rig-autosave]
+            [laser-show.events.helpers :as h]
+            [laser-show.routing.rig :as rig]))
 
 (defn- order [state]
   (rig/effective-order (get-in state [:rig :order]) (:projectors state)))
@@ -73,6 +79,59 @@
     {:state (assoc-in state [:rig-ui :drop] nil)}
     {:state state}))
 
+
+;; The rig file (09 §6, §7)
+
+(defn- this-file?
+  "Is a write's result about this window's rig file? One for another path
+   (a test or a window before) is ignored."
+  [state path]
+  (and (some? path) (= path (get-in state [:rig-file :path]))))
+
+(defn- answered
+  "state with request seq answered."
+  [state seq]
+  (update-in state [:rig-file :written] #(max (or % 0) (or seq 0))))
+
+(defn- handle-written
+  "The rig file was written at :at: saved. An event waiting for it (Exit's
+   Try again) carries on."
+  [{:keys [path seq at then state]}]
+  (if (this-file? state path)
+    (cond-> {:state (-> state
+                        (answered seq)
+                        (update :rig-file assoc :status :saved :error nil :written-at at))}
+      then (assoc :dispatch then))
+    {:state state}))
+
+(defn- handle-write-failed
+  "The rig file couldn't be written: the status line says why, with Retry,
+   and so does a notice. Exit asks first while it stays so."
+  [{:keys [path seq error state]}]
+  (if (this-file? state path)
+    (h/show-notice (-> state
+                       (answered seq)
+                       (update :rig-file assoc :status :write-failed :error error))
+                   (str "Rig not saved: " error)
+                   :error)
+    {:state state}))
+
+(defn- handle-retry-write
+  "Retry, and Exit's Try again: write the rig as it is now, at once. :then
+   is the event to continue with once it is written."
+  [{:keys [then state]}]
+  (if (rig-autosave/writable? state)
+    (rig-autosave/write-request state {:then then :now? true})
+    {:state state}))
+
+(defn- handle-startup-notice
+  "What the startup read of the rig file has to say (a backup in use, an
+   empty rig), once the window is up."
+  [{:keys [text level state]}]
+  (if (string? text)
+    (h/show-notice state text (or level :warning))
+    {:state state}))
+
 (defn handle
   "Dispatch :rig/* events."
   [{:keys [event/type] :as event}]
@@ -83,4 +142,9 @@
     :rig/set-split-width (handle-set-split-width event)
     :rig/drag-over (handle-drag-over event)
     :rig/drag-exit (handle-drag-exit event)
+    ;; The rig file
+    :rig/written (handle-written event)
+    :rig/write-failed (handle-write-failed event)
+    :rig/retry-write (handle-retry-write event)
+    :rig/startup-notice (handle-startup-notice event)
     {}))

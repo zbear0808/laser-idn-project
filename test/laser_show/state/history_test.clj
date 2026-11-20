@@ -60,7 +60,47 @@
     (doseq [edit edits]
       (is (false? (history/document-roots-identical? with-rig (edit with-rig))))
       (is (true? (history/undoable-changed? (doc with-rig) (doc (edit with-rig)))) "undoable")
-      (is (true? (history/persisted-changed? (doc with-rig) (doc (edit with-rig)))) "and an unsaved change"))))
+      (is (false? (history/persisted-changed? (doc with-rig) (doc (edit with-rig))))
+          "but not an unsaved change: the rig file saves itself (zones plan ZR)"))))
+
+(deftest rig-edit-is-undoable-but-not-unsaved-test
+  (let [clean (history/mark-clean sample-state)]
+    (doseq [[label edit] [["a projector's setting" #(assoc-in % [:projectors :proj-1 :enabled?] false)]
+                          ["a safety zone" #(assoc-in % [:projectors :proj-1 :safety] {:limit [-0.5 -0.5 0.5 0.5] :blocked []})]
+                          ["what a laser is in" #(assoc-in % [:projectors :proj-1 :zone-groups] [:graphics])]
+                          ["a new projector" #(assoc-in % [:projectors :proj-2] {:name "Two"})]
+                          ["a virtual projector" #(assoc-in % [:virtual-projectors :vp] {:parent-projector-id :proj-1})]
+                          ["the order" #(assoc-in % [:rig :order] [:proj-1])]]]
+      (testing label
+        (is (true? (history/undoable-changed? (doc clean) (doc (edit clean)))) "undoable")
+        (is (false? (history/persisted-changed? (doc clean) (doc (edit clean)))) "not unsaved")
+        (is (false? (history/derive-dirty clean (edit clean))) "a saved show stays saved")))))
+
+(deftest show-edit-is-still-unsaved-test
+  (let [clean (history/mark-clean sample-state)]
+    (doseq [[label edit] [["a cue" edit-content]
+                          ["an effect cell" #(assoc-in % [:chains :effect-chains [1 0] :items] [])]
+                          ["a group's definition" #(assoc-in % [:zone-groups :all :name] "Everything")]
+                          ["the grid" #(assoc-in % [:grid :size] [4 4])]
+                          ["a learned control" #(assoc-in % [:config :input :trigger-map] {{:note 1} {:type :trigger-cue}})]]]
+      (testing label
+        (is (true? (history/undoable-changed? (doc clean) (doc (edit clean)))))
+        (is (true? (history/persisted-changed? (doc clean) (doc (edit clean)))))
+        (is (true? (history/derive-dirty clean (edit clean))))))
+    (testing "a preference: unsaved, not undoable, as before"
+      (let [edit #(assoc-in % [:config :preview :grid-layout] [3 3])]
+        (is (false? (history/undoable-changed? (doc clean) (doc (edit clean)))))
+        (is (true? (history/persisted-changed? (doc clean) (doc (edit clean)))))))
+    (testing "a rig edit and a show edit together: unsaved"
+      (is (true? (history/derive-dirty clean (-> clean edit-content (assoc-in [:rig :order] [:proj-1]))))))))
+
+(deftest projector-effects-count-as-rig-test
+  (let [clean (history/mark-clean sample-state)
+        calibrated #(assoc-in % [:chains :projector-effects :proj-1] {:items [{:id item-id :effect-id :rgb-curves}]})]
+    (is (true? (history/undoable-changed? (doc clean) (doc (calibrated clean)))) "undoable")
+    (is (false? (history/persisted-changed? (doc clean) (doc (calibrated clean)))) "the rig's, so not unsaved")
+    (is (true? (history/persisted-changed? (doc clean) (doc (edit-content (calibrated clean)))))
+        "the cue chains beside it are still the show's")))
 
 (deftest restore-document-restores-the-rig-test
   (let [before (assoc sample-state :rig {:order [:proj-1] :middle :split :split-width 0.75})
