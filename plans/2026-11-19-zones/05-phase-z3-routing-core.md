@@ -1,8 +1,9 @@
 # Phase Z3: routing core (routing in the snapshot, each picture once, split lasers, fit guard, per-laser preview, low-fps warnings)
 
-**Written:** 2026-11-19   **Written for commit:** `90e35c7` (`master`; the source cited is as at `e3d6d1b`, the last commit to touch `src/`)
+**Written:** 2026-11-19   **Written for commit:** `6aaad7d` (`master`; first written at `90e35c7`, then re-verified here: `src/` is as vibe Phase 6 left it in `4a4a10a`, after vibe Phases 3 (`38f92ad`), 4a (`6715fb4`), 4b (`f5a4f84`) and 5 (`9f5d78a`, with the fader fix `0faa18c`) and UX Phase 3 (`b9b9d55`); every line below is at that source). Z1 and Z2 edit several of these files first, so **re-check every path and line at HEAD before starting.**
 **Status:** Proposed.   **Needs:** Z1 (`03-phase-z1-safety.md`: the safety limit and stage) and Z2 (`04-phase-z2-rig-strip-and-groups.md`: rig order, automatic groups, the rig card). The Z2 names below are taken from doc 04. Doc 03 now exists (re-checked at `70f7db8`), and the Z1 row of the table below follows it. Doc 06 (Z4) calls this phase's accessor `rig/resolve-ref`, and this doc uses that name.
-**Implements spec** (`01-model-and-routing-spec.md`): §1 (frame keys in normal form), §5, §6 with §6.1 and §6.2 a–h (i and j are Z4), §7, §8, invariants 4, 5, 6, 8 and 9, and needs C-10 (a per-laser preview).   **Size:** ~6 d
+**Implements spec** (`01-model-and-routing-spec.md`): §1 (frame keys in normal form), §5 with its order within a tick (the routing before the render, Z5 S-3), §6 with §6.1 and §6.2 a–h (i and j are Z4), §7, §8, invariants 4, 5, 6, 8 and 9, and needs C-10 (a per-laser preview).   **Size:** ~6 d
+**Merge risk:** vibe Phase 6 (auto-advance and one tap tempo) landed while this was being re-verified (`4a4a10a`), and the lines below are after it. It added a `rotation-step` to `tick!`, after `publish!` and `status-step`, and made `show-time/due-reports` public, taking the sent map. Z3 leaves both where they are. Vibe Phase 7 (safety and hardening, proposed) also edits `services/show_clock.clj`, `animation/show_time.clj`, `views/toolbar.clj` (where the LOW FPS chip goes), `state/domains.clj` and `subs.clj`, so whichever of Phase 7 and Z3 lands second merges those by hand (00 §6).
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks anything that doesn't exist yet.
 
@@ -11,33 +12,33 @@ After this phase you can:
 - **Trust overlapping groups.** A laser in All and in Graphics draws a cue sent to both of them once, not twice (e). A picture placed under two keys is drawn once.
 - **Keep the frame rate.** When a laser would draw below its minimum (20 fps by default), it draws fewer points. It never goes below 60% of them, and it keeps the blanking, the ends of each line and the corners. It dims too, if you allow it.
 - **See it.** Each laser's card shows what it sent (after calibration and safety) and a load meter that says what the guard did ("split · 2 regions · −30% pts"). The card turns amber below the laser's minimum, and the toolbar says **LOW FPS · Laser R 14 fps** on every tab, with a click to the card. A playing cue that is too heavy shows **⚠** on its cell, and its editor names the laser and the heaviest item. A preview cell can show one laser as it draws it.
-- **Edit live.** The show clock works out the routing once per tick, and every engine and the preview read that one copy. A group edit shows on the next tick and restarts nothing.
+- **Edit live.** The show clock works out the routing once per tick, before it renders, and every engine and the preview read that one copy. A group edit shows on the next tick and restarts nothing.
 
 There is still one render per cue per tick (spec invariant 8). Zones (A, B…) and maps come in Z4. Until then, frame keys are groups (`:all`, `:auto/left`, `:auto.laser/<id>`, custom ids), and Z4 adds only the zone → lane lookup (§4, `rig/resolve-ref`).
 
 | Assumed from | What this phase uses |
 |---|---|
-| Z1 (doc 03) | `[:projectors id :safety]` with `:limit [x0 y0 x1 y1]` (default `[-1 -1 1 1]`), **always read through `safety/normalize`** (03 S-Z1-7), so the safe box for regions is the same box the stage clips to. A safety stage after `apply-projector-effects` in `projector-frame` that fails closed and reports under `[:safety id]`. A test-pattern and Identify branch that replaces a laser's content, skipping composition and the fit guard |
+| Z1 (doc 03) | `[:projectors id :safety]` with `:limit [x0 y0 x1 y1]` (default `[-1 -1 1 1]`), **always read through `safety/normalize`** (03 S-Z1-7), so the safe box for regions is the same box the stage clips to. `normalize` throws on data it can't read, and Z3 catches that per laser (§4, S-9). A safety stage after `apply-projector-effects` in `projector-frame` that fails closed and reports under `[:safety id]`. Z1's `projector-frame` is a `cond` (03 §4): BLACKOUT on the test pattern, Identify's dark half and the test pattern come before the `:playing?` branch, which is the only one Z3 changes. The pattern replaces a laser's content, so it skips composition and the fit guard, and the effects grid (the vibe Master included) never touches it (03 S-Z1-8) |
 | Z2 (doc 04 §4) | `[:rig]` with `:order`, `:middle` (`:split`) and `:split-width` (0.75), plus `:exclude-from-all?` on each projector. In `routing/rig.clj`: `enabled?` (`(:enabled? p true)`), `effective-order`, `rig-inputs [state]`, `auto-groups`, and `ref-entries [inputs]`, the whole `{ref entries}` map that "Z3's resolver puts under `:refs`". There's also `refs-for`, which Z2's `get-projector-zone-groups` returns: every ref that reaches a laser, with halves counted as the whole laser. `subs/target-groups`, which every picker reads (the preview's too), lists All, the automatic groups, each laser (`:auto.laser/<id>`) and the custom groups. The cards are built in NEW `views/components/rig_strip.clj` from a vector of sections, and Z2's thumbnail section returns nil for Z3 to fill. The card keeps `#projector-dot-<id>` and `#projector-status-<id>`, and the inspector stays in `views/tabs/projectors.clj` |
 
 ## 1. Current behaviour (file:line)
 
 | What | Where | Behaviour |
 |---|---|---|
-| A tick | `services/show_clock.clj:71-92, 137-162` | It renders every playing cue once (`:83-85`) and publishes `{:cues [{:cell :run :zone-frames}] :projector-ctx :render-us :at-ns :playing? :positions :preview}` (`:153-157`). The snapshot has no routing |
-| Points counted | `services/show_clock.clj:62-69` | One total for the JFR `FrameGeneration` event. Nothing per cue, per item or per laser |
-| The clock's status | `services/show_clock.clj:108-132`; `animation/show_time.clj:52-62`; `events/handlers/timing.clj:156-162` | The beat, the frame stats and the MTC text. They go to app state at most every 250 ms, and only when app state differs |
+| A tick | `services/show_clock.clj:83-106, 160-191` | It steps show time (`:172`), takes Phase 4a's pulse view (`:176`), renders every playing cue once (`:97-99`) and publishes `{:cues [{:cell :run :zone-frames}] :projector-ctx :render-us :at-ns :playing? :positions :pulses :faders :preview}` (`:179-185`; `publish!` adds `:tick`). `:pulses` (vibe Phase 4a) is also on every cue's timing context and the effects grid's (`:65`; `services/frame_service.clj:103-125`), but not on `:projector-ctx`. `:faders` (vibe Phase 5, as `0faa18c` derives them once a tick) is for the Perform meters. After `publish!` come the status and Phase 6's auto-advance reports (`:187-190`). The snapshot has no routing |
+| Points counted | `services/show_clock.clj:74-81` (`record-render!`) | One total for the JFR `FrameGeneration` event. Nothing per cue, per item or per laser |
+| The clock's status | `services/show_clock.clj:122-146`; `animation/show_time.clj:63-78`; `events/handlers/timing.clj:148-154` | The beat, the frame stats and the MTC text. They go to app state at most every 250 ms, and only when app state differs |
 | Who draws what | `backend/multi_engine.clj:47-88, 119-150` | Each engine, on its own thread, reads `[:projectors id :zone-groups]` from **live app state** (`:132-133`). It takes those keys of each cue, in list order, joins them (`:134-137`), then applies its projector effects (`:148-150`). A laser in two groups that both hold the same frame draws it twice: 68 points instead of 33 (Phase 8 probe v22). There are no regions |
-| The join | `services/frame_service.clj:179-217` | `concatenate-frames` puts two dark points between frames |
-| Effects-grid point effects | `services/frame_service.clj:397-405` | Run once per key of each cue |
-| Frame keys | `routing/zone_effects.clj:127-156`; `services/frame_service.clj:239-249, 373` | One keyword per item: its own group, else its track's, its parent group's or the cue's, else `:all` |
+| The join | `services/frame_service.clj:190-228` | `concatenate-frames` puts two dark points between frames |
+| Effects-grid point effects | `services/frame_service.clj:84-101, 299-311, 408-416` | Run once per key of each cue, at the cue's tempo, inside the render, so before anything per laser. Since vibe Phase 5 a new project has one: the **Master** at [0 3] (`state/templates.clj:105-110`, `vibes/faders.clj:56-62`), an Intensity on fader 1. It scales r, g and b (`animation/effects/intensity.clj:11-18`) and keeps every point |
+| Frame keys | `routing/zone_effects.clj:127-156`; `services/frame_service.clj:250-254, 384` | One keyword per item: its own group, else its track's, its parent group's or the cue's, else `:all` |
 | Projector effects | `backend/multi_engine.clj:94-111` | Read live. A failing one is skipped |
-| The preview | `services/frame_service.clj:407-428`; `views/components/preview.clj:134-162, 295-335` | A cell names a zone group (`:zone-group-id`, `state/domains.clj:248-255`) and draws that exact key. There is no view of one laser |
+| The preview | `services/frame_service.clj:418-439`; `views/components/preview.clj:134-162, 295-335` | A cell names a zone group (`:zone-group-id`, `state/domains.clj:252-259`) and draws that exact key. There is no view of one laser |
 | Its picker | `views/components/preview.clj:200-267`; `events/handlers/ui.clj:103-138` | Lists `[:zone-groups]`. Option ids use `(name id)`, so `:auto/left` and a custom `:left` would collide |
 | Engine stats, status | `backend/streaming_engine.clj:51-63, 267-308, 365-384`; `backend/output_runtime.clj:172-207` | The fps a laser draws and whether its scan rate limits it, published at most 4 times a second. No point load |
-| The laser's status line | `views/tabs/projectors.clj:283-294` | "Streaming · 24.9 fps (limited by scan rate)" is the only sign of too many points |
+| The laser's status line | `views/tabs/projectors.clj:255-266` (`output-status-text`) | "Streaming · 24.9 fps (limited by scan rate)" is the only sign of too many points |
 | Scan rate | `idn/stream.clj:547-578`; `backend/streaming_engine.clj:123, 170-183` | Clamped to 1,000–100,000 pts/s. It sets each frame's duration on the wire |
-| Toolbar, cue cells | `views/toolbar.clj:228-297`; `views/components/grid_cell.clj:189-217, 224-317` | OUTPUT OFF and the streaming status. A cell shows LEARN, its label, the playing dot and ⚡. A cue cell has no tooltip |
+| Toolbar, cue cells | `views/toolbar.clj:219-301`; `views/components/grid_cell.clj:95-220, 226-319` | OUTPUT OFF and the streaming status. A cell shows LEARN, its label, the playing dot and ⚡. A cue cell has no tooltip: `generic-grid-cell` takes a `:tooltip-fn`, but only effects cells pass one (`effects-tooltip`, `:85-89`) |
 | Clock widgets | `views/components/clock_view.clj:30-71` | Redraw when the tick changes: up to 60 times a second |
 | Engine fingerprint | `backend/output_runtime.clj:35-39` | Host, port, service, output config and scan rate. Group edits restart nothing |
 | Engine timing | `backend/streaming_engine.clj:380-381`; `profiling/frame_profiler.clj:55-70` | The "IDN" time of a frame is the provider (routing, projector effects) plus the send |
@@ -56,42 +57,42 @@ The fix has two parts. A resolver turns the rig into `ref → [laser region side
 
 | Existing thing (file:line) | How it's reused |
 |---|---|
-| `concatenate-frames` (`services/frame_service.clj:179-217`) | Joins every bucket and every cue. It moves to NEW `animation/frames.clj` so `routing` can call it, and the frame service keeps the name |
-| The snapshot and `publish!` (`animation/show_time.clj:306-326`) | Carry `:routing`. Engines and the preview read nothing else for routing |
-| The runtime's `:status`, kept from tick to tick (`services/show_clock.clj:108-132`) | The same pattern keeps the resolver's cache, `:routing-cache` |
-| `status-paths`, `:show-clock/status` (`animation/show_time.clj:52-62`) | One more path: `[:backend :streaming :cue-warnings]` |
+| `concatenate-frames` (`services/frame_service.clj:190-228`) | Joins every bucket and every cue. It moves to NEW `animation/frames.clj` so `routing` can call it, and the frame service keeps the name |
+| The snapshot and `publish!` (`animation/show_time.clj:335-355`) | Carry `:routing`, beside Phase 4a's `:pulses` and Phase 5's `:faders`. Engines and the preview read nothing else for routing |
+| The runtime's `:status`, kept from tick to tick (`services/show_clock.clj:122-146`) | The same pattern keeps the resolver's cache, `:routing-cache` |
+| `status-paths`, `:show-clock/status` (`animation/show_time.clj:63-73`) | One more path: `[:backend :streaming :cue-warnings]` |
 | A frame's `{:tick :at-ns}` metadata, read at `backend/streaming_engine.clj:369` | Also carries the fit-guard record into the engine's stats |
 | `engine-status`, `:output/status` (`backend/output_runtime.clj:172-219`) | Publish each laser's load, at most 4 times a second |
 | `ext-clock-redraw`, `draw-preview` (`views/components/clock_view.clj:58-71`; `views/components/preview.clj:119-132`) | Draw the thumbnail and the laser cell. A NEW `:every-ms` caps thumbnails at 10 redraws a second |
-| `output-held-chip` and its style (`views/toolbar.clj:228-240`; `css/layout.clj:64-71`) | The model for the LOW FPS chip |
+| `output-held-chip` and its style (`views/toolbar.clj:232-244`; `css/layout.clj:65-71`) | The model for the LOW FPS chip |
 | The fingerprint (`backend/output_runtime.clj:35-39`) | Unchanged: fit, safety and rig edits restart nothing |
 | Z2's automatic groups (`routing/rig.clj`) and Z1's limit | The resolver's inputs |
-| Phase 8's planned `routing/zone_remap.clj` | If Z3 lands first, it can join with `animation/frames` instead of taking a `:join` option. Its "copy to several zones" (its §9) also becomes safe, because a copy is now drawn once |
+| Phase 8's planned `routing/zone_remap.clj` | If Z3 lands first, it can join with `animation/frames` instead of taking a `:join` option. Its "copy to several zones" (its §9) also becomes safe: Z5 stores a copy as one frame under the union of its zones (spec §6.1, Z5 S-1), and composition draws each key once |
 
 ## 4. Changes per namespace
 
-**`laser-show.animation.frames`** (NEW, pure). `blanking-jump [from to]` and `concatenate-frames [frames]` move here unchanged from `services/frame_service.clj:179-217`. `frame-service/concatenate-frames` stays as `(def concatenate-frames frames/concatenate-frames)`, so no caller or test changes. The reason: `routing` has to join frames, and the frame service already requires `routing`.
+**`laser-show.animation.frames`** (NEW, pure). `create-blanking-jump` and `concatenate-frames [frames]` move here unchanged from `services/frame_service.clj:190-228`. `frame-service/concatenate-frames` stays as `(def concatenate-frames frames/concatenate-frames)`, so no caller or test changes (Z1's test pattern joins its layers with it too). The reason: `routing` has to join frames, and the frame service already requires `routing`.
 
 **`laser-show.routing.rig`** (from Z2; Z3 adds these, all pure):
 - `normalize-target [t]` (spec §1): nil stays nil and a keyword stays itself. A collection becomes its distinct keywords sorted by `(juxt namespace name)`: one keyword if one is left, nil if none.
 - `key-refs [k]`: `[k]` for a keyword, `k` itself for a vector. `zone-index [ref]`: `:zone/a` 0 … `:zone/z` 25, `:zone/aa` 26, nil for any other ref. It's used for key order now, and for lanes in Z4.
 - `region-fits [limit w]` (spec §7): `{:L [cx cy s] :R [cx cy s]}` from the limit's bounding box. It returns nil when the box is under 0.05 wide or high (§12 S-9).
-- `routing-inputs [state map-id]`: `{:rig :projectors :zone-groups :zone-maps :map}`, slices of the tick's app state. Their identity is the cache key (`:zone-maps` is nil until Z4).
-- `routing [inputs]` → `{:map map-id :refs {ref [[pid region side] …]} :outputs {pid {…}}}`. It builds Z2's `rig-inputs` from the slices.
+- `routing-inputs [state map-id]`: `{:rig :projectors :zone-groups :zone-maps :map}`, slices of the tick's app state (the clock's one read, so `one-state-and-input-read-per-tick-test` still holds). Their identity is the cache key (`:zone-maps` is nil until Z4).
+- `routing [inputs]` → `{:map map-id :refs {ref [[pid region side] …]} :outputs {pid {…}}}` (the shape in spec §5). It builds Z2's `rig-inputs` from the slices.
   - `:refs` is Z2's `ref-entries`: `:all` (every enabled laser that isn't excluded, whole), the `:auto/*` groups with their regions and sides, `:auto.laser/<id>`, and the custom groups (members in E, whole).
-  - `:outputs` has an entry for each laser in E (`rig/enabled?`):
-    - `:index`: its place in E;
+  - `:outputs` has an entry for each enabled laser (`rig/enabled?`), excluded ones too, since their own group and custom groups still reach them (D-33):
+    - `:index`: its place in E, or nil for a laser excluded from All;
     - `:scan-rate`: clamped as the engine clamps it (`idn/stream.clj:561-568`), 25,000 by default;
     - `:fit`: from `fit-guard/settings`;
-    - `:regions`: from `region-fits`.
+    - `:regions`: `region-fits` of the limit as Z1's `safety/normalize` reads it (03 S-Z1-7). A zone `normalize` can't read throws there; the resolver catches that for the one laser, which gets `:regions nil`, as a box under 0.05 does. So one bad zone never stops the routing of the other lasers (D-29), and Z1's stage still sends that laser dark and says why.
 - `resolve-ref [routing ref]`: the only way to read a ref's entries, and the name doc 06 uses. In Z3 it's `(get (:refs routing) ref [])`. In Z4 it resolves a zone through the effective map's lanes, so nothing that calls it changes.
 - `cached-routing [cache inputs]` → `[cache routing]`. While every input is `identical?` to the cached one (every tick without an edit), it returns the cached routing; otherwise it builds a new one.
 - Z2's `refs-for` stays for the audience rule (`refs-reaching`), but no engine calls it any more.
 
 **`laser-show.routing.compose`** (NEW, pure): what one laser draws (spec §6, §7).
-- `key-order [k]`: a sortable tuple. Zone refs come first by index, then the other single refs by namespace and name, then vector keys.
-- `contributions [zone-frames routing pid]` (steps 1–3). For each key with entries for `pid` it gives `{:keys [k] :frame f :region r :side s}`. `r` is nil (the whole laser) if any entry is whole or if the entries cover both `:L` and `:R`; otherwise it is that one region. `s` is kept only when every entry carries the same side.
-- `merge-pictures [contribs]` (step 4): contributions whose frames are `identical?` become one, with their keys together and their regions merged by the same rule.
+- `key-order [k]`: a sortable tuple. Zone refs come first by index, then the other single refs by namespace and name, then vector keys, compared ref by ref in that same order. So the order never depends on the order of the keys in the cue's map, even with several vector keys (since Z5, each pattern copy is one: spec §6.1).
+- `contributions [zone-frames routing pid]` (steps 1–3). For each key with entries for `pid` it gives `{:keys [k] :frame f :region r :side s}`. `r` is nil (the whole laser) if any entry is whole or if the entries cover both `:L` and `:R`; otherwise it is that one region. `s` is kept only when every entry carries the same side. A vector key is one contribution however many of its refs reach `pid`, which is how Z5's copies are drawn once on each laser without relying on identity (spec §6.1, Z5 S-1).
+- `merge-pictures [contribs]` (step 4): contributions whose frames are `identical?` become one, with their keys together and their regions merged by the same rule. This is the second line of defence for copies.
 - `split-sides? [cues routing pid]` (step 5): true when some whole contribution tagged `:left` and some tagged `:right` reach `pid` anywhere in the **tick's** cues (§12 S-1). After `merge-pictures` they are different objects, so they are different pictures.
 - `cue-plan [zone-frames routing pid split?]` → `{:L [f …] :whole [f …] :R [f …]}`, each in key order (steps 4–6). With `split?`, contributions tagged `:left` go to `:L` and those tagged `:right` go to `:R`.
 - `plan-points [plan]`: how many points `build` will make, from counts only: every frame's count plus 2 per join.
@@ -99,10 +100,10 @@ The fix has two parts. A resolver turns the rig into `ref → [laser region side
 - `build [plan fits]`: joins each bucket, fits `:L` and `:R`, then joins L, whole and R. A bucket whose fit is nil (a degenerate box) is dropped.
 - `projector-frame [cues routing pid]` → `{:frame f :regions n}`, or nil when nothing reaches `pid`: every cue's built frame, joined in the cues' order (step 7).
 - `cue-points [zone-frames routing pid]`: `plan-points` for one cue, 0 if it doesn't reach `pid`.
-- `cue-warnings [cues routing]` → `{cell {:projector :points :fps :min-fps :scan-rate :item}}`: every cue whose `scan-rate / cue-points` is under some laser's `:min-fps`, at its worst laser (ties go to the lower `:index`). `:item {:id :points}` is the top-level item with the most points on that laser. It's present when the cue's frames carry `:item-points` metadata, which only edited cues do (below).
+- `cue-warnings [cues routing]` → `{cell {:projector :points :fps :min-fps :scan-rate :item}}`: every cue whose `scan-rate / cue-points` is under some laser's `:min-fps`, at its worst laser (ties go to the lower `:index`, an excluded laser's nil last). `:item {:id :points}` is the top-level item with the most points on that laser. It's present when the cue's frames carry `:item-points` metadata, which only edited cues do (below).
 
 **`laser-show.animation.fit-guard`** (NEW, pure; spec §8):
-- `defaults` is `{:min-fps 20 :reduce-points? true :point-floor 0.6 :dim? false :dim-floor 0.5}`. `settings [fit]` merges a laser's `:fit` over them and clamps to 5–60, 0.3–1.0 and 0.2–1.0.
+- `defaults` is `{:min-fps 20 :reduce-points? true :point-floor 0.6 :dim? false :dim-floor 0.5}`. `settings [fit]` merges a laser's `:fit` over them and clamps to 5–60, 0.3–1.0 and 0.2–1.0. A value of the wrong type takes its default, so a bad `:fit` can't stop the resolver either.
 - `budget [scan-rate min-fps]` is ⌊r / min-fps⌋ (S-5). `target-points [n budget settings]` is `max(budget, ⌈point-floor · n⌉)`.
 - `keep-mask [frame]` marks the points thinning may never remove:
   - every blanked point;
@@ -113,28 +114,29 @@ The fix has two parts. A resolver turns the rig into `ref → [laser region side
   A colour change is not protected.
 - `thin [frame k]` removes up to k of the other points. Each run gets a share of k in proportion to its removable points (largest remainder, ties in frame order). Inside a run with c removable points and share q, its j-th removable point goes when `⌊(j+1)·q/c⌋ > ⌊j·q/c⌋`, which spreads the removals evenly. If there are fewer than k removable points, all of them go. The result is always a subsequence of the frame.
 - `dim [frame factor]`: multiplies r, g and b by factor. Dark points stay dark.
-- `guard [frame scan-rate settings]` → `{:frame f :fit record}`. Under budget it returns the same frame object, and a record with no cut. Over budget it thins if `:reduce-points?`, then, if `:dim?` and still under the minimum, dims by `max(dim-floor, guard-fps / min-fps)`. The record is `{:points-in :points :budget :min-fps :scan-rate :est-fps :guard-fps :reduced-pct :dim-pct}` for every frame, since the meter needs it.
-- `smooth [prev record]` averages `:est-fps` and `:guard-fps` over about 10 frames, the way `update-stats` smooths the draw rate (`backend/streaming_engine.clj:267-308`). It keeps the rest of the newest record and sets `:low?`: on when the averaged guard fps is under the minimum, off again only at 1 fps above it (S-6). A nil record gives nil.
+- `guard [frame scan-rate settings]` → `{:frame f :fit record}`. Under budget it returns the same frame object, and a record with no cut. Over budget it thins if `:reduce-points?`, then, if `:dim?` and still under the minimum, dims by `max(dim-floor, guard-fps / min-fps)`. The record is `{:points-in :points :budget :min-fps :scan-rate :est-fps :guard-fps :reduced-pct :dim-pct}` for every frame, since the meter needs it. Over budget, a frame with no lit point also says `:dark? true` (S-14): the mask pass sees that for free.
+- `smooth [prev record]` averages `:est-fps` and `:guard-fps` over about 10 frames, the way `update-stats` smooths the draw rate (`backend/streaming_engine.clj:267-308`). It keeps the rest of the newest record and sets `:low?`: on when the averaged guard fps is under the minimum, off again only at 1 fps above it (S-6). A `:dark?` record leaves the averages and `:low?` as they were (none yet: not low), so a frame nobody sees never turns a laser amber (S-14). A nil record gives nil.
+- **The vibe faders.** The Master and the Morphs (vibe Phase 5) are effects-grid cells, so they run inside the render, before composition and the guard, and the guard sees the frame they made. The Master scales colours and never changes the number of points, so the guard cuts the same at any fader level. If `:dim?` is on, the guard's dim multiplies the Master's.
 - **Cost** (estimated): one pass to mark and one to copy, about 50–100 µs for 2,000 points. That's extrapolated from v23 (11–12 µs to join two 1,000-point frames), plus a few multiplications per point. It runs only for frames over budget; otherwise it costs a `count` and a compare.
 
 **`laser-show.services.frame-service`** (existing):
-- `generate-frames-by-zone` (`:338-405`): the effects-grid loop (`:397-405`) becomes NEW `apply-global-effects-once [frames-by-key global-effects global-ctx]` (spec §6.1). An `IdentityHashMap` maps each input frame to its output, so keys that hold one object get one result object. There is no value hashing.
-- A NEW optional 4th argument, `{:item-points? true}`, puts `{:item-points [[item-id {key n}] …]}` on the result's metadata: each top-level item's (or clip's) point counts by key, taken from `item-zone-maps` (`:379-386`), before track, group and global effects.
+- `generate-frames-by-zone` (`:349-416`): the effects-grid loop (`:408-416`) becomes NEW `apply-global-effects-once [frames-by-key global-effects global-ctx]` (spec §6.1). An `IdentityHashMap` maps each input frame to its output, so keys that hold one object get one result object. There is no value hashing. The global context is `render-context`'s (`:103-125`) as today: the tick's pulse view and the faders' values are on it, so the Master and the tap reactions run exactly as they do now, once per picture instead of once per key.
+- A NEW key on the render context, `:item-points? true`, puts `{:item-points [[item-id {key n}] …]}` on the result's metadata: each top-level item's (or clip's) point counts by key, taken from `item-zone-maps` (`:390-397`), before track, group and global effects. It's a key, not a 4th argument, so the clock keeps calling the 3-arity, which `render-context-carries-pulses-test` (`test/laser_show/services/show_clock_test.clj:421-447`) redefines with 3 arguments.
 - Keys become targets in normal form: `resolve-item-zone-destination` (`routing/zone_effects.clj:148-152`) returns `(rig/normalize-target result)`. With today's keyword keys this changes nothing; in Z4, two vector targets written in different orders become the same key and merge by concatenation.
-- `preview-data [cues routing]` (`:407-428`; the 1-arity stays, with routing nil):
+- `preview-data [cues routing]` (`:418-439`; the 1-arity stays, with routing nil):
   - `:zone-frames` becomes `:ref-frames {ref frame}`: for every ref named in the tick's keys, the frames of each key that names it, joined in key order and then across cues. A vector key counts for each of its refs. With keyword keys this is exactly today's `:zone-frames`.
   - NEW `:projector-frames {pid (delay …)}`: for each laser in `:outputs`, `compose/projector-frame` and then `fit-guard/guard`. A delay is forced only when a cell shows that laser, and a cell on `:auto.laser/<id>` reads it through Z2's `rig/laser-of`.
 
 **`laser-show.services.show-clock`** (existing):
-- `render` (`:71-92`): `render-cue` (`:48-60`) passes `{:item-points? true}` for the cells whose editor is open, read from the tick's state: `[:ui :dialogs :cue-chain-editor]` or `[:ui :dialogs :timeline-cue-editor]`, with `:open?`, `:col` and `:row`.
-- `tick!` (`:137-162`): after the render, `(rig/cached-routing (:routing-cache runtime) (rig/routing-inputs state nil))`, kept in the runtime as `:routing-cache`. The snapshot gains `:routing`, and `:preview` becomes `(delay (frame-service/preview-data cues routing))`. If the resolver throws, the tick reports `[:routing]` and keeps the cached routing (or an empty one), so a bad edit can't stop the clock. Z4 passes the effective map id instead of nil.
-- `status-step` (`:108-132`) also takes the snapshot. When the stats are due (every 250 ms), its value gains `:cue-warnings (not-empty (compose/cue-warnings cues routing))`, rounded (whole fps, points to the nearest 10). So the warnings reach app state only when one starts, ends or changes.
+- `render` (`:83-106`): `render-cue` (`:57-72`) puts `:item-points? true` on the render context it passes for the cells whose editor is open, read from the tick's state: `[:ui :dialogs :cue-chain-editor]` or `[:ui :dialogs :timeline-cue-editor]`, with `:open?`, `:col` and `:row`.
+- `tick!` (`:160-191`), in the spec's order (§5, Z5 S-3): `step` (`:172`); Phase 4a's pulse view (`:176`); NEW the routing, `(rig/cached-routing (:routing-cache runtime) (rig/routing-inputs state nil))`, kept in the runtime as `:routing-cache`; then `render` (`:177-178`). The routing never depends on the frames, so it can come first, and Z5's zone stage, inside the render, needs it there (Z3's render doesn't read it). The snapshot gains `:routing`, beside `:pulses` and `:faders` (`:183-184`), and `:preview` becomes `(delay (frame-service/preview-data cues routing))`. If the resolver throws, the tick reports `[:routing]` and keeps the cached routing (or an empty one), so a bad edit can't stop the clock. `status-step` and Phase 6's `rotation-step` stay after `publish!` (`:187-188`). Z4 passes the effective map id instead of nil, and Z5 puts its zone context and the Map cycle's pick before it.
+- `status-step` (`:122-146`) also takes the snapshot. When the stats are due (every 250 ms), its value gains `:cue-warnings (not-empty (compose/cue-warnings cues routing))`, rounded (whole fps, points to the nearest 10). So the warnings reach app state only when one starts, ends or changes.
 
-**`laser-show.animation.show-time`** (existing): `status-paths` (`:52-57`) gains `:cue-warnings [:backend :streaming :cue-warnings]`, and the snapshot's docstring (`:306-311`) lists `:routing`. NEW `record-output! [pid frame]` and `output-frame [pid]` → `{:frame :at-ns}` keep what each laser's provider produced last, in a `ConcurrentHashMap`, for the thumbnails. `reset-runtime!` (`:333-341`) clears them.
+**`laser-show.animation.show-time`** (existing): `status-paths` (`:63-68`) gains `:cue-warnings [:backend :streaming :cue-warnings]`, and the docstrings of `!runtime` (`:56-59`) and the snapshot (`:336-338`) list `:routing-cache` and `:routing`. NEW `record-output! [pid frame]` and `output-frame [pid]` → `{:frame :at-ns}` keep what each laser's provider produced last, in a `ConcurrentHashMap`, for the thumbnails. `reset-runtime!` (`:362-372`) clears them.
 
 **`laser-show.backend.multi-engine`** (existing):
 - `get-projector-zone-groups` (Z2's version returns `rig/refs-for`), `extract-frames-for-zones` and `combine-zone-frames` (`:47-88`) go.
-- `projector-frame` (`:119-150`) reads no app state for routing. It runs `compose/projector-frame` on the snapshot's `:cues` and `:routing`, then `fit-guard/guard` with the laser's `:outputs` entry, then `apply-projector-effects` (`:94-111`, unchanged and still live), then Z1's safety stage. The result carries `{:tick :at-ns :fit (assoc record :regions n)}` as metadata. When the laser is showing Z1's test pattern, composition and the guard are skipped.
+- `projector-frame` (`:119-150`, as Z1 leaves it: a `cond`, 03 §4) reads no app state for routing. Z3 changes only its `(:playing? snapshot)` branch: `compose/projector-frame` on the snapshot's `:cues` and `:routing`, then `fit-guard/guard` with the laser's `:outputs` entry, then, inside Z1's `guard-safety`, `apply-projector-effects` (`:94-111`, unchanged and still live) and the safety stage. The result carries Z1's `{:tick :at-ns}` and Z3's `:fit (assoc record :regions n)` as metadata. The branches before it stay Z1's: BLACKOUT on the test pattern, Identify's dark half, and the test pattern itself. The pattern replaces the content, so it skips composition and the guard (S-13), and its frame carries no `:fit`, so the card shows no load while it's on.
 - `create-projector-frame-provider` (`:152-171`) smooths the record with `fit-guard/smooth` in a `volatile!` (there's one provider per engine, called only on that engine's thread), puts the smoothed record on the frame's `:fit`, and calls `show-time/record-output!` with the frame (nil after an error).
 
 **`laser-show.backend.streaming-engine`** (existing): the loop reads `:fit` together with `:tick` and `:at-ns` (`:369`) and stores it as the stats' `:fit` (`:382-383`). `initial-stats` (`:51-63`) gets `:fit nil`, and a frame without one (nil: nothing playing) clears it. The engine doesn't look inside the record. The numbers live in the engine's stats rather than in an atom in `multi_engine` for three reasons: they start and end with the engine (`start!` resets them), the output runtime already publishes those stats, and there's nothing to clean up when a laser is turned off.
@@ -142,17 +144,17 @@ The fix has two parts. A resolver turns the rig into `ref → [laser region side
 **`laser-show.backend.output-runtime`** (existing): `engine-status` (`:172-181`) adds `:low?` and `:load {:points-in :points :budget :min-fps :est-fps :guard-fps :reduced-pct :dim-pct :regions}`, rounded (whole fps and percent, points to the nearest 10). `output-errors`' docstring lists `[:routing]`. `fingerprint` is unchanged.
 
 **State, events and subs** (existing namespaces):
-- `state/domains.clj`: the projectors docstring (`:274-299`) lists `:fit`. `[:backend :streaming]` (`:428-430`) gains `:cue-warnings nil`. The preview docstring says a cell is `{:target ref}`, that a laser's ref shows what the laser draws, and that an old `{:zone-group-id x}` reads as `{:target x}`. Z2 has already made the default cells `nil :auto/left :auto/right :auto/center`.
+- `state/domains.clj`: the projectors docstring (`:280-303`, where Z1 adds `:safety`) lists `:fit`. `[:backend :streaming]` (`:433-436`) gains `:cue-warnings nil`. The preview docstring (`:259`) says a cell is `{:target ref}`, that a laser's ref shows what the laser draws, and that an old `{:zone-group-id x}` reads as `{:target x}`. Z2 has already made the default cells `nil :auto/left :auto/right :auto/center`.
 - `events/handlers/projector.clj`: NEW `:projectors/set-fit`.
 - `events/handlers/ui.clj`:
   - NEW `:ui/reveal-projector`.
   - `:preview/set-cell-zone` (`:131-138`) also takes `:target` (`:zone-group-id` still works) and writes `{:target …}`. Z4 renames it `:preview/set-cell-target` (doc 06 §4).
   - `:preview/set-grid-layout` (`:103-129`) fills new cells with `{:target …}`.
 - `subs.clj`:
-  - NEW `projector-load [ctx pid]` (from `projector-output-status`, `:382-386`);
+  - NEW `projector-load [ctx pid]` (from `projector-output-status`, `:395-399`);
   - NEW `low-fps-projectors [ctx]` (named, lowest first);
   - NEW `cue-warning [ctx col row]`;
-  - `preview-cell-config` (`:477-480`) normalises old cells;
+  - `preview-cell-config` (`:490-493`) normalises old cells;
   - the preview picker keeps Z2's `target-groups`.
 
 **Screen:**
@@ -166,11 +168,11 @@ The fix has two parts. A resolver turns the rig into `ref → [laser region side
   - NEW `output-thumbnail`: a canvas in `ext-clock-redraw` with `:every-ms 100`. Its `redraw-thumbnail!` draws `show-time/output-frame` while it's newer than `STALE_MS`, else "Not streaming", with the laser's limit as a grey outline.
 - `views/components/rig_strip.clj` (Z2's cards): `output-thumbnail` fills Z2's thumbnail section, and the NEW load section adds `load-meter`, `load-note` and the amber `rig-card-low` state.
 - `views/tabs/projectors.clj` (Z2's inspector): NEW `fit-guard-section`.
-- `views/toolbar.clj`: NEW `low-fps-chip`, between `output-held-chip` and `connection-status` (`:283-297`).
-- `views/components/grid_cell.clj`: an amber ⚠ next to ⚡ (`:206-209`) on a cue that has a warning, and a `:tooltip-fn` for cue cells (the tooltip goes on the menu label, `:210-217`).
+- `views/toolbar.clj`: NEW `low-fps-chip`, between `output-held-chip` and `connection-status` (the toolbar's last two children, `:300-301`).
+- `views/components/grid_cell.clj`: an amber ⚠ next to ⚡ (`:208-211`) on a cue that has a warning. `grid-cell` (`:226-319`) passes a `:tooltip-fn`, which `generic-grid-cell` already takes for effects cells; the tooltip goes on the menu label (`:212-219`). Z4's badge text joins it there (06 §4.5).
 - NEW `views/components/load_warning.clj`:
   - `cue-warning-text`, `low-fps-text` and `load-note-text`, pure functions shared by the tooltip, the chip and the card;
-  - `cue-load-warning`, a line above the footers of `views/dialogs/cue_chain_editor.clj` (`:602-643`) and `views/dialogs/timeline_cue_editor.clj` (`:142-171`).
+  - `cue-load-warning`, a line above the footers of `views/dialogs/cue_chain_editor.clj` (`:608-653`) and `views/dialogs/timeline_cue_editor.clj` (`:142-171`).
 - CSS:
   - in `css/layout.clj`: `.low-fps-chip` (like `.output-held-chip`), `.rig-card-low`, `.load-meter` and `.load-meter-over`;
   - in `css/grid_cells.clj`: `.grid-cell-warning-indicator`, after `:113-115`;
@@ -180,7 +182,7 @@ The fix has two parts. A resolver turns the rig into `ref → [laser region side
 
 | Key / path | Lives in | Written by | Undo / dirty? |
 |---|---|---|---|
-| `[:projectors id :fit]` `{:min-fps :reduce-points? :point-floor :dim? :dim-floor}` NEW | the rig: `hardware.edn` until ZR (`state/persistent.clj:53-56`) | `:projectors/set-fit` | yes / yes |
+| `[:projectors id :fit]` `{:min-fps :reduce-points? :point-floor :dim? :dim-floor}` NEW | the rig: `hardware.edn` until ZR (`state/persistent.clj:54-57`) | `:projectors/set-fit` | yes / yes |
 | `[:config :preview :grid-cells i]` `{:target ref}` | prefs (`state/history.clj:39-41`) | `:preview/set-cell-zone` | no / yes |
 | snapshot `:routing`; `:routing-cache` in `show-time/!runtime` NEW | runtime, per tick | the show clock | – |
 | the preview's `:ref-frames`, `:projector-frames` | runtime, inside the snapshot's `:preview` delay | forced by the screen | – |
@@ -197,10 +199,10 @@ Nothing new is saved apart from `:fit` and the preview cells.
 | `:projectors/set-fit {:projector-id :key :value}` | NEW (`events/handlers/projector.clj`) | the inspector's Fit guard controls | yes. Clamps to the ranges; one undo step per commit |
 | `:ui/reveal-projector {:projector-id}` | NEW (`events/handlers/ui.clj`) | the LOW FPS chip | yes. Sets `[:ui :active-tab] :projectors` and selects the laser |
 | `:preview/set-cell-zone {:cell-index :target}` | yes (`events/handlers/ui.clj:131-138`), with a new payload key (Z4 renames the event) | the preview picker | yes |
-| `:show-clock/status` | yes (`events/handlers/timing.clj:156-162`) | the show clock. Its value gains `:cue-warnings` | yes |
+| `:show-clock/status` | yes (`events/handlers/timing.clj:148-154`) | the show clock. Its value gains `:cue-warnings` | yes |
 | `:output/status` | yes (`events/handlers/connection.clj:28-34`) | the output runtime. Each laser gains `:load` and `:low?` | yes |
 
-There's no new effect key. The path of one frame: `show-clock/tick!` → `rig/cached-routing` → `show-time/publish!` → the engine's `projector-frame` → `compose/projector-frame` → `fit-guard/guard` → projector effects → Z1 safety → `sanitize-frame` → `send-frame!`.
+There's no new effect key. The path of one frame: `show-clock/tick!` → `rig/cached-routing` → `render` (where the effects grid, the Master included, has run) → `show-time/publish!` → the engine's `projector-frame` → `compose/projector-frame` → `fit-guard/guard` → projector effects → Z1 safety → `sanitize-frame` → `send-frame!`.
 
 ## 7. UX
 
@@ -288,7 +290,9 @@ One laser `:p1` at 25 kpps, example b: track 1 (circle, 33 points) → `:auto/le
 ;;               :outputs {:p1 {:index 0 :scan-rate 25000
 ;;                              :fit {:min-fps 20 :reduce-points? true :point-floor 0.6 :dim? false :dim-floor 0.5}
 ;;                              :regions {:L [-0.25 0.0 0.75] :R [0.25 0.0 0.75]}}}}
-;;     :positions {[0 0] 6.5} :projector-ctx {…} :render-us 180.0 :preview #<Delay>}
+;;     :positions {[0 0] 6.5} :pulses {} :faders {}         ; vibe Phases 4a and 5, as today
+;;     :projector-ctx {…} :render-us 180.0 :preview #<Delay>}
+;; :routing was made before the render, from the tick's state; the render didn't read it.
 ;; :p1 sends the circle fitted in :L, 2 dark points, the wave fitted in :R: 99 points, est-fps 252.5, no guard.
 
 ;; three lasers on :middle :both (spec §3): the middle laser is whole in both sides, tagged
@@ -334,20 +338,21 @@ One laser `:p1` at 25 kpps, example b: track 1 (circle, 33 points) → `:auto/le
 | 1 dark + 1,999 lit (a circle, no corners) | 25,000, 20 | 2,000 | 1,250 | 1,200 | 1,250 | 12.5 → 20.0 | −37.5% (750 of 1,997 removable points, about 3 in 8) | no |
 | 3,000 lit | 25,000, 20 | 3,000 | 1,250 | 1,800 | 1,800 | 8.3 → 13.9 | −40%. If dim is on: × max(0.5, 0.69), so −31% bright | **yes** |
 | 1,000 | 25,000, 20 | 1,000 | 1,250 | – | the same object | 25 | none | no |
-| the spec's ⌈r/min⌉ (S-5) | 30,000, 23 | 2,000 | 1,305 | 1,200 | 1,305 | → 22.99 | | **yes**, wrongly |
-| this plan's ⌊r/min⌋ | 30,000, 23 | 2,000 | 1,304 | 1,200 | 1,304 | → 23.01 | | no |
+| 3,000, all dark (the Master at 0, a Strobe's dark half) | 25,000, 20 | 3,000 | 1,250 | 1,800 | 3,000: every point is kept | 8.3 | none. `:dark? true` (S-14) | as it was |
+| the ceiling, the spec's first wording (S-5) | 30,000, 23 | 2,000 | 1,305 | 1,200 | 1,305 | → 22.99 | | **yes**, wrongly |
+| the floor, now spec §8.1 | 30,000, 23 | 2,000 | 1,304 | 1,200 | 1,304 | → 23.01 | | no |
 
 **Invariants**:
-1. One render per cue per tick (spec 8). Routing, composition, the guard, the laser cells and the cue warnings never render: they transform frames that were already rendered.
+1. One render per cue per tick (spec 8). Routing, composition, the guard, the laser cells and the cue warnings never render: they transform frames that were already rendered. The routing is made before the render, from the tick's one read of app state, and never from its frames (spec §5).
 2. The engines, the laser cells and the cue warnings compose from the snapshot alone. No composition step reads app state (spec 6). Only the projector effects and Z1's safety settings are still read live, as today.
 3. A laser draws each (cue, key) at most once, and each identical frame at most once per cue (spec 4). It has at most two regions, `:L` and `:R`, plus whole content (spec 5).
 4. Composition is deterministic: the same cue frames and routing give the same frame, whatever the order of the keys in the cue's map.
 5. Composition keeps every point. The frame has exactly the points of the distinct contributions (fitted ones moved, no colour changed), plus 2 per join, and `plan-points` equals its count.
-6. Under budget the guard returns the same object. Over budget its output is a subsequence of its input: every blanked point, every run's ends, every dwell point and every corner over 45° stay, and there are never fewer than ⌈floor·N⌉ points. Colours change only when dimming is on.
+6. Under budget the guard returns the same object. Over budget its output is a subsequence of its input: every blanked point, every run's ends, every dwell point and every corner over 45° stay, and there are never fewer than ⌈floor·N⌉ points. Colours change only when dimming is on. A frame with no lit point never sets or clears `:low?`.
 7. No zone setup means today's behaviour: every enabled laser draws every `:all` cue once (spec 2). An old show draws the same points (spec 3). It draws the same frame whenever each cue reaches a laser through one key (S-4).
-8. A group, order, middle, split-width, fit or limit edit shows on the next tick and restarts no engine.
+8. A group, order, middle, split-width, fit or limit edit shows on the next tick and restarts no engine. A zone `safety/normalize` can't read takes the halves away from that laser only.
 9. The resolver is pure, and its output is reused (`identical?`) while its inputs are identical (spec 9).
-10. Safety stays last. Composition and the guard run before the projector effects, and Z1's stage runs after them (spec 1).
+10. Safety stays last. The effects grid (the vibe Master and Morphs included) runs inside the render, so composition and the guard see what it did. Composition and the guard run before the projector effects, and Z1's stage runs after them (spec 1). The test pattern skips composition and the guard, and the effects grid never touches it.
 11. Load numbers and cue warnings reach app state at most 4 times a second, and only when they change.
 12. Cost, estimated and *unverified*: probes z1–z4 measure it (§9).
     - Composition per laser costs about what today's join does (v23: 11–12 µs for two 1,000-point frames), plus 10–30 µs per 1,000 fitted points, and runs on the laser's own thread.
@@ -363,44 +368,47 @@ Pure tests come first. The fixtures to reuse:
 - `direct-frame` and `tick-and-compare` (`:323-353`);
 - the cue fixtures and setup in `test/laser_show/routing/zone_routing_integration_test.clj:26-135`;
 - `random-frame` and `sanitize-invariants-test` (`test/laser_show/idn/frame_rules_test.clj:23-57`): a seeded `java.util.Random`, 2,000 cases, the pattern for the property tests;
-- `with-engines` (`test/laser_show/services/show_clock_test.clj:156-173`);
+- `with-engines` (`test/laser_show/services/show_clock_test.clj:194-211`);
 - `play-square!`, `lit-in` and `with-clock` (`test/laser_show/ui_test/preview_test.clj:43-86`), with `with-clock` moved to `ui_test/fixtures.clj`;
 - `with-fake-dac` and `projector` (`test/laser_show/ui_test/streaming_status_test.clj:23-36`).
 
 - `laser-show.routing.rig-test` (Z2's file; Z3 adds):
   - `normalize-target-test`, `zone-index-test`;
   - `routing-has-every-ref-the-rig-knows-test`: `:all` without excluded or disabled lasers; automatic groups with regions and sides for n = 1, 3 `:split` and 3 `:both`; `:auto.laser/*`; custom groups; a stray `:all` in a laser's list never overrides All;
-  - `outputs-carry-scan-rate-fit-and-region-fits-test`;
-  - `region-fits-follow-the-safety-limit-test`: the two boxes in §8, and a box 0.04 wide gives nil;
+  - `outputs-carry-scan-rate-fit-and-region-fits-test` (an excluded laser has one too, with no index);
+  - `region-fits-follow-the-safety-limit-test`: the two boxes in §8, a box 0.04 wide gives nil, and a limit with its corners swapped gives the box `safety/normalize` makes of it;
+  - `unreadable-safety-zone-draws-no-halves-test` (S-9): a zone `normalize` throws on gives that laser `:regions nil`, and the other lasers' routing is what it would be without it;
   - `cached-routing-is-reused-while-inputs-are-identical-test`, `cached-routing-follows-an-edit-test`;
   - `routing-of-an-invented-rig-test` (invariant 9).
 - `laser-show.routing.compose-test` (NEW):
   - the §6.2 examples, one test each: `example-a-a-picture-moves-between-halves-test`, `example-b-one-laser-draws-two-fitted-halves-test`, `example-c-both-halves-of-one-laser-is-the-whole-laser-test`, `example-d-two-keys-two-pictures-overlay-test`, `example-e-one-key-through-two-groups-is-drawn-once-test`, `example-f-split-middle-laser-test`, `example-g-both-middle-splits-when-both-sides-differ-test`, `example-h-both-middle-with-one-side-stays-whole-test`;
-  - the other rules: `both-middle-splits-across-two-cues-test` (S-1), `same-picture-under-two-keys-is-drawn-once-test`, `side-is-kept-only-when-every-entry-agrees-test`, `buckets-go-left-whole-right-in-key-order-test`, `key-order-test`, `fit-region-test`, `degenerate-safe-area-draws-no-halves-test`, `cues-join-in-their-order-test`, `nothing-reaches-the-laser-is-nil-test` (an unknown ref too), `plan-points-equal-the-built-frame-test`;
+  - the other rules: `both-middle-splits-across-two-cues-test` (S-1), `same-picture-under-two-keys-is-drawn-once-test`, `side-is-kept-only-when-every-entry-agrees-test`, `buckets-go-left-whole-right-in-key-order-test`, `key-order-test` (vector keys too), `fit-region-test`, `degenerate-safe-area-draws-no-halves-test`, `cues-join-in-their-order-test`, `nothing-reaches-the-laser-is-nil-test` (an unknown ref too), `plan-points-equal-the-built-frame-test`;
   - `old-show-draws-the-same-points-test` (invariant 7): with one key per cue, the result equals today's extract-and-combine frame; with two keys, the same points in another order;
   - `composition-invariants-test`, seeded: each key once; at most 2 regions; the count is the distinct frames' points plus 2 per join; the frame stays the same when the keys are reordered;
   - `cue-warnings-name-the-worst-laser-test`, `cue-warnings-name-the-heaviest-item-test`;
   - written in Z4, named here: `example-i-unison-draws-every-zone-everywhere-test`, `example-j-zones-wrap-over-two-lanes-test`.
-- `laser-show.animation.fit-guard-test` (NEW): `under-budget-is-the-same-frame-test`, `budget-and-target-points-test` (the table in §8, S-5 included), `thinning-keeps-blanking-ends-dwell-and-corners-test`, `thinning-spreads-evenly-along-a-run-test`, `thinning-shares-the-cut-across-runs-test`, `floor-stops-the-thinning-test`, `dim-only-when-allowed-and-still-low-test`, `reduce-off-keeps-every-point-test`, `settings-are-clamped-test`, `smooth-averages-and-low-has-hysteresis-test`, and the seeded `guard-invariants-test` (invariant 6).
+- `laser-show.animation.fit-guard-test` (NEW): `under-budget-is-the-same-frame-test`, `budget-and-target-points-test` (the table in §8, S-5 included), `thinning-keeps-blanking-ends-dwell-and-corners-test`, `thinning-spreads-evenly-along-a-run-test`, `thinning-shares-the-cut-across-runs-test`, `floor-stops-the-thinning-test`, `dim-only-when-allowed-and-still-low-test`, `reduce-off-keeps-every-point-test`, `settings-are-clamped-test` (a value of the wrong type too), `smooth-averages-and-low-has-hysteresis-test`, `dark-frames-leave-low-as-it-was-test` (S-14: lit frames at the minimum with every other one dark, as a Strobe gives, never turn it on), and the seeded `guard-invariants-test` (invariant 6).
 - `laser-show.services.frame-service-test` (existing):
   - NEW: `global-effects-run-once-per-distinct-frame-test` (it counts `effects/apply-effect-chain` calls and checks that both keys hold one result object), `distinct-frames-are-not-shared-test`, `frame-keys-are-normal-targets-test`, `item-points-only-when-asked-test`, `preview-ref-frames-follow-ref-membership-test`, `preview-projector-frames-are-what-the-engine-composes-test`;
-  - the preview tests at `:157-185` read `:ref-frames`;
+  - the preview tests at `:161-186` read `:ref-frames`;
+  - `timeline-clip-effects-see-pulses-test` (`:234`, vibe Phase 4a) passes unchanged;
   - `test/laser_show/services/frame_concatenation_test.clj` passes unchanged, through the alias.
 - `laser-show.backend.multi-engine-test` (existing):
   - `extract-frames-for-zones-test`, `combine-zone-frames-test` and `get-projector-zone-groups-test` (`:194-270`) go, since the functions they test are removed. The compose tests cover what they checked.
   - Z2's `one-laser-draws-left-and-right-whole-test` was written to pin Z2's behaviour, so it becomes `one-laser-draws-left-and-right-halves-test` (example b, through the clock).
   - Z2's `projector-draws-all-without-listing-it-test`, `excluded-projector-skips-all-test` and `reorder-reroutes-left-test` keep their assertions on routed snapshots.
   - `projector-receives-only-zone-specific-frames-test` (`:272-309`) and `engine-frame-equals-direct-render-test` (`:355-395`) keep their assertions. Their snapshots carry routing, and `direct-frame` composes.
-  - NEW: `engine-routes-from-the-snapshot-not-app-state-test`, `fit-guard-runs-before-projector-effects-test`, `frame-carries-its-fit-record-test`, `provider-records-what-it-produced-test`.
+  - Z1's test-pattern tests (`test-pattern-shows-with-nothing-playing-test`, `master-doesnt-dim-the-test-pattern-test`, `blackout-hides-the-test-pattern-test`) pass unchanged.
+  - NEW: `engine-routes-from-the-snapshot-not-app-state-test`, `fit-guard-runs-before-projector-effects-test`, `frame-carries-its-fit-record-test`, `test-pattern-frame-carries-no-load-test`, `provider-records-what-it-produced-test`.
 - `laser-show.routing.zone-routing-integration-test` (existing): `projector-multi-zone-concatenation-test` (`:601-627`) composes instead of calling the removed helpers. Its assertions don't change. Z2's `laser-show.state.migration-test/old-show-routes-as-before-test` compares through `compose/projector-frame` instead of `extract-frames-for-zones`, and compares the same points (S-4).
 - Engines and status (existing):
   - `laser-show.backend.streaming-engine-test`: NEW `stats-keep-the-frames-fit-record-test`, patterned on `stats-report-the-fps-the-projector-draws-test` (`:138`).
   - `laser-show.backend.output-lifecycle-test`: NEW `status-carries-each-lasers-load-test`, patterned on `:371`. `zone-group-edit-restarts-nothing-test` (`:289`) also edits `:fit`, the limit and the rig order.
   - `laser-show.events.output-sync-test`: `name-or-zone-change-requests-nothing-test` (`:69`) also changes `:fit`, `[:safety :limit]` and `:exclude-from-all?`.
 - `laser-show.services.show-clock-test` (existing):
-  - NEW: `snapshot-carries-routing-test` (next to `snapshot-shape-test`, `:190-210`), `routing-is-reused-while-nothing-changes-test`, `routing-follows-a-group-edit-next-tick-test`, `a-throwing-resolver-keeps-the-last-routing-test`, `cue-warnings-reach-app-state-test`, `edited-cue-names-its-heaviest-item-test`;
-  - unchanged and still passing: `renders-once-per-tick-test` (`:175-188`, invariant 1), `one-state-and-input-read-per-tick-test` (`:341-369`), `preview-is-built-after-the-engines-wake-test` (`:250-264`), and `app-state-is-quiet-while-a-cue-plays-test` (`:288-300`), whose path list (`:269-270`) gains the new path;
-  - `preview-zones-have-blanking-between-cues-test` (`:226-238`) reads `:ref-frames`.
+  - NEW: `snapshot-carries-routing-test` (next to `snapshot-shape-test`, `:228-250`), `routing-is-made-before-the-render-test` (spec §5's order: a redefined `generate-frames-by-zone` finds the tick's routing already made), `routing-is-reused-while-nothing-changes-test`, `routing-follows-a-group-edit-next-tick-test`, `a-throwing-resolver-keeps-the-last-routing-test`, `cue-warnings-reach-app-state-test`, `edited-cue-names-its-heaviest-item-test`;
+  - unchanged and still passing: `renders-once-per-tick-test` (`:213-226`, invariant 1), `one-state-and-input-read-per-tick-test` (`:381-409`: the routing reads the tick's state, not its own), `preview-is-built-after-the-engines-wake-test` (`:290-304`), `app-state-is-quiet-while-a-cue-plays-test` (`:328-340`), whose path list (`:309-310`) gains the new path, vibe Phase 4a's `render-context-carries-pulses-test` (`:421-447`) and `projector-effects-never-see-pulses-test` (`:449-458`), Phase 5's fader tests (`:512-605`) and Phase 6's `vibe-report-is-sent-once-per-interval-test` (`:146-174`);
+  - `preview-zones-have-blanking-between-cues-test` (`:266-278`) reads `:ref-frames`.
 - Events, subs and views (existing, unless marked NEW):
   - `laser-show.events.projector-handlers-test`: `set-fit-clamps-and-is-undoable-test`;
   - `laser-show.events.ui-handlers-test`: `old-preview-cell-reads-as-a-target-test`, `set-cell-zone-writes-a-target-test`, `reveal-projector-opens-its-card-test`;
@@ -418,10 +426,10 @@ Pure tests come first. The fixtures to reuse:
   - z3: each engine's IDN time with 3 lasers on the fake DAC, before (at Z2's commit) and after;
   - z4: renders per tick with 8 engines (show-clock probe c2).
 
-  The render time is also checked against JFR `FrameGeneration` `baseTimeUs` (`services/show_clock.clj:62-69`), which should be unchanged. No new JFR event is added (§11).
+  The render time is also checked against JFR `FrameGeneration` `baseTimeUs` (`services/show_clock.clj:74-81`), which should be unchanged. No new JFR event is added (§11).
 - **Hardware check** (00 R-1), on a real projector at 25 and 40 kpps:
   - example b, looking for flicker and for the halves sitting inside the limit;
-  - a 3,000-point cue with reduce on and off;
+  - a 3,000-point cue with reduce on and off, and with the Master pulled down and up again (the card stays as it was while the show is dark, S-14);
   - Identify (Z1) still works.
 
 Run:
@@ -437,11 +445,11 @@ Each step is one commit. Write the named tests first and watch them fail, then t
 | # | Commit message | Red first |
 |---|---|---|
 | 1 | `refactor(render): the blanking join moves to animation/frames.clj, so routing can join frames without requiring the frame service; frame-service/concatenate-frames stays as its alias` | none: it's a move. `frame-concatenation-test` and every caller pass unchanged |
-| 2 | `feat(routing): the rig resolver gives every group its lasers, halves and sides, and each laser its scan rate, fit settings and the boxes its halves fit into; it works them out again only when the rig or a group changes` | `rig-test` (above) |
+| 2 | `feat(routing): the rig resolver gives every group its lasers, halves and sides, and each laser its scan rate, fit settings and the boxes its halves fit into; it works them out again only when the rig or a group changes, and a safety zone it can't read takes the halves away from that laser only` | `rig-test` (above) |
 | 3 | `feat(routing): what one laser draws from a tick: each key once and each picture once, a split laser's Left and Right fitted into its safe area, joined Left, whole, Right in a fixed order` | `compose-test` (examples a–h, the property test) |
-| 4 | `feat(output): each tick's snapshot carries its routing and every engine composes its laser's frame from it, so a group edit shows on the next tick and restarts nothing, and no engine reads zone state` | `engine-routes-from-the-snapshot-not-app-state-test`, `one-laser-draws-left-and-right-halves-test`, `snapshot-carries-routing-test`, `routing-is-reused-while-nothing-changes-test`; then the tests that used the removed helpers move over |
+| 4 | `feat(output): each tick works out its routing before it renders and the snapshot carries it; every engine composes its laser's frame from it, so a group edit shows on the next tick and restarts nothing, and no engine reads zone state` | `engine-routes-from-the-snapshot-not-app-state-test`, `one-laser-draws-left-and-right-halves-test`, `snapshot-carries-routing-test`, `routing-is-made-before-the-render-test`, `routing-is-reused-while-nothing-changes-test`; then the tests that used the removed helpers move over |
 | 5 | `feat(render): an effects-grid point effect runs once per distinct picture in a cue, so a picture under two keys stays one picture and is drawn once; frame keys are targets in normal form` | `global-effects-run-once-per-distinct-frame-test`, `frame-keys-are-normal-targets-test` |
-| 6 | `feat(output): the fit guard: a laser that would draw below its minimum fps draws fewer points (never under its floor, keeping blanking, line ends and corners), then dims if allowed, before its calibration` | `fit-guard-test`, `fit-guard-runs-before-projector-effects-test` |
+| 6 | `feat(output): the fit guard: a laser that would draw below its minimum fps draws fewer points (never under its floor, keeping blanking, line ends and corners), then dims if allowed, before its calibration; a frame nobody sees, all dark, never makes it low` | `fit-guard-test`, `fit-guard-runs-before-projector-effects-test`, `test-pattern-frame-carries-no-load-test` |
 | 7 | `feat(output): each laser's load (points, the fps it would draw, what the guard cut, low or not) reaches the output status, and what it produced is kept for its thumbnail` | `stats-keep-the-frames-fit-record-test`, `status-carries-each-lasers-load-test`, `provider-records-what-it-produced-test` |
 | 8 | `feat(output): a playing cue too heavy for a laser is found from the tick's frames four times a second, and the item with the most points is named while its editor is open` | `cue-warnings-*` (compose), `cue-warnings-reach-app-state-test`, `item-points-only-when-asked-test` |
 | 9 | `feat(ui): each rig card shows what its laser sent, a load meter and what the fit guard did, and turns amber below its minimum; the toolbar says LOW FPS · Laser R 14 fps and opens that card; the Fit guard settings` | `rig-card-test`, `low-fps-chip-*`, `set-fit-*`, `reveal-projector-*` |
@@ -461,28 +469,29 @@ Steps 1–3 and 5–6 need nothing from the UI. Steps 9–11 can be reordered am
 - **Value hashing for "each picture once"**: rejected (spec §6.1). It costs time on every tick, and two cues that draw the same shape on purpose would merge.
 - **Per-item counts for every cue on every tick**: rejected. Only an open editor needs them.
 - **A JFR event for composition**: not added. The IDN time already covers the provider (`backend/streaming_engine.clj:380-381`), and an event would need a Java class and a build step (`java/laser_show/profiling/`, `build.clj:35-44`).
-- **Left as they are**: virtual projectors (no engine routes them today), and `get-preview-zone-filter` and `matches-preview-zone?` (`services/frame_service.clj:61-81`), which only tests use. The default preview cells are Z2's.
+- **Left as they are**: virtual projectors (no engine routes them today), and `get-preview-zone-filter` and `matches-preview-zone?` (`services/frame_service.clj:62-82`), which only tests use. The default preview cells are Z2's.
 - **Later**: inverting the corner pin for regions (00 R-3), fades between regions (00 §8), a large preview and a Wall of thumbnails (needs/08 R-14), protecting colour changes from thinning.
 
 ## 12. Spec questions and open questions
 
-**Spec questions**: places where 01 is unclear or the code disagrees with it, and what this plan chose.
+**Spec questions**: places where 01 is unclear or the code disagrees with it, and what this plan chose. S-1, S-2, S-3, S-5, S-6, S-7 and S-11 are now in the spec, as chosen here.
 
 | # | Spec | The problem | Chosen |
 |---|---|---|---|
-| S-1 | §6 step 5 (auto-split) is written under "one cue's frames" | D-27 says Both splits "while both sides are lit with different content". With one cue per side, a per-cue rule would never split | The test runs over all of the tick's cues for that laser (`split-sides?`). Asked as Q-Z3-1 |
-| S-2 | §5: `:routing` is `{:map :refs}` | Composing also needs each laser's scan rate, fit settings and safe box. Reading those live would let an engine and the preview disagree for a tick | `:routing :outputs {pid {:index :scan-rate :fit :regions}}`, from the same memoised resolver |
-| S-3 | §5: `:refs` covers the refs in the tick's keys | That ties the routing to each tick's frames, so it couldn't be reused from tick to tick | `:refs` holds every non-zone ref the rig knows (a superset: Z2's `ref-entries`). Everything reads it through `rig/resolve-ref`, where Z4 resolves zones by the effective map |
+| S-1 | §6 step 5 (auto-split) was written under "one cue's frames". **Now spec §6 step 5** | D-27 says Both splits "while both sides are lit with different content". With one cue per side, a per-cue rule would never split | The test runs over all of the tick's cues for that laser (`split-sides?`). Asked as Q-Z3-1 |
+| S-2 | §5 said `:routing` is `{:map :refs}`. **Now spec §5's shape** | Composing also needs each laser's scan rate, fit settings and safe box. Reading those live would let an engine and the preview disagree for a tick | `:routing :outputs {pid {:index :scan-rate :fit :regions}}`, from the same memoised resolver |
+| S-3 | §5 said `:refs` covers the refs in the tick's keys. **Now spec §5** | That ties the routing to each tick's frames, so it couldn't be reused from tick to tick, nor made before the render (spec §5's order, Z5 S-3) | `:refs` holds every non-zone ref the rig knows (a superset: Z2's `ref-entries`). Everything reads it through `rig/resolve-ref`, where Z4 resolves zones by the effective map |
 | S-4 | §6 step 6 sorts the keys; invariant 3 says old shows route exactly as before | Today a laser joins a cue's keys in its `:zone-groups` order (`backend/multi_engine.clj:61-73`), and Z2 joins in `refs-for` order | The spec's order, as Z2's S-1 expects. The frames are identical whenever each cue reaches a laser through one key (nearly always); otherwise the same points come in another order. The fixture tests say which case they check |
-| S-5 | §8.1: `N' = max(⌈r/min-fps⌉, …)` | The ceiling leaves the frame just under the minimum (30,000 pts/s, min 23: 1,305 points, 22.99 fps), so a laser the guard fixed would be flagged LOW | `⌊r/min-fps⌋` |
-| S-6 | §8: P is low when `guard-fps < :min-fps` | Checked frame by frame, a cue near the limit flips the badge on and off | Averaged over about 10 frames, and cleared only at 1 fps above the minimum |
-| S-7 | §8.1: points are removed "evenly along each run, in proportion to its length" | Length in points or in distance? | In removable points, so each run loses the same share, spread evenly by index |
+| S-5 | §8.1 said `N' = max(⌈r/min-fps⌉, …)`. **Now spec §8.1** | The ceiling leaves the frame just under the minimum (30,000 pts/s, min 23: 1,305 points, 22.99 fps), so a laser the guard fixed would be flagged LOW | `⌊r/min-fps⌋` |
+| S-6 | §8 said P is low when `guard-fps < :min-fps`. **Now spec §8** | Checked frame by frame, a cue near the limit flips the badge on and off | Averaged over about 10 frames, and cleared only at 1 fps above the minimum |
+| S-7 | §8.1: points are removed "evenly along each run, in proportion to its length". **Now spec §8.1** | Length in points or in distance? | In removable points, so each run loses the same share, spread evenly by index |
 | S-8 | §8: N is the frame's points | Z1's safety (blanking at crossings) and `sanitize-frame` (a dark first point, `idn/frame_rules.clj:19-31`) add points after the guard | Accepted: the estimate is a few points optimistic. The measured fps on the card (`backend/streaming_engine.clj:267-308`) stays the ground truth |
-| S-9 | §7: fit into `min(w·W, H)/2` | A tiny or zero safe box squeezes a half into a near-static point: a burn and audience hazard | Under 0.05 wide or high, the laser draws no halves (its whole content still goes through safety), and its card says "Safe area too small to split" |
-| S-10 | §8: the per-item counts "come from the tick's render" | The render counts only one total (`services/show_clock.clj:62-69`) | Top-level item counts are recorded only for the cues whose editor is open (`{:item-points? true}`). Cue-level counts come from the snapshot's frames |
-| S-11 | §8.3: the stats "are not part of state" | The UI reads app state | They reach `[:backend :streaming :status]`: runtime state, never saved or undone, the same as `:fps` |
+| S-9 | §7: fit into `min(w·W, H)/2`; §10 fails closed per laser | A tiny or zero safe box squeezes a half into a near-static point: a burn and audience hazard. And Z1's `normalize` throws on a zone it can't read (03 S-Z1-7), inside the one resolver every laser shares | Under 0.05 wide or high, the laser draws no halves (its whole content still goes through safety), and its card says "Safe area too small to split". A zone `normalize` can't read gives the same `:regions nil` for that laser only: the others route on (D-29), and Z1's stage sends it dark with "Safety error: output off" |
+| S-10 | §8: the per-item counts "come from the tick's render" | The render counts only one total (`services/show_clock.clj:74-81`) | Top-level item counts are recorded only for the cues whose editor is open (`:item-points? true` on the render context). Cue-level counts come from the snapshot's frames |
+| S-11 | §8.3 said the stats "are not part of state". **Now spec §8.3** | The UI reads app state | They reach `[:backend :streaming :status]`: runtime state, never saved or undone, the same as `:fps` |
 | S-12 | §11: preview cells `{:zone-group-id x}` become `{:target x}` | It doesn't say what a cell shows, and it has no laser view | A group cell shows what is sent to the group. A cell on a laser's ref (`:auto.laser/<id>`, which Z2's picker already lists) shows what that laser draws. Z3 reads `:zone-group-id` as `:target`, so no load-time step is needed before Z4 |
-| S-13 | §10: the test pattern goes through safety | Composition and the guard aren't mentioned | The test pattern and Identify skip both, since they replace the content |
+| S-13 | §10: the test pattern goes through safety | Composition and the guard aren't mentioned | The test pattern and Identify skip both, since they replace the content. 03 §4 puts them in Z1's `cond` before the `:playing?` branch, the only one Z3 changes |
+| S-14 (NEW) | §8.1: only lit runs are thinned; §8's low flag | Since vibe Phase 5 the Master at 0 darkens every point, and so do a Strobe reaction's dark half and a Fade in's start (Phase 4a). The guard can't thin a frame with no lit point, so its estimate stays under the minimum, and averaged with the lit frames it would turn a laser amber while it strobes, or while the show is faded out, though nothing is seen | Over budget, a frame with no lit point says `:dark? true`, and `smooth` leaves the averages and `:low?` as they were for it. Its meter still shows its load, and the cue warnings still count its points (a heavy cue is still heavy) |
 
 **Open questions for you** (★ = recommended):
 
