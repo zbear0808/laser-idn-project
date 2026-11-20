@@ -216,21 +216,34 @@
    
    The frame provider takes the show clock's newest tick (show-time/latest):
    1. Composes what this projector draws from the tick's cues and routing
-   2. Applies projector calibration effects (color curves + corner-pin)
-   3. Clips it to the projector's safety zone
+   2. Draws fewer points, then dims, below its minimum fps (the fit guard)
+   3. Applies projector calibration effects (color curves + corner-pin)
+   4. Clips it to the projector's safety zone
+   
+   The fit guard's record on the frame (:fit) is averaged over the frames it
+   makes (fit-guard/smooth, kept here: one provider per engine, called only
+   on its thread), so the card's load and low flag don't flicker. What it
+   produced is kept for the card's thumbnail (show-time/record-output!), nil
+   after an error.
    
    The preview is built from the same tick, so it shows what the engines send.
    
    Returns a zero-arity function that returns a LaserFrame or nil."
   [projector-id]
-  (fn []
-    (try
-      (let [frame (projector-frame projector-id (show-time/latest))]
-        (output-errors/ok! [:provider projector-id])
-        frame)
-      (catch Throwable e
-        (output-errors/report! [:provider projector-id] e)
-        nil))))
+  (let [smoothed (volatile! nil)]
+    (fn []
+      (try
+        (let [frame (projector-frame projector-id (show-time/latest))
+              fit (vreset! smoothed (fit-guard/smooth @smoothed (:fit (meta frame))))
+              frame (cond-> frame fit (vary-meta assoc :fit fit))]
+          (output-errors/ok! [:provider projector-id])
+          (show-time/record-output! projector-id frame)
+          frame)
+        (catch Throwable e
+          (output-errors/report! [:provider projector-id] e)
+          (vreset! smoothed nil)
+          (show-time/record-output! projector-id nil)
+          nil)))))
 
 
 ;; Engine Management

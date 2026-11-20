@@ -672,3 +672,34 @@
     (is (< 300 (count out)) "the pattern, not the 3,000 points")
     (is (= 1 (:tick (meta out))))
     (is (not (contains? (meta out) :fit)) "it skips composition and the guard: no load while it shows (S-13)")))
+
+(deftest provider-records-what-it-produced-test
+  (state/assoc-in-state! [:projectors :p] {:host "10.0.0.5" :enabled? true :zone-groups []})
+  (let [provider (#'me/create-projector-frame-provider :p)
+        cues [{:cell [0 0] :zone-frames {:all heavy}}]
+        fit #(:fit (meta %))]
+    (is (nil? (show-time/output-frame :p)) "nothing made yet")
+    (show-time/publish! (snapshot cues))
+    (let [frame (provider)
+          out (show-time/output-frame :p)]
+      (is (identical? frame (:frame out)) "what it produced, after calibration and safety, for the card's thumbnail")
+      (is (number? (:at-ns out)))
+      (is (= 1800 (count frame)))
+      (is (true? (:low? (fit frame))) "the record is smoothed (fit-guard/smooth): 13.9 fps is low")
+      (is (= 1 (:samples (fit frame)))))
+    (testing "averaged over the frames it makes"
+      (show-time/publish! (snapshot cues))
+      (is (= 2 (:samples (fit (provider))))))
+    (testing "nothing playing: it keeps nil, and the average starts again"
+      (show-time/publish! (snapshot [] :playing? false))
+      (is (nil? (provider)))
+      (is (nil? (:frame (show-time/output-frame :p))))
+      (show-time/publish! (snapshot cues))
+      (is (= 1 (:samples (fit (provider))))))
+    (testing "an error keeps nil"
+      (show-time/publish! (snapshot cues :at-ns (- (System/nanoTime) (* (inc show-time/STALE_MS) 1000000))))
+      (is (nil? (provider)))
+      (is (nil? (:frame (show-time/output-frame :p)))))
+    (testing "and the show clock's reset forgets them"
+      (show-time/reset-runtime!)
+      (is (nil? (show-time/output-frame :p))))))

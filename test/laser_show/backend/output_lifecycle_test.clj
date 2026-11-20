@@ -10,6 +10,7 @@
             [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.backend.streaming-engine :as se]
             [laser-show.animation.types :as t]
+            [laser-show.animation.fit-guard :as fit-guard]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.timing :as timing]
             [laser-show.idn.fake-dac :as dac]
@@ -380,6 +381,43 @@
           (is (= :streaming state))
           (is (< 24.0 fps 26.0) "1 001 samples at 25 000 pts/s: 25 fps"))
         (is (stop-streaming!))))))
+
+(deftest status-carries-each-lasers-load-test
+  (testing "zones plan Z3: each laser's load, rounded, and whether it is low, at most 4 writes a second"
+    (init-with-projectors! {:a (assoc (projector 1 true) :scan-rate 25000)
+                            :b (assoc (projector 2 true) :scan-rate 25000)})
+    (let [status #(get-in (state/get-raw-state) [:backend :streaming :status :projectors %])
+          heavy (vec (for [i (range 3000)] [(* 0.5 (Math/cos (* i 0.002))) (* 0.5 (Math/sin (* i 0.002))) 1.0 1.0 1.0]))
+          {thinned :frame record :fit} (fit-guard/guard heavy 25000 fit-guard/defaults)
+          frames {:a (with-meta thinned {:fit (assoc record :regions 0)})
+                  :b [[0.0 0.0 1.0 1.0 1.0] [0.5 0.0 1.0 1.0 1.0]]}
+          writes (atom 0)
+          watch-key ::load-writes]
+      (add-watch (state/get-context-atom) watch-key
+                 (fn [_ _ old new]
+                   (when-not (= (get-in (:cljfx.context/m old) [:backend :streaming :status])
+                                (get-in (:cljfx.context/m new) [:backend :streaming :status]))
+                     (swap! writes inc))))
+      (try
+        (with-redefs-fn {#'me/projector-frame (fn [id _] (get frames id))}
+          (fn []
+            (dispatch! {:event/type :idn/start-multi-streaming})
+            (is (dac/wait-for! #(:load (status :a)) 3000) (pr-str (status :a)))
+            (is (= {:points-in 3000 :points 1800 :budget 1250 :min-fps 20 :scan-rate 25000 :est-fps 8 :guard-fps 14
+                    :reduced-pct 40 :dim-pct 0 :regions 0}
+                   (:load (status :a)))
+                "whole fps and percent")
+            (is (true? (:low? (status :a))) "13.9 fps after the guard, under its 20")
+            (is (= :streaming (:state (status :a))))
+            (is (dac/wait-for! #(= :streaming (:state (status :b))) 3000))
+            (is (not (contains? (status :b) :load)) "a frame with no record: no load")
+            (testing "a steady load writes nothing more"
+              (let [before @writes]
+                (Thread/sleep 1000)
+                (is (<= (- @writes before) 5))))
+            (is (stop-streaming!))))
+        (finally
+          (remove-watch (state/get-context-atom) watch-key))))))
 
 
 (deftest safety-error-shows-in-status-test

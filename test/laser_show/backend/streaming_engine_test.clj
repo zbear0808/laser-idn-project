@@ -163,6 +163,42 @@
         (is (near? 60.0 (:draw-fps s)))
         (is (false? (:scan-limited? s)))))))
 
+(defn- eventually
+  "Wait up to 2 s for (pred) to be true; its last value."
+  [pred]
+  (let [deadline (+ (System/currentTimeMillis) 2000)]
+    (loop []
+      (or (pred)
+          (when (< (System/currentTimeMillis) deadline)
+            (Thread/sleep 5)
+            (recur))))))
+
+(deftest stats-keep-the-frames-fit-record-test
+  (testing "zones plan Z3: the fit guard's record rides on the frame (:fit), and the stats keep the last one sent"
+    (with-open [receiver (DatagramSocket. 0 (InetAddress/getLoopbackAddress))]
+      (let [record {:points-in 3000 :points 1800 :guard-fps 13.9 :low? true}
+            frame (atom (with-meta [[0.0 0.0 0.0 0.0 0.0] [0.5 0.0 1.0 1.0 1.0]] {:fit record}))
+            engine (se/create-engine "127.0.0.1" (fn [] @frame) :port (.getLocalPort receiver))]
+        (is (contains? (se/get-stats engine) :fit))
+        (is (nil? (:fit (se/get-stats engine))) "none before a frame")
+        (se/start! engine)
+        (try
+          (is (eventually #(= record (:fit (se/get-stats engine)))) "as it came: the engine doesn't look inside")
+          (reset! frame nil)
+          (is (eventually #(and (nil? (:fit (se/get-stats engine))) (pos? (:frames-sent (se/get-stats engine)))))
+              "a frame without one (nothing playing) clears it")
+          (reset! frame (with-meta [[0.0 0.0 1.0 1.0 1.0]] {:fit record}))
+          (is (eventually #(= record (:fit (se/get-stats engine)))))
+          (finally
+            (se/stop! engine)))
+        (testing "start! resets it with the other stats"
+          (is (= record (:fit (se/get-stats engine))) "kept after a stop")
+          (with-redefs-fn {#'se/streaming-loop (fn [_])}
+            (fn []
+              (se/start! engine)
+              (is (nil? (:fit (se/get-stats engine))))
+              (se/stop! engine))))))))
+
 
 ;; Paced by the show clock's ticks (plans/2026-11-17-show-clock/02 §4, §7)
 

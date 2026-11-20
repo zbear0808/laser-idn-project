@@ -34,7 +34,8 @@
 
 (defn fingerprint
   "What an engine is built from. A change restarts the projector's engine;
-   zone groups and names are read live by its frame provider."
+   names, groups, the rig's order, fit and safety settings restart nothing:
+   the routing comes with each tick, and safety is read live."
   [projector]
   (select-keys projector [:host :port :service-id :output-config :scan-rate]))
 
@@ -169,11 +170,32 @@
 
 ;; Status
 
+(defn- whole [x] (when (number? x) (Math/round (double x))))
+
+(defn- tens [x] (when (number? x) (* 10 (Math/round (/ (double x) 10.0)))))
+
+(defn- load-of
+  "What a card shows of a laser's fit-guard record (smoothed by its
+   provider): whole fps and percent, points to the nearest 10, so it changes
+   only when the load does."
+  [fit]
+  (cond-> {:points-in (tens (:points-in fit))
+           :points (tens (:points fit))
+           :budget (tens (:budget fit))
+           :min-fps (whole (:min-fps fit))
+           :scan-rate (:scan-rate fit)
+           :est-fps (whole (:est-fps fit))
+           :guard-fps (whole (:guard-fps fit))
+           :reduced-pct (whole (:reduced-pct fit))
+           :dim-pct (whole (:dim-pct fit))
+           :regions (or (:regions fit) 0)}
+    (:no-room? fit) (assoc :no-room? true)))
+
 (defn- engine-status [e errors id]
   (let [safety-error (:message (get errors [:safety id]))
         error (some #(:message (get errors [% id])) [:engine :provider :projector-effects])
         ^Thread thread @(:thread e)
-        {:keys [frames-sent draw-fps scan-limited?]} (engine/get-stats e)]
+        {:keys [frames-sent draw-fps scan-limited? fit]} (engine/get-stats e)]
     (cond
       ;; First: it is why the projector is dark (multi-engine guard-safety)
       safety-error {:state :error :kind :safety :error "Safety error: output off" :detail safety-error}
@@ -183,17 +205,24 @@
       :else (let [skipped (:message (get errors [:calibration id]))]
               (cond-> {:state :streaming :fps (/ (Math/round (* 10.0 (double draw-fps))) 10.0)}
                 scan-limited? (assoc :scan-limited? true)
-                skipped (assoc :warning skipped))))))
+                skipped (assoc :warning skipped)
+                fit (assoc :low? (boolean (:low? fit)) :load (load-of fit)))))))
 
 (defn status
   "Pure-data status for app state, or nil when stopped with nothing running:
    {:engines n :wanted m :pending? bool
     :projectors {id {:state :streaming|:starting|:error :fps 59.8 :scan-limited? true
-                     :warning \"Corner Pin skipped\" :error \"…\"}}}
+                     :warning \"Corner Pin skipped\" :error \"…\"
+                     :low? false :load {:points-in :points :budget :min-fps :scan-rate
+                                        :est-fps :guard-fps :reduced-pct :dim-pct :regions}}}}
    :fps is how many new frames the projector draws per second
    (streaming-engine/update-stats :draw-fps); :scan-limited? is there when its
    scan rate, not the send rate, sets that; :warning names the calibration
-   effects skipped because they fail (multi-engine report-skips!). A
+   effects skipped because they fail (multi-engine report-skips!). :load is
+   what the fit guard made of its last frame (zones plan Z3: the points it
+   was asked for and sent, its budget, the fps before and after the guard,
+   what it cut and dimmed, how many halves it drew), rounded, and :low?
+   whether it is still below its minimum; both only while a frame has one. A
    projector whose safety stage fails is {:state :error :kind :safety :error
    \"Safety error: output off\" :detail <message>}."
   []

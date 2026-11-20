@@ -49,7 +49,9 @@
 
 
 (def ^:private initial-stats
-  "Stats of an engine that hasn't sent a frame yet (see update-stats)."
+  "Stats of an engine that hasn't sent a frame yet (see update-stats). :fit
+   is the fit guard's record of the last frame sent (its :fit metadata, zones
+   plan Z3), nil for a frame without one."
   {:frames-sent 0
    :packets-sent 0
    :fragments-sent 0
@@ -60,7 +62,8 @@
    :send-fps 0.0
    :draw-fps 0.0
    :scan-limited? false
-   :tick-to-send-us nil})
+   :tick-to-send-us nil
+   :fit nil})
 
 (def ^:const KEEPALIVE_INTERVALS
   "While paced by the show clock, an engine that gets no tick for this many
@@ -76,7 +79,8 @@
    - target-host: IP address of the laser DAC
    - frame-provider: Function that returns the current LaserFrame to send. A
      frame may carry {:tick :at-ns} metadata: the show clock's tick it shows
-     and when that was published (see :frame-signal)
+     and when that was published (see :frame-signal); and :fit, the fit
+     guard's record, which the stats keep as it is
    - opts: Optional map with:
      - :id - Names the engine in output-errors (default \"host:port/channel\")
      - :fps - Target frames per second (default 60)
@@ -366,7 +370,7 @@
             (try
               (let [produce-start (System/nanoTime)
                     frame (frame-provider)
-                    {frame-tick :tick at-ns :at-ns} (meta frame)
+                    {frame-tick :tick at-ns :at-ns fit :fit} (meta frame)
                     _ (when frame-tick (vreset! tick frame-tick))
                     new-tick? (and frame-tick (> (long frame-tick) (long @seen)))
                     frame-point-count (count (or frame []))
@@ -379,8 +383,9 @@
                 (vreset! last-sent sent)
                 ;; IDN streaming time (µs): producing plus sending, without the wait between
                 (profiler/record-idn-streaming! (/ (+ (- produced produce-start) (- sent send-start)) 1000.0))
-                (swap! stats update-stats sent duration-us packet-count target-us
-                       (when (and new-tick? at-ns) (/ (- sent (long at-ns)) 1000.0)))
+                (swap! stats #(assoc (update-stats % sent duration-us packet-count target-us
+                                                   (when (and new-tick? at-ns) (/ (- sent (long at-ns)) 1000.0)))
+                                     :fit fit))
                 (output-errors/ok! error-key))
               
               (catch Throwable e
@@ -508,6 +513,7 @@
 
 (defn get-stats
   "Current streaming statistics: the counts, :send-fps, :draw-fps,
-   :scan-limited?, :frame-duration-us and :tick-to-send-us (see update-stats)."
+   :scan-limited?, :frame-duration-us and :tick-to-send-us (see update-stats),
+   and :fit, the last frame's fit-guard record."
   [engine]
   @(:stats engine))
