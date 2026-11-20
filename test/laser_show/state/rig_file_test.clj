@@ -3,6 +3,7 @@
    rig file holds, and how a show's lasers and groups are matched onto this
    rig. Pure."
   (:require [clojure.test :refer [deftest is testing]]
+            [laser-show.animation.safety :as safety]
             [laser-show.state.domains :as domains]
             [laser-show.state.persistent :as persistent]
             [laser-show.state.rig-file :as rig-file]))
@@ -155,6 +156,126 @@
     (testing "nothing to rename: the same state"
       (is (identical? here (rig-file/rename-pins here {:projectors {}})))
       (is (identical? here (rig-file/rename-pins here nil))))))
+
+;; Setting the rig up from a show (09 §7)
+
+(def ^:private friday-hardware
+  "friday.zip's hardware.edn: Laser L (unit L) at .5 with its zone, groups
+   and calibration, SR Beam (host only) at .9, a laser that was off there,
+   a virtual projector, and its order."
+  {:projectors {:projector-10-0-0-5-1 {:name "Laser L" :host "10.0.0.5" :port 7255 :service-id 1 :unit-id unit-l
+                                       :stable-id [:unit unit-l 1] :enabled? true :scan-rate 30000
+                                       :zone-groups [:graphics] :exclude-from-all? false :tags #{:graphics}
+                                       :safety {:limit [-0.9 -0.8 0.9 0.9] :blocked [[-0.2 -0.2 0.2 0.2]]}}
+                :projector-10-0-0-9-1 {:name "SR Beam" :host "10.0.0.9" :port 7255 :service-id 1
+                                       :stable-id [:host "10.0.0.9" 1] :enabled? true
+                                       :zone-groups [] :exclude-from-all? true}
+                :projector-10-0-0-8-1 {:name "Spare" :host "10.0.0.8" :service-id 1 :stable-id [:host "10.0.0.8" 1]
+                                       :enabled? false :zone-groups []}}
+   :virtual-projectors {:vp-l {:name "L graphics" :parent-projector-id :projector-10-0-0-5-1 :zone-groups [:graphics]}}
+   :rig {:order [:projector-10-0-0-9-1 :projector-10-0-0-5-1] :middle :none :split-width 0.9}})
+
+(def ^:private friday-chains
+  {:projector-10-0-0-5-1 {:items [{:effect-id :corner-pin :id #uuid "22222222-2222-2222-2222-222222222222"}]}
+   :projector-10-0-0-9-1 {:items [{:effect-id :rgb-curves :id #uuid "33333333-3333-3333-3333-333333333333"}]}})
+
+(defn- empty-rig
+  "This rig, no laser on yet: the startup scan found unit L at .57 (off,
+   default calibration), and a laser at .9 known by its address."
+  []
+  (-> (domains/build-initial-state)
+      (assoc :projectors {:projector-10-0-0-57-1 {:name "Head 1" :host "10.0.0.57" :port 7300 :service-id 1 :unit-id unit-l
+                                                  :stable-id [:unit unit-l 1] :enabled? false :zone-groups []
+                                                  :exclude-from-all? false :tags #{}}
+                          :projector-10-0-0-9-1 {:name "Head 9" :host "10.0.0.9" :port 7255 :service-id 1
+                                                 :stable-id [:host "10.0.0.9" 1] :enabled? false :zone-groups []
+                                                 :exclude-from-all? false :tags #{}}})
+      (assoc-in [:chains :projector-effects] {:projector-10-0-0-57-1 {:items [{:effect-id :rgb-curves}]}})
+      (assoc-in [:chains :cue-chains [0 0]] (pinned :auto.laser/projector-10-0-0-57-1))))
+
+(deftest set-up-keeps-rig-ids-and-addresses-test
+  (let [s (empty-rig)
+        pins (rig-file/pin-map s friday-hardware)
+        set-up (rig-file/set-up-from-show s friday-hardware friday-chains pins)
+        laser (get-in set-up [:projectors :projector-10-0-0-57-1])]
+    (is (false? (rig-file/set-up? s)) "no laser on: the question comes up")
+    (is (true? (rig-file/set-up? set-up)))
+    (testing "a laser already here keeps its id and address, and takes everything else from the show"
+      (is (= {:host "10.0.0.57" :port 7300 :service-id 1 :stable-id [:unit unit-l 1]}
+             (select-keys laser [:host :port :service-id :stable-id])))
+      (is (= {:name "Laser L" :enabled? true :scan-rate 30000 :zone-groups [:graphics] :tags #{:graphics}
+              :safety {:limit [-0.9 -0.8 0.9 0.9] :blocked [[-0.2 -0.2 0.2 0.2]]}}
+             (select-keys laser [:name :enabled? :scan-rate :zone-groups :tags :safety])))
+      (is (= [:corner-pin] (mapv :effect-id (get-in set-up [:chains :projector-effects :projector-10-0-0-57-1 :items])))
+          "and its calibration"))
+    (testing "matched by address: the same"
+      (is (= ["SR Beam" true "10.0.0.9"] ((juxt :name :enabled? :host) (get-in set-up [:projectors :projector-10-0-0-9-1])))))
+    (testing "a laser the show had off doesn't come: the show wasn't made with it"
+      (is (not (contains? (:projectors set-up) :projector-10-0-0-8-1))))
+    (testing "the order, the middle laser and the split width are the show's, in this rig's ids"
+      (is (= {:order [:projector-10-0-0-9-1 :projector-10-0-0-57-1] :middle :none :split-width 0.9} (:rig set-up))))
+    (testing "the virtual projector, on its laser here"
+      (is (= :projector-10-0-0-57-1 (get-in set-up [:virtual-projectors :vp-l :parent-projector-id]))))
+    (testing "a laser that isn't here is added, with its setup"
+      (let [s (update (empty-rig) :projectors dissoc :projector-10-0-0-9-1)
+            set-up (rig-file/set-up-from-show s friday-hardware friday-chains (rig-file/pin-map s friday-hardware))]
+        (is (= (get-in friday-hardware [:projectors :projector-10-0-0-9-1]) (get-in set-up [:projectors :projector-10-0-0-9-1])))
+        (is (= [:rgb-curves] (mapv :effect-id (get-in set-up [:chains :projector-effects :projector-10-0-0-9-1 :items]))))))
+    (testing "a pin renamed when the show was opened follows a laser the rig found since"
+      (let [opened (update (empty-rig) :projectors dissoc :projector-10-0-0-9-1)
+            pins-then (rig-file/pin-map opened friday-hardware)
+            later (-> opened
+                      (assoc-in [:chains :cue-chains [1 0]] (pinned :auto.laser/projector-10-0-0-9-1))
+                      (assoc-in [:projectors :projector-10-0-0-90-1] {:name "Found" :host "10.0.0.90" :service-id 1
+                                                                      :stable-id [:host "10.0.0.9" 1] :enabled? false}))
+            set-up (rig-file/set-up-from-show later friday-hardware friday-chains pins-then)]
+        (is (= :auto.laser/projector-10-0-0-90-1 (get-in set-up [:chains :cue-chains [1 0] :destination-zone :zone-group-id])))
+        (is (not (contains? (:projectors set-up) :projector-10-0-0-9-1)) "no second laser for the same unit")))))
+
+(deftest set-up-converts-old-hardware-first-test
+  (let [old {:projectors {:projector-10-0-0-5-1 {:name "Laser L" :host "10.0.0.5" :service-id 1 :unit-id unit-l
+                                                 :enabled? true :zone-groups [:all :graphics]}
+                          :projector-10-0-0-12-1 {:name "Aud" :host "10.0.0.12" :service-id 1 :enabled? true
+                                                  :zone-groups [:crowd]}}}
+        s (empty-rig)
+        set-up (rig-file/set-up-from-show s old {} (rig-file/pin-map s old))]
+    (is (= {:zone-groups [:graphics] :exclude-from-all? false :stable-id [:unit unit-l 1] :host "10.0.0.57"}
+           (select-keys (get-in set-up [:projectors :projector-10-0-0-57-1]) [:zone-groups :exclude-from-all? :stable-id :host]))
+        "All's tick became All, and the unit is the one found here")
+    (is (= {:zone-groups [:crowd] :exclude-from-all? true :stable-id [:host "10.0.0.12" 1]}
+           (select-keys (get-in set-up [:projectors :projector-10-0-0-12-1]) [:zone-groups :exclude-from-all? :stable-id]))
+        "a laser that didn't tick All is excluded from it, as Z2 converts it")
+    (is (= [:projector-10-0-0-57-1 :projector-10-0-0-12-1] (get-in set-up [:rig :order]))
+        "no order in an old show: by its IPs, then names")))
+
+(deftest show-safety-is-normalized-on-the-way-in-test
+  (let [s (empty-rig)
+        hw (assoc-in friday-hardware [:projectors :projector-10-0-0-5-1 :safety] {:limit [1 1 -1 -0.5] :blocked [[0.5 0.5 0.2 0.2]]})
+        set-up (rig-file/set-up-from-show s hw friday-chains (rig-file/pin-map s hw))]
+    (is (= {:limit [-1.0 -0.5 1.0 1.0] :blocked [[0.2 0.2 0.5 0.5]]}
+           (get-in set-up [:projectors :projector-10-0-0-57-1 :safety]))
+        "corners ordered and numbers made doubles, as safety/normalize gives them")
+    (is (not (contains? (get-in set-up [:projectors :projector-10-0-0-9-1]) :safety))
+        "a laser the show gave no zone gets none: the default, as on any laser")))
+
+(deftest unreadable-show-safety-stays-dark-test
+  (let [s (empty-rig)
+        bad {:limit [0 0 "x" 1]}
+        hw (assoc-in friday-hardware [:projectors :projector-10-0-0-5-1 :safety] bad)
+        set-up (rig-file/set-up-from-show s hw friday-chains (rig-file/pin-map s hw))]
+    (testing "the set-up copies it as it is: the stage fails closed, the laser stays dark until its zone is set"
+      (is (= bad (get-in set-up [:projectors :projector-10-0-0-57-1 :safety])))
+      (is (thrown? clojure.lang.ExceptionInfo (safety/normalize (get-in set-up [:projectors :projector-10-0-0-57-1 :safety])))))
+    (testing "and the question names it"
+      (is (= ["Laser L"] (:unreadable (rig-file/set-up-question s hw)))))))
+
+(deftest set-up-question-test
+  (let [q (rig-file/set-up-question (empty-rig) friday-hardware)]
+    (is (= ["SR Beam" "Laser L"] (:lasers q)) "the lasers the show was made with, in its order")
+    (is (= [{:name "SR Beam" :host "10.0.0.9"}] (:matched-by-ip q)) "matched by IP only: check them")
+    (is (= [] (:unreadable q))))
+  (is (nil? (rig-file/set-up-question (empty-rig) {:projectors {:p {:name "Off" :host "10.0.0.1" :enabled? false}}}))
+      "a show made with no laser on: nothing to set up"))
 
 (deftest group-copy-keeps-groups-with-lasers-test
   (let [beams {:id :group-beams :name "Beams" :color "#123456"}

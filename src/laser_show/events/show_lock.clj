@@ -46,7 +46,10 @@
     ;; (zones plan Z2): they re-route the engines or change which cues reach
     ;; the audience
     :rig/move-projector :rig/nudge-projector :rig/set-middle :rig/set-split-width
-    :projectors/set-enabled :projectors/set-exclude-from-all :projectors/set-tag})
+    :projectors/set-enabled :projectors/set-exclude-from-all :projectors/set-tag
+    ;; A show's rig onto this one (zones plan ZR): it rebuilds and re-routes
+    ;; the engines, and changes safety zones and calibration
+    :rig/set-up-from-show})
 
 (def safety-edits
   "The safety zone edits (zones plan Z1). The lock refuses one only when it

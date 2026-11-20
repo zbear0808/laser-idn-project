@@ -7,9 +7,11 @@
    The rig file holds the rig paths (rig-paths) and a copy of the groups the
    rig's lasers are in (group-copy), so New Project can bring them along and
    a show that doesn't define them can be told so."
-  (:require [laser-show.routing.refs :as refs]
+  (:require [laser-show.animation.safety :as safety]
+            [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
-            [laser-show.state.domains :as domains]))
+            [laser-show.state.domains :as domains]
+            [laser-show.state.migration :as migration]))
 
 
 ;; The document
@@ -106,6 +108,123 @@
   (refs/replace-refs state (into {}
                                  (keep (fn [[s r]] (when (not= s r) [(rig/laser-ref s) (rig/laser-ref r)])))
                                  (pin-map state hardware))))
+
+;; Setting the rig up from a show (09 §7)
+
+(defn set-up?
+  "Is the rig set up: is some laser turned on (rig/enabled?)?"
+  [state]
+  (boolean (some rig/enabled? (vals (:projectors state)))))
+
+(defn- show-lasers
+  "The ids of the lasers a show was made with (the projectors on in its
+   hardware), in its order."
+  [hardware]
+  (let [projectors (or (:projectors hardware) {})]
+    (filterv #(rig/enabled? (get projectors %))
+             (rig/effective-order (get-in hardware [:rig :order]) projectors))))
+
+(defn- readable-zone
+  "A show's safety zone through safety/normalize, or ::unreadable."
+  [zone]
+  (try (safety/normalize zone)
+       (catch Exception _ ::unreadable)))
+
+(defn- incoming-safety
+  "A show laser's zone as it comes onto this rig (S-ZR-8): what
+   safety/normalize gives, so it never grows on the way in; one it can't
+   read as it is, so the stage fails closed and the laser stays dark until
+   its zone is set. A laser with no zone keeps none."
+  [p]
+  (if (contains? p :safety)
+    (let [zone (readable-zone (:safety p))]
+      (if (= ::unreadable zone) p (assoc p :safety zone)))
+    p))
+
+(def ^:private identity-keys
+  "What a laser already on this rig keeps when a show's setup comes onto it:
+   where and what it is here."
+  [:host :port :service-id :service-name :unit-id :stable-id])
+
+(defn- matched-by-ip
+  "The show's lasers (ids) matched to one here by a [:host …] identity only."
+  [state hardware]
+  (let [here (set (vals (rig/settled-ids (:projectors state))))
+        sids (rig/settled-ids (:projectors hardware))]
+    (filterv #(let [[kind :as sid] (get sids %)] (and (= :host kind) (contains? here sid)))
+             (show-lasers hardware))))
+
+(defn- unreadable-zones
+  "The show's lasers (ids) whose safety zone safety/normalize can't read."
+  [hardware]
+  (filterv #(let [p (get-in hardware [:projectors %])]
+              (and (contains? p :safety) (= ::unreadable (readable-zone (:safety p)))))
+           (show-lasers hardware)))
+
+(defn set-up-question
+  "What the set-up question says of a show's hardware on this rig:
+   {:lasers [name …] (in the show's order) :matched-by-ip [{:name :host}]
+   :unreadable [name …]}, or nil when the show was made with no laser on."
+  [state hardware]
+  (when-let [ids (seq (show-lasers hardware))]
+    (let [name-of #(rig/projector-name hardware %)]
+      {:lasers (mapv name-of ids)
+       :matched-by-ip (mapv (fn [id] {:name (name-of id) :host (get-in hardware [:projectors id :host])})
+                            (matched-by-ip state hardware))
+       :unreadable (mapv name-of (unreadable-zones hardware))})))
+
+(defn- renamed-since
+  "{old-pin new-pin} for the show's lasers whose id here (pins, pin-map's
+   now) isn't the one their pins got when the show was opened (pins-then),
+   as when a scan found one of them in between."
+  [pins-then pins]
+  (into {}
+        (keep (fn [[s r]]
+                (let [then (get pins-then s r)]
+                  (when (not= then r) [(rig/laser-ref then) (rig/laser-ref r)]))))
+        pins))
+
+(defn- bring-lasers
+  "state with the lasers ids of a show's hardware (converted) and chains on
+   this rig, each at its id here (pins): one already here keeps its
+   identity-keys and takes everything else from the show; one that isn't is
+   added. Zones come in as incoming-safety gives them; calibration and the
+   virtual projectors on these lasers come too."
+  [state hardware chains ids pins]
+  (let [brought (set ids)]
+    (as-> state s
+      (reduce (fn [s id]
+                (let [r (get pins id id)
+                      show-p (incoming-safety (get-in hardware [:projectors id]))
+                      here (get-in s [:projectors r])]
+                  (cond-> (assoc-in s [:projectors r] (merge show-p (select-keys here identity-keys)))
+                    (get chains id) (assoc-in [:chains :projector-effects r] (get chains id)))))
+              s
+              ids)
+      (reduce-kv (fn [s vp-id vp]
+                   (if (contains? brought (:parent-projector-id vp))
+                     (assoc-in s [:virtual-projectors vp-id] (update vp :parent-projector-id #(get pins % %)))
+                     s))
+                 s
+                 (or (:virtual-projectors hardware) {})))))
+
+(defn set-up-from-show
+  "state with a show's rig as this rig (the set-up question's Set up rig,
+   09 §7): the lasers the show was made with (its hardware converted first
+   when it is from before Z2) brought on (bring-lasers), at the ids pin-map
+   gives now, and the show's order, middle laser and split width. A pin
+   still naming the id a laser had here when the show was opened (pins-then)
+   follows it to its id now. chains is the show's [:chains :projector-effects]."
+  [state hardware chains pins-then]
+  (let [hardware (migration/zones-z2-rig hardware)
+        pins (pin-map state hardware)
+        ids (show-lasers hardware)
+        rig-of-show (:rig hardware)]
+    (-> state
+        (bring-lasers hardware chains ids pins)
+        (assoc-in [:rig :order] (mapv #(get pins % %) ids))
+        (update :rig merge (select-keys rig-of-show [:middle :split-width]))
+        (refs/replace-refs (renamed-since pins-then pins)))))
 
 (defn- map-or-nil? [v]
   (or (nil? v) (map? v)))

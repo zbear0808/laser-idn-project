@@ -10,6 +10,7 @@
             [laser-show.dev-config :as dev-config]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.state.persistent :as persistent]
+            [laser-show.state.rig-file :as rig-file]
             [laser-show.events.helpers :as h]
             [laser-show.events.handlers.grid :as grid]
             [laser-show.events.handlers.effects :as effects]
@@ -93,10 +94,22 @@
 (defn- handle-file-project-loaded
   "Replace the show with the loaded project contents. This machine's rig,
    its safety zones and calibration with it, stays as it is (D-30): the
-   show's copy of a rig is only read, to match the show onto this one."
+   show's copy of a rig is only read, to match the show onto this one. It is
+   kept in [:ui :dialogs :rig-report] while the show is open (rig-file):
+   on a rig with no laser on, and a show made with lasers, it opens the
+   set-up question (Q-ZR-3)."
   [{:keys [state file-path contents]}]
   (log/info "Project loaded:" file-path)
-  {:state (persistent/apply-loaded-project state contents file-path)})
+  (let [loaded (persistent/apply-loaded-project state contents file-path)
+        hardware (get contents (:hardware persistent/zip-filenames))
+        set-up? (boolean (and (not (rig-file/set-up? loaded)) (rig-file/set-up-question loaded hardware)))]
+    {:state (assoc-in loaded [:ui :dialogs :rig-report]
+                      {:open? set-up?
+                       :mode (if set-up? :set-up :report)
+                       :file (file-name file-path)
+                       :hardware hardware
+                       :chains (get-in contents [(:content persistent/zip-filenames) :chains :projector-effects])
+                       :pins (rig-file/pin-map state hardware)})}))
 
 (defn- handle-file-project-load-failed
   "The project couldn't be read: the document stays, and a notice says so."

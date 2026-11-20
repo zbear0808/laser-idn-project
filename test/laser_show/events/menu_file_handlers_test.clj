@@ -279,6 +279,48 @@
                         [:state :ui :notice]))))))
 
 
+;; The show's rig, matched onto this one (zones plan ZR)
+
+
+(def ^:private two-lasers
+  "A show made with Laser L and Laser R, on."
+  (-> (domains/build-initial-state)
+      (assoc :projectors {:p-l {:name "Laser L" :host "10.0.0.5" :service-id 1 :enabled? true :zone-groups []
+                                :stable-id [:host "10.0.0.5" 1]}
+                          :p-r {:name "Laser R" :host "10.0.0.7" :service-id 1 :enabled? true :zone-groups []
+                                :stable-id [:host "10.0.0.7" 1]}})
+      (assoc :rig {:order [:p-l :p-r] :middle :split :split-width 0.75})))
+
+(deftest open-asks-to-set-up-an-empty-rig-test
+  (let [open (fn [here show]
+               (:state (menu/handle {:event/type :file/project-loaded :file-path "shows/friday.zip"
+                                     :contents (zip-contents-of show) :state here})))
+        empty-rig (assoc document-state :projectors {})
+        asked (open empty-rig two-lasers)]
+    (testing "no laser on this rig is on, and friday.zip has lasers: the set-up question"
+      (is (= {:open? true :mode :set-up :file "friday.zip"}
+             (select-keys (get-in asked [:ui :dialogs :rig-report]) [:open? :mode :file])))
+      (is (= (:projectors two-lasers) (get-in asked [:ui :dialogs :rig-report :hardware :projectors]))
+          "the show's hardware, kept for the set-up")
+      (is (= {} (:projectors asked)) "nothing changes until Set up rig is pressed"))
+    (testing "lasers that are all off count as no laser on"
+      (is (= :set-up (get-in (open (assoc-in document-state [:projectors :proj-a :enabled?] false) two-lasers)
+                             [:ui :dialogs :rig-report :mode]))))
+    (testing "a rig with a laser on: no question"
+      (is (not= :set-up (get-in (open document-state two-lasers) [:ui :dialogs :rig-report :mode]))))
+    (testing "a show with no laser on: nothing to set up"
+      (is (not (get-in (open empty-rig (-> two-lasers
+                                           (assoc-in [:projectors :p-l :enabled?] false)
+                                           (assoc-in [:projectors :p-r :enabled?] false)))
+                       [:ui :dialogs :rig-report :open?])))
+      (is (not (get-in (open empty-rig (domains/build-initial-state)) [:ui :dialogs :rig-report :open?]))))
+    (testing "Not now leaves the rig as it is; the next show asks again"
+      (let [not-now (:state (events/handle-event-pipeline {:event/type :ui/close-dialog :dialog-id :rig-report :state asked}))]
+        (is (false? (get-in not-now [:ui :dialogs :rig-report :open?])))
+        (is (= {} (:projectors not-now)))
+        (is (true? (get-in (open not-now two-lasers) [:ui :dialogs :rig-report :open?])))))))
+
+
 ;; Unsaved-changes guard (New / Open / Exit ask first when the project is dirty)
 
 

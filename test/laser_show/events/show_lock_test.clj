@@ -72,10 +72,22 @@
    {:event/type :rig/set-split-width :split-width 0.6}
    {:event/type :projectors/set-enabled :projector-id :p1 :enabled? false}
    {:event/type :projectors/set-exclude-from-all :projector-id :p1 :exclude? true}
-   {:event/type :projectors/set-tag :projector-id :p1 :tag :crowd-scanning :on? true}])
+   {:event/type :projectors/set-tag :projector-id :p1 :tag :crowd-scanning :on? true}
+   ;; A show's rig onto this one (zones plan ZR), from the show s0 opened
+   {:event/type :rig/set-up-from-show}])
+
+(def ^:private opened-show
+  "What Open kept of friday.zip's rig (zones plan ZR): P1 with its own
+   setup, and P9, which isn't on this rig."
+  {:open? false :mode :report :file "friday.zip" :chains {} :pins nil
+   :hardware {:projectors {:p1 {:name "P1 (friday)" :host "10.0.0.1" :port 7255 :enabled? true :zone-groups []}
+                           :p9 {:name "P9" :host "10.0.0.9" :port 7255 :enabled? true :zone-groups []}}
+              :rig {:order [:p9 :p1] :middle :split :split-width 0.75}}})
 
 (deftest locked-blocks-structure-edits-test
-  (let [s0 (assoc-in (starter) [:config :input :trigger-map {:source :midi :channel 0 :note 36}] {:type :vibe :role :hit})]
+  (let [s0 (-> (starter)
+               (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 36}] {:type :vibe :role :hit})
+               (assoc-in [:ui :dialogs :rig-report] opened-show))]
     (doseq [event structure-edits]
       (testing (str (:event/type event))
         (is (not= (history/extract-document-state s0) (history/extract-document-state (run s0 event)))

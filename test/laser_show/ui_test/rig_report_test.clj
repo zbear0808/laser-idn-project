@@ -10,6 +10,7 @@
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
+            [laser-show.state.persistent :as persistent]
             [laser-show.state.rig-store :as rig-store]
             [laser-show.state.templates :as templates]
             [laser-show.ui-test.fixtures :as fixtures]
@@ -64,6 +65,21 @@
 (defn- tooltip-text [selector]
   (ui/on-fx-thread #(some-> ^Control (ui/query selector) .getTooltip .getText)))
 
+(defn- show-zip!
+  "Write a show to this test's folder as name, made on the rig of lasers
+   ({id projector}) with cues (cue-chains); return its path."
+  [name lasers cues & {:keys [groups]}]
+  (let [path (str (io/file *dir* name))
+        show (cond-> (-> (domains/build-initial-state)
+                         (assoc :projectors lasers)
+                         (assoc-in [:chains :cue-chains] cues))
+               groups (update :zone-groups merge groups))]
+    (persistent/write-project! path (persistent/project-files show))
+    path))
+
+(defn- open! [path]
+  (events/dispatch! {:event/type :file/open-result :file-path path}))
+
 
 ;; The rig file's line
 
@@ -115,3 +131,30 @@
     (ui/click! (ui/robot) "#projectors-tab")
     (ui/assert-text! "#rig-file-banner" "This rig file comes from a newer version of Laser Show. It is used, but not saved.")
     (is (true? (get-in (app-state) [:rig-file :read-only?])))))
+
+
+;; Opening a show on a rig with no laser on
+
+(deftest open-on-an-empty-rig-asks-to-set-it-up-test
+  (let [robot (ui/robot)
+        friday (show-zip! "friday.zip"
+                          {:projector-10-0-0-5-1 (assoc (laser "Laser L" "10.0.0.5") :safety {:limit [-0.9 -0.9 0.9 0.9] :blocked []})
+                           :projector-10-0-0-7-1 (laser "Laser R" "10.0.0.7")}
+                          {[0 0] {:items [] :destination-zone {:zone-group-id :auto.laser/projector-10-0-0-5-1}}})]
+    (start-with-rig!)
+    (open! friday)
+    (ui/assert-text! "#rig-setup-title" "Set up your rig from friday.zip?")
+    (ui/assert-text! "#rig-setup-lasers" "Laser L · Laser R")
+    (testing "Not now leaves the rig as it is"
+      (ui/click! robot "#rig-setup-not-now")
+      (ui/wait-for! #(not (get-in (app-state) [:ui :dialogs :rig-report :open?])))
+      (is (= {} (:projectors (app-state)))))
+    (testing "the next show opened asks again; Set up rig makes its lasers this rig"
+      (open! friday)
+      (ui/click! robot "#rig-setup-button")
+      (ui/wait-for! #(= #{:projector-10-0-0-5-1 :projector-10-0-0-7-1} (set (keys (:projectors (app-state))))))
+      (is (= {:limit [-0.9 -0.9 0.9 0.9] :blocked []} (get-in (app-state) [:projectors :projector-10-0-0-5-1 :safety])))
+      (ui/wait-for! #(not (ui/visible? "#rig-setup-title")))
+      (ui/wait-for! 5000 #(= 2 (count (:projectors (:doc (rig-store/read! (rig-path)))))))
+      (is (= "Set Up Rig From Show" (get-in (app-state) [:history :undo-stack 0 :description])) "one undo step")
+      (is (false? (get-in (app-state) [:project :dirty?])) "and the show isn't unsaved for it"))))

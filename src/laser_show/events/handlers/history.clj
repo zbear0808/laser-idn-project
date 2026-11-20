@@ -177,6 +177,7 @@
    :rig/nudge-projector "Move Projector"
    :rig/set-middle "Change Middle Laser"
    :rig/set-split-width "Change Split Width"
+   :rig/set-up-from-show "Set Up Rig From Show"
    :zone-groups/create-new "Add Zone Group"
    :zone-groups/save-edit "Edit Zone Group"
    :zone-groups/remove "Delete Zone Group"

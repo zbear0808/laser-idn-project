@@ -117,3 +117,55 @@
     (is (empty? (get-in (pipeline (history/mark-clean s) {:event/type :rig/drag-over :projector-id :b :side :after})
                         [:state :history :undo-stack]))
         "never an undo step")))
+
+
+;; The rig file's set-up and report (plans/2026-11-19-zones/09 §6)
+
+(def ^:private show-hardware
+  "A show made with Laser A (the same unit as :a here) and Laser D, which
+   isn't here."
+  {:projectors {:a {:name "Laser A (show)" :host "10.0.0.1" :enabled? true :zone-groups [:graphics]
+                    :stable-id [:host "10.0.0.1" 0] :safety {:limit [-0.8 -0.8 0.8 0.8] :blocked []}}
+                :d {:name "Laser D" :host "10.0.0.4" :enabled? true :zone-groups [] :stable-id [:host "10.0.0.4" 0]}}
+   :rig {:order [:d :a] :middle :both :split-width 0.75}})
+
+(defn- asking-to-set-up
+  "rig-state with every laser off, and the set-up question open for a show."
+  [hardware]
+  (-> (rig-state)
+      (update :projectors update-vals #(assoc % :enabled? false))
+      (assoc-in [:ui :dialogs :rig-report] {:open? true :mode :set-up :file "friday.zip"
+                                            :hardware hardware :chains {} :pins {:a :a :d :d}})
+      (history/mark-clean)))
+
+(deftest set-up-is-one-undo-step-test
+  (let [asked (assoc-in (asking-to-set-up show-hardware) [:rig-file :path] "/tmp/never-written/rig.edn")
+        effects (pipeline asked {:event/type :rig/set-up-from-show})
+        s (:state effects)]
+    (is (= "Laser A (show)" (get-in s [:projectors :a :name])))
+    (is (contains? (:projectors s) :d) "Laser D comes into the rig")
+    (is (= [:d :a] (get-in s [:rig :order])))
+    (is (false? (get-in s [:ui :dialogs :rig-report :open?])) "the question closes")
+    (is (= :report (get-in s [:ui :dialogs :rig-report :mode])) "and what doesn't fit is the report's from now on")
+    (is (= ["Set Up Rig From Show"] (mapv :description (get-in s [:history :undo-stack]))) "one undo step")
+    (is (false? (get-in s [:project :dirty?])) "the rig's: not an unsaved change")
+    (is (some? (:rig/write effects)) "the rig file follows")
+    (let [undone (:state (pipeline s {:event/type :history/undo}))]
+      (is (= (:projectors asked) (:projectors undone)) "Undo takes it all back")))
+  (testing "called bare, or with the question gone: nothing"
+    (let [s (rig-state)]
+      (is (identical? s (handle s {:event/type :rig/set-up-from-show}))))))
+
+(deftest set-up-asks-before-widening-a-live-laser-test
+  (let [;; Laser A turned on and streaming since the question came up, with a small zone
+        live (-> (asking-to-set-up (assoc-in show-hardware [:projectors :a :safety] {:limit [-1.0 -1.0 1.0 1.0] :blocked []}))
+                 (assoc-in [:projectors :a :enabled?] true)
+                 (assoc-in [:projectors :a :safety] {:limit [-0.5 -0.5 0.5 0.5] :blocked []})
+                 (assoc-in [:backend :streaming :running?] true))
+        asked (handle live {:event/type :rig/set-up-from-show})]
+    (is (= (:projectors live) (:projectors asked)) "nothing changes yet")
+    (is (= "Allow light in a larger area?" (get-in asked [:ui :dialogs :confirm :title])))
+    (is (= {:event/type :rig/set-up-from-show :confirmed? true} (get-in asked [:ui :dialogs :confirm :confirm-event])))
+    (is (= [-1.0 -1.0 1.0 1.0] (get-in (handle asked {:event/type :rig/set-up-from-show :confirmed? true})
+                                       [:projectors :a :safety :limit]))
+        "confirmed, it applies")))

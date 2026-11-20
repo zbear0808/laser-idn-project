@@ -31,6 +31,7 @@
    [laser-show.views.dialogs.zone-group-editor :as zone-group-editor]
    [laser-show.views.dialogs.cell-trigger-editor :as cell-trigger-editor]
    [laser-show.views.dialogs.unsaved-confirm :as unsaved-confirm]
+   [laser-show.views.dialogs.rig-report :as rig-report]
    [laser-show.views.dialogs.confirm :as confirm]
    [laser-show.views.status-bar :as status-bar]
    [laser-show.views.tabs.effects :as effects-tab]
@@ -185,6 +186,7 @@
         zone-group-editor-open? (fx/sub-ctx context subs/dialog-open? :zone-group-editor)
         trigger-editor-open? (fx/sub-ctx context subs/dialog-open? :trigger-editor)
         unsaved-confirm-open? (fx/sub-ctx context subs/dialog-open? :unsaved-confirm)
+        rig-report-open? (fx/sub-ctx context subs/dialog-open? :rig-report)
         confirm-open? (fx/sub-ctx context subs/dialog-open? :confirm)]
     {:fx/type fx/ext-set-env
      :env {::layout-config layout-config}  ; For any components that need spacing/fonts
@@ -242,7 +244,11 @@
                     (when unsaved-confirm-open?
                       {:fx/type unsaved-confirm/unsaved-confirm-dialog
                        :fx/key :unsaved-confirm-dialog})
-                    ;; The setup screens' shared confirm dialog
+                    ;; A show's rig onto this one: the set-up question or the report
+                    (when rig-report-open?
+                      {:fx/type rig-report/rig-report-dialog
+                       :fx/key :rig-report-dialog})
+                    ;; The setup screens' shared confirm dialog, on top of the report
                     (when confirm-open?
                       {:fx/type confirm/confirm-dialog
                        :fx/key :confirm-dialog})])}}))

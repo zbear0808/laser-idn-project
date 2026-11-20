@@ -10,7 +10,9 @@
    (handlers/rig_autosave.clj)."
   (:require [laser-show.events.handlers.rig-autosave :as rig-autosave]
             [laser-show.events.helpers :as h]
-            [laser-show.routing.rig :as rig]))
+            [laser-show.events.safety-guard :as guard]
+            [laser-show.routing.rig :as rig]
+            [laser-show.state.rig-file :as rig-file]))
 
 (defn- order [state]
   (rig/effective-order (get-in state [:rig :order]) (:projectors state)))
@@ -132,6 +134,45 @@
     (h/show-notice state text (or level :warning))
     {:state state}))
 
+
+;; A show's rig onto this one (09 §6, §7): the set-up question
+
+(defn- opened-show
+  "What the last Open kept of the show's rig ([:ui :dialogs :rig-report]):
+   {:file :hardware :chains :pins (pin-map then) :mode :open?}."
+  [state]
+  (get-in state [:ui :dialogs :rig-report]))
+
+(defn- ask-if-it-grows
+  "{:state after}, unless after gives a laser that is outputting a larger
+   safety zone and event isn't :confirmed?: then Z1's question first, and
+   nothing changes (D-28)."
+  [state after {:keys [confirmed?] :as event}]
+  (let [grown (guard/growing state after)]
+    (cond
+      (or confirmed? (empty? grown)) {:state after}
+      (guard/asking? state) {:state state}
+      :else {:state (guard/ask state {:message (str (guard/names-text (map #(guard/projector-name state %) grown))
+                                                    (if (= 1 (count grown)) " is" " are")
+                                                    " on. The show's safety zone lets light reach places it couldn't before.")
+                                      :event event})})))
+
+(defn- handle-set-up-from-show
+  "Set up rig: the lasers the show was made with become this rig
+   (rig-file/set-up-from-show), in one undo step, and the question closes;
+   from then on, what doesn't fit is the report's. A laser turned on since
+   the question came up whose area this would grow asks first. Nothing
+   without a show's lasers to set up."
+  [{:keys [state] :as event}]
+  (let [{:keys [hardware chains pins]} (opened-show state)]
+    (if-not (rig-file/set-up-question state hardware)
+      {:state state}
+      (ask-if-it-grows state
+                       (-> (rig-file/set-up-from-show state hardware chains pins)
+                           (update-in [:ui :dialogs :rig-report] assoc
+                                      :open? false :mode :report :pins (rig-file/pin-map state hardware)))
+                       event))))
+
 (defn handle
   "Dispatch :rig/* events."
   [{:keys [event/type] :as event}]
@@ -147,4 +188,6 @@
     :rig/write-failed (handle-write-failed event)
     :rig/retry-write (handle-retry-write event)
     :rig/startup-notice (handle-startup-notice event)
+    ;; A show's rig onto this one
+    :rig/set-up-from-show (handle-set-up-from-show event)
     {}))
