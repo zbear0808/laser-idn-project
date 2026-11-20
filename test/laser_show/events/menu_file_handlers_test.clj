@@ -173,8 +173,9 @@
       (is (= {[3 3] {:items [{:type :preset :preset-id :star}]}}
              (get-in new-state [:chains :cue-chains])))
       (is (= {} (get-in new-state [:chains :effect-chains])))
-      (is (= {} (:projectors new-state)))
       (is (= #{:all} (set (keys (:zone-groups new-state))))))
+    (testing "the projectors stay this machine's rig's (D-30): the show had none"
+      (is (identical? (:projectors current) (:projectors new-state))))
     (testing "session state pointing at the old document is reset"
       (is (= {} (get-in new-state [:playback :active-cues])))
       (is (nil? (get-in new-state [:grid :selected-cell])))
@@ -184,13 +185,11 @@
       (is (false? (get-in new-state [:project :dirty?]))))
     (testing "runtime/backend state is kept"
       (assert-runtime-kept new-state))
-    (testing "while streaming, the new projectors are synced (through the pipeline)"
-      (is (= (:projectors new-state)
-             (get-in (events/handle-event-pipeline {:event/type :file/project-loaded
-                                                    :file-path test-file
-                                                    :contents (zip-contents-of loaded-doc)
-                                                    :state current})
-                     [:multi-engine/refresh :projectors]))))))
+    (testing "while streaming, the engines go on as they were (through the pipeline)"
+      (is (nil? (:multi-engine/refresh (events/handle-event-pipeline {:event/type :file/project-loaded
+                                                                       :file-path test-file
+                                                                       :contents (zip-contents-of loaded-doc)
+                                                                       :state current})))))))
 
 (deftest project-loaded-fills-missing-config-defaults-test
   (let [contents {"project-metadata.edn" {:config {:cue {:trigger-mode :toggle}}}}
@@ -249,22 +248,22 @@
         new-state (:state result)]
     (testing "document is fresh, with starter cues"
       (is (= 120.0 (get-in new-state [:timing :bpm])))
-      (is (= {} (:projectors new-state)))
       (is (= [[0 3]] (keys (get-in new-state [:chains :effect-chains]))) "and the Master, the only effect cell")
       (is (= "Master" (get-in new-state [:chains :effect-chains [0 3] :name])))
       (is (seq (get-in new-state [:chains :cue-chains])))
       (is (not= (get-in current [:chains :cue-chains [0 0]])
                 (get-in new-state [:chains :cue-chains [0 0]]))))
+    (testing "the rig stays: the projectors are as they were"
+      (is (identical? (:projectors current) (:projectors new-state))))
     (testing "project and session are reset"
       (is (nil? (get-in new-state [:project :current-file])))
       (is (false? (get-in new-state [:project :dirty?])))
       (is (= {} (get-in new-state [:playback :active-cues]))))
     (testing "runtime/backend state is kept"
       (assert-runtime-kept new-state))
-    (testing "while streaming, the engines are synced to no projectors (through the pipeline)"
-      (is (= {} (get-in (events/handle-event-pipeline {:event/type :file/new-project
-                                                        :force? true :state current})
-                        [:multi-engine/refresh :projectors]))))))
+    (testing "while streaming, the engines go on as they were (through the pipeline)"
+      (is (nil? (:multi-engine/refresh (events/handle-event-pipeline {:event/type :file/new-project
+                                                                       :force? true :state current})))))))
 
 (deftest new-and-open-take-the-notice-away-test
   (let [noticed (assoc-in document-state [:ui :notice]
@@ -272,28 +271,12 @@
     (testing "File > New: the notice was about the project that went"
       (is (nil? (get-in (menu/handle {:event/type :file/new-project :force? true :state noticed})
                         [:state :ui :notice]))))
-    (testing "File > Open: the old notice goes, and the new one says where the safety zones come from"
-      (is (= "Safety zones and calibration come from menu-file-handlers-test.zip"
-             (get-in (menu/handle {:event/type :file/project-loaded
-                                   :file-path test-file
-                                   :contents (zip-contents-of document-state)
-                                   :state noticed})
-                     [:state :ui :notice :text]))))))
-
-(deftest open-says-where-safety-comes-from-test
-  (let [open (fn [before show]
-               (menu/handle {:event/type :file/project-loaded :file-path "shows/friday.zip"
-                             :contents (zip-contents-of show) :state before}))
-        no-projectors (assoc document-state :projectors {})]
-    (testing "the show has projectors"
-      (let [result (open no-projectors document-state)]
-        (is (= "Safety zones and calibration come from friday.zip" (get-in result [:state :ui :notice :text])))
-        (is (= :info (get-in result [:state :ui :notice :level])))
-        (is (= :ui/clear-notice (get-in result [:dispatch-later :event :event/type])) "it goes after a while")))
-    (testing "only this machine had projectors: they were replaced too"
-      (is (some? (get-in (open document-state no-projectors) [:state :ui :notice]))))
-    (testing "neither has a projector: no notice"
-      (is (nil? (get-in (open no-projectors no-projectors) [:state :ui :notice]))))))
+    (testing "File > Open: the same, and no notice about safety zones: Open never touches them (D-30)"
+      (is (nil? (get-in (menu/handle {:event/type :file/project-loaded
+                                      :file-path test-file
+                                      :contents (zip-contents-of document-state)
+                                      :state noticed})
+                        [:state :ui :notice]))))))
 
 
 ;; Unsaved-changes guard (New / Open / Exit ask first when the project is dirty)
@@ -338,11 +321,12 @@
   (testing "same effect maps as before the guard existed"
     (let [new-result (menu/handle {:event/type :file/new-project :state clean-document-state})]
       (is (= 120.0 (get-in new-result [:state :timing :bpm])))
-      (is (= #{:state} (set (keys new-result))) "the output sync comes from the pipeline"))
-    (is (some? (:multi-engine/refresh
-                (events/handle-event-pipeline
-                 {:event/type :file/new-project
-                  :state (assoc-in clean-document-state [:backend :streaming :running?] true)}))))
+      (is (= #{:state} (set (keys new-result))) "nothing but the new show"))
+    (is (nil? (:multi-engine/refresh
+               (events/handle-event-pipeline
+                {:event/type :file/new-project
+                 :state (assoc-in clean-document-state [:backend :streaming :running?] true)})))
+        "New keeps the rig, so the engines go on")
     (is (contains? (menu/handle {:event/type :file/open :state clean-document-state})
                    :fx/show-file-chooser))
     (is (= {:system/exit true}

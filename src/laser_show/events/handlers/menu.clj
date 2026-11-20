@@ -91,16 +91,12 @@
   (or (some-> file-path java.io.File. .getName) "the project"))
 
 (defn- handle-file-project-loaded
-  "Replace the document with the loaded project contents. Until the rig gets
-   its own file (zones plan ZR), the show's projectors, with their safety
-   zones and calibration, replace this machine's, so a notice says so (D-34),
-   unless neither had a projector."
+  "Replace the show with the loaded project contents. This machine's rig,
+   its safety zones and calibration with it, stays as it is (D-30): the
+   show's copy of a rig is only read, to match the show onto this one."
   [{:keys [state file-path contents]}]
   (log/info "Project loaded:" file-path)
-  (let [loaded (persistent/apply-loaded-project state contents file-path)]
-    (if (or (seq (:projectors state)) (seq (:projectors loaded)))
-      (h/show-notice loaded (str "Safety zones and calibration come from " (file-name file-path)) :info)
-      {:state loaded})))
+  {:state (persistent/apply-loaded-project state contents file-path)})
 
 (defn- handle-file-project-load-failed
   "The project couldn't be read: the document stays, and a notice says so."

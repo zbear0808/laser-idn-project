@@ -2,7 +2,10 @@
   "Persistence layer for application state.
    
    This namespace is responsible for:
-   - Defining WHICH state is persistent (the mapping lives here)
+   - Defining WHICH state is persistent (the mapping lives here), and which
+     of it is the show's and which this machine's rig's (:owner): Open and
+     New replace the show only, and the rig has a file of its own
+     (state.rig-file, state.rig-store), the zip keeping a copy of it
    - Loading persistent state from disk on app startup
    - Saving persistent state to disk on user request
    
@@ -14,6 +17,7 @@
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
             [laser-show.state.migration :as migration]
+            [laser-show.state.rig-file :as rig-file]
             [laser-show.state.serialization :as ser]
             [laser-show.state.templates :as templates]
             [laser-show.timeline.model :as model]))
@@ -206,28 +210,39 @@
           zip-filenames))
 
 (defn apply-loaded-project
-  "Return state with the document replaced by the loaded zip contents.
+  "Return state with the show replaced by the loaded zip contents. This
+   machine's rig (projectors, virtual projectors, [:rig], calibration) stays
+   as it is (D-30): the zip's copy of it is only read, to match the show onto
+   this rig. The show's pins follow their units to this rig's ids
+   (rig-file/rename-pins).
    
    zip-contents is the {filename data} map from serialization/load-from-zip.
-   An old show is converted (state.migration) before the saved baseline is
-   taken, so it isn't \"unsaved\" right after loading."
+   An old show is converted (state.migration, its groups judged by its own
+   hardware) before the saved baseline is taken, so it isn't \"unsaved\"
+   right after loading."
   [state zip-contents zip-path]
-  (let [initial (domains/build-initial-state)]
+  (let [initial (domains/build-initial-state)
+        hardware (get zip-contents (:hardware zip-filenames))]
     (-> state
-        (replace-document initial (zip-contents->file-data zip-contents) #{:show :rig})
+        (replace-document initial (zip-contents->file-data zip-contents) #{:show})
         (reset-session initial)
         ;; Before mark-clean, so an old project isn't "unsaved" right after loading
         (update-in [:chains :cue-chains] model/normalize-timeline-cues)
-        (migration/zones-z2 (get zip-contents (:hardware zip-filenames)))
+        (migration/zones-z2-show hardware)
+        (rig-file/rename-pins hardware)
         history/mark-clean
         (assoc-in [:project :current-file] zip-path))))
 
 (defn new-project-state
-  "Return state with a fresh starter document. Runtime/backend state is kept."
+  "Return state with a fresh starter show on the same rig: the rig stays as
+   it is, and the groups its lasers are in come into the new show
+   (rig-file/group-copy). Runtime/backend state is kept."
   [state]
-  (let [initial (domains/build-initial-state)]
+  (let [initial (domains/build-initial-state)
+        rig-groups (rig-file/group-copy state)]
     (-> state
-        (replace-document initial {} #{:show :rig})
+        (replace-document initial {} #{:show})
+        (update :zone-groups merge rig-groups)
         (templates/apply-starter-cue-chains)
         (templates/apply-starter-vibes)
         (templates/apply-starter-effects)

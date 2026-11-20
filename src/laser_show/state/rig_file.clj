@@ -7,7 +7,8 @@
    The rig file holds the rig paths (rig-paths) and a copy of the groups the
    rig's lasers are in (group-copy), so New Project can bring them along and
    a show that doesn't define them can be told so."
-  (:require [laser-show.routing.rig :as rig]
+  (:require [laser-show.routing.refs :as refs]
+            [laser-show.routing.rig :as rig]
             [laser-show.state.domains :as domains]))
 
 
@@ -70,6 +71,41 @@
    (or (some #(differs? (get-in old %) (get-in new %)) rig-paths)
        (and (not (identical? (:zone-groups old) (:zone-groups new)))
             (not= (group-copy old) (group-copy new))))))
+
+;; Matching a show's lasers onto this rig
+
+(defn pin-map
+  "{show-id rig-id} for each projector in a show's hardware (its
+   hardware.edn): the id of the projector here with the same stable id (a
+   show from before Z2 is known by its :unit-id, as a scan knows it,
+   rig/settled-ids). One whose unit isn't here keeps its id while no
+   projector here has it, else gets a free one, so its pins reach nothing
+   here rather than another laser."
+  [state hardware]
+  (let [show (or (:projectors hardware) {})
+        here (or (:projectors state) {})
+        here-by-sid (into {} (map (fn [[id sid]] [sid id])) (rig/settled-ids here))
+        matched (into {} (keep (fn [[id sid]] (when-let [r (get here-by-sid sid)] [id r]))) (rig/settled-ids show))]
+    (reduce (fn [m [id p]]
+              (cond
+                (contains? m id) m
+                (not (contains? here id)) (assoc m id id)
+                :else (assoc m id (rig/unique-projector-id (into (set (keys here)) (concat (keys show) (vals m)))
+                                                           (:host p) (:service-id p)))))
+            matched
+            (sort-by (comp str key) show))))
+
+(defn rename-pins
+  "state with every pin to one of a show's lasers (:auto.laser/<show id>)
+   naming that laser's id here (pin-map), wherever it is stored
+   (routing.refs: cues, items, tracks, clips, Zone Selectors, the preview's
+   cells), so a show's pins follow the units, not the addresses (S-ZR-5).
+   hardware is the show's hardware.edn. state comes back identical? when
+   nothing is renamed."
+  [state hardware]
+  (refs/replace-refs state (into {}
+                                 (keep (fn [[s r]] (when (not= s r) [(rig/laser-ref s) (rig/laser-ref r)])))
+                                 (pin-map state hardware))))
 
 (defn- map-or-nil? [v]
   (or (nil? v) (map? v)))

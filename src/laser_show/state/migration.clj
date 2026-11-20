@@ -5,9 +5,11 @@
    a converted show isn't unsaved.
 
    Z2's rows run when the loaded hardware.edn has no :rig (every file Z2
-   saves has one). They are two functions, so the rig file (ZR) can run them
-   apart: rig-rows (the projectors) and show-rows (the groups). Z4 adds its
-   rows here."
+   saves has one). They are two functions, so the rig file (ZR) runs them
+   apart: show-rows (the groups) on every Open of an old show, judged by
+   its own hardware, and rig-rows (the projectors) only on a show's
+   hardware, before its lasers are set up or imported (zones-z2-show,
+   zones-z2-rig). Z4 adds its rows here."
   (:require [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]))
 
@@ -73,12 +75,36 @@
               (contains? (:zone-groups state) :all) (update :zone-groups dissoc :all))
             built-ins)))
 
+(defn old-hardware?
+  "Is hardware (a hardware.edn) from before Z2: no :rig (every file Z2 saves
+   has one)?"
+  [hardware]
+  (not (contains? hardware :rig)))
+
 (defn zones-z2
   "Z2's rows (04 §4), when hardware (the loaded hardware.edn) has no :rig:
    show-rows, then rig-rows over state's projectors and virtual projectors.
-   state comes back identical when the file has a :rig."
+   state comes back identical when the file has a :rig. From ZR on a show's
+   load runs only the show half (zones-z2-show): the rig isn't the show's."
   [state hardware]
   (if (contains? hardware :rig)
     state
     (merge (show-rows state hardware)
            (rig-rows (select-keys state [:projectors :virtual-projectors])))))
+
+(defn zones-z2-show
+  "Z2's show rows on a show just opened (zones plan ZR), when its hardware
+   is from before Z2: the built-in groups judged by the show's own hardware
+   (09 S-ZR-7), not by this rig's."
+  [state hardware]
+  (if (old-hardware? hardware)
+    (show-rows state hardware)
+    state))
+
+(defn zones-z2-rig
+  "Z2's rig rows on a show's own hardware (zones plan ZR), when it is from
+   before Z2: just before its lasers are set up on this rig or imported."
+  [hardware]
+  (if (old-hardware? hardware)
+    (rig-rows hardware)
+    hardware))

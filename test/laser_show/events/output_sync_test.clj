@@ -6,7 +6,8 @@
             [laser-show.events.core :as events]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
-            [laser-show.state.history :as history]))
+            [laser-show.state.history :as history]
+            [laser-show.state.persistent :as persistent]))
 
 (def pipeline events/handle-event-pipeline)
 
@@ -49,14 +50,25 @@
                          ["enable all by IP" {:event/type :projectors/enable-all-by-ip
                                               :address "10.0.0.2"}]
                          ["add manual" {:event/type :projectors/add-manual
-                                        :name "C" :host "10.0.0.3" :port 7255}]
-                         ["new project" {:event/type :file/new-project :force? true}]]]
+                                        :name "C" :host "10.0.0.3" :port 7255}]]]
     (testing label
       (let [effects (run (streaming-state) event)]
         (is (= (:projectors (:state effects)) (:projectors (refresh effects)))
             "the sync carries the new projector snapshot")))
     (testing (str label ", not streaming")
       (is (nil? (refresh (run (streaming-state false) event)))))))
+
+(deftest open-keeps-the-engines-test
+  (let [other-show (persistent/project-files (-> (domains/build-initial-state)
+                                                 (assoc :projectors {:z {:name "Z" :host "10.9.9.9" :enabled? true}})
+                                                 (assoc-in [:timing :bpm] 90.0)))]
+    (doseq [[label event] [["File > New" {:event/type :file/new-project :force? true}]
+                           ["File > Open" {:event/type :file/project-loaded :file-path "/tmp/other.zip" :contents other-show}]]]
+      (testing label
+        (let [s (streaming-state)
+              effects (run s event)]
+          (is (identical? (:projectors s) (get-in effects [:state :projectors])) "the rig stays (D-30)")
+          (is (nil? (refresh effects)) "so no engine restarts while streaming"))))))
 
 (deftest service-enabled-uses-the-deterministic-id-test
   (let [s (assoc-in (streaming-state) [:projectors :projector-10-0-0-5-0]

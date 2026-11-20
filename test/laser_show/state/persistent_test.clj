@@ -8,6 +8,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
+            [laser-show.state.history :as history]
             [laser-show.state.persistent :as persistent]
             [laser-show.state.serialization :as ser]
             [laser-show.state.templates :as templates]
@@ -148,7 +149,7 @@
         (is (= 1 (count (get-in data [:chains :effect-chains [0 0] :items]))))))))
 
 (deftest test-load-project
-  (testing "Load project restores all data from zip"
+  (testing "Load project restores the show from zip; this machine's rig stays as it is"
     (init-test-state!)
     (persistent/save-project! test-project-file)
     
@@ -180,15 +181,17 @@
         (is (= 1 (count effect-chain)))
         (is (= :test-effect (get-in effect-chain [0 :effect-id])))))
     
-    (testing "Projectors are restored with zone groups"
-      ;; After flattening: :projectors IS the map directly (no :items wrapper)
-      (let [projector (state/get-in-state [:projectors :test-proj])]
+    (testing "Projectors are the rig's, not the show's: this machine had none"
+      (is (= {} (state/get-in-state [:projectors]))))
+
+    (testing "the zip still holds the projectors, as a copy"
+      (let [projector (get-in (ser/load-from-zip test-project-file) ["hardware.edn" :projectors :test-proj])]
         (is (= "Test Projector" (:name projector)))
         (is (= "192.168.1.100" (:host projector)))
         (is (= [] (:zone-groups projector)))))))
 
 (deftest test-round-trip
-  (testing "Save and load preserves all data with zip format"
+  (testing "Save and load preserves the show with zip format, and leaves the rig"
     (init-test-state!)
     
     ;; Capture original state
@@ -207,27 +210,26 @@
       (is (= original-bpm (state/get-in-state [:timing :bpm])))
       (is (= original-cues (state/get-in-state [:chains :cue-chains [0 0] :items])))
       (is (= original-effects (state/get-in-state [:chains :effect-chains [0 0] :items])))
-      (is (= original-projector (state/get-in-state [:projectors :test-proj]))))))
+      (is (nil? (state/get-in-state [:projectors :test-proj])) "the rig the load found: none")
+      (is (= original-projector (get-in (ser/load-from-zip test-project-file) ["hardware.edn" :projectors :test-proj]))
+          "and the zip's copy of the projector, as it was"))))
 
 (deftest rig-is-saved-with-the-hardware-test
   (let [rig {:order [:p2 :p1] :middle :both :split-width 0.6}
-        defaults {:order [] :middle :split :split-width 0.75}
+        here {:order [:p9] :middle :none :split-width 0.9}
         saved (assoc (domains/build-initial-state) :rig rig)
         files (persistent/project-files saved)]
     (is (= rig (get-in files ["hardware.edn" :rig])) "in hardware.edn, beside the projectors")
     (is (persistent/write-project! test-project-file files))
-    (let [loaded (persistent/apply-loaded-project (domains/build-initial-state)
-                                                  (persistent/read-project test-project-file)
-                                                  test-project-file)]
-      (is (= rig (:rig loaded)))
-      (is (false? (get-in loaded [:project :dirty?]))))
-    (testing "a file from before the rig gets the defaults"
-      (is (= defaults (:rig (persistent/apply-loaded-project saved (update files "hardware.edn" dissoc :rig) "old.zip")))))
-    (testing "a key the file doesn't have gets its default"
-      (is (= (assoc defaults :order [:p1])
-             (:rig (persistent/apply-loaded-project saved (assoc-in files ["hardware.edn" :rig] {:order [:p1]}) "x.zip")))))
-    (testing "File > New starts with the defaults"
-      (is (= defaults (:rig (persistent/new-project-state saved)))))))
+    (testing "Open leaves this machine's rig as it is: the zip's is only a copy"
+      (let [on-another-rig (history/mark-clean (assoc (domains/build-initial-state) :rig here))
+            loaded (persistent/apply-loaded-project on-another-rig
+                                                    (persistent/read-project test-project-file)
+                                                    test-project-file)]
+        (is (identical? (:rig on-another-rig) (:rig loaded)))
+        (is (false? (get-in loaded [:project :dirty?])))))
+    (testing "File > New keeps the rig"
+      (is (identical? (:rig saved) (:rig (persistent/new-project-state saved)))))))
 
 (deftest old-show-loads-clean-test
   (let [old-groups {:all {:id :all :name "All" :color "#808080"} :left {:id :left :name "Left" :color "#4A90D9"}
@@ -243,10 +245,9 @@
                   (assoc-in ["project-metadata.edn" :config :preview :grid-cells]
                             [{:zone-group-id nil} {:zone-group-id :left} {:zone-group-id :right} {:zone-group-id :center}]))
         loaded (persistent/apply-loaded-project (domains/build-initial-state) files "old.zip")]
-    (is (= {:zone-groups [:left] :exclude-from-all? false :stable-id [:unit "0A 1B" 1]}
-           (select-keys (get-in loaded [:projectors :p]) [:zone-groups :exclude-from-all? :stable-id])))
+    (is (= {} (:projectors loaded)) "the show's projectors are a copy: this rig's stay (none here)")
     (is (= #{:left :graphics :crowd} (set (keys (:zone-groups loaded)))) "All is built in; the empty Right and Center went")
-    (is (= "Left (manual)" (get-in loaded [:zone-groups :left :name])))
+    (is (= "Left (manual)" (get-in loaded [:zone-groups :left :name])) "the show's own hardware lists Left")
     (is (= :auto/center (get-in loaded [:chains :cue-chains [0 0] :items 0 :zone-group-id])))
     (is (= [nil :left :auto/right :auto/center] (mapv :zone-group-id (get-in loaded [:config :preview :grid-cells]))))
     (is (false? (get-in loaded [:project :dirty?])) "converted before the baseline: not an unsaved change")
@@ -402,7 +403,126 @@
                            (assoc-in [:projectors :p] {:name "Laser L" :host "10.0.0.5" :zone-groups [:all]
                                                        :safety zone})))
     (persistent/save-project! test-project-file)
-    (state/reset-state! (domains/build-initial-state))
+    (is (= zone (get-in (ser/load-from-zip test-project-file) ["hardware.edn" :projectors :p :safety]))
+        "Save writes the zone into the zip's copy of the rig")
+    (state/swap-state! assoc-in [:projectors :p :safety] {:limit [-0.5 -0.5 0.5 0.5] :blocked []})
     (persistent/load-project! test-project-file)
-    (is (= zone (state/get-in-state [:projectors :p :safety])) "Save, then Open, gives the same zone")))
+    (is (= {:limit [-0.5 -0.5 0.5 0.5] :blocked []} (state/get-in-state [:projectors :p :safety]))
+        "and Open never puts it back over this machine's (D-30)")))
+
+
+;; The rig in its own file (zones plan ZR): Open and New are the show's
+
+(def ^:private unit-l "0A 1B 2C 3D 4E 5F 60 71 82 93 A4 B5 C6 D7 E8 F9")
+
+(defn- on-a-rig
+  "A saved show on this machine's rig: Laser L (unit L, at .57 here) in
+   Beams, a virtual projector, an order and Laser L's calibration."
+  []
+  (-> (with-starter-vibes)
+      (assoc :projectors {:projector-10-0-0-57-1 {:name "Laser L" :host "10.0.0.57" :port 7255 :service-id 1
+                                                  :unit-id unit-l :stable-id [:unit unit-l 1] :enabled? true
+                                                  :zone-groups [:group-beams] :exclude-from-all? false
+                                                  :safety {:limit [-0.5 -0.5 0.5 0.5] :blocked []}}})
+      (assoc :virtual-projectors {:vp-1 {:name "VP" :parent-projector-id :projector-10-0-0-57-1 :zone-groups []}})
+      (assoc :rig {:order [:projector-10-0-0-57-1] :middle :both :split-width 0.6})
+      (assoc-in [:chains :projector-effects :projector-10-0-0-57-1] {:items [{:effect-id :rgb-curves :id #uuid "11111111-1111-1111-1111-111111111111"}]})
+      (assoc-in [:zone-groups :group-beams] {:id :group-beams :name "Beams" :color "#123456"})
+      (history/mark-clean)))
+
+(defn- friday
+  "friday.zip, made on another rig: Laser L is the same unit, at .5 there,
+   with its own safety zone, calibration and order."
+  []
+  (-> (domains/build-initial-state)
+      (assoc :projectors {:projector-10-0-0-5-1 {:name "Laser L (Friday)" :host "10.0.0.5" :port 7255 :service-id 1
+                                                 :unit-id unit-l :stable-id [:unit unit-l 1] :enabled? true
+                                                 :zone-groups [] :exclude-from-all? false
+                                                 :safety {:limit [-1.0 -1.0 1.0 1.0] :blocked []}}
+                          :projector-10-0-0-9-1 {:name "SR Beam" :host "10.0.0.9" :port 7255 :service-id 1
+                                                 :stable-id [:host "10.0.0.9" 1] :enabled? true :zone-groups []}})
+      (assoc :rig {:order [:projector-10-0-0-9-1 :projector-10-0-0-5-1] :middle :none :split-width 0.9})
+      (assoc-in [:chains :projector-effects :projector-10-0-0-5-1] {:items [{:effect-id :corner-pin :id #uuid "22222222-2222-2222-2222-222222222222"}]})
+      (assoc-in [:chains :cue-chains [0 0]] {:items [{:type :preset :preset-id :circle}]
+                                             :destination-zone {:zone-group-id :auto.laser/projector-10-0-0-5-1}})
+      (assoc-in [:timing :bpm] 128.0)
+      (persistent/project-files)))
+
+(def ^:private rig-paths [[:projectors] [:virtual-projectors] [:rig] [:chains :projector-effects]])
+
+(deftest open-keeps-the-rig-test
+  (let [here (on-a-rig)
+        loaded (persistent/apply-loaded-project here (friday) "shows/friday.zip")]
+    (doseq [path rig-paths]
+      (is (identical? (get-in here path) (get-in loaded path)) (str path " is this machine's, as it was")))
+    (is (= 128.0 (get-in loaded [:timing :bpm])) "the show is friday's")
+    (is (= :auto.laser/projector-10-0-0-57-1 (get-in loaded [:chains :cue-chains [0 0] :destination-zone :zone-group-id]))
+        "its cue pinned to Laser L follows the unit to its id here")
+    (is (false? (get-in loaded [:project :dirty?])) "renamed before the baseline: not unsaved")))
+
+(deftest open-never-changes-safety-or-calibration-test
+  (let [here (on-a-rig)
+        loaded (persistent/apply-loaded-project here (friday) "shows/friday.zip")]
+    (is (= {:limit [-0.5 -0.5 0.5 0.5] :blocked []} (get-in loaded [:projectors :projector-10-0-0-57-1 :safety]))
+        "the show's full-area zone for the same unit never comes in")
+    (is (= [:rgb-curves] (mapv :effect-id (get-in loaded [:chains :projector-effects :projector-10-0-0-57-1 :items])))
+        "nor its calibration")
+    (is (not (contains? (:projectors loaded) :projector-10-0-0-9-1)) "nor a laser this rig doesn't have")))
+
+(deftest new-project-keeps-the-rig-test
+  (let [here (assoc-in (on-a-rig) [:chains :cue-chains [3 3]] {:items [{:type :preset :preset-id :star}]})
+        fresh (persistent/new-project-state here)]
+    (doseq [path rig-paths]
+      (is (identical? (get-in here path) (get-in fresh path)) (str path ": the same, so no engine restarts (invariant 2)")))
+    (is (nil? (get-in fresh [:chains :cue-chains [3 3]])) "the show is new")
+    (is (= [[0 3]] (keys (get-in fresh [:chains :effect-chains]))) "with the Master")
+    (is (= {} (get-in fresh [:config :input :trigger-map])) "and nothing learned yet (S-ZR-3)")
+    (is (false? (get-in fresh [:project :dirty?])))))
+
+(deftest new-project-brings-the-rigs-groups-test
+  (let [here (on-a-rig)
+        fresh (persistent/new-project-state here)]
+    (is (= {:id :group-beams :name "Beams" :color "#123456"} (get-in fresh [:zone-groups :group-beams]))
+        "Laser L is in Beams: the group comes into the new show")
+    (is (= #{:graphics :crowd :group-beams} (set (keys (:zone-groups fresh)))) "beside the default groups")
+    (testing "a group no laser is in stays behind"
+      (is (not (contains? (:zone-groups (persistent/new-project-state (assoc-in here [:zone-groups :group-old] {:id :group-old :name "Old"})))
+                          :group-old))))
+    (testing "one the open show doesn't define comes from the rig's copy"
+      (let [elsewhere (-> here
+                          (update :zone-groups dissoc :group-beams)
+                          (assoc-in [:rig-file :group-copy :group-beams] {:id :group-beams :name "Beams (copy)" :color "#123456"}))]
+        (is (= "Beams (copy)" (get-in (persistent/new-project-state elsewhere) [:zone-groups :group-beams :name])))))
+    (testing "a rig group named like a default wins over it"
+      (let [renamed (-> here
+                        (assoc-in [:projectors :projector-10-0-0-57-1 :zone-groups] [:graphics])
+                        (assoc-in [:zone-groups :graphics :name] "Gfx"))]
+        (is (= "Gfx" (get-in (persistent/new-project-state renamed) [:zone-groups :graphics :name])))))))
+
+(deftest save-still-writes-the-rig-copy-test
+  (let [here (on-a-rig)
+        files (persistent/project-files here)]
+    (is (= (:projectors here) (get-in files ["hardware.edn" :projectors])) "an older build opens it with its setup (Q-ZR-2)")
+    (is (= (:virtual-projectors here) (get-in files ["hardware.edn" :virtual-projectors])))
+    (is (= (:rig here) (get-in files ["hardware.edn" :rig])))
+    (is (= (get-in here [:chains :projector-effects]) (get-in files ["content.edn" :chains :projector-effects])))))
+
+(deftest old-built-ins-are-judged-by-the-shows-own-hardware-test
+  (let [old-show (fn [listing]
+                   (-> (persistent/project-files (domains/build-initial-state))
+                       (update "hardware.edn" dissoc :rig)
+                       (assoc-in ["hardware.edn" :zone-groups] {:left {:id :left :name "Left" :color "#4A90D9"}
+                                                                :right {:id :right :name "Right" :color "#D94A4A"}})
+                       (assoc-in ["hardware.edn" :projectors] {:p {:name "L" :host "10.0.0.5" :zone-groups listing}})
+                       (assoc-in ["content.edn" :chains :cue-chains] {[0 0] {:items [] :destination-zone {:zone-group-id :left}}
+                                                                      [1 0] {:items [] :destination-zone {:zone-group-id :right}}})))
+        ;; This rig's laser is in a Right of its own, from an earlier show
+        here (-> (on-a-rig)
+                 (assoc-in [:projectors :projector-10-0-0-57-1 :zone-groups] [:right]))
+        loaded (persistent/apply-loaded-project here (old-show [:all :left]) "old.zip")]
+    (is (= "Left (manual)" (get-in loaded [:zone-groups :left :name])) "its own laser was in Left, though no laser here is")
+    (is (= :left (get-in loaded [:chains :cue-chains [0 0] :destination-zone :zone-group-id])))
+    (is (not (contains? (:zone-groups loaded) :right)) "nothing of its own was in Right, though a laser here is (S-ZR-7)")
+    (is (= :auto/right (get-in loaded [:chains :cue-chains [1 0] :destination-zone :zone-group-id])))
+    (is (= [:right] (get-in loaded [:projectors :projector-10-0-0-57-1 :zone-groups])) "and the rig is left alone")))
 

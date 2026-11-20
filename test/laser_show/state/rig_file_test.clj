@@ -95,6 +95,67 @@
                           ["that group's colour" #(assoc-in % [:zone-groups :graphics :color] "#000000")]]]
       (is (true? (rig-file/rig-changed? s (edit s))) label))))
 
+(def ^:private unit-r "1F 2E 3D 4C 5B 6A 79 88 97 A6 B5 C4 D3 E2 F1 00")
+
+(defn- pinned
+  "A cue cell that plays on ref."
+  [ref]
+  {:items [{:id (str "i-" (name ref)) :type :preset :preset-id :circle}] :destination-zone {:zone-group-id ref}})
+
+(deftest rename-pins-by-stable-id-test
+  (let [;; This rig: unit L found at .57, unit R at .7, and another unit at .5
+        here (-> (domains/build-initial-state)
+                 (assoc :projectors {:projector-10-0-0-57-1 {:name "Laser L" :host "10.0.0.57" :service-id 1 :stable-id [:unit unit-l 1]}
+                                     :projector-10-0-0-7-1 {:name "Laser R" :host "10.0.0.7" :service-id 1 :stable-id [:unit unit-r 1]}
+                                     :projector-10-0-0-5-1 {:name "Someone else" :host "10.0.0.5" :service-id 1 :stable-id [:unit "99 99" 1]}})
+                 (assoc-in [:chains :cue-chains] {[0 0] (pinned :auto.laser/projector-10-0-0-5-1)
+                                                  [1 0] (pinned :auto.laser/projector-10-0-0-7-1)
+                                                  [2 0] (pinned :auto.laser/projector-10-0-0-9-1)
+                                                  [3 0] (pinned :auto.laser/projector-10-0-0-6-1)
+                                                  [4 0] (pinned :graphics)})
+                 (assoc-in [:chains :cue-chains [5 0]] {:items [{:id "i5" :type :preset :preset-id :wave
+                                                                 :zone-group-id :auto.laser/projector-10-0-0-5-1}]})
+                 (assoc-in [:config :preview :grid-cells 1 :zone-group-id] :auto.laser/projector-10-0-0-5-1))
+        ;; friday.zip's hardware: unit L at .5, unit R at .7, a host-only laser at .9, and one at .6 whose
+        ;; unit isn't here
+        hardware {:rig {:order []}
+                  :projectors {:projector-10-0-0-5-1 {:name "Laser L" :host "10.0.0.5" :service-id 1 :stable-id [:unit unit-l 1]}
+                               :projector-10-0-0-7-1 {:name "Laser R" :host "10.0.0.7" :service-id 1 :stable-id [:unit unit-r 1]}
+                               :projector-10-0-0-9-1 {:name "SR Beam" :host "10.0.0.9" :service-id 1 :stable-id [:host "10.0.0.9" 1]}
+                               :projector-10-0-0-6-1 {:name "Gone" :host "10.0.0.5" :service-id 2 :stable-id [:unit "77 77" 2]}}}
+        renamed (rig-file/rename-pins here hardware)
+        target (fn [s cell] (get-in s [:chains :cue-chains cell :destination-zone :zone-group-id]))]
+    (is (= :auto.laser/projector-10-0-0-57-1 (target renamed [0 0])) "Laser L's pin follows the unit to .57")
+    (is (= :auto.laser/projector-10-0-0-57-1 (get-in renamed [:chains :cue-chains [5 0] :items 0 :zone-group-id])) "an item's too")
+    (is (= :auto.laser/projector-10-0-0-57-1 (get-in renamed [:config :preview :grid-cells 1 :zone-group-id])) "and a preview cell")
+    (is (= :auto.laser/projector-10-0-0-7-1 (target renamed [1 0])) "Laser R has the same id here")
+    (is (= :auto.laser/projector-10-0-0-9-1 (target renamed [2 0])) "a laser that isn't here keeps its id, which reaches nothing")
+    (is (= :graphics (target renamed [4 0])) "groups are left alone")
+    (testing "a laser that isn't here, whose id is another laser's here, gets a free one: its pins never reach that laser"
+      (is (= {:projector-10-0-0-5-1 :projector-10-0-0-57-1
+              :projector-10-0-0-7-1 :projector-10-0-0-7-1
+              :projector-10-0-0-9-1 :projector-10-0-0-9-1
+              :projector-10-0-0-6-1 :projector-10-0-0-6-1}
+             (rig-file/pin-map here hardware)))
+      (let [collides (assoc-in hardware [:projectors :projector-10-0-0-5-1 :stable-id] [:unit "AB CD" 1])
+            renamed (rig-file/rename-pins here collides)]
+        (is (= :auto.laser/projector-10-0-0-5-1-2 (target renamed [0 0])))
+        (is (not (contains? (:projectors here) :projector-10-0-0-5-1-2)))))
+    (testing "two lasers whose ids are each other's here swap their pins"
+      (let [swapped (-> here
+                        (assoc-in [:projectors :projector-10-0-0-57-1 :stable-id] [:unit unit-r 1])
+                        (assoc-in [:projectors :projector-10-0-0-7-1 :stable-id] [:unit unit-l 1]))
+            renamed (rig-file/rename-pins swapped hardware)]
+        (is (= :auto.laser/projector-10-0-0-7-1 (target renamed [0 0])) "L's pin goes to where unit L is here")
+        (is (= :auto.laser/projector-10-0-0-57-1 (target renamed [1 0])) "and R's to where unit R is")))
+    (testing "a show from before Z2: its projectors are known by their :unit-id"
+      (let [old {:projectors {:projector-10-0-0-5-1 {:name "Laser L" :host "10.0.0.5" :service-id 1 :unit-id unit-l
+                                                     :zone-groups [:all]}}}]
+        (is (= :auto.laser/projector-10-0-0-57-1 (target (rig-file/rename-pins here old) [0 0])))))
+    (testing "nothing to rename: the same state"
+      (is (identical? here (rig-file/rename-pins here {:projectors {}})))
+      (is (identical? here (rig-file/rename-pins here nil))))))
+
 (deftest group-copy-keeps-groups-with-lasers-test
   (let [beams {:id :group-beams :name "Beams" :color "#123456"}
         state (-> (rigged)
