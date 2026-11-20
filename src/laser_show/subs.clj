@@ -756,6 +756,52 @@
   (into {} (map (juxt :id identity)) (fx/sub-ctx context target-groups)))
 
 
+;; Level 2: The rig strip (views/components/rig_strip.clj)
+
+
+(defn- found-outputs
+  "#{[host service-id]} of the outputs the last scan found (service 0 for a
+   device with none)."
+  [devices]
+  (into #{} (mapcat (fn [{:keys [address services]}]
+                      (if (seq services)
+                        (map (fn [s] [address (or (:service-id s) 0)]) services)
+                        [[address 0]])))
+        devices))
+
+(defn rig-cards
+  "One map per card of the rig strip, in rig order (routing.rig): {:id
+   :position (the laser's place in E, from 1; nil when it is off or excluded
+   from All) :name :host :service-id :host-label (\"10.0.0.7 #1\") :enabled?
+   :excluded? :tags :identity (rig/identity-label) :selected? :found? (false
+   once a scan this session didn't find it) :multi-output? (another output of
+   its device is a card too)}."
+  [context]
+  (let [projectors (fx/sub-val context :projectors)
+        inputs (rig/rig-inputs {:projectors projectors :rig (fx/sub-val context :rig)})
+        position (zipmap (rig/e-order inputs) (iterate inc 1))
+        selected (fx/sub-ctx context active-projector-id)
+        found (when (fx/sub-val context get-in [:rig-ui :scanned?])
+                (found-outputs (fx/sub-ctx context discovered-devices)))
+        hosts (frequencies (map :host (vals projectors)))]
+    (mapv (fn [id]
+            (let [{:keys [host service-id tags] :as p} (get projectors id)]
+              {:id id
+               :position (position id)
+               :name (rig/projector-name {:projectors projectors} id)
+               :host host
+               :service-id service-id
+               :host-label (if (and service-id (pos? service-id)) (str host " #" service-id) (str host))
+               :enabled? (rig/enabled? p)
+               :excluded? (true? (:exclude-from-all? p))
+               :tags (set tags)
+               :identity (rig/identity-label p)
+               :selected? (= id selected)
+               :found? (or (nil? found) (contains? found [host (or service-id 0)]))
+               :multi-output? (< 1 (get hosts host 0))}))
+          (:order inputs))))
+
+
 ;; Level 2: Input Device Subscriptions (MIDI, OSC)
 
 

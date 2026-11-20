@@ -688,6 +688,37 @@
   (testing "the pickers' All is the built-in one, listed once"
     (is (= [:all] (mapv :id (take 1 (fx/sub-ctx (context base-state) subs/target-groups)))))))
 
+(deftest rig-cards-test
+  (let [s (-> base-state
+              (assoc :projectors {:l {:name "Laser L" :host "10.0.0.5" :service-id 1 :stable-id [:unit "0A 1B" 1] :enabled? true}
+                                  :aud {:name "Aud" :host "10.0.0.12" :service-id 1 :enabled? true :exclude-from-all? true
+                                        :tags #{:crowd-scanning}}
+                                  :r {:name "Laser R" :host "10.0.0.7" :service-id 2 :enabled? true}
+                                  :spare {:name "Spare" :host "10.0.0.9" :enabled? false}})
+              (assoc-in [:projector-ui :active-projector] :r))
+        cards (fx/sub-ctx (context s) subs/rig-cards)]
+    (is (= [:l :r :spare :aud] (mapv :id cards)) "in rig order: by IP as numbers")
+    (is (= [1 2 nil nil] (mapv :position cards)) "the number is the place in E: none for one off or excluded")
+    (is (= ["Laser L" "Laser R" "Spare" "Aud"] (mapv :name cards)))
+    (is (= ["10.0.0.5 #1" "10.0.0.7 #2" "10.0.0.9" "10.0.0.12 #1"] (mapv :host-label cards)))
+    (is (= [false true false false] (mapv :selected? cards)))
+    (is (= [true true false true] (mapv :enabled? cards)))
+    (is (= [false false false true] (mapv :excluded? cards)))
+    (is (= #{:crowd-scanning} (:tags (last cards))))
+    (is (= "Unit 0A 1B · output 1" (:identity (first cards))))
+    (is (every? :found? cards) "before any scan, no card says it wasn't found")
+    (testing "after a scan, a laser it didn't find says so"
+      (let [scanned (-> s
+                        (assoc-in [:rig-ui :scanned?] true)
+                        (assoc-in [:projector-ui :discovered-devices] [{:address "10.0.0.5" :services [{:service-id 1}]}
+                                                                        {:address "10.0.0.9" :services []}]))]
+        (is (= [true false true false] (mapv :found? (fx/sub-ctx (context scanned) subs/rig-cards))))))
+    (testing "the outputs of one device know of each other"
+      (let [two (assoc-in s [:projectors :l2] {:name "Laser L2" :host "10.0.0.5" :service-id 2 :enabled? true})]
+        (is (= {:l true :l2 true :r false}
+               (into {} (keep #(when (#{:l :l2 :r} (:id %)) [(:id %) (:multi-output? %)]))
+                     (fx/sub-ctx (context two) subs/rig-cards))))))))
+
 (deftest vibe-audience-groups-follow-the-order-test
   (let [s (-> base-state
               (templates/apply-starter-vibes)

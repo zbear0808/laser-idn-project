@@ -103,6 +103,21 @@
                                                              :vp-id :vp1 :zone-group-id ref :state vp-state})))
             "nor in a virtual projector's list")))))
 
+(deftest set-enabled-turns-an-output-on-or-off-test
+  (let [off (assoc-in state-with-projector [:projectors test-projector-id :enabled?] false)
+        set-enabled (fn [state id on?] (:state (projectors/handle {:event/type :projectors/set-enabled :projector-id id
+                                                                   :enabled? on? :state state})))]
+    (is (true? (get-in (set-enabled off test-projector-id true) [:projectors test-projector-id :enabled?])))
+    (is (false? (get-in (set-enabled state-with-projector test-projector-id false) [:projectors test-projector-id :enabled?])))
+    (is (identical? off (set-enabled off test-projector-id false)) "it sets, never toggles: off stays off")
+    (is (identical? off (set-enabled off :nope true)) "an unknown projector")
+    (is (identical? off (set-enabled off test-projector-id "yes")) "only true or false")
+    (testing "while streaming, the engines follow"
+      (is (contains? (get-in (events/handle-event-pipeline {:event/type :projectors/set-enabled :projector-id test-projector-id
+                                                            :enabled? true :state (assoc-in off [:backend :streaming :running?] true)})
+                             [:multi-engine/refresh :projectors])
+                     test-projector-id)))))
+
 (deftest new-projectors-are-in-all-without-listing-it-test
   (let [added (first (vals (get-in (projectors/handle {:event/type :projectors/add-manual :name "Manual" :host "10.0.0.5"
                                                        :state sample-state})

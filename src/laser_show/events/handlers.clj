@@ -6,6 +6,7 @@
    [laser-show.events.handlers.effects :as effects]
    [laser-show.events.handlers.cue-chain :as cue-chain]
    [laser-show.events.handlers.projector :as projectors]
+   [laser-show.events.handlers.rig :as rig]
    [laser-show.events.handlers.zone-groups :as zone-groups]
    [laser-show.events.handlers.timing :as timing]
    [laser-show.events.handlers.ui :as ui]
@@ -41,6 +42,7 @@
       "effect-chain" (effects/handle event)  ; Effect chain bank events -> effects handler
       "cue-chain" (cue-chain/handle event)
       "projectors" (projectors/handle event)
+      "rig" (rig/handle event)  ; The rig strip: the order, the middle laser, the split width
       "zone-groups" (zone-groups/handle event)
       "timing" (timing/handle event)
       "transport" (timing/handle event)  ; Transport grouped with timing

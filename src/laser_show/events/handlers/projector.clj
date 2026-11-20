@@ -174,7 +174,8 @@
         found (found-in-scan new-projectors new-effects moves upgrades)
         new-state (-> (found state)
                       (assoc-in [:projector-ui :scanning?] false)
-                      (assoc-in [:projector-ui :discovered-devices] (vec devices)))]
+                      (assoc-in [:projector-ui :discovered-devices] (vec devices))
+                      (assoc-in [:rig-ui :scanned?] true))]
     (cond-> (if (seq notices)
               (h/show-notice new-state (str/join " " notices) :info)
               {:state new-state})
@@ -301,6 +302,22 @@
   [{:keys [projector-id state]}]
   (let [current (boolean (get-in state [:projectors projector-id :enabled?]))]
     {:state (assoc-in state [:projectors projector-id :enabled?] (not current))}))
+
+
+;; The rig strip and its inspector (plans/2026-11-19-zones/04 §6): setters,
+;; so a box sets the value it shows and can never toggle twice
+
+
+(defn- handle-projectors-set-enabled
+  "Turn a projector's output on or off (:enabled? true or false), as its
+   card's On box says. An unknown projector, any other value, or the value
+   it has changes nothing."
+  [{:keys [projector-id enabled? state]}]
+  (if (and (contains? (:projectors state) projector-id)
+           (boolean? enabled?)
+           (not= enabled? (get-in state [:projectors projector-id :enabled?])))
+    {:state (assoc-in state [:projectors projector-id :enabled?] enabled?)}
+    {:state state}))
 
 
 
@@ -632,6 +649,9 @@
     ;; Calibration mode
     :projectors/toggle-calibration (handle-projectors-toggle-calibration event)
     :projectors/set-calibration-brightness (handle-projectors-set-calibration-brightness event)
+    
+    ;; The rig strip and its inspector (Z2)
+    :projectors/set-enabled (handle-projectors-set-enabled event)
     
     ;; Configuration
     :projectors/toggle-device-expand (handle-projectors-toggle-device-expand event)

@@ -407,6 +407,14 @@
    :split-width {:default 0.75
                  :doc "How wide each half is, 0.5-1.0 of the safe width, when one laser draws Left and Right"}})
 
+(defstate rig-ui
+  "The rig strip's UI state (views/components/rig_strip.clj). Never saved,
+   never undone."
+  {:drop {:default nil
+          :doc "{:projector-id :side} while a dragged card is over another (:before or :after it), so a bar shows where it would land; nil otherwise"}
+   :scanned? {:default false
+              :doc "A network scan finished this session: until then, no card says the scan didn't find it"}})
+
 ;; Unified Chain Storage Domain
 
 

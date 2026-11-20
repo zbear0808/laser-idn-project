@@ -1,0 +1,157 @@
+(ns laser-show.ui-test.rig-strip-test
+  "The rig strip on the Projectors tab (plans/2026-11-19-zones/04 §7): a card
+   per output in rig order, its On box, reordering by drag and drop, by ◀ ▶
+   and by Alt+← / Alt+→, the group rows under the cards and the audience
+   offer in the inspector."
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.events.core :as events]
+            [laser-show.state.core :as state]
+            [laser-show.ui-test.fixtures :as fixtures]
+            [laser-show.ui-test.testfx :as ui]
+            [laser-show.views.components.drag-drop-cell :as dnd])
+  (:import [javafx.event Event]
+           [javafx.scene Node]
+           [javafx.scene.input KeyCode KeyEvent TransferMode]))
+
+(use-fixtures :once fixtures/with-toolkit)
+(use-fixtures :each fixtures/with-app)
+
+(defn- app-state [] (state/get-raw-state))
+
+(defn- device
+  "A device as the network scan reports it, with these outputs."
+  [address unit-id & service-ids]
+  {:address address :host-name "DAC" :unit-id unit-id :port 7255 :status {} :protocol-version {:major 1 :minor 0}
+   :services (mapv (fn [s] {:service-id s :name (str "Head " s)}) service-ids) :relays []})
+
+(defn- with-lasers!
+  "Projectors :a :b :c at 10.0.0.1-3, on, so in that order."
+  []
+  (state/swap-state! assoc :projectors
+                     (into {} (for [[id n] [[:a 1] [:b 2] [:c 3]]]
+                                [id {:name (str "Laser " (str/upper-case (name id))) :host (str "10.0.0." n) :port 7255
+                                     :service-id 1 :enabled? true :zone-groups [] :exclude-from-all? false
+                                     :output-config {:color-bit-depth 8 :xy-bit-depth 16}}]))))
+
+(defn- shown-order
+  "The ids of the cards on the strip, left to right."
+  []
+  (->> (ui/query-all ".rig-card")
+       (map (fn [^Node n] [(first (ui/scene-bounds n)) (str/replace-first (ui/on-fx-thread #(.getId n)) "rig-card-" "")]))
+       (sort-by first)
+       (mapv (comp keyword second))))
+
+(defn- order [] (get-in (app-state) [:rig :order]))
+
+(defn- key-press!
+  "A key pressed on the strip, as the keyboard sends it while the strip has
+   the focus (the headless robot can't hold Alt)."
+  [code & {:keys [alt?]}]
+  (let [strip (ui/query "#rig-strip")]
+    (ui/on-fx-thread #(Event/fireEvent strip (KeyEvent. KeyEvent/KEY_PRESSED "" "" code false false (boolean alt?) false)))
+    (ui/sync-fx!)))
+
+(deftest scan-shows-a-card-per-output-in-ip-order-test
+  (let [robot (ui/robot)]
+    (events/dispatch! {:event/type :projectors/scan-complete
+                       :devices [(device "10.0.0.10" "AA" 1) (device "10.0.0.9" "BB" 1 2) (device "10.0.0.2" "CC" 1)]})
+    (ui/click! robot "#projectors-tab")
+    ;; by IP as numbers: .9 before .10
+    (ui/wait-for! #(= [:projector-10-0-0-2-1 :projector-10-0-0-9-1 :projector-10-0-0-9-2 :projector-10-0-0-10-1]
+                      (shown-order)))
+    (ui/assert-text! "#rig-card-number-projector-10-0-0-2-1" "–")
+    (ui/assert-text! "#rig-header-count" "Tick On on a card to send it output.")
+    (is (nil? (ui/query "#discovered-device-10-0-0-9")) "no device list any more: every output is a card")))
+
+(deftest card-on-box-enables-the-output-test
+  (let [robot (ui/robot)
+        enabled? #(get-in (app-state) [:projectors % :enabled?])]
+    (events/dispatch! {:event/type :projectors/scan-complete :devices [(device "10.0.0.5" "AA" 1 2)]})
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(some? (ui/query "#rig-card-enable-projector-10-0-0-5-1")))
+    (is (false? (enabled? :projector-10-0-0-5-1)) "a found output starts off")
+    (ui/check! robot "#rig-card-enable-projector-10-0-0-5-1")
+    (ui/wait-for! #(true? (enabled? :projector-10-0-0-5-1)))
+    (ui/assert-text! "#rig-card-number-projector-10-0-0-5-1" "1")
+    (ui/assert-text! "#rig-header-count" "2 outputs · 1 on")
+    (is (false? (enabled? :projector-10-0-0-5-2)) "the other output is untouched")
+    (ui/uncheck! robot "#rig-card-enable-projector-10-0-0-5-1")
+    (ui/wait-for! #(false? (enabled? :projector-10-0-0-5-1)))
+    (ui/assert-text! "#rig-card-number-projector-10-0-0-5-1" "–")))
+
+(deftest no-output-device-gets-a-card-test
+  (let [robot (ui/robot)]
+    (events/dispatch! {:event/type :projectors/scan-complete :devices [(device "10.0.0.7" "AA")]})
+    (ui/click! robot "#projectors-tab")
+    (ui/assert-visible! "#rig-card-projector-10-0-0-7-0")
+    (ui/check! robot "#rig-card-enable-projector-10-0-0-7-0")
+    (ui/wait-for! #(true? (get-in (app-state) [:projectors :projector-10-0-0-7-0 :enabled?])))))
+
+(deftest drop-a-card-before-another-test
+  (let [robot (ui/robot)
+        width (fn [^Node n] (let [[x0 _ x1 _] (ui/scene-bounds n)] (- x1 x0)))
+        drop! (fn [id onto x & opts]
+                (apply ui/fire-drop! (ui/query (str "#rig-card-" (name onto))) (dnd/drag-content :rig-card {:projector-id id})
+                       x 20 :mode TransferMode/MOVE opts))]
+    (with-lasers!)
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(= [:a :b :c] (shown-order)))
+    (testing "on the left half of a card: before it"
+      (is (:completed? (drop! :c :a 5)))
+      (ui/wait-for! #(= [:c :a :b] (shown-order)))
+      (is (= [:c :a :b] (order)) "the whole order is written"))
+    (testing "on the right half: after it"
+      (drop! :c :b (- (width (ui/query "#rig-card-b")) 5))
+      (ui/wait-for! #(= [:a :b :c] (shown-order))))
+    (testing "while it is over a card, a bar shows where it would land, and goes when it leaves"
+      (drop! :a :c 5 :drop? false :exit? false)
+      (ui/wait-for! #(= {:projector-id :c :side :before} (get-in (app-state) [:rig-ui :drop])))
+      (ui/assert-visible! "#rig-drop-bar-before-c")
+      (drop! :a :c 5 :drop? false)
+      (ui/wait-for! #(nil? (get-in (app-state) [:rig-ui :drop])))
+      (is (= [:a :b :c] (order)) "nothing moved"))))
+
+(deftest alt-arrow-moves-the-selected-card-test
+  (let [robot (ui/robot)
+        selected #(get-in (app-state) [:projector-ui :active-projector])]
+    (with-lasers!)
+    (ui/click! robot "#projectors-tab")
+    (ui/click! robot "#rig-card-a")
+    (ui/wait-for! #(= :a (selected)))
+    (ui/wait-for! #(ui/on-fx-thread (fn [] (identical? (ui/query "#rig-strip")
+                                                       (some-> ^Node (ui/query "#rig-strip") .getScene .getFocusOwner)))))
+    (ui/assert-text! "#projector-config-title" "CONFIGURE: Laser A")
+    (testing "→ alone moves the selection"
+      (key-press! KeyCode/RIGHT)
+      (ui/wait-for! #(= :b (selected)))
+      (ui/assert-text! "#projector-config-title" "CONFIGURE: Laser B"))
+    (testing "Alt+→ moves the card"
+      (key-press! KeyCode/RIGHT :alt? true)
+      (ui/wait-for! #(= [:a :c :b] (shown-order)))
+      (is (= :b (selected)) "and it stays selected"))
+    (testing "Alt+← moves it back, ← moves the selection"
+      (key-press! KeyCode/LEFT :alt? true)
+      (ui/wait-for! #(= [:a :b :c] (shown-order)))
+      (key-press! KeyCode/LEFT)
+      (ui/wait-for! #(= :a (selected))))
+    (testing "at the left end, Alt+← does nothing"
+      (key-press! KeyCode/LEFT :alt? true)
+      (ui/sync-fx!)
+      (is (= [:a :b :c] (shown-order))))))
+
+(deftest move-buttons-follow-the-ends-test
+  (let [robot (ui/robot)]
+    (with-lasers!)
+    (ui/click! robot "#projectors-tab")
+    (ui/assert-disabled! "#rig-move-left-button")
+    (ui/assert-disabled! "#rig-move-right-button")
+    (events/dispatch! {:event/type :projectors/select-projector :projector-id :a})
+    (ui/wait-for! #(ui/enabled? "#rig-move-right-button"))
+    (ui/assert-disabled! "#rig-move-left-button")
+    (ui/click! robot "#rig-move-right-button")
+    (ui/wait-for! #(= [:b :a :c] (shown-order)))
+    (ui/wait-for! #(ui/enabled? "#rig-move-left-button"))
+    (events/dispatch! {:event/type :projectors/select-projector :projector-id :c})
+    (ui/wait-for! #(not (ui/enabled? "#rig-move-right-button")))
+    (ui/assert-enabled! "#rig-move-left-button")))
