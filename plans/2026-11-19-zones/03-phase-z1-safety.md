@@ -1,7 +1,7 @@
 # Phase Z1: safety zones, the test pattern and Identify
 
 **Written:** 2026-11-19 at `d298801`. **Reviewed and re-checked at `70f7db8`** (`master`, after vibe Phases 4b and 5 and the fader fix `0faa18c`): every line below is at `70f7db8`. **Re-check every path and line at HEAD before starting.**
-**Status:** **Built** (`ae4c065`..`3e14382`, branch `zones-z1`, built in a worktree alongside Z2 and vibe Phase 7); not yet on `master`. **Still owed: the real-projector check in §9**, which decides `edge-dwell` (1 until then). The as-built note is §13. Q-Z1-1 is answered (D-34); Q-Z1-2, -3 and -4 were built as ★ A.   **Needs:** nothing. It goes well with Z0, whose confirm dialog it reuses (02 §4); without Z0 it brings that dialog itself. It can be built alongside Z2.   **Size:** ~4–5 d.
+**Status:** **Done in code, on `master`** (`fa15044`..`1424955`; built in worktree `zones-z1` alongside Z2 and vibe Phase 7). **Still owed: the real-projector check in §9**, which decides `edge-dwell` (1 until then). The as-built note is §13. Q-Z1-1 is answered (D-34); Q-Z1-2, -3 and -4 were built as ★ A; Q-Z1-5 (the show lock) is open.   **Needs:** nothing. It goes well with Z0, whose confirm dialog it reuses (02 §4); without Z0 it brings that dialog itself. It can be built alongside Z2.   **Size:** ~4–5 d.
 **Implements:** spec §10 (`01-model-and-routing-spec.md`), D-28 (edits on a live laser), D-29 (fail closed) and D-34 (a notice after Open). It also gives Z3 what its doc assumes (05 §1, "Z1 row"): `[:projectors id :safety :limit]`, a stage after the projector effects that reports under `[:safety id]`, and a test-pattern branch that replaces a laser's content before its projector effects, with no composition and no fit guard (05 S-13).
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks anything that doesn't exist yet.
@@ -381,23 +381,23 @@ Write the failing tests first in each step.
 - **Q-Z1-3 · Test-pattern brightness ceiling.** The slider stops at 50% today (`events/handlers/projector.clj:386`). ★ **A** Keep 50%. **B** 100%, with a warning colour above 50%.
 - **Q-Z1-4 · Undo or Redo that would grow a live laser's area.** Undo is one history for the whole show, so a ⌘Z meant for something else can undo a zone made smaller during the show. ★ **A** Ask with the same dialog (§4, `history`). **B** Just restore: it puts back a zone that was in force before. Either way, Escape during a drag doesn't ask: it puts back the zone from before the drag.
 
-## 13. As built (2026-11-19, `ae4c065`..`3e14382`)
+## 13. As built (2026-11-19, `fa15044`..`1424955`, on `master`)
 
-Built in worktree `zones-z1` off `989c315` (Z0 on `master`), at the same time as Z2 (worktree `zones-z2`) and vibe Phase 7 (`vibe-phase7`). Not yet rebased or merged.
+Built in worktree `zones-z1` off `989c315` (Z0 on `master`), at the same time as Z2 (worktree `zones-z2`) and vibe Phase 7. Rebased onto `8b4b7d7` (vibe Phase 7 in), where the only conflict was two tests added at the same place in `persistent_test.clj` (both kept), and fast-forwarded onto `master`. Z2 landed on top of it (04 §13).
 
 ### Where it landed
 
 | # | Commit | Step (§10) |
 |---|---|---|
-| 1 | `ae4c065` | NEW `animation/safety.clj`: `normalize`, `identity?`, `inside?`, `intervals`, `apply-safety`, `widens?`, `mirror-x`, `edge-dwell` (1) |
-| 2 | `15462c4` | `multi-engine` `guard-safety` and `stamp`; `output-runtime/engine-status` looks at `[:safety id]` first and gives `{:state :error :kind :safety :error "Safety error: output off" :detail msg}`; the status line shows it as it is, with `:detail` as the tooltip |
-| 3 | `a8a7ee6` | NEW `animation/test_pattern.clj` (`content-layer`, `safety-layer`, `identify-on?`, `identify-ms`); `multi-engine` `test-pattern-mode`, `test-pattern-frame`, `show-frame`; `[:projector-ui :identify]`; `reset-session` clears the test pattern and Identify; the `frame-service` docstring |
-| 4 | `7039d0e` | `:projectors/identify`, `:projectors/identify-ended`; `multi-engine/now-ms`, a var; Z0's remove also clears `:identify` |
-| 5 | `129bafd` | `:projectors/set-safety`, `add-blocked-area`, `remove-blocked-area`, `copy-safety`; the Undo and Redo check; the four undo labels; NEW `events/safety_guard.clj` |
-| 6 | `a62cdb1` | the D-34 notice after Open |
-| 7 | `8296e28` | NEW `views/components/safety_editor.clj` (SAFETY ZONE); the calibration row becomes TEST PATTERN with Identify and its notes |
-| 8 | `1727a28` | `#projectors-subtitle` mentions safety zones again; one sentence in QUICKSTART step 3 |
-| – | `3e14382` | `safety-round-trips-test` (§9 listed it; written last) |
+| 1 | `fa15044` | NEW `animation/safety.clj`: `normalize`, `identity?`, `inside?`, `intervals`, `apply-safety`, `widens?`, `mirror-x`, `edge-dwell` (1) |
+| 2 | `df65be4` | `multi-engine` `guard-safety` and `stamp`; `output-runtime/engine-status` looks at `[:safety id]` first and gives `{:state :error :kind :safety :error "Safety error: output off" :detail msg}`; the status line shows it as it is, with `:detail` as the tooltip |
+| 3 | `fb801f2` | NEW `animation/test_pattern.clj` (`content-layer`, `safety-layer`, `identify-on?`, `identify-ms`); `multi-engine` `test-pattern-mode`, `test-pattern-frame`, `show-frame`; `[:projector-ui :identify]`; `reset-session` clears the test pattern and Identify; the `frame-service` docstring |
+| 4 | `1b14cc4` | `:projectors/identify`, `:projectors/identify-ended`; `multi-engine/now-ms`, a var; Z0's remove also clears `:identify` |
+| 5 | `fbe0f40` | `:projectors/set-safety`, `add-blocked-area`, `remove-blocked-area`, `copy-safety`; the Undo and Redo check; the four undo labels; NEW `events/safety_guard.clj` |
+| 6 | `9b8798b` | the D-34 notice after Open |
+| 7 | `17a3ad7` | NEW `views/components/safety_editor.clj` (SAFETY ZONE); the calibration row becomes TEST PATTERN with Identify and its notes |
+| 8 | `8b95459` | `#projectors-subtitle` mentions safety zones again; one sentence in QUICKSTART step 3 |
+| – | `1424955` | `safety-round-trips-test` (§9 listed it; written last) |
 
 ### Deviations from the plan
 
@@ -443,15 +443,15 @@ Built in worktree `zones-z1` off `989c315` (Z0 on `master`), at the same time as
 
 | Where | Unit suite (`clj -M:mac-arm:test`) | UI suite (`clj -M:test-ui:mac-arm:test-ui-headless`) |
 |---|---|---|
-| the branch at `1727a28` | 1,205 tests, 460,863 assertions, 0 failures | 151 tests, 722 assertions, 0 failures |
-| the branch at `3e14382` (one unit test more) | 1,206 tests, 460,864 assertions, 0 failures | (no change to the app or UI tests) |
+| the branch on `989c315`, at step 8 | 1,205 tests, 460,863 assertions, 0 failures | 151 tests, 722 assertions, 0 failures |
+| the same, with `safety-round-trips-test` | 1,206 tests, 460,864 assertions, 0 failures | (no change to the app or UI tests) |
+| rebased onto `8b4b7d7` (vibe Phase 7 in), as landed | 1,232 tests, 461,146 assertions, 0 failures | 156 tests, 749 assertions, 0 failures |
 
 **Not done: the real-projector check (§9).** Nothing here has been seen on a laser. Before relying on a blocked area in front of people, try one at low brightness: a line swept through it and a shape that jumps across it, at 25 and 40 kpps, and look for light bleeding into the area where the beam comes back on. That decides `edge-dwell`.
 
-### For the merge
+### For the merge (done in Z2's landing, 04 §13)
 
-- Z2 moves `output-status-text` and `status-indicator` into `rig_strip.clj`; step 2 changed both (the `:kind :safety` case).
-- Both edit the `:projectors/remove` handler and the handler's `case` rows in `events/handlers/projector.clj`, `state/domains.clj` and `state/persistent.clj`.
-- Z2 changes `get-projector-zone-groups` in `multi-engine`; Z1 split `projector-frame` around it.
-- Z2's inspector should mount `safety-editor/safety-section` and the TEST PATTERN section where the config panel has them now.
-
+- Z2's cards took the device and configured lists' place, so Z1's two status changes moved into `views/components/rig_strip.clj`: `output-status-text` shows a safety error as it is, and `card-status` gives `#projector-status-<id>` the `:detail` tooltip.
+- Z2's `handle-projectors-remove` also clears `[:projector-ui :identify id]`; the requires and the undo labels keep both sides.
+- The subtitle is Z2's ("Put your lasers in order, left to right. The groups follow the order.", 04 §7), so `subtitle-mentions-safety-zones-test` is `subtitle-says-to-put-the-lasers-in-order-test`. QUICKSTART keeps Z1's sentence.
+- The SAFETY ZONE and TEST PATTERN sections sit in the inspector's right column, below the rig strip. At the default 1200 × 800 the inspector shows only its top, so they need a scroll; `safety-editor-test` and `calibration-brightness-slider-test` scroll to them first (`ui/scroll-into-view!`).

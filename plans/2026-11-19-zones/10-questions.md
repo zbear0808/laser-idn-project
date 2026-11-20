@@ -80,6 +80,11 @@ Also tell me the layout: a line on a truss, sides + center, front and back, or w
 
 Either way, Escape during a drag puts the old zone back without asking.
 
+**Q-Z1-5 · Safety zone edits while the show lock is on** (vibe Phase 7's switch on the Perform tab; it refuses edits that change the show, and never BLACKOUT). Until answered, the lock lets every safety edit through, and a larger area on a live laser still asks first.
+- **A ★** Making an area smaller always works; making it larger is refused while the lock is on. The lock never stands between you and a safer show, and nothing gets wider by accident during one.
+- **B** Refuse every safety edit while locked: unlock first (BLACKOUT is always there for an emergency).
+- **C** Leave safety edits alone, as now.
+
 ## Z2 · Rig strip and groups (`04-phase-z2-rig-strip-and-groups.md`)
 
 **Q-Z2-1 · Exclude from All also takes a laser out of Left/Right/Center/Odd/Even.** **Answered B (D-33)**, and already applied to the spec and to Z2. The other options were **A** (Exclude only means "not in All") and **C** (a second switch).

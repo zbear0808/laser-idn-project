@@ -1,7 +1,7 @@
 # Phase Z2: the rig strip, stable identity, automatic groups, implicit All, the two tabs
 
 **Written:** 2026-11-19   **Written for commit:** `4fa9eee` (`master`). First written at `90e35c7`. Re-checked at `4fa9eee`, after vibe Phases 3 (`38f92ad`), 4a and 4b (`6715fb4`, `f5a4f84`), 5 (`9f5d78a`, fixed in `0faa18c`) and 6 (`4a4a10a`), and UX Phase 3 (`b9b9d55`). Of the files cited here, vibe Phase 6 moved lines only in `state/domains.clj`, `subs.clj` and `events/core.clj`. Every line below is at `4fa9eee`. Vibe Phase 7 (in a worktree) and Z0 (in a worktree, `zones-z0`) are in progress: see §11. **Re-check at HEAD before starting.**
-**Status:** **Done** (`5e39fd5`..`af2979d`, on branch `zones-z2`, built in a worktree off `989c315` alongside Z1 and vibe Phase 7; not merged yet). The as-built note is §13.   **Needs:** Z0 (`02-phase-z0-fixups.md` §4): the reference walker `laser-show.routing.refs` (`ref-places`, `cues-using`, `replace-refs`), the delete that asks first and re-targets (`:zone-groups/request-remove`, the confirm dialog `views/dialogs/confirm.clj`), the real cue count, `unique-group-id`, "All" listed once, and `:projectors/remove`. B-6 needed no fix: a click already toggles once. Independent of Z1: whichever lands first, Z1's SAFETY ZONE section, its TEST PATTERN row and Identify end up in Z2's inspector (§7). Z3 builds on it.
+**Status:** **Done, on `master`** (`4e97979`..`2eb5e82`, then the landing's `fee90ce`..`8c30108`; built in a worktree off `989c315` alongside Z1 and vibe Phase 7). The as-built note is §13.   **Needs:** Z0 (`02-phase-z0-fixups.md` §4): the reference walker `laser-show.routing.refs` (`ref-places`, `cues-using`, `replace-refs`), the delete that asks first and re-targets (`:zone-groups/request-remove`, the confirm dialog `views/dialogs/confirm.clj`), the real cue count, `unique-group-id`, "All" listed once, and `:projectors/remove`. B-6 needed no fix: a click already toggles once. Independent of Z1: whichever lands first, Z1's SAFETY ZONE section, its TEST PATTERN row and Identify end up in Z2's inspector (§7). Z3 builds on it.
 **Implements spec:** §1 (the refs `:all`, `:auto/*`, `:auto.laser/*`, custom groups; projector identity), §3 (automatic groups, as data with regions), §11 (the rows for `:all` membership, the built-in `:left` `:right` `:center`, and no `[:rig :order]`), §12 (the rig rows). Decisions D-7, D-13, D-15, D-17, D-20, D-21, D-22, D-23.   **Size:** ~5 d
 
 After this phase you can:
@@ -516,24 +516,24 @@ Each step is one commit: the named tests first (run them and record them red), t
 
 **Q1 (00 §9, still open)** sizes the strip: Z2 scrolls past about 8 cards. A count over 12 would call for the compact cards in needs/08 R-14.
 
-## 13. As built (2026-11-19, `5e39fd5`..`af2979d`)
+## 13. As built (2026-11-19, `4e97979`..`2eb5e82`, on `master`)
 
-Built in a worktree (`zones-z2`) off `989c315` (Z0 in), while Z1 and vibe Phase 7 ran in theirs. Vibe Phase 7 reached `master` meanwhile (`8b4b7d7`). Not merged: the orchestrator merges it ("For the merges" says what the trial merges show). Q1 is still open, so the strip is one horizontal scroll pane that scrolls past about 8 cards, the rows with it.
+Built in a worktree (`zones-z2`) off `989c315` (Z0 in), while Z1 and vibe Phase 7 ran in theirs. Rebased onto `f8deb7e` (Z1 on `master`, on top of vibe Phase 7's `8b4b7d7`) and fast-forwarded onto `master`; "How it landed" below says what that took. Q1 is still open, so the strip is one horizontal scroll pane that scrolls past about 8 cards, the rows with it.
 
 ### Where it landed
 
 | # | Commit | Step (§10) |
 |---|---|---|
-| 1 | `5e39fd5` | NEW `routing/rig.clj`: `enabled?`, `stable-id`, `identity-label`, `placement-key`, `effective-order`, `rig-inputs`, `auto-groups`, `ref-entries`, `refs-for` (cached), `reaching`, `refs-reaching`, `laser-ref`/`laser-of`/`derived-ref?`, `group-defs`, `ref-name`, `projector-id`/`unique-projector-id`, `settled-ids`, `match-discovered` |
-| 2 | `cfd7380` | `(defstate rig …)`, `:rig` a document root (history), `[:rig]` in `hardware.edn` with `:merge-defaults?`, Z0's remove drops the laser from `[:rig :order]` |
-| 3 | `b7213d2` | the scan matches by stable id (moves, upgrades, new outputs with free ids, one notice), `make-projector-config` adds `:stable-id`, `set-service-enabled` by host and output, a host edit moves a `[:host …]` identity |
-| 4 | `e1f1eef` | NEW `state/migration.clj` (`rig-rows`, `show-rows`, `zones-z2`) run by `apply-loaded-project`; `get-projector-zone-groups` → `rig/refs-for`; the built-in groups leave the defaults and the preview's cells become `:auto/*`; new projectors list no group and play All; the toggles refuse derived refs; the vibes' `audience-groups`, `audience-text`, `vibe-audience-groups` (and `reaction-inputs`, `lint-world`) read the rig |
-| 5 | `fb94d35` | `rig/target-groups`, `rig/known-ref?`, subs `target-groups`/`target-groups-by-id`; the five pickers switch to them, with a lock; the delete's choice lists every target and a derived ref is a valid re-target; `:projectors/request-remove` counts the laser's pins and asks where they go, `:projectors/remove` re-targets them (S-13) |
-| 6 | `005f299` | NEW `events/handlers/rig.clj` (routed as `"rig"`), NEW `views/components/rig_strip.clj` (cards, drag and drop, keys, ◀ ▶, the card menu; `status-indicator` and `output-status-text` moved here), `(defstate rig-ui …)`, `:projectors/set-enabled`, sub `rig-cards`; the Projectors tab is the header, the strip and the inspector; the device list, the configured list and the zone chips are gone |
-| 7 | `a4a6bd3` | NEW `views/components/group_matrix.clj` (the rows, the middle-laser and split-width settings), `rig/ref-marks` and `rig/matrix`, subs `rig-matrix` and `rig-settings`, `zone-chips/member-mark`, `:projectors/set-exclude-from-all`, `:zone-groups/show` |
-| 8 | `b164e37` | the inspector's identity, tags and Exclude from All with the audience offer (Q-Z2-2 A), `:projectors/set-tag` |
-| 9 | `3adcab6` | `views/tabs/zones.clj` rewritten group first; subs `ref-reach`, `zone-groups-tab-list`, `selected-target-group`, `group-members`; `zone-group-usage` counts the lasers a derived ref reaches |
-| + | `af2979d` | fix: the zone group editor neither opens for nor saves All or an automatic group (invariant 1); a test of a card's menu |
+| 1 | `4e97979` | NEW `routing/rig.clj`: `enabled?`, `stable-id`, `identity-label`, `placement-key`, `effective-order`, `rig-inputs`, `auto-groups`, `ref-entries`, `refs-for` (cached), `reaching`, `refs-reaching`, `laser-ref`/`laser-of`/`derived-ref?`, `group-defs`, `ref-name`, `projector-id`/`unique-projector-id`, `settled-ids`, `match-discovered` |
+| 2 | `eaf18df` | `(defstate rig …)`, `:rig` a document root (history), `[:rig]` in `hardware.edn` with `:merge-defaults?`, Z0's remove drops the laser from `[:rig :order]` |
+| 3 | `e83d754` | the scan matches by stable id (moves, upgrades, new outputs with free ids, one notice), `make-projector-config` adds `:stable-id`, `set-service-enabled` by host and output, a host edit moves a `[:host …]` identity |
+| 4 | `12023eb` | NEW `state/migration.clj` (`rig-rows`, `show-rows`, `zones-z2`) run by `apply-loaded-project`; `get-projector-zone-groups` → `rig/refs-for`; the built-in groups leave the defaults and the preview's cells become `:auto/*`; new projectors list no group and play All; the toggles refuse derived refs; the vibes' `audience-groups`, `audience-text`, `vibe-audience-groups` (and `reaction-inputs`, `lint-world`) read the rig |
+| 5 | `9939c14` | `rig/target-groups`, `rig/known-ref?`, subs `target-groups`/`target-groups-by-id`; the five pickers switch to them, with a lock; the delete's choice lists every target and a derived ref is a valid re-target; `:projectors/request-remove` counts the laser's pins and asks where they go, `:projectors/remove` re-targets them (S-13) |
+| 6 | `bc8a9e2` | NEW `events/handlers/rig.clj` (routed as `"rig"`), NEW `views/components/rig_strip.clj` (cards, drag and drop, keys, ◀ ▶, the card menu; `status-indicator` and `output-status-text` moved here), `(defstate rig-ui …)`, `:projectors/set-enabled`, sub `rig-cards`; the Projectors tab is the header, the strip and the inspector; the device list, the configured list and the zone chips are gone |
+| 7 | `c83a35b` | NEW `views/components/group_matrix.clj` (the rows, the middle-laser and split-width settings), `rig/ref-marks` and `rig/matrix`, subs `rig-matrix` and `rig-settings`, `zone-chips/member-mark`, `:projectors/set-exclude-from-all`, `:zone-groups/show` |
+| 8 | `220dbac` | the inspector's identity, tags and Exclude from All with the audience offer (Q-Z2-2 A), `:projectors/set-tag` |
+| 9 | `93c534e` | `views/tabs/zones.clj` rewritten group first; subs `ref-reach`, `zone-groups-tab-list`, `selected-target-group`, `group-members`; `zone-group-usage` counts the lasers a derived ref reaches |
+| + | `2eb5e82` | fix: the zone group editor neither opens for nor saves All or an automatic group (invariant 1); a test of a card's menu |
 
 ### Deviations from the plan
 
@@ -594,9 +594,10 @@ Green on their first run, **not run red**: the six card and reorder UI tests of 
 | Where | Unit suite (`clj -M:mac-arm:test`) | UI suite (`clj -M:test-ui:mac-arm:test-ui-headless`) |
 |---|---|---|
 | `989c315` (the base) | 1,153 tests, 34,605 assertions, 0 failures | 143 tests, 709 assertions, 0 failures |
-| step 4, `e1f1eef` | 1,203 tests, 37,035 assertions, 0 failures | 143 tests, 709 assertions, 0 failures |
-| step 9, `3adcab6` | 1,226 tests, 37,215 assertions, 0 failures | 159 tests, 764 assertions, 0 failures |
-| **`af2979d` (final)** | **1,227 tests, 37,222 assertions, 0 failures** | **160 tests, 766 assertions, 0 failures** |
+| step 4, `12023eb` | 1,203 tests, 37,035 assertions, 0 failures | 143 tests, 709 assertions, 0 failures |
+| step 9, `93c534e` | 1,226 tests, 37,215 assertions, 0 failures | 159 tests, 764 assertions, 0 failures |
+| `2eb5e82` (the branch's last code, on `989c315`) | 1,227 tests, 37,222 assertions, 0 failures | 160 tests, 766 assertions, 0 failures |
+| **`8c30108`, rebased onto `f8deb7e` (Z1 and vibe Phase 7 in), as landed** | **1,306 tests, 463,804 assertions, 0 failures** | **173 tests, 806 assertions, 0 failures** |
 
 Each step also ran its targeted namespaces (§9's run list), and the unit suite after steps 2, 5, 6, 7 and 8. After step 7 one full unit run failed `streaming-engine-test/new-tick-goes-out-without-the-minimum-gap-test` (a wall-clock test: 0 of 5 gaps under 8 ms while the machine was loaded); alone it passed, and every later full run passed.
 
@@ -630,13 +631,22 @@ Trial merges of `zones-z2` with `git merge-tree`, which writes no branch and no 
   - `state/persistent.clj`: the `[:rig]` path, and the migration in `apply-loaded-project`.
   - Identify on a card's menu sends `{:event/type :projectors/identify :projector-id id}`, the event Z1's button sends.
 
+### How it landed
+
+- **The conflicts were the ones above,** resolved as they say, plus `subs_test.clj` twice (steps 4 and 5 each add a test where vibe Phase 7 added its own: both kept).
+- **`fee90ce`: the show lock refuses Z2's seven events** (`events/show_lock.clj`). `show-lock-test`'s list of real edits gains one of each, so its starter has two lasers, and its zone group delete removes Graphics instead of Left, which Z2 made automatic. Red first: 28 failures (the seven events, four checks each). Z1's safety edits are not in the list: Q-Z1-5.
+- **`95a510d`: the dead `:clipboard/paste-projector-effects` effect is gone** (`events/core.clj`, Z0's leftover for after Phase 7). `core-test` checks it's absent. Not run red: it removes code nothing calls.
+- **`5e56456`: QUICKSTART step 3** says to tick **On** on the cards and drag them into left-to-right order.
+- **`8c30108`: two UI tests scroll before they click** (`ui/scroll-into-view!`, NEW in `testfx.clj`). In Z2's inspector, below the strip, Z1's safety editor and test pattern start out of view, so `add-and-remove-a-blocked-area-test` and `calibration-brightness-slider-test` failed with "bounds are not visible in Scene".
+- **Layout to look at:** at the default 1200 × 800 the inspector shows only its top (about 290 px) below the strip and its rows, so the safety canvas, its buttons and TEST PATTERN need a scroll.
+
 ### Found on the way
 
 - **Dead after Z2, left in the shared files for the merges:**
   - The subs `zone-groups-list`, `zone-groups-by-id`, `projector-zone-groups`, `enabled-projector-services`, `expanded-discovered-devices`, `selected-zone-group`, and `zone-group` (only `selected-zone-group` used it).
   - The `:projectors/toggle-device-expand` handler and `[:projector-ui :expanded-devices]`.
   - `:projectors/set-service-enabled` (as §6 expects) and `:projectors/toggle-enabled` have no button now. The show lock already blocks both.
-- **QUICKSTART** step 3, which Z1 edits too, still says to tick the outputs to use. That's still true with the cards' On boxes, but it doesn't say that the cards' order makes Left, Right and the rest. Worth a line once both are in.
+- **QUICKSTART** step 3 didn't say that the cards' order makes Left, Right and the rest: done in the landing (`5e56456`).
 - **cljfx:** a grid-pane or v-box constraint is applied by the parent, so it goes on the description the parent gets, a function component's too (on the description the function returns it is "No such prop"); a nil `:graphic` breaks a menu item and a nil `:style` a node. `ui/shown-text` finds a Labeled graphic's `.text` before the cell's own, so the lock is a plain Text node.
 - **The vibe rule's cue walk** (`vibes.library/zone-group-ids`) still skips keyframes, as Z0 noted, so a keyframed Zone Selector's zones don't make a cue an audience cue. Unchanged.
 - **A preview cell shows the frames of exactly its ref,** so a cell on Left doesn't show what the left laser draws through All. Z3's per-projector preview is the fix.

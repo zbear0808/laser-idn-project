@@ -120,8 +120,8 @@ There is still **one render per cue per tick** (spec invariant 8). Everything pe
 | Phase | Goal: what you can do after it | Size | Needs | Doc |
 |---|---|---|---|---|
 | **Z0** ✅ | **Done** (`0f9d6a1`..`e1d9693`, 02 §13). Fix-ups: deleting a group asks first and re-targets its cues; a real "used by N cues"; Axis Transform can be edited; pasting into a projector chain; removing a projector; "All" listed once; group ids that don't collide; a skipped calibration effect shows on the status line | ~1.5 d | – | 02 |
-| **Z1** | **Draw a blocked box and nothing lights inside it.** Safety rectangles with live editing; the test pattern and Identify work | ~4–5 d | – | 03 |
-| **Z2** | **Drag your lasers into order and the groups appear.** The rig strip on the Projectors tab, stable identity, automatic groups, implicit All with opt-out, the Zone Groups tab redone group-first and following the order | ~5 d | Z0 | 04 |
+| **Z1** ✅ | **Done in code** (`fa15044`..`1424955`, 03 §13); **the real-projector check is still owed** (03 §9). Draw a blocked box and nothing lights inside it: safety rectangles with live editing; the test pattern and Identify work | ~4–5 d | – | 03 |
+| **Z2** ✅ | **Done** (`4e97979`..`2eb5e82`, landed with `fee90ce`..`8c30108`, 04 §13). Drag your lasers into order and the groups appear: the rig strip on the Projectors tab, stable identity, automatic groups, implicit All with opt-out, the Zone Groups tab redone group-first and following the order | ~5 d | Z0 | 04 |
 | **Z3** | **One laser shows Left and Right halves.** Routing in the snapshot, de-duplication, regions and the middle policy, fit guard, a thumbnail per projector, low-fps badges, cue ⚠ | ~6 d | Z1, Z2 | 05 |
 | **Z4** | **A cue drawn into Zone A follows the zone map you switch live.** Zones and maps, one Target control, inheritance with "from …", grid badges, map pads with switch timing, migration | ~6 d | Z3 | 06 |
 | **ZR** | **New Project keeps your rig. Opening someone's show never touches your safety zones.** The rig file, and matching a show's groups onto it | ~3–4 d | Z2 (best after Z4) | 09 |
@@ -157,13 +157,13 @@ Z1 ─────────┘           │
 - **Vibe Phase 4a's reactions** (`vibes/reactions.clj` `listens-to`, `effect-sources`; landed in `6715fb4`): today they only see the sources named inside modulators. **Z5 extends `effect-sources`** so a zone pattern's Step on and Restart on count, which makes a pattern that steps on HIT one of HIT's reactions (named on its pad, and covered by 4b's lint). The vibe plan's owner should agree, since it changes 4a's code (07 S-10).
 - **Vibe Phase 5's faders** (`9f5d78a`): the Fader modulator can drive a pattern's rate, offset or style, and the Morph fader can scrub a step grid (07 §8, 08 §8). A new project's Master cell sits at `[0 3]` on the effects grid, outside the zone stage, so UI tests for pattern cells must use other cells.
 
-### Running alongside vibe Phases 6 and 7 (checked 2026-11-19, 18:20; updated after Phase 6 merged)
+### Running alongside vibe Phases 6 and 7 (checked 2026-11-19, 18:20; updated after Phase 6 merged, and after Phase 7, Z1 and Z2 landed)
 
-**Vibe Phase 6 (auto-advance and tap tempo) has merged** (`4a4a10a`, verified in `6aaad7d`). **Phase 7 (safety and hardening) is in progress** in its own worktree. Here are the files each side edits:
+**Both have merged:** Phase 6 (auto-advance and tap tempo) in `4a4a10a`, Phase 7 (safety and hardening) in `5b59774` (verified in `8b4b7d7`). Z1 and Z2 landed on top of Phase 7. The table below is what each side edited, kept for the record:
 
 | File | Vibe 6 | Vibe 7 | Z0 | Z1 | Risk |
 |---|---|---|---|---|---|
-| `events/core.clj` | ✓ | ✓ | – (the dead `:clipboard/paste-projector-effects` effect, now `:212-221`, was **left in place** by Z0 to avoid Phase 7's edits; remove it after Phase 7 merges) | | none |
+| `events/core.clj` | ✓ | ✓ | – (the dead `:clipboard/paste-projector-effects` effect was **left in place** by Z0 to avoid Phase 7's edits; **removed in `95a510d`**) | | none |
 | `state/domains.clj` | ✓ | ✓ | ✓ (one `:confirm` dialog default) | ✓ (`projector-ui :identify`) | low: one-line additions in separate maps |
 | `subs.clj` | | ✓ | ✓ (`zone-group-usage`) | ✓ | low: separate subs |
 | `state/persistent.clj` | ✓ | | | ✓ (`reset-session` clears the test pattern and Identify) | low |
@@ -172,8 +172,8 @@ Z1 ─────────┘           │
 | everything else Z0/Z1 edit (zone groups, projector handlers, the Projectors and Zone Groups tabs, the engine's `projector-frame`, the output runtime, the clipboard, list paste) | | | ✓ | ✓ | none |
 
 - **Z0 and Z1 can run alongside vibe Phase 7** in their own worktree, as the vibe phases do. The overlaps are small additions in different parts of shared files, so merging is mechanical. (Z0 was built this way.)
-- **Z3 and Z4 no longer wait for Phase 6**, which has merged, but **Phase 7 also edits the show clock, the show time, the toolbar, `state/domains.clj` and `subs.clj`.** Start Z3 after Phase 7 merges, or expect a real merge in the tick.
-- **Phase 7's show lock** (it blocks some events during a show) must also cover the new zones events that re-route lasers or change their safety: Z0's remove, Z1's safety edits, Z2's order and membership events, Z4's map switches (maybe allowed: they are performer actions), ZR's rig events. Tell the vibe plan's owner. Whether a show lock should block a safety edit is open (Z1 and Phase 7 to agree).
+- **Z3 and Z4 no longer wait for Phase 6 or Phase 7**: both have merged, so Z3 can start from `master`.
+- **Phase 7's show lock** (it refuses some events during a show) covers the zones events that re-route lasers: Z0's removes (Phase 7 added them) and Z2's order and membership events (`fee90ce`). Z4's map switches (maybe allowed: they are performer actions) and ZR's rig events join when they land. **Z1's safety edits aren't in it yet: Q-Z1-5** (10-questions).
 - **UX plan** (`plans/2026-11-18-ux-improvements/`, finished and deleted in `2d1f813`; it is in git history): all four of its phases are done. Z2 builds on what they left in the Projectors and Zone Groups tabs, for example the status line and "No projectors enabled" link from `92c191a` and the subtitle and row ids from `b9b9d55`.
 
 ## 7. Risks
