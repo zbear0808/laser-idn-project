@@ -69,7 +69,8 @@
                           :host "192.168.1.100"
                           :port 7255
                           :enabled? true
-                          :zone-groups [:all]}))
+                          :zone-groups []
+                          :exclude-from-all? false}))
 
 
 ;; Tests
@@ -135,7 +136,7 @@
         (is (contains? data :projectors))
         ;; After flattening: :projectors IS the map directly (no :items wrapper)
         (is (contains? (:projectors data) :test-proj))
-        (is (= [:all] (get-in data [:projectors :test-proj :zone-groups])))))
+        (is (= [] (get-in data [:projectors :test-proj :zone-groups])))))
     
     (testing "content.edn contains expected data"
       (let [zip-contents (ser/load-from-zip test-project-file)
@@ -184,7 +185,7 @@
       (let [projector (state/get-in-state [:projectors :test-proj])]
         (is (= "Test Projector" (:name projector)))
         (is (= "192.168.1.100" (:host projector)))
-        (is (= [:all] (:zone-groups projector)))))))
+        (is (= [] (:zone-groups projector)))))))
 
 (deftest test-round-trip
   (testing "Save and load preserves all data with zip format"
@@ -227,6 +228,33 @@
              (:rig (persistent/apply-loaded-project saved (assoc-in files ["hardware.edn" :rig] {:order [:p1]}) "x.zip")))))
     (testing "File > New starts with the defaults"
       (is (= defaults (:rig (persistent/new-project-state saved)))))))
+
+(deftest old-show-loads-clean-test
+  (let [old-groups {:all {:id :all :name "All" :color "#808080"} :left {:id :left :name "Left" :color "#4A90D9"}
+                    :right {:id :right :name "Right" :color "#D94A4A"} :center {:id :center :name "Center" :color "#4AD94A"}
+                    :graphics {:id :graphics :name "Graphics" :color "#9B59B6"} :crowd {:id :crowd :name "Crowd Scanning" :color "#E67E22"}}
+        files (-> (persistent/project-files (domains/build-initial-state))
+                  (update "hardware.edn" dissoc :rig)
+                  (assoc-in ["hardware.edn" :zone-groups] old-groups)
+                  (assoc-in ["hardware.edn" :projectors] {:p {:name "L" :host "10.0.0.5" :service-id 1 :enabled? true
+                                                              :unit-id "0A 1B" :zone-groups [:all :left]}})
+                  (assoc-in ["content.edn" :chains :cue-chains] {[0 0] {:items [{:id "i" :type :preset :preset-id :circle
+                                                                                :zone-group-id :center}]}})
+                  (assoc-in ["project-metadata.edn" :config :preview :grid-cells]
+                            [{:zone-group-id nil} {:zone-group-id :left} {:zone-group-id :right} {:zone-group-id :center}]))
+        loaded (persistent/apply-loaded-project (domains/build-initial-state) files "old.zip")]
+    (is (= {:zone-groups [:left] :exclude-from-all? false :stable-id [:unit "0A 1B" 1]}
+           (select-keys (get-in loaded [:projectors :p]) [:zone-groups :exclude-from-all? :stable-id])))
+    (is (= #{:left :graphics :crowd} (set (keys (:zone-groups loaded)))) "All is built in; the empty Right and Center went")
+    (is (= "Left (manual)" (get-in loaded [:zone-groups :left :name])))
+    (is (= :auto/center (get-in loaded [:chains :cue-chains [0 0] :items 0 :zone-group-id])))
+    (is (= [nil :left :auto/right :auto/center] (mapv :zone-group-id (get-in loaded [:config :preview :grid-cells]))))
+    (is (false? (get-in loaded [:project :dirty?])) "converted before the baseline: not an unsaved change")
+    (is (empty? (get-in loaded [:history :undo-stack])))
+    (testing "saved again, it loads as it is"
+      (let [again (persistent/apply-loaded-project (domains/build-initial-state) (persistent/project-files loaded) "new.zip")]
+        (is (= (select-keys loaded [:projectors :zone-groups :rig :chains]) (select-keys again [:projectors :zone-groups :rig :chains])))
+        (is (= (get-in loaded [:config :preview]) (get-in again [:config :preview])))))))
 
 (deftest test-obsolete-domains-removed
   (testing "Obsolete domains are not in registered domains"

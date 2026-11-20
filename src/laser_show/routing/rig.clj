@@ -67,14 +67,14 @@
 ;; Display data for the derived refs
 
 (def group-defs
-  "Names and colours of All and the automatic groups. Each laser's own group
-   is laser-color, named after its projector."
-  {:all {:name "All" :color "#808080"}
-   :auto/left {:name "Left" :color "#4A90D9"}
-   :auto/right {:name "Right" :color "#D94A4A"}
-   :auto/center {:name "Center" :color "#4AD94A"}
-   :auto/odd {:name "Odd" :color "#F1C40F"}
-   :auto/even {:name "Even" :color "#1ABC9C"}})
+  "Names, colours and descriptions of All and the automatic groups. Each
+   laser's own group is laser-color, named after its projector."
+  {:all {:name "All" :color "#808080" :description "Every laser that's on, except those set to Exclude from All."}
+   :auto/left {:name "Left" :color "#4A90D9" :description "The left half of the rig."}
+   :auto/right {:name "Right" :color "#D94A4A" :description "The right half of the rig."}
+   :auto/center {:name "Center" :color "#4AD94A" :description "The middle laser, or the middle two."}
+   :auto/odd {:name "Odd" :color "#F1C40F" :description "Every other laser from the left: 1st, 3rd, 5th…"}
+   :auto/even {:name "Even" :color "#1ABC9C" :description "Every other laser from the left: 2nd, 4th…"}})
 
 (def laser-color "#4A6FA5")
 

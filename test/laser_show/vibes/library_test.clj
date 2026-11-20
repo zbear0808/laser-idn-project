@@ -53,14 +53,15 @@
   (let [state (assoc-in (starter) [:chains :cue-chains [0 1]] shape)
         cell? #(library/audience-cell? %1 [0 1])]
     (testing "destination :all, no item rerouted, no projector tagged"
-      (is (false? (cell? (with-projector state :p3 {:zone-groups [:front]})))))
+      (is (false? (cell? (with-projector state :p3 {:zone-groups [:front] :exclude-from-all? true})))))
     (testing "destination :crowd"
       (is (true? (cell? (assoc-in state [:chains :cue-chains [0 1] :destination-zone :zone-group-id] :crowd)))))
     (testing "an item's zone selector names a group a crowd-scanning projector is in"
       (let [rerouted (assoc-in state [:chains :cue-chains [0 1] :items 0 :effects]
                                [{:effect-id :zone-selector :params {:target-zone :front}}])]
-        (is (true? (cell? (with-projector rerouted :p3 {:zone-groups [:front] :tags #{:crowd-scanning}}))))
-        (is (false? (cell? (with-projector rerouted :p3 {:zone-groups [:front]}))) "untagged")))
+        (is (true? (cell? (with-projector rerouted :p3 {:zone-groups [:front] :tags #{:crowd-scanning}
+                                                        :exclude-from-all? true}))))
+        (is (false? (cell? (with-projector rerouted :p3 {:zone-groups [:front] :exclude-from-all? true}))) "untagged")))
     (testing "destination :all, and the crowd-scanning projector is in :all: it does reach the crowd"
       (is (true? (cell? (with-projector state :p3 {:zone-groups [:all] :tags #{:crowd-scanning}})))))
     (testing "a destination with no group set (the zone combo sent none) routes to :all, so it reaches it too"
@@ -83,8 +84,41 @@
                                   {:parent-projector-id :p9 :zone-groups [:all] :tags #{:crowd-scanning}}))))
       (is (true? (cell? (-> (with-projector state :p9 {:zone-groups [:left] :tags #{:crowd-scanning}})
                             (assoc-in [:virtual-projectors :v1] {:parent-projector-id :p9 :zone-groups [:all]}))))))
-    (is (= #{:crowd :front} (library/audience-groups (with-projector state :p3 {:zone-groups [:front]
-                                                                                :tags [:crowd-scanning]}))))))
+    (is (= #{:crowd :front :auto.laser/p3}
+           (library/audience-groups (with-projector state :p3 {:zone-groups [:front] :tags [:crowd-scanning]
+                                                               :exclude-from-all? true})))
+        "its groups and its own; not All, nor the automatic groups, which it is out of")))
+
+(deftest crowd-laser-in-all-makes-all-audience-test
+  (let [state (-> (starter)
+                  (with-projector :aud {:host "10.0.0.1" :zone-groups [] :tags #{:crowd-scanning}})
+                  (assoc-in [:chains :cue-chains [0 1]] shape))]
+    (is (contains? (library/audience-groups state) :all) "with nothing ticked, it plays All (D-20)")
+    (is (true? (library/audience-cell? state [0 1])) "so every cue on All is an audience cue")))
+
+(deftest excluded-crowd-laser-leaves-all-alone-test
+  (let [state (-> (starter)
+                  (with-projector :aud {:host "10.0.0.1" :zone-groups [:crowd] :tags #{:crowd-scanning}
+                                        :exclude-from-all? true})
+                  (with-projector :main {:host "10.0.0.2" :zone-groups []})
+                  (assoc-in [:chains :cue-chains [0 1]] shape))]
+    (is (= #{:crowd :auto.laser/aud} (library/audience-groups state)))
+    (is (false? (library/audience-cell? state [0 1])) "a cue on All isn't an audience cue")
+    (is (true? (library/audience-cell? (assoc-in state [:chains :cue-chains [0 1] :destination-zone :zone-group-id]
+                                                 :auto.laser/aud)
+                                       [0 1]))
+        "one aimed at the scanner itself is")))
+
+(deftest crowd-laser-at-the-left-end-makes-left-audience-test
+  (let [state (-> (starter)
+                  (with-projector :aud {:host "10.0.0.1" :zone-groups [] :tags #{:crowd-scanning}})
+                  (with-projector :main {:host "10.0.0.2" :zone-groups []}))]
+    (is (contains? (library/audience-groups state) :auto/left))
+    (is (not (contains? (library/audience-groups state) :auto/right)))
+    (testing "moved to the right end, Right reaches the audience instead"
+      (let [moved (assoc-in state [:rig :order] [:main :aud])]
+        (is (contains? (library/audience-groups moved) :auto/right))
+        (is (not (contains? (library/audience-groups moved) :auto/left)))))))
 
 (deftest audience-cells-never-play-unless-allowed-test
   (let [state (-> (starter)
@@ -294,6 +328,19 @@
       (let [rows (library/lint (-> (starter) (with-vibe :vibe-2 {:hit {:cells []}}) (with-vibe :vibe-1 {:hit {:cells [[0 0]]}})))]
         (is (= [:error :warn :info] (mapv :level rows)))
         (is (= [:vibe-2 :vibe-1 nil] (mapv :vibe rows)))))))
+
+(deftest lint-names-the-automatic-group-and-its-scanner-test
+  (let [state (-> (learned-all (starter))
+                  (assoc-in [:projectors :aud] {:name "Aud" :host "10.0.0.1" :zone-groups [] :tags #{:crowd-scanning}})
+                  (assoc-in [:projectors :main] {:name "Main" :host "10.0.0.2" :zone-groups []})
+                  (assoc-in [:chains :cue-chains [1 0] :destination-zone :zone-group-id] :auto/left))]
+    (is (has-row? state :warn "Shapes: A2 reaches the audience through Left (Aud), so this vibe never plays it. Allow audience cells, or take it out")
+        "Aud is the left laser, though it lists no group: the derived groups count, named as the pickers name them")
+    (is (has-row? (assoc-in state [:chains :cue-chains [1 0] :destination-zone :zone-group-id] :auto.laser/aud)
+                  :warn "Shapes: A2 reaches the audience through Aud, so this vibe never plays it. Allow audience cells, or take it out")
+        "a cue aimed at the scanner's own group names it once")
+    (is (not-any? #(re-find #"A2 reaches" (:text %)) (library/lint (assoc-in state [:rig :order] [:main :aud])))
+        "with Main on the left, Left doesn't reach the audience")))
 
 
 ;; Lint of the tap reactions (04 §7)

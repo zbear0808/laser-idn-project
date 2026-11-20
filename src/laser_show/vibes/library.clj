@@ -18,6 +18,7 @@
    :vibes], and returns them) and the lint. laser-show.vibes.engine plays
    them."
   (:require [clojure.string :as str]
+            [laser-show.routing.rig :as rig]
             [laser-show.state.domains :as domains]
             [laser-show.timeline.playback :as playback]
             [laser-show.vibes.reactions :as reactions]))
@@ -69,22 +70,30 @@
 
 ;; Who a cue reaches (V6)
 
-(defn- scanners
-  "The projectors that scan the audience: those tagged :crowd-scanning, and
-   the virtual projectors that are or whose projector is."
+(defn- crowd?
+  "Does an output scan the audience (tagged :crowd-scanning)?"
+  [output]
+  (boolean (some #{:crowd-scanning} (:tags output))))
+
+(defn- crowd-virtual-projectors
+  "The virtual projectors that scan the audience: tagged, or whose projector
+   is."
   [state]
-  (let [projectors (:projectors state)
-        crowd? (fn [p] (some #{:crowd-scanning} (:tags p)))]
-    (concat (filter crowd? (vals projectors))
-            (filter #(or (crowd? %) (crowd? (get projectors (:parent-projector-id %))))
-                    (vals (:virtual-projectors state))))))
+  (let [projectors (:projectors state)]
+    (filter #(or (crowd? %) (crowd? (get projectors (:parent-projector-id %))))
+            (vals (:virtual-projectors state)))))
 
 (defn audience-groups
-  "Zone groups that reach the audience: :crowd, and every zone group of a
-   projector tagged :crowd-scanning, or of a virtual projector that is or
-   whose projector is."
+  "Refs that reach the audience: :crowd; every ref that reaches a projector
+   tagged :crowd-scanning (routing.rig/refs-reaching: All unless it is
+   excluded, its groups, the automatic groups it is in, which follow the
+   rig's order, and its own); and All and the groups of a virtual projector
+   that is tagged or whose projector is. The refs that make a laser draw a
+   cue are the ones that make it an audience cue (04 invariant 10)."
   [state]
-  (into #{:crowd} (mapcat :zone-groups) (scanners state)))
+  (-> #{:crowd}
+      (into (rig/refs-reaching state crowd?))
+      (into (mapcat rig/stored-refs) (crowd-virtual-projectors state))))
 
 (defn- zone-group-ids
   "Every zone group cue can send to, in any of the places the routing reads
@@ -402,16 +411,30 @@
   [state]
   (count (heard-roles state)))
 
+(defn- scanner-through
+  "The name of the scanner that group reaches: the first projector tagged
+   :crowd-scanning, in rig order, that group reaches (routing.rig/reaching),
+   else the first such virtual projector; nil for none."
+  [state group]
+  (let [projectors (:projectors state)]
+    (or (some (fn [id]
+                (when (and (crowd? (get projectors id)) (some #{group} (rig/reaching state id)))
+                  (rig/projector-name state id)))
+              (rig/effective-order (get-in state [:rig :order]) projectors))
+        (some #(when (some #{group} (rig/stored-refs %)) (:name %)) (crowd-virtual-projectors state)))))
+
 (defn- audience-text
   "Why vibe-name never plays the cue at cell: the audience group it reaches,
-   and the projector that scans the crowd there."
+   named as the pickers name it (\"All\", \"Left\", a laser, a group), and the
+   projector that scans the crowd there (not for :crowd, nor for a laser's
+   own group, which names it)."
   [state vibe-name cell cue groups]
   (let [ids (zone-group-ids cue)
         group (if (contains? ids :crowd) :crowd (first (filter groups (sort ids))))
-        scanner (when (not= :crowd group)
-                  (some #(when (some #{group} (:zone-groups %)) (:name %)) (scanners state)))]
+        scanner (when-not (or (= :crowd group) (rig/laser-of group))
+                  (scanner-through state group))]
     (str vibe-name ": " (cell-name cell) " reaches the audience through "
-         (get-in state [:zone-groups group :name] (name group))
+         (rig/ref-name state group)
          (when scanner (str " (" scanner ")"))
          ", so this vibe never plays it. Allow audience cells, or take it out")))
 

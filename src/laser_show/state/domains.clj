@@ -257,9 +257,9 @@
    :preview {:default {:zone-group-filter :all
                        :grid-layout [2 2]
                        :grid-cells [{:zone-group-id nil}    ;; nil = master view (show all)
-                                    {:zone-group-id :left}
-                                    {:zone-group-id :right}
-                                    {:zone-group-id :center}]
+                                    {:zone-group-id :auto/left}
+                                    {:zone-group-id :auto/right}
+                                    {:zone-group-id :auto/center}]
                        :show-labels? true}
              :doc "Preview grid configuration. grid-layout is [cols rows], grid-cells is vector of cell configs with :zone-group-id (nil = show all/master view). The cells take their size from the preview's pane (views/components/preview.clj canvas-side)"}
    :idn {:default {:host nil :port 7255}
@@ -304,7 +304,12 @@
    - :output-config - Bit depth settings
    - :scan-rate - Points per second (pps) this projector draws: 25 000 for new
      projectors, 1 000-100 000. It sets each frame's duration on the wire
-   - :zone-groups - Vector of zone group IDs this projector belongs to (e.g., [:all :left])
+   - :zone-groups - Vector of custom zone group IDs this projector belongs to
+     (e.g., [:graphics]); All and the automatic groups are never listed
+   - :exclude-from-all? - true keeps it out of All and the automatic groups
+     (laser-show.routing.rig); it still plays its own group and its groups
+   - :stable-id - [:unit \"0A 1B …\" output] or [:host address output]: how a
+     scan knows it again (routing.rig/match-discovered)
    - :tags - Set of optional tags (:graphics, :crowd-scanning) for categorization
    - :status - Runtime connection status (not persisted)"
   {})
@@ -363,34 +368,16 @@
    This domain IS the map of zone-group-id -> group config.
    UI selection state is stored in :zone-group-ui domain.
    
+   These are your groups. All (:all) and the automatic groups (Left, Right,
+   Center, Odd, Even and one per laser) are built in and derived from the
+   rig (laser-show.routing.rig), never stored here; shows from before keep
+   their built-in Left, Right or Center only while a projector is in it, as
+   \"Left (manual)\" (state.migration).
+   
    Default zone groups are provided:
-   - :all - All projectors
-   - :left - Left side projectors
-   - :right - Right side projectors
-   - :center - Center projectors
    - :graphics - Graphics-specific projectors (for smaller scan areas)
    - :crowd - Audience scanning projectors"
-  {:all {:default {:id :all
-                   :name "All"
-                   :description "All projectors"
-                   :color "#808080"}
-         :doc "All projectors group"}
-   :left {:default {:id :left
-                    :name "Left"
-                    :description "Left side projectors"
-                    :color "#4A90D9"}
-          :doc "Left side projectors group"}
-   :right {:default {:id :right
-                     :name "Right"
-                     :description "Right side projectors"
-                     :color "#D94A4A"}
-           :doc "Right side projectors group"}
-   :center {:default {:id :center
-                      :name "Center"
-                      :description "Center projectors"
-                      :color "#4AD94A"}
-            :doc "Center projectors group"}
-   :graphics {:default {:id :graphics
+  {:graphics {:default {:id :graphics
                         :name "Graphics"
                         :description "Graphics-specific projectors"
                         :color "#9B59B6"}

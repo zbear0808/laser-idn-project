@@ -76,14 +76,15 @@
    
    Required keys: :name, :host
    Optional keys: :port, :service-id, :service-name, :unit-id, :stable-id, :zone-groups, :tags, :scan-rate, :enabled?
-   Without :stable-id, it is the one routing.rig/stable-id gives.
+   Without :stable-id, it is the one routing.rig/stable-id gives. A new
+   projector lists no group and plays All (:exclude-from-all? false).
    
    NOTE: Auto-discovered projectors default to enabled?=false.
    Manual projectors should pass enabled?=true explicitly.
    
    Throws: IllegalArgumentException if host is nil or blank"
   [{:keys [name host port service-id service-name unit-id stable-id zone-groups tags scan-rate enabled?]
-    :or {port 7255 zone-groups [:all] tags #{} scan-rate stream/DEFAULT_SCAN_RATE enabled? false}}]
+    :or {port 7255 zone-groups [] tags #{} scan-rate stream/DEFAULT_SCAN_RATE enabled? false}}]
   {:pre [(and host (not (str/blank? host)))]}
   {:name name
    :host host
@@ -93,6 +94,7 @@
    :unit-id unit-id
    :stable-id (or stable-id (rig/stable-id {:unit-id unit-id :service-id service-id :host host}))
    :zone-groups zone-groups
+   :exclude-from-all? false
    :tags tags
    :enabled? enabled?
    :scan-rate scan-rate
@@ -304,16 +306,22 @@
 ;; Zone Group Assignment
 
 
+(defn- toggled-groups
+  "groups with group-id taken out, or added at the end."
+  [groups group-id]
+  (let [groups (or groups [])]
+    (if (some #{group-id} groups)
+      (vec (remove #{group-id} groups))
+      (conj (vec groups) group-id))))
+
 (defn- handle-projectors-toggle-zone-group
-  "Toggle a projector's membership in a zone group."
+  "Toggle a projector's membership in a custom zone group. All and the
+   automatic groups (routing.rig/derived-ref?) are never stored: they are
+   refused, and state is returned as it is."
   [{:keys [projector-id zone-group-id state]}]
-  (let [current-groups (get-in state [:projectors projector-id :zone-groups] [])
-        member? (some #{zone-group-id} current-groups)
-        new-groups (if member?
-                     (vec (remove #{zone-group-id} current-groups))
-                     (conj current-groups zone-group-id))]
-    {:state (-> state
-                (assoc-in [:projectors projector-id :zone-groups] new-groups))}))
+  (if (rig/derived-ref? zone-group-id)
+    {:state state}
+    {:state (update-in state [:projectors projector-id :zone-groups] toggled-groups zone-group-id)}))
 
 
 
@@ -322,15 +330,12 @@
 
 
 (defn- handle-vp-toggle-zone-group
-  "Toggle a virtual projector's membership in a zone group."
+  "Toggle a virtual projector's membership in a custom zone group (never All
+   or an automatic group)."
   [{:keys [vp-id zone-group-id state]}]
-  (let [current-groups (get-in state [:virtual-projectors vp-id :zone-groups] [])
-        member? (some #{zone-group-id} current-groups)
-        new-groups (if member?
-                     (vec (remove #{zone-group-id} current-groups))
-                     (conj current-groups zone-group-id))]
-    {:state (-> state
-                (assoc-in [:virtual-projectors vp-id :zone-groups] new-groups))}))
+  (if (rig/derived-ref? zone-group-id)
+    {:state state}
+    {:state (update-in state [:virtual-projectors vp-id :zone-groups] toggled-groups zone-group-id)}))
 
 
 

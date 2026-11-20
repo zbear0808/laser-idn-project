@@ -12,6 +12,7 @@
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
+            [laser-show.state.migration :as migration]
             [laser-show.state.serialization :as ser]
             [laser-show.state.templates :as templates]
             [laser-show.timeline.model :as model]))
@@ -183,7 +184,9 @@
 (defn apply-loaded-project
   "Return state with the document replaced by the loaded zip contents.
    
-   zip-contents is the {filename data} map from serialization/load-from-zip."
+   zip-contents is the {filename data} map from serialization/load-from-zip.
+   An old show is converted (state.migration) before the saved baseline is
+   taken, so it isn't \"unsaved\" right after loading."
   [state zip-contents zip-path]
   (let [initial (domains/build-initial-state)]
     (-> state
@@ -191,6 +194,7 @@
         (reset-session initial)
         ;; Before mark-clean, so an old project isn't "unsaved" right after loading
         (update-in [:chains :cue-chains] model/normalize-timeline-cues)
+        (migration/zones-z2 (get zip-contents (:hardware zip-filenames)))
         history/mark-clean
         (assoc-in [:project :current-file] zip-path))))
 

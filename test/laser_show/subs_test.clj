@@ -660,3 +660,18 @@
     (is (= "Vibes ⚠ 2" (fx/sub-ctx (context (-> s (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [])
                                                 (assoc-in [:config :vibes :library :vibe-2 :hit :cells] [])))
                                    subs/vibes-tab-label)))))
+
+(deftest vibe-audience-groups-follow-the-order-test
+  (let [s (-> base-state
+              (templates/apply-starter-vibes)
+              (assoc-in [:chains :cue-chains] {[0 0] {:items [{:type :preset :preset-id :circle}]
+                                                      :destination-zone {:zone-group-id :auto/left}}
+                                               [1 0] {:items [{:type :preset :preset-id :square}]
+                                                      :destination-zone {:zone-group-id :auto/right}}})
+              (assoc :projectors {:aud {:name "Aud" :host "10.0.0.1" :zone-groups [] :tags #{:crowd-scanning}}
+                                  :main {:name "Main" :host "10.0.0.2" :zone-groups []}}))
+        ctx (context s)
+        blocked (fn [ctx] [(fx/sub-ctx ctx subs/vibe-cell-blocked 0 0) (fx/sub-ctx ctx subs/vibe-cell-blocked 1 0)])]
+    (is (= [:crowd nil] (blocked ctx)) "the scanner is the left laser: the cue on Left reaches the audience")
+    (is (= [nil :crowd] (blocked (fx/swap-context ctx assoc-in [:rig :order] [:main :aud])))
+        "moved to the right end, the mark moves to the cue on Right")))

@@ -214,11 +214,11 @@
     (ui/click! robot "#zone-group-delete-button")
     (ui/wait-for! #(window-showing? "Delete \"Balcony\"?"))
     (ui/assert-text! "#confirm-details" "A1 Intro")
-    (ui/select! robot "#confirm-choice" ":left")
-    (ui/wait-for! #(= :left (get-in (app-state) [:ui :dialogs :confirm :choice-value])))
+    (ui/select! robot "#confirm-choice" ":graphics")
+    (ui/wait-for! #(= :graphics (get-in (app-state) [:ui :dialogs :confirm :choice-value])))
     (ui/click! robot "#confirm-ok")
     (ui/wait-for! #(nil? (get-in (app-state) [:zone-groups :group-balcony])))
-    (is (= :left (cue-zone)) "the cue now goes to Left")
+    (is (= :graphics (cue-zone)) "the cue now goes to Graphics")
     (ui/wait-for! #(not (window-showing? "Delete \"Balcony\"?")))))
 
 (deftest all-has-no-delete-test
@@ -229,7 +229,7 @@
     (ui/assert-text! "#zone-group-cannot-delete" "All can't be deleted.")
     (is (nil? (ui/query "#zone-group-delete-button")))
     (testing "another group has its Delete... button"
-      (events/dispatch! {:event/type :zone-groups/select :group-id :left})
+      (events/dispatch! {:event/type :zone-groups/select :group-id :graphics})
       (ui/wait-for! #(some? (ui/query "#zone-group-delete-button"))))))
 
 (defn- check-box-labelled

@@ -9,6 +9,7 @@
             [laser-show.backend.output-errors :as output-errors]
             [laser-show.animation.safety :as safety]
             [laser-show.events.core :as events]
+            [laser-show.routing.rig :as rig]
             [laser-show.services.frame-service :as fs]
             [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
@@ -253,22 +254,61 @@
           (is (nil? result)))))))
 
 (deftest get-projector-zone-groups-test
-  (testing "Gets zone groups from projector config"
+  (testing "The refs that reach each projector (routing.rig/refs-for): All, its own groups, the automatic ones it is in"
     (state/reset-state!
       {:projectors {:proj-1 {:zone-groups [:left :center]}
                     :proj-2 {:zone-groups [:right]}
                     :proj-3 {}}})
     
     (let [raw-state (state/get-raw-state)]
-      (testing "Returns configured zone groups"
-        (is (= [:left :center] (#'me/get-projector-zone-groups raw-state :proj-1)))
-        (is (= [:right] (#'me/get-projector-zone-groups raw-state :proj-2))))
-      
-      (testing "Returns nil when no zone groups configured"
-        (is (nil? (#'me/get-projector-zone-groups raw-state :proj-3))))
+      (testing "three lasers in id order (no hosts), the middle one split"
+        (is (= [:all :left :center :auto/left :auto/odd :auto.laser/proj-1]
+               (#'me/get-projector-zone-groups raw-state :proj-1)))
+        (is (= [:all :right :auto/left :auto/right :auto/center :auto/even :auto.laser/proj-2]
+               (#'me/get-projector-zone-groups raw-state :proj-2)))
+        (is (= [:all :auto/right :auto/odd :auto.laser/proj-3]
+               (#'me/get-projector-zone-groups raw-state :proj-3))
+            "with no groups of its own"))
       
       (testing "Returns nil for unknown projector"
         (is (nil? (#'me/get-projector-zone-groups raw-state :unknown)))))))
+
+(deftest projector-draws-all-without-listing-it-test
+  (let [all-frame [[0.0 0.0 1.0 1.0 1.0] [0.5 0.0 1.0 1.0 1.0]]]
+    (state/assoc-in-state! [:projectors :p] {:host "10.0.0.5" :enabled? true :zone-groups []
+                                             :exclude-from-all? false})
+    (is (= all-frame (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:all all-frame}}])))
+        "every enabled projector plays All, with nothing ticked (D-20)")))
+
+(deftest excluded-projector-skips-all-test
+  (let [all-frame [[0.0 0.0 1.0 1.0 1.0] [0.5 0.0 1.0 1.0 1.0]]
+        graphics [[0.0 0.5 0.0 1.0 0.0] [0.5 0.5 0.0 1.0 0.0]]
+        frame #(#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames %}]))]
+    (state/assoc-in-state! [:projectors :p] {:host "10.0.0.5" :enabled? true :zone-groups [:graphics]
+                                             :exclude-from-all? true})
+    (is (nil? (frame {:all all-frame})) "Exclude from All: All's content isn't drawn")
+    (is (nil? (frame {:auto/left all-frame :auto/odd all-frame})) "nor Left's or Odd's (D-33)")
+    (is (= graphics (frame {:all all-frame :graphics graphics})) "its own groups still are")
+    (is (= graphics (frame {:auto.laser/p graphics})) "and the group of its own")))
+
+(deftest one-laser-draws-left-and-right-whole-test
+  (let [circle (vec (for [i (range 33)] [(Math/cos (* i 0.19)) (Math/sin (* i 0.19)) 0.0 0.0 1.0]))
+        wave (vec (for [i (range 50)] [(- (/ i 25.0) 1.0) (Math/sin (* i 0.3)) 1.0 0.0 0.0]))]
+    (state/assoc-in-state! [:projectors :p] {:host "10.0.0.5" :enabled? true :zone-groups []})
+    (is (= (#'me/combine-zone-frames [circle wave])
+           (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:auto/left circle :auto/right wave}}])))
+        "Z2: Left and Right of one laser are its halves, but each is drawn whole, joined by a blanking jump (Z3 fits them into the halves)")))
+
+(deftest reorder-reroutes-left-test
+  (let [left-frame [[-0.5 0.0 1.0 1.0 1.0] [-0.4 0.0 1.0 1.0 1.0]]
+        cues [{:cell [0 0] :zone-frames {:auto/left left-frame}}]]
+    (state/swap-state! assoc :projectors {:a {:name "A" :host "10.0.0.5" :enabled? true :zone-groups []}
+                                          :b {:name "B" :host "10.0.0.6" :enabled? true :zone-groups []}})
+    (is (= left-frame (#'me/projector-frame :a (snapshot cues))) "by IP, A is on the left")
+    (is (nil? (#'me/projector-frame :b (snapshot cues))))
+    (state/assoc-in-state! [:rig :order] [:b :a])
+    (is (nil? (#'me/projector-frame :a (snapshot cues))) "moved: the next frame follows, no restart")
+    (is (= left-frame (#'me/projector-frame :b (snapshot cues))))))
 
 (deftest projector-receives-only-zone-specific-frames-test
   (testing "Projector receives only frames for its configured zone groups, from the tick's snapshot"
@@ -323,13 +363,14 @@
 
 (defn- direct-frame
   "What the projector would send for the cues as they are now: each cue
-   rendered with generate-frames-by-zone at its own timing, its projector's
-   zones taken and joined, the cues joined, then the projector effects at the
-   first cue's timing and the global BPM."
+   rendered with generate-frames-by-zone at its own timing, the frames of
+   the refs that reach the projector (routing.rig/refs-for) taken and
+   joined, the cues joined, then the projector effects at the first cue's
+   timing and the global BPM."
   [projector-id]
   (let [s (state/get-raw-state)
         bpm (get-in s [:timing :bpm])
-        zones (get-in s [:projectors projector-id :zone-groups])
+        zones (rig/refs-for s projector-id)
         runs (show-time/active-runs s)
         per-cue (keep (fn [{:keys [cue-chain cue-timing]}]
                         (let [cue-bpm (playback/cue-bpm cue-chain bpm)

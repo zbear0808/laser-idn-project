@@ -147,15 +147,15 @@
 (deftest handle-zone-groups-edit-test
   (testing "Edit opens dialog with existing group data"
     (let [event {:event/type :zone-groups/edit
-                 :group-id :left
+                 :group-id :graphics
                  :state base-state}
           result (zone-groups/handle event)
           ;; FLATTENED: Dialog fields live alongside :open?, not under :data
           dialog (get-in result [:state :ui :dialogs :zone-group-editor])]
       (is (true? (:open? dialog)))
       (is (true? (:editing? dialog)))
-      (is (= :left (:group-id dialog)))
-      (is (= "Left" (:name dialog))))))
+      (is (= :graphics (:group-id dialog)))
+      (is (= "Graphics" (:name dialog))))))
 
 
 (deftest handle-zone-groups-save-edit-test
@@ -165,19 +165,19 @@
                                 (assoc-in [:ui :dialogs :zone-group-editor]
                                           {:open? true
                                            :editing? true
-                                           :group-id :left
-                                           :name "Left Updated"
+                                           :group-id :graphics
+                                           :name "Graphics Updated"
                                            :description "New desc"
                                            :color "#00FF00"}))
           event {:event/type :zone-groups/save-edit
-                 :group-id :left
-                 :name "Left Updated"
+                 :group-id :graphics
+                 :name "Graphics Updated"
                  :description "New desc"
                  :color "#00FF00"
                  :state state-with-dialog}
           result (zone-groups/handle event)
-          group (get-in result [:state :zone-groups :left])]
-      (is (= "Left Updated" (:name group)))
+          group (get-in result [:state :zone-groups :graphics])]
+      (is (= "Graphics Updated" (:name group)))
       (is (= "New desc" (:description group)))
       (is (= "#00FF00" (:color group)))
       (is (false? (get-in result [:state :ui :dialogs :zone-group-editor :open?]))))))
@@ -236,9 +236,9 @@
     (is (= "A1 Intro · C2 Drop" (:details dialog)))
     (is (= :retarget-to (get-in dialog [:choice :key])))
     (is (= :all (:choice-value dialog)) "All by default")
-    (is (= [:all :center :crowd :graphics :left :right :inherit]
+    (is (= [:all :crowd :graphics :inherit]
            (mapv :value (get-in dialog [:choice :options])))
-        "All, the other groups by name, and Nothing; never the group itself")
+        "All (built in, though no group stores it), the other groups by name, and Nothing; never the group itself")
     (is (= {:event/type :zone-groups/remove :group-id :group-balcony} (:confirm-event dialog))))
   (testing "a group nothing uses asks with no choice"
     (let [dialog (get-in (zone-groups/handle {:event/type :zone-groups/request-remove
@@ -257,15 +257,19 @@
 
 (deftest remove-retargets-cues-test
   (let [result (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
-                                    :retarget-to :left :state balcony-state})
+                                    :retarget-to :graphics :state balcony-state})
         state (:state result)]
     (is (nil? (get-in state [:zone-groups :group-balcony])))
-    (is (= :left (get-in state [:chains :cue-chains [0 0] :items 0 :zone-group-id])))
-    (is (= :left (get-in state [:chains :cue-chains [1 2] :destination-zone :zone-group-id])))
-    (is (= {:zone-group-id :left} (get-in state [:config :preview :grid-cells 1])))
+    (is (= :graphics (get-in state [:chains :cue-chains [0 0] :items 0 :zone-group-id])))
+    (is (= :graphics (get-in state [:chains :cue-chains [1 2] :destination-zone :zone-group-id])))
+    (is (= {:zone-group-id :graphics} (get-in state [:config :preview :grid-cells 1])))
     (is (= #{} (refs/cues-using (get-in state [:chains :cue-chains]) :group-balcony)))
     (is (nil? (get-in state [:zone-group-ui :selected-group])))
-    (is (= "Deleted Balcony · 2 cues now go to Left" (get-in state [:ui :notice :text])))))
+    (is (= "Deleted Balcony · 2 cues now go to Graphics" (get-in state [:ui :notice :text])))
+    (is (= "Deleted Balcony · 2 cues now go to All"
+           (get-in (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony :state balcony-state})
+                   [:state :ui :notice :text]))
+        "All by its name, though no group stores it")))
 
 (deftest remove-to-nothing-inherits-test
   (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
@@ -290,7 +294,7 @@
 
 (deftest remove-strips-membership-test
   (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
-                                           :retarget-to :left :state balcony-state}))]
+                                           :retarget-to :graphics :state balcony-state}))]
     (is (= [:all] (get-in state [:projectors test-projector-id :zone-groups]))
         "the group leaves the projector; the re-target never adds a membership")))
 

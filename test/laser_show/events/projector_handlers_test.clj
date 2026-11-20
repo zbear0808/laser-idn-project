@@ -15,6 +15,7 @@
    [laser-show.events.core :as events]
    [laser-show.events.handlers.projector :as projectors]
    [laser-show.events.safety-guard :as guard]
+   [laser-show.routing.rig :as rig]
    [laser-show.state.domains :refer [build-initial-state]]))
 
 
@@ -70,26 +71,48 @@
   (testing "Adds zone group when not present"
     (let [event {:event/type :projectors/toggle-zone-group
                  :projector-id test-projector-id
-                 :zone-group-id :left
-                 :state state-with-projector}
+                 :zone-group-id :graphics
+                 :state (assoc-in state-with-projector [:projectors test-projector-id :zone-groups] [])}
           result (projectors/handle event)
           zone-groups (get-in result [:state :projectors test-projector-id :zone-groups])]
-      (is (some #{:left} zone-groups))
-      (is (some #{:all} zone-groups))))
+      (is (= [:graphics] zone-groups))))
   
   (testing "Removes zone group when present"
     (let [state-with-groups (assoc-in state-with-projector
                                       [:projectors test-projector-id :zone-groups]
-                                      [:all :left :right])
+                                      [:graphics :crowd :group-balcony])
           event {:event/type :projectors/toggle-zone-group
                  :projector-id test-projector-id
-                 :zone-group-id :left
+                 :zone-group-id :crowd
                  :state state-with-groups}
           result (projectors/handle event)
           zone-groups (get-in result [:state :projectors test-projector-id :zone-groups])]
-      (is (not (some #{:left} zone-groups)))
-      (is (some #{:all} zone-groups))
-      (is (some #{:right} zone-groups)))))
+      (is (= [:graphics :group-balcony] zone-groups)))))
+
+(deftest toggle-refuses-derived-groups-test
+  (let [vp-state (assoc-in state-with-projector [:virtual-projectors :vp1] {:name "VP" :parent-projector-id test-projector-id
+                                                                             :zone-groups []})]
+    (doseq [ref [:all :auto/left :auto/even :auto.laser/proj-1]]
+      (testing (str ref)
+        (is (identical? vp-state (:state (projectors/handle {:event/type :projectors/toggle-zone-group
+                                                             :projector-id test-projector-id :zone-group-id ref
+                                                             :state vp-state})))
+            "All and the automatic groups are never stored")
+        (is (identical? vp-state (:state (projectors/handle {:event/type :projectors/vp-toggle-zone-group
+                                                             :vp-id :vp1 :zone-group-id ref :state vp-state})))
+            "nor in a virtual projector's list")))))
+
+(deftest new-projectors-are-in-all-without-listing-it-test
+  (let [added (first (vals (get-in (projectors/handle {:event/type :projectors/add-manual :name "Manual" :host "10.0.0.5"
+                                                       :state sample-state})
+                                   [:state :projectors])))
+        found (get-in (projectors/handle {:event/type :projectors/scan-complete
+                                          :devices [{:address "10.0.0.6" :unit-id "AB" :port 7255 :services [{:service-id 1}]}]
+                                          :state sample-state})
+                      [:state :projectors :projector-10-0-0-6-1])]
+    (doseq [p [added found]]
+      (is (= {:zone-groups [] :exclude-from-all? false} (select-keys p [:zone-groups :exclude-from-all?]))))
+    (is (= :all (first (rig/refs-for {:projectors {:p added}} :p))) "and it plays All")))
 
 
 

@@ -1,12 +1,14 @@
 (ns laser-show.events.handlers.zone-groups
   "Event handlers for zone group management.
    
-   Default groups: :all, :left, :right, :center, :graphics, :crowd.
+   Default groups: :graphics and :crowd. All and the automatic groups are
+   built in (laser-show.routing.rig) and can't be deleted.
    Deleting a group asks first (the shared confirm dialog), and re-targets
    every cue, effect and preview reference to it (routing.refs)."
   (:require [clojure.string :as str]
             [laser-show.events.helpers :as h]
             [laser-show.routing.refs :as refs]
+            [laser-show.routing.rig :as rig]
             [laser-show.views.dialogs.common :as common]))
 
 
@@ -79,7 +81,7 @@
   (str n " " (if (= 1 n) one many)))
 
 (defn- group-name [state group-id]
-  (get-in state [:zone-groups group-id :name] (name group-id)))
+  (rig/ref-name state group-id))
 
 (defn- cue-list-text
   "The cues as their cells and names, \"A1 Intro · C2 Drop\": at most six, then
@@ -94,14 +96,13 @@
                       (pos? more) (conj (str "and " more " more"))))))
 
 (defn- retarget-options
-  "Where a deleted group's cues can go: All, the other groups by name, and
-   Nothing (they inherit). Never the group itself."
+  "Where a deleted group's cues can go: All (built in), the other groups by
+   name, and Nothing (they inherit). Never the group itself."
   [state group-id]
-  (let [groups (:zone-groups state)
-        others (->> (dissoc groups group-id :all)
+  (let [others (->> (apply dissoc (:zone-groups state) group-id (filter rig/derived-ref? (keys (:zone-groups state))))
                     (sort-by (fn [[id g]] [(str/lower-case (or (:name g) "")) (name id)]))
                     (mapv (fn [[id g]] {:value id :text (or (:name g) (name id))})))]
-    (-> (if (contains? groups :all) [{:value :all :text (group-name state :all)}] [])
+    (-> [{:value :all :text (group-name state :all)}]
         (into others)
         (conj {:value :inherit :text "Nothing (they inherit)"}))))
 

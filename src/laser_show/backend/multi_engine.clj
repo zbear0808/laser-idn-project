@@ -32,7 +32,8 @@
             [laser-show.animation.safety :as safety]
             [laser-show.animation.test-pattern :as test-pattern]
             [laser-show.services.frame-service :as frame-service]
-            [laser-show.idn.output-config :as output-config]))
+            [laser-show.idn.output-config :as output-config]
+            [laser-show.routing.rig :as rig]))
 
 
 ;; Routing Debug Logging
@@ -48,18 +49,19 @@
 
 
 (defn- get-projector-zone-groups
-  "Get the zone groups a projector belongs to.
+  "The refs whose frames a projector draws, in join order: All unless it is
+   excluded, its own groups, the automatic groups it is in and its own
+   (routing.rig/refs-for). Read live, so a reorder, an exclusion or a
+   membership change re-routes on the next frame. Z3 reads the snapshot's
+   :routing instead.
    
    Args:
    - raw-state: The raw application state
    - projector-id: The projector's ID keyword
    
-   Returns: Vector of zone-group-ids the projector belongs to."
+   Returns: Vector of refs, or nil for an unknown or disabled projector."
   [raw-state projector-id]
-  (let [projector (get-in raw-state [:projectors projector-id])]
-    (-> projector
-        :zone-groups
-        seq)))
+  (rig/refs-for raw-state projector-id))
 
 (defn- extract-frames-for-zones
   "Extract frames from a zone-frames map for the specified zone groups.

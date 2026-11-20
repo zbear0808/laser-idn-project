@@ -34,6 +34,7 @@
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.chains :as chains]
             [laser-show.routing.refs :as refs]
+            [laser-show.routing.rig :as rig]
             [laser-show.dev-config :as dev-config]))
 
 
@@ -673,19 +674,25 @@
 
 
 (defn zone-groups-list
-  "Get all zone groups as a flat list.
-   Depends on: zone-groups domain (which IS the map of group-id -> config)"
+  "All (built in, laser-show.routing.rig) first, then the stored zone groups,
+   as a flat list.
+   Depends on: zone-groups domain"
   [context]
   (let [items (fx/sub-val context :zone-groups)]
-    (mapv (fn [[id config]] (assoc config :id id)) items)))
+    (into [(assoc (rig/group-defs :all) :id :all)]
+          (keep (fn [[id config]] (when-not (rig/derived-ref? id) (assoc config :id id))))
+          items)))
 
 (defn zone-group
-  "Get a single zone group by ID.
+  "Get a single zone group by ID: a stored one, or All or an automatic
+   group (routing.rig/group-defs), which are built in.
    Depends on: zone-groups domain"
   [context group-id]
   (when group-id
-    (when-let [g (get (fx/sub-val context :zone-groups) group-id)]
-      (assoc g :id group-id))))
+    (if-let [g (get (fx/sub-val context :zone-groups) group-id)]
+      (assoc g :id group-id)
+      (when-let [d (get rig/group-defs group-id)]
+        (assoc d :id group-id)))))
 
 (defn selected-zone-group-id
   "Get the currently selected zone group ID.
@@ -1036,9 +1043,9 @@
 
 (defn- reaction-inputs
   "What the cells that react to a press depend on (vibes.reactions/reactions
-   and what may play)."
+   and what may play: the audience rule reads the rig's order too)."
   [state]
-  (select-keys state [:chains :projectors :virtual-projectors]))
+  (select-keys state [:chains :projectors :virtual-projectors :rig]))
 
 (defn- vibe-reactions
   "The current vibe's tap reactions by role (vibes.reactions/reactions), and
@@ -1148,11 +1155,13 @@
   (fx/sub-ctx context indexed-cell-vibes grid col row))
 
 (defn vibe-audience-groups
-  "The zone groups that reach the audience (vibes.library/audience-groups),
-   from the projectors alone."
+  "The refs that reach the audience (vibes.library/audience-groups), from
+   the projectors and the rig (the automatic groups a scanner is in follow
+   the order)."
   [context]
   (library/audience-groups {:projectors (fx/sub-val context :projectors)
-                            :virtual-projectors (fx/sub-val context :virtual-projectors)}))
+                            :virtual-projectors (fx/sub-val context :virtual-projectors)
+                            :rig (fx/sub-val context :rig)}))
 
 (defn- edited-allows-audience? [state]
   (boolean (:allow-audience? (library/vibe state (library/edited-id state)))))
@@ -1227,7 +1236,8 @@
    :chains (select-keys (:chains state) [:cue-chains :effect-chains])
    :projectors (:projectors state)
    :virtual-projectors (:virtual-projectors state)
-   :zone-groups (:zone-groups state)})
+   :zone-groups (:zone-groups state)
+   :rig (:rig state)})
 
 (defn vibe-lint
   "What to fix before the show, worst first (vibes.library/lint)."
