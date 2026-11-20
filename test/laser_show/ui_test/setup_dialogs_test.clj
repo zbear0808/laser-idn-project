@@ -316,3 +316,56 @@
     (ui/click! robot "#projectors-tab")
     (ui/assert-text! "#projectors-subtitle" "Put your lasers in order, left to right. The groups follow the order.")))
 
+
+;; Decimate (zones plan 12)
+
+(defn- menu-texts
+  "The texts of the items of the menu button found by selector."
+  [selector]
+  (let [^javafx.scene.control.MenuButton menu (ui/query selector)]
+    (ui/on-fx-thread #(mapv (fn [^javafx.scene.control.MenuItem item] (.getText item)) (.getItems menu)))))
+
+(defn- window-titled
+  "The showing window whose title starts with title, or nil."
+  ^javafx.stage.Stage [title]
+  (ui/on-fx-thread #(some (fn [w] (when (and (instance? javafx.stage.Stage w) (.isShowing ^javafx.stage.Stage w)
+                                              (some-> (.getTitle ^javafx.stage.Stage w) (.startsWith ^String title)))
+                                     w))
+                          (vec (javafx.stage.Window/getWindows)))))
+
+(defn- labeled-in
+  "The first label or button in window whose text is text, or nil."
+  [^javafx.stage.Window window text]
+  (ui/on-fx-thread
+   #(some (fn [n] (when (and (instance? javafx.scene.control.Labeled n)
+                             (= text (.getText ^javafx.scene.control.Labeled n)))
+                    n))
+          (tree-seq (fn [n] (instance? javafx.scene.Parent n))
+                    (fn [^javafx.scene.Parent p] (seq (.getChildrenUnmodifiable p)))
+                    (.getRoot (.getScene window))))))
+
+(deftest decimate-is-offered-test
+  (let [robot (ui/robot)
+        chain #(get-in (app-state) [:chains :projector-effects :a :items])]
+    (with-projector!)
+    (ui/click! robot "#projectors-tab")
+    (testing "in a laser's Add Effect menu"
+      ;; Below the strip, the inspector scrolls to its calibration chain
+      (ui/scroll-into-view! "#projector-add-effect-menu")
+      (is (some #{"Decimate"} (menu-texts "#projector-add-effect-menu")))
+      (ui/click! robot "#projector-add-effect-menu")
+      (ui/click! robot "#projector-add-effect-decimate")
+      (ui/wait-for! #(= [:decimate] (mapv :effect-id (chain))))
+      (is (= {:kpps 25 :fps 30} (:params (first (chain)))) "at 25 kpps and 30 fps")
+      (testing "the chain names it, and its editor has its two parameters"
+        (ui/wait-for! #(some? (labeled-in (ui/main-window) "Decimate")))
+        (ui/click-node! robot (labeled-in (ui/main-window) "Decimate"))
+        (ui/wait-for! #(some? (labeled-in (ui/main-window) "Edit: Decimate")))
+        (is (some? (labeled-in (ui/main-window) "Scan rate (kpps)")))
+        (is (some? (labeled-in (ui/main-window) "Target fps")))))
+    (testing "and in the effect bank's Shape tab"
+      (events/dispatch! {:event/type :cue-chain/open-editor :col 0 :row 0})
+      (ui/wait-for! #(some? (window-titled "Cue Chain Editor")))
+      (ui/wait-for! #(some? (labeled-in (window-titled "Cue Chain Editor") "Decimate")))
+      (is (ui/has-style-class? "#shape-tab" "tab-btn-active") "the tab it shows"))))
+

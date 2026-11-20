@@ -190,8 +190,10 @@
    cues and routing (routing.compose/projector-frame), then the fit guard
    (animation.fit-guard, with the routing's scan rate and fit settings for
    it), then its projector effects and its safety zone. The frame carries
-   the guard's record, with how many halves it drew, as :fit. Nil when none
-   of the cues reach it."
+   the guard's record, with how many halves it drew, as :fit. When the
+   projector effects change the point count (Decimate), the record counts
+   what they left (fit-guard/recount): what reaches the safety stage, before
+   the crossing points it may add. Nil when none of the cues reach it."
   [raw-state projector-id snapshot]
   (let [routing (:routing snapshot)
         {:keys [frame regions no-room?]} (compose/projector-frame (:cues snapshot) routing projector-id)
@@ -206,8 +208,10 @@
     (when frame
       (let [{:keys [scan-rate fit]} (get-in routing [:outputs projector-id])
             {guarded :frame record :fit} (fit-guard/guard frame scan-rate fit)
+            calibrated (volatile! nil)
             out (guard-safety raw-state projector-id snapshot
-                              (fn [_] (apply-projector-effects guarded projector-id (:projector-ctx snapshot))))]
+                              (fn [_] (vreset! calibrated (apply-projector-effects guarded projector-id (:projector-ctx snapshot)))))
+            record (cond-> record @calibrated (fit-guard/recount (count @calibrated)))]
         (vary-meta out assoc :fit (cond-> (assoc record :regions regions)
                                     no-room? (assoc :no-room? true)))))))
 

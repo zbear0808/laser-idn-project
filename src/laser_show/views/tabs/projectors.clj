@@ -438,12 +438,14 @@
                                 effect-name (:name effect-def)
                                 default-params (effects/get-default-params effect-id)]
                             {:fx/type :menu-item
+                             :id (str "projector-add-effect-" (name effect-id))
                              :text effect-name
                              :on-action {:event/type :projectors/add-effect
                                          :projector-id projector-id
                                          :effect {:effect-id effect-id
                                                   :params default-params}}})))]
     {:fx/type :menu-button
+     :id "projector-add-effect-menu"
      :text "+ Add Effect"
      :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10;"
      :items menu-items}))

@@ -703,3 +703,34 @@
     (testing "and the show clock's reset forgets them"
       (show-time/reset-runtime!)
       (is (nil? (show-time/output-frame :p))))))
+
+
+;; Decimate in a laser's calibration chain (zones plan 12): the record counts
+;; what it left
+
+(def ^:private decimate
+  {:id (random-uuid) :effect-id :decimate :enabled? true :params {:kpps 25 :fps 30}})
+
+(deftest decimate-in-a-calibration-chain-counts-on-the-card-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:projectors :p] {:host "10.0.0.5" :enabled? true :zone-groups [] :scan-rate 25000})
+                          (assoc-in [:chains :projector-effects :p :items] [decimate])))
+  (let [cues [{:cell [0 0] :zone-frames {:all heavy}}]
+        out (#'me/projector-frame :p (snapshot cues))
+        fit (:fit (meta out))]
+    (is (= 833 (count out)) "the guard's 1,800 points, then Decimate's 833")
+    (is (= [3000 833] ((juxt :points-in :points) fit)) "the record counts what Decimate left")
+    (is (<= 30.0 (:guard-fps fit)) "25,000 / 833: 30 fps")
+    (is (< 72.2 (:reduced-pct fit) 72.3) "2,167 of the 3,000 points cut")
+    (is (= [1250 20 0.0 (/ 25000.0 3000)] ((juxt :budget :min-fps :dim-pct :est-fps) fit)) "the rest is the guard's")
+    (testing "so the laser isn't low"
+      (let [provider (#'me/create-projector-frame-provider :p)]
+        (show-time/publish! (snapshot cues))
+        (let [frame (provider)]
+          (is (= 833 (count frame) (:points (:fit (meta frame)))))
+          (is (false? (:low? (:fit (meta frame))))))))
+    (testing "the safety stage's crossing points aren't counted: the record says what reaches it"
+      (state/assoc-in-state! [:projectors :p :safety] {:limit [-0.4 -1.0 0.4 1.0]})
+      (let [out (#'me/projector-frame :p (snapshot cues))]
+        (is (= (+ 833 4) (count out)) "a point more where the circle crosses the limit, four times")
+        (is (= 833 (:points (:fit (meta out)))))))))

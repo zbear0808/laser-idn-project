@@ -244,6 +244,22 @@
     (is (:dark? (:fit (guarded (vec (repeat 100 (dark 0.0 0.0))) 25000))))
     (is (not (:dark? (:fit (guarded (lit-circle 100) 25000)))))))
 
+(deftest recount-counts-what-is-drawn-test
+  (let [{fit :fit} (guarded (lit-circle 3000) 25000)
+        after (fg/recount fit 833)]
+    (is (identical? fit (fg/recount fit 1800)) "the count the guard left: its own record")
+    (testing "what an effect after the guard left (Decimate, zones plan 12), counted against what it was asked for"
+      (is (= [3000 833] ((juxt :points-in :points) after)))
+      (is (close? (/ 25000.0 833) (:guard-fps after)))
+      (is (close? (* 100.0 (/ 2167 3000.0)) (:reduced-pct after)))
+      (is (= (dissoc fit :points :guard-fps :reduced-pct) (dissoc after :points :guard-fps :reduced-pct))
+          "the budget, the minimum, the dimming and the fps before the guard stay the guard's")
+      (is (false? (:low? (fg/smooth nil after))) "30 fps: not low"))
+    (testing "none left: dark, so it leaves the low flag as it was (S-14)"
+      (let [none (fg/recount fit 0)]
+        (is (= [0 nil true] ((juxt :points :guard-fps :dark?) none)))
+        (is (true? (:low? (fg/smooth (fg/smooth nil fit) none))))))))
+
 
 ;; Seeded properties (invariant 6)
 

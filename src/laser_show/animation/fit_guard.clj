@@ -208,6 +208,24 @@
         {:frame (if factor (dim thinned factor) thinned)
          :fit (record points (if factor (* 100.0 (- 1.0 factor)) 0.0))}))))
 
+(defn recount
+  "guard's record for a frame that something after the guard left with
+   points: a projector effect that changes the count (Decimate, zones plan
+   12). :points, :guard-fps and :reduced-pct are counted for points against
+   :points-in, as guard counts them; :budget, :min-fps, :dim-pct and
+   :est-fps stay the guard's. A frame left with no point is :dark?, its fps
+   nil, as guard has it. The same record when the count is the same."
+  [record points]
+  (if (= points (:points record))
+    record
+    (let [n (long (:points-in record))
+          points (long points)]
+      (cond-> (assoc record
+                     :points points
+                     :guard-fps (when (pos? points) (/ (double (:scan-rate record)) points))
+                     :reduced-pct (if (pos? n) (* 100.0 (/ (- n points) (double n))) 0.0))
+        (zero? points) (assoc :dark? true)))))
+
 
 ;; The record over time
 
