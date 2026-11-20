@@ -24,7 +24,8 @@
       (templates/apply-starter-effects)
       (assoc-in [:timing :bpm] 120.0)
       (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)
-      (assoc :projectors {:p1 {:name "P1" :host "10.0.0.1" :port 7255 :enabled? true :zone-groups [:all]}})
+      (assoc :projectors {:p1 {:name "P1" :host "10.0.0.1" :port 7255 :enabled? true :zone-groups []}
+                          :p2 {:name "P2" :host "10.0.0.2" :port 7255 :enabled? true :zone-groups []}})
       (history/mark-clean)))
 
 (defn- lock [state] (assoc-in state [:ui :show-lock?] true))
@@ -62,7 +63,16 @@
    {:event/type :vibe/clear-control :role :hit}
    {:event/type :projectors/toggle-enabled :projector-id :p1}
    {:event/type :projectors/remove :projector-id :p1}
-   {:event/type :zone-groups/remove :group-id :left}])
+   {:event/type :zone-groups/remove :group-id :graphics}
+   ;; The rig's order, its middle laser and split width, and what each laser
+   ;; is in, re-route the engines (zones plan Z2)
+   {:event/type :rig/move-projector :projector-id :p2 :target :p1 :side :before}
+   {:event/type :rig/nudge-projector :projector-id :p1 :delta 1}
+   {:event/type :rig/set-middle :middle :both}
+   {:event/type :rig/set-split-width :split-width 0.6}
+   {:event/type :projectors/set-enabled :projector-id :p1 :enabled? false}
+   {:event/type :projectors/set-exclude-from-all :projector-id :p1 :exclude? true}
+   {:event/type :projectors/set-tag :projector-id :p1 :tag :crowd-scanning :on? true}])
 
 (deftest locked-blocks-structure-edits-test
   (let [s0 (assoc-in (starter) [:config :input :trigger-map {:source :midi :channel 0 :note 36}] {:type :vibe :role :hit})]

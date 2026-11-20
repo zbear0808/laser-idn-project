@@ -38,7 +38,12 @@
     :projectors/add-manual :projectors/update-settings :projectors/toggle-enabled
     :projectors/toggle-zone-group :projectors/vp-toggle-zone-group :projectors/set-service-enabled
     :projectors/enable-all-by-ip :projectors/request-remove :projectors/remove
-    :zone-groups/request-remove :zone-groups/remove})
+    :zone-groups/request-remove :zone-groups/remove
+    ;; The rig's order, middle laser and split width, and what a laser is in
+    ;; (zones plan Z2): they re-route the engines or change which cues reach
+    ;; the audience
+    :rig/move-projector :rig/nudge-projector :rig/set-middle :rig/set-split-width
+    :projectors/set-enabled :projectors/set-exclude-from-all :projectors/set-tag})
 
 (defn refused-text
   "What the Perform tab says under the switch when the lock refused an event
