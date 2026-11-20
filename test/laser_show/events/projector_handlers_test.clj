@@ -442,3 +442,65 @@
           result (through-pipeline event)]
       (is (nil? (:multi-engine/refresh result))
           "Should not request a refresh when no projectors match"))))
+
+
+;; Removing a projector
+
+
+(def ^:private removable-state
+  (-> base-state
+      (assoc-in [:projectors :p1] {:name "Laser L" :host "10.0.0.5" :port 7255 :service-id 1
+                                   :enabled? true :zone-groups [:all]})
+      (assoc-in [:projectors :p2] {:name "Laser R" :host "10.0.0.6" :port 7255 :service-id 1
+                                   :enabled? true :zone-groups [:all]})
+      (assoc-in [:chains :projector-effects :p1 :items] [{:id (random-uuid) :effect-id :rgb-curves :params {}}])
+      (assoc-in [:chains :projector-effects :p2 :items] [])
+      (assoc-in [:ui :projector-effect-ui-state :p1] {:active-curve-channel :r})
+      (assoc-in [:list-ui [:projector-effects :p1]] {:selected-ids #{}})
+      (assoc-in [:virtual-projectors :vp1] {:name "VP" :parent-projector-id :p1 :zone-groups [:all]})
+      (assoc-in [:virtual-projectors :vp2] {:name "VP2" :parent-projector-id :p2 :zone-groups [:all]})
+      (assoc-in [:projector-ui :active-projector] :p1)
+      (assoc-in [:projector-ui :calibrating-projector-id] :p1)
+      (assoc-in [:projector-ui :discovered-devices]
+                [{:address "10.0.0.5" :services [{:service-id 1 :name "A"} {:service-id 2 :name "B"}]}
+                 {:address "10.0.0.6" :services [{:service-id 1 :name "C"}]}])))
+
+(deftest request-remove-projector-asks-first-test
+  (let [dialog (get-in (projectors/handle {:event/type :projectors/request-remove :projector-id :p1
+                                           :state removable-state})
+                       [:state :ui :dialogs :confirm])]
+    (is (:open? dialog))
+    (is (= "Remove Laser L?" (:title dialog)))
+    (is (= "Its calibration goes too. If it's still on the network, the next scan finds it again, turned off."
+           (:message dialog)))
+    (is (= {:event/type :projectors/remove :projector-id :p1} (:confirm-event dialog)))))
+
+(deftest remove-projector-cleans-up-test
+  (let [state (:state (projectors/handle {:event/type :projectors/remove :projector-id :p1
+                                          :state removable-state}))]
+    (is (nil? (get-in state [:projectors :p1])))
+    (is (some? (get-in state [:projectors :p2])) "the other projector stays")
+    (is (not (contains? (get-in state [:chains :projector-effects]) :p1)))
+    (is (not (contains? (get-in state [:ui :projector-effect-ui-state]) :p1)))
+    (is (not (contains? (:list-ui state) [:projector-effects :p1])))
+    (is (= #{:vp2} (set (keys (:virtual-projectors state)))) "its virtual projectors go with it")
+    (is (nil? (get-in state [:projector-ui :active-projector])))
+    (is (nil? (get-in state [:projector-ui :calibrating-projector-id])))
+    (is (= [{:address "10.0.0.5" :services [{:service-id 2 :name "B"}]}
+            {:address "10.0.0.6" :services [{:service-id 1 :name "C"}]}]
+           (get-in state [:projector-ui :discovered-devices]))
+        "its output leaves the Discover list")))
+
+(deftest remove-unknown-projector-changes-nothing-test
+  (is (identical? removable-state
+                  (:state (projectors/handle {:event/type :projectors/remove :projector-id :nope
+                                              :state removable-state})))))
+
+(deftest remove-projector-stops-its-engine-test
+  (let [result (events/handle-event-pipeline {:event/type :projectors/remove :projector-id :p1
+                                              :state (assoc-in removable-state [:backend :streaming :running?] true)})]
+    (is (= #{:p2} (set (keys (get-in result [:multi-engine/refresh :projectors]))))
+        "while streaming, the engines are refreshed without it")
+    (is (= "Remove Projector" (get-in result [:state :history :undo-stack 0 :description]))
+        "one undo step")))
+

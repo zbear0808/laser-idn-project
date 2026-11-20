@@ -756,7 +756,16 @@
                                                      :fx/context context
                                                      :projector-id projector-id
                                                      :selected-ids selected-ids
-                                                     :clipboard-items clipboard-items}]}
+                                                     :clipboard-items clipboard-items}
+                                                    {:fx/type :separator}
+                                                    {:fx/type :button
+                                                     :id "projector-remove-button"
+                                                     :text "Remove..."
+                                                     :style-class ["button-danger"]
+                                                     :tooltip {:fx/type :tooltip
+                                                               :text "Remove this projector and its calibration"}
+                                                     :on-action {:event/type :projectors/request-remove
+                                                                 :projector-id projector-id}}]}
                                         ;; Right: Parameter editor + calibration controls
                                         {:fx/type :v-box
                                          :spacing 16

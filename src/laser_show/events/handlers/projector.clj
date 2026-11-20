@@ -9,7 +9,8 @@
    AUTO-DISCOVERY FLOW:
    - Network scan automatically creates projector entries (disabled by default)
    - Users enable/disable projectors via toggle controls
-   - Projectors cannot be deleted once discovered (they persist)
+   - A projector can be removed (:projectors/remove, after a confirm); a later
+     scan finds the device again, turned off, with default calibration
    - 'Enable All' enables all projectors from an IP address
    
    This file handles:
@@ -347,6 +348,57 @@
 
 
 
+;; Removing a projector
+
+
+(defn- projector-label [state projector-id]
+  (let [n (get-in state [:projectors projector-id :name])]
+    (if (and (string? n) (not (str/blank? n))) n (name projector-id))))
+
+(defn- handle-projectors-request-remove
+  "Ask before removing a projector (the shared confirm dialog)."
+  [{:keys [projector-id state]}]
+  (if-not (contains? (:projectors state) projector-id)
+    {:state state}
+    {:state (assoc-in state [:ui :dialogs :confirm]
+                      {:open? true
+                       :title (str "Remove " (projector-label state projector-id) "?")
+                       :message "Its calibration goes too. If it's still on the network, the next scan finds it again, turned off."
+                       :confirm-label "Remove"
+                       :danger? true
+                       :confirm-event {:event/type :projectors/remove :projector-id projector-id}})}))
+
+(defn- drop-discovered-output
+  "The Discover list without the output host's service-id, so it doesn't keep
+   a box that can no longer do anything."
+  [devices host service-id]
+  (mapv (fn [device]
+          (if (= host (:address device))
+            (update device :services (fn [services] (filterv #(not= (or service-id 0) (or (:service-id %) 0)) services)))
+            device))
+        devices))
+
+(defn- handle-projectors-remove
+  "Remove a projector, its calibration chain, its editor and list state and its
+   virtual projectors, and clear the selection and calibration mode that point
+   at it. While streaming, the output-sync middleware stops its engine. An
+   unknown id changes nothing."
+  [{:keys [projector-id state]}]
+  (if-let [{:keys [host service-id]} (get-in state [:projectors projector-id])]
+    (let [clear-if (fn [s path] (if (= projector-id (get-in s path)) (assoc-in s path nil) s))]
+      {:state (-> state
+                  (update :projectors dissoc projector-id)
+                  (update-in [:chains :projector-effects] dissoc projector-id)
+                  (update-in [:ui :projector-effect-ui-state] dissoc projector-id)
+                  (update :list-ui dissoc [:projector-effects projector-id])
+                  (update :virtual-projectors
+                          #(into {} (remove (fn [[_ vp]] (= projector-id (:parent-projector-id vp)))) %))
+                  (clear-if [:projector-ui :active-projector])
+                  (clear-if [:projector-ui :calibrating-projector-id])
+                  (update-in [:projector-ui :discovered-devices] drop-discovered-output host service-id))})
+    {:state state}))
+
+
 ;; Calibration Mode
 
 
@@ -410,6 +462,8 @@
     
     ;; Effect chain management (for color curves)
     :projectors/add-effect (handle-projectors-add-effect event)
+    :projectors/request-remove (handle-projectors-request-remove event)
+    :projectors/remove (handle-projectors-remove event)
     
     ;; Calibration mode
     :projectors/toggle-calibration (handle-projectors-toggle-calibration event)

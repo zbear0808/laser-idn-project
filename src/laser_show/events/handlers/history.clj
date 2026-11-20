@@ -142,6 +142,7 @@
    :timeline/delete-selection "Delete Clip(s)"
    :timeline/nudge-selection "Nudge Clip(s)"
    :projectors/add-manual "Add Projector"
+   :projectors/remove "Remove Projector"
    :zone-groups/create-new "Add Zone Group"
    :zone-groups/save-edit "Edit Zone Group"
    :zone-groups/remove "Delete Zone Group"

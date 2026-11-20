@@ -292,3 +292,20 @@
               (get-in (app-state) [:chains :projector-effects :b :items 0 :id]))
         "the pasted effect is a copy with its own id")))
 
+(deftest remove-projector-asks-first-test
+  (let [robot (ui/robot)]
+    (with-projector!)
+    (ui/click! robot "#projectors-tab")
+    (ui/click! robot "#projector-remove-button")
+    (ui/wait-for! #(window-showing? "Remove Fake 1?"))
+    (testing "Cancel keeps it"
+      (ui/click! robot "#confirm-cancel")
+      (ui/wait-for! #(not (window-showing? "Remove Fake 1?")))
+      (is (some? (get-in (app-state) [:projectors :a]))))
+    (testing "Remove removes it"
+      (ui/click! robot "#projector-remove-button")
+      (ui/wait-for! #(window-showing? "Remove Fake 1?"))
+      (ui/click! robot "#confirm-ok")
+      (ui/wait-for! #(nil? (get-in (app-state) [:projectors :a])))
+      (ui/wait-for! #(not (window-showing? "Remove Fake 1?"))))))
+
