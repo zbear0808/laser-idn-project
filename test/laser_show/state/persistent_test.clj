@@ -348,3 +348,13 @@
       (is (nil? (get-in after [:projector-ui :calibrating-projector-id])) label)
       (is (= {} (get-in after [:projector-ui :identify])) label))))
 
+(deftest safety-round-trips-test
+  (let [zone {:limit [-0.9 -0.8 0.9 0.95] :blocked [[-0.2 -1.0 0.2 -0.4] [0.5 0.5 0.6 0.6]]}]
+    (state/init-state! (-> (domains/build-initial-state)
+                           (assoc-in [:projectors :p] {:name "Laser L" :host "10.0.0.5" :zone-groups [:all]
+                                                       :safety zone})))
+    (persistent/save-project! test-project-file)
+    (state/reset-state! (domains/build-initial-state))
+    (persistent/load-project! test-project-file)
+    (is (= zone (state/get-in-state [:projectors :p :safety])) "Save, then Open, gives the same zone")))
+
