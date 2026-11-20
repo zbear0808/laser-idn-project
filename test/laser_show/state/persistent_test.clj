@@ -526,3 +526,22 @@
     (is (= :auto/right (get-in loaded [:chains :cue-chains [1 0] :target])))
     (is (= [:right] (get-in loaded [:projectors :projector-10-0-0-57-1 :zone-groups])) "and the rig is left alone")))
 
+
+(deftest zone-data-survives-save-and-load-test
+  (testing "zones plan Z4: the grid's column defaults and the show's"
+    (let [show (-> (domains/build-initial-state)
+                   (assoc-in [:grid :column-targets] {0 :zone/a 2 [:zone/b :graphics]})
+                   (assoc-in [:config :default-target] :zone/c))
+          files (persistent/project-files show)
+          loaded (persistent/apply-loaded-project (domains/build-initial-state) files "zones.zip")]
+      (is (= {0 :zone/a 2 [:zone/b :graphics]} (get-in files ["project-metadata.edn" :grid :column-targets])))
+      (is (= {0 :zone/a 2 [:zone/b :graphics]} (get-in loaded [:grid :column-targets])))
+      (is (= :zone/c (get-in loaded [:config :default-target])))
+      (is (false? (get-in loaded [:project :dirty?])))
+      (testing "a file without them: none"
+        (let [old (-> files
+                      (update-in ["project-metadata.edn" :grid] dissoc :column-targets)
+                      (update-in ["project-metadata.edn" :config] dissoc :default-target))
+              loaded (persistent/apply-loaded-project show old "old.zip")]
+          (is (= {} (get-in loaded [:grid :column-targets])))
+          (is (nil? (get-in loaded [:config :default-target]))))))))

@@ -260,6 +260,21 @@
            (mapv :value (get-in dialog [:choice :options])))
         "every target the pickers list (All first, the automatic groups, each laser, your other groups by name), and Nothing; never the group itself")
     (is (= {:event/type :zone-groups/remove :group-id :group-balcony} (:confirm-event dialog))))
+  (testing "zones plan Z4: a column default and the show's name it too, and can be sent elsewhere"
+    (let [dialog (get-in (zone-groups/handle {:event/type :zone-groups/request-remove
+                                              :group-id :group-balcony
+                                              :state (-> balcony-state
+                                                         (assoc-in [:grid :column-targets] {2 [:group-balcony :zone/a] 4 :zone/b})
+                                                         (assoc-in [:config :default-target] :group-balcony))})
+                         [:state :ui :dialogs :confirm])]
+      (is (= "2 cues, column 3, the show default and 1 projector use it." (:message dialog)))
+      (is (= :retarget-to (get-in dialog [:choice :key])))))
+  (testing "a column alone"
+    (let [dialog (get-in (zone-groups/handle {:event/type :zone-groups/request-remove :group-id :graphics
+                                              :state (assoc-in balcony-state [:grid :column-targets] {0 :graphics 1 :graphics})})
+                         [:state :ui :dialogs :confirm])]
+      (is (= "Columns 1 and 2 use it." (:message dialog)))
+      (is (some? (:choice dialog)) "where they go: asked")))
   (testing "a group nothing uses asks with no choice"
     (let [dialog (get-in (zone-groups/handle {:event/type :zone-groups/request-remove
                                               :group-id :graphics

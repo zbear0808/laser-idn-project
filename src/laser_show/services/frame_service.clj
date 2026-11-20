@@ -115,6 +115,9 @@
      :macro-map], vibes.faders/with-faders), never a stored copy;
    - :pulses: the presses, which the clock puts on each cue's timing context;
    - :global-effects: the effects grid's active chain in state, or nil;
+   - :column-targets and :show-target: the grid columns' default targets and
+     the show's (zones plan Z4); each cue's render takes its column's
+     (:column-target, show-clock's render-cue);
    - :global-ctx: the global clock's timing context, with the input values
      and the presses, at the global BPM. Each cue's render puts its own tempo
      on it, so a timeline with a locked tempo runs the global effects at that
@@ -125,6 +128,8 @@
    (let [input-values (faders/with-faders input-values (get-in state [:config :input :macro-map]))]
      {:input-values input-values
       :pulses pulses
+      :column-targets (get-in state [:grid :column-targets])
+      :show-target (get-in state [:config :default-target])
       :global-effects (get-active-global-effects state)
       :global-ctx (assoc (cue-timing/get-global-timing-context global-clock (get-in state [:timing :bpm]))
                          :input-values input-values

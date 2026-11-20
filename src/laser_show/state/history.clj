@@ -15,7 +15,8 @@
    | Data                                              | Undo? | Unsaved? |
    |---------------------------------------------------|-------|----------|
    | show content (cue and effect chains, zone groups, | yes   | yes      |
-   |   grid, [:config :grid/:input/:vibes])            |       |          |
+   |   grid size and column targets, [:config :grid/   |       |          |
+   |   :input/:vibes/:default-target])                 |       |          |
    | rig (projectors, virtual projectors, the rig,     | yes   | no: the  |
    |   [:chains :projector-effects])                   |       | rig file |
    |                                                   |       | saves it |
@@ -55,13 +56,13 @@
 
 (defn extract-document-state
   "Extract document configuration from state.
-   Only captures persistent project fields (cues, effects, projectors, zones, the rig, config, bpm, grid size).
+   Only captures persistent project fields (cues, effects, projectors, zones, the rig, config, bpm, grid size and column targets).
    Excludes all runtime data (playback, streaming engines, IDN discovery, transient UI, history)."
   [state]
   (let [{:keys [config timing grid projectors virtual-projectors zone-groups rig chains]} state]
     {:config config
      :timing {:bpm (:bpm timing)}
-     :grid {:size (:size grid)}
+     :grid {:size (:size grid) :column-targets (or (:column-targets grid) {})}
      :projectors (or projectors {})
      :virtual-projectors (or virtual-projectors {})
      :zone-groups (or zone-groups {})
@@ -295,6 +296,7 @@
     (-> state
         (assoc :config restored-config)
         (assoc-in [:grid :size] (:size grid))
+        (assoc-in [:grid :column-targets] (or (:column-targets grid) {}))
         (assoc :projectors (or projectors {}))
         (assoc :virtual-projectors (or virtual-projectors {}))
         (assoc :zone-groups (or zone-groups {}))

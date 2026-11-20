@@ -260,3 +260,18 @@
           result (grid/handle event)]
       (is (= {:event/type :cue-chain/open-editor :col 3 :row 3}
              (:dispatch result))))))
+
+
+;; A column's default target (zones plan Z4)
+
+(deftest set-column-target-test
+  (let [set-target #(grid/handle (merge {:event/type :grid/set-column-target :state sample-state-with-content} %))
+        targets #(get-in % [:state :grid :column-targets])]
+    (is (= {2 :zone/a} (targets (set-target {:col 2 :target :zone/a}))))
+    (is (= {2 [:zone/a :zone/b]} (targets (set-target {:col 2 :target [:zone/b :zone/a]}))) "in normal form")
+    (let [set (:state (set-target {:col 2 :target :zone/a}))]
+      (is (= {} (targets (grid/handle {:event/type :grid/set-column-target :col 2 :target nil :state set})))
+          "none: the column has no default, its cues use the show's")
+      (is (= {2 :zone/a 0 :graphics} (targets (grid/handle {:event/type :grid/set-column-target :col 0 :target :graphics :state set})))))
+    (is (history/derive-dirty sample-state-with-content (:state (set-target {:col 2 :target :zone/a}))))
+    (is (= {:state sample-state-with-content} (set-target {})) "no column: nothing")))

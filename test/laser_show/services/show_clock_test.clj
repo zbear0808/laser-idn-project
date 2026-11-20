@@ -315,6 +315,18 @@
       (events/event-handler {:event/type :rig/move-projector :projector-id :p2 :target :p1 :side :before})
       (is (= [[:p2 nil nil]] (rig/resolve-ref (:routing (show-clock/tick! 33333334)) :auto/left))))))
 
+(deftest column-default-reaches-its-cues-test
+  (testing "zones plan Z4: a cue in a column with a default target draws there, one elsewhere doesn't"
+    (init! {[2 0] (cue :circle) [3 0] (cue :square)})
+    (state/swap-state! #(-> %
+                            (assoc-in [:grid :column-targets] {2 :zone/a})
+                            (assoc-in [:config :default-target] :graphics)))
+    (trigger! 2 0)
+    (trigger! 3 0)
+    (let [s (ticks! 2)]
+      (is (= {[2 0] [:zone/a] [3 0] [:graphics]}
+             (into {} (map (fn [{:keys [cell zone-frames]}] [cell (vec (keys zone-frames))])) (:cues s)))))))
+
 (deftest a-throwing-resolver-keeps-the-last-routing-test
   (init! {[0 0] (cue :circle)})
   (two-lasers!)

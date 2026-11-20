@@ -64,16 +64,17 @@
 ;; Rendering a tick
 
 (defn- render-cue
-  "One cue's frames by zone at its run's timing, with the tick's render
-   context (its input values and presses); {} if the render throws, reported
-   under [:render cell]."
+  "One cue's frames by target at its run's timing, with the tick's render
+   context (its input values and presses) and its column's default target
+   (zones plan Z4); {} if the render throws, reported under [:render cell]."
   [{:keys [cell cue-chain cue-timing]} bpm render-ctx]
   (let [cue-bpm (playback/cue-bpm cue-chain bpm)
         ctx (assoc (cue-timing/get-cue-timing-context cue-timing cue-bpm)
                    :input-values (:input-values render-ctx)
                    :pulses (:pulses render-ctx))]
     (try
-      (let [zone-frames (frame-service/generate-frames-by-zone cue-chain ctx render-ctx)]
+      (let [zone-frames (frame-service/generate-frames-by-zone
+                         cue-chain ctx (assoc render-ctx :column-target (get (:column-targets render-ctx) (first cell))))]
         (output-errors/ok! [:render cell])
         zone-frames)
       (catch Throwable e

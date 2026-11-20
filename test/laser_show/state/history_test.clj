@@ -335,3 +335,21 @@
     (is (= (:vibes (:config s)) (:vibes (:config (history/restore-document edited (doc s))))) "undo brings it back")
     (testing "what the engine is doing is not a document root (probe v3)"
       (is (history/document-roots-identical? s (assoc-in s [:vibe-runtime :current] :vibe-1))))))
+
+(deftest column-targets-are-undoable-test
+  (testing "zones plan Z4: a grid column's default target and the show's are show content"
+    (let [clean (history/mark-clean sample-state)]
+      (doseq [[label edit] [["a column's default" #(assoc-in % [:grid :column-targets] {2 :zone/a})]
+                            ["the show default" #(assoc-in % [:config :default-target] :zone/b)]]]
+        (testing label
+          (is (true? (history/undoable-changed? (doc clean) (doc (edit clean)))) "undoable")
+          (is (true? (history/persisted-changed? (doc clean) (doc (edit clean)))) "unsaved")
+          (is (true? (history/derive-dirty clean (edit clean))))))
+      (testing "the column defaults sit in the document beside the grid's size, and undo puts them back"
+        (let [edited (assoc-in clean [:grid :column-targets] {2 :zone/a})]
+          (is (= {:size [8 4] :column-targets {2 :zone/a}} (:grid (doc edited))))
+          (is (= {:size [8 4] :column-targets {}} (:grid (doc clean))) "none is {}")
+          (is (= {} (get-in (history/restore-document edited (doc clean)) [:grid :column-targets])))
+          (is (= {2 :zone/a} (get-in (history/restore-document clean (doc edited)) [:grid :column-targets])))
+          (is (= [0 0] (get-in (history/restore-document edited (doc clean)) [:grid :selected-cell]))
+              "the selection isn't the document's"))))))

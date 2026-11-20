@@ -9,6 +9,7 @@
             [laser-show.events.helpers :as h]
             [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
+            [laser-show.routing.targets :as targets]
             [laser-show.views.dialogs.common :as common]))
 
 
@@ -116,22 +117,53 @@
             (rig/target-groups state))
       (conj {:value :inherit :text "Nothing (they inherit)"})))
 
+(defn columns-using
+  "The grid columns whose default target names ref (zones plan Z4), in
+   order."
+  [state ref]
+  (sort (keep (fn [[col t]] (when (some #{ref} (targets/target-refs t)) col))
+              (get-in state [:grid :column-targets]))))
+
+(defn- and-list
+  "\"a\", \"a and b\", \"a, b and c\"."
+  [parts]
+  (if (next parts)
+    (str (str/join ", " (butlast parts)) " and " (last parts))
+    (first parts)))
+
+(defn uses-text
+  "What a delete's question says uses a group: \"3 cues, column 3, the show
+   default and 2 projectors use it.\", \"1 cue uses it.\", \"Nothing uses
+   it.\" (cues, the columns using it, whether the show default does, how
+   many outputs are in it)."
+  [cue-count cols default? outputs]
+  (let [parts (cond-> []
+                (pos? cue-count) (conj (plural cue-count "cue" "cues"))
+                (seq cols) (conj (if (next cols)
+                                   (str "columns " (and-list (map #(str (inc %)) cols)))
+                                   (str "column " (inc (first cols)))))
+                default? (conj "the show default")
+                (pos? outputs) (conj (plural outputs "projector" "projectors")))
+        one? (and (= 1 (count parts)) (or (= 1 cue-count) (= 1 (count cols)) default? (= 1 outputs)))]
+    (if (empty? parts)
+      "Nothing uses it."
+      (let [text (and-list parts)]
+        (str (str/upper-case (subs text 0 1)) (subs text 1) (if one? " uses it." " use it."))))))
+
 (defn- handle-zone-groups-request-remove
-  "Ask before deleting a zone group: which cues and projectors use it, and,
-   when cues do, where to send them (All by default). :all can't be deleted:
-   for :all or an unknown group, state is returned as it is."
+  "Ask before deleting a zone group: which cues, grid columns, the show
+   default (zones plan Z4) and projectors use it, and, when anything routes
+   to it, where to send it (All by default). :all can't be deleted: for :all
+   or an unknown group, state is returned as it is."
   [{:keys [group-id state]}]
   (if (or (= :all group-id) (not (contains? (:zone-groups state) group-id)))
     {:state state}
     (let [cues (refs/cues-using (get-in state [:chains :cue-chains]) group-id)
+          cols (columns-using state group-id)
+          default? (boolean (some #{group-id} (targets/target-refs (get-in state [:config :default-target]))))
           outputs (count (filter #(some #{group-id} (:zone-groups %))
                                  (concat (vals (:projectors state)) (vals (:virtual-projectors state)))))
-          message (cond
-                    (and (seq cues) (pos? outputs))
-                    (str (plural (count cues) "cue" "cues") " and " (plural outputs "projector" "projectors") " use it.")
-                    (seq cues) (str (plural (count cues) "cue" "cues") (if (= 1 (count cues)) " uses it." " use it."))
-                    (pos? outputs) (str (plural outputs "projector" "projectors") (if (= 1 outputs) " uses it." " use it."))
-                    :else "Nothing uses it.")]
+          message (uses-text (count cues) cols default? outputs)]
       {:state (assoc-in state [:ui :dialogs :confirm]
                         (cond-> {:open? true
                                  :title (str "Delete \"" (group-name state group-id) "\"?")
@@ -139,11 +171,12 @@
                                  :confirm-label "Delete group"
                                  :danger? true
                                  :confirm-event {:event/type :zone-groups/remove :group-id group-id}}
-                          (seq cues) (assoc :details (cue-list-text state cues)
-                                            :choice {:key :retarget-to
-                                                     :label "Send its cues to:"
-                                                     :options (retarget-options state group-id)}
-                                            :choice-value :all)))})))
+                          (seq cues) (assoc :details (cue-list-text state cues))
+                          (or (seq cues) (seq cols) default?)
+                          (assoc :choice {:key :retarget-to
+                                          :label "Send its cues to:"
+                                          :options (retarget-options state group-id)}
+                                 :choice-value :all)))})))
 
 (defn retarget-value
   "Where the references to ref (a group or laser that goes) go:

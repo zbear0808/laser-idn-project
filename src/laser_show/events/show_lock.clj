@@ -50,7 +50,11 @@
     ;; A show's rig onto this one (zones plan ZR): they rebuild and re-route
     ;; the engines, change safety zones and calibration, or re-route cues
     :rig/set-up-from-show :rig/import-new-lasers :rig/request-use-show-setup :rig/use-show-setup
-    :rig/adopt-group :rig/repin :rig/request-forget :rig/forget-projector})
+    :rig/adopt-group :rig/repin :rig/request-forget :rig/forget-projector
+    ;; A grid column's default target and the show's (zones plan Z4): they
+    ;; re-route every cue that inherits them, and can change which cues
+    ;; reach the audience
+    :grid/set-column-target :zones/set-default-target})
 
 (def safety-edits
   "The safety zone edits (zones plan Z1). The lock refuses one only when it

@@ -394,6 +394,25 @@
     (testing "the cue's union is every inheriting item's key"
       (is (= [[:zone/a :zone/c]] (keys (render {:target [:zone/c :zone/a] :items [(item :a nil) (item :b nil)]})))))))
 
+(deftest column-and-show-defaults-reach-items-test
+  (let [item (fn [id t] {:id id :type :preset :preset-id :square :enabled? true :effects [] :target t})
+        cue {:items [(item :a nil) (item :b :zone/c)
+                     {:id :g :type :group :enabled? true :items [(item :c nil)]}]}
+        keys-of (fn [cue ctx] (set (keys (frame-service/generate-frames-by-zone cue test-timing-ctx ctx))))]
+    (is (= #{:zone/a :zone/c} (keys-of cue {:column-target :zone/a :show-target :zone/b}))
+        "what inherits takes its column's default, through a group too; an item's own stays")
+    (is (= #{:zone/b :zone/c} (keys-of cue {:show-target :zone/b})) "no column default: the show's")
+    (is (= #{:all :zone/c} (keys-of cue {})) "neither: All")
+    (is (= #{:graphics :zone/c} (keys-of (assoc cue :target :graphics) {:column-target :zone/a :show-target :zone/b}))
+        "the cue's own beats both")
+    (testing "the tick's render context carries them, read once from app state"
+      (let [ctx (frame-service/render-context (-> (domains/build-initial-state)
+                                                  (assoc-in [:grid :column-targets] {2 :zone/a})
+                                                  (assoc-in [:config :default-target] :zone/b))
+                                              {} {:effective-beats 0.0})]
+        (is (= {2 :zone/a} (:column-targets ctx)))
+        (is (= :zone/b (:show-target ctx)))))))
+
 (deftest item-points-only-when-asked-test
   (let [cue {:items [{:id :ring :type :preset :preset-id :circle :enabled? true :effects [] :params {:num-points 99}}
                      {:id :box :type :preset :preset-id :square :enabled? true :effects [] :target :auto/left}

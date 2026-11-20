@@ -8,6 +8,7 @@
   (:require [laser-show.events.helpers :as h]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.state.migration :as migration]
+            [laser-show.routing.targets :as targets]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.timeline.playback :as playback]
             [laser-show.animation.cue-timing :as cue-timing]
@@ -183,6 +184,17 @@
                 (assoc-in [:playback :active-cell] nil))
               (update-in [:playback :active-cues] dissoc [col row]))})
 
+(defn- handle-grid-set-column-target
+  "Set or clear (nil) column col's default target (zones plan Z4), in normal
+   form: what its cues draw to when they set none of their own. Without a
+   column, nothing changes."
+  [{:keys [col state] :as event}]
+  (if (integer? col)
+    (let [chosen (if (contains? event :target) (:target event) (:id (:fx/event event)))
+          t (when-not (= :inherit chosen) (targets/normalize-target chosen))]
+      {:state (update-in state [:grid :column-targets] #(if (some? t) (assoc (or % {}) col t) (dissoc (or % {}) col)))})
+    {:state state}))
+
 (defn- handle-grid-open-cell-editor
   "Open the appropriate editor for a cell based on its cue configuration.
    Dispatches :timeline-cue-editor/open for timeline cues,
@@ -213,6 +225,7 @@
     :grid/copy-cell (handle-grid-copy-cell event)
     :grid/paste-cell (handle-grid-paste-cell event)
     :grid/clear-cell (handle-grid-clear-cell event)
+    :grid/set-column-target (handle-grid-set-column-target event)
     
     ;; Unknown event in this domain
     {}))

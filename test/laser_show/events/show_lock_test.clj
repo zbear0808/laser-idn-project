@@ -79,7 +79,11 @@
    {:event/type :rig/use-show-setup :projector-id :p1}
    {:event/type :rig/adopt-group :group-id :crowd :from :graphics}
    {:event/type :rig/repin :from :auto.laser/p9 :to :all}
-   {:event/type :rig/forget-projector :projector-id :p2}])
+   {:event/type :rig/forget-projector :projector-id :p2}
+   ;; A column's default target and the show's re-route every cue that
+   ;; inherits them, and can change which reach the audience (zones plan Z4)
+   {:event/type :grid/set-column-target :col 2 :target :graphics}
+   {:event/type :zones/set-default-target :target :graphics}])
 
 (def ^:private opened-show
   "What Open kept of friday.zip's rig (zones plan ZR): P1 with its own

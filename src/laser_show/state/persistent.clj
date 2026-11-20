@@ -69,7 +69,7 @@
   {:project-metadata
    {:paths [{:path [:config] :owner :show :merge-defaults? true}
             {:path [:timing] :owner :show :keys [:bpm]}
-            {:path [:grid] :owner :show :keys [:size]}]}
+            {:path [:grid] :owner :show :keys [:size :column-targets]}]}
    
    :hardware
    {:paths [{:path [:projectors] :owner :rig}
