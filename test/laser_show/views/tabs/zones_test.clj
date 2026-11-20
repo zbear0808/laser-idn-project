@@ -30,3 +30,12 @@
     (is (= "Just Laser C." (explain {:id :auto.laser/c :kind :laser :name "Laser C (off)" :description "Just Laser C."})))
     (is (= "Click a laser to add it to Graphics or take it out. The boxes under the cards on the Projectors tab are the same ones."
            (explain {:id :graphics :kind :custom :name "Graphics"})))))
+
+(deftest usage-text-test
+  (is (= "Used by no cues" (zones/usage-text {:direct 0 :through 0 :zones []})))
+  (is (= "Used by 3 cues" (zones/usage-text {:direct 3 :through 0 :zones []})))
+  (is (= "Used by 1 cue" (zones/usage-text {:direct 1 :through 0 :zones []})))
+  (is (= "Used by 3 cues · 9 more through Zone A" (zones/usage-text {:direct 3 :through 9 :zones [:zone/a]})))
+  (is (= "Used by 3 cues · 11 more through Zones A, C" (zones/usage-text {:direct 3 :through 11 :zones [:zone/a :zone/c]})))
+  (is (= "Used by 9 cues through Zone A" (zones/usage-text {:direct 0 :through 9 :zones [:zone/a]})))
+  (is (= "Used by 1 cue through Zone B" (zones/usage-text {:direct 0 :through 1 :zones [:zone/b]}))))

@@ -58,7 +58,7 @@
    (the refs that reach the crowd)}.
    Scopes: :item :group :track :clip :cue :column, every row; :show, no
    Inherit (nothing set is All); :lane, All and the groups only; :preview,
-   Master (all content) for Inherit, no new zone, Combine or Pin."
+   Master (everything) for Inherit, no new zone, Combine or Pin."
   [{:keys [scope own inherited names zone-map zones audience]}]
   (let [own (targets/normalize-target own)
         checked? (fn [ref] (= own ref))
@@ -81,7 +81,7 @@
         (contains? (disj every-row-scopes :show) scope)
         [{:kind :inherit :text (inherit-text names zone-map inherited) :checked? (nil? own) :target nil}]
         (= :preview scope)
-        [{:kind :master :text "Master (all content)" :checked? (nil? own) :target nil}])
+        [{:kind :master :text "Master (everything)" :checked? (nil? own) :target nil}])
       [{:kind :ref :ref :all :text "All" :target :all
         :checked? (if (= :show scope) (or (nil? own) (= :all own)) (checked? :all))}]
       (when-not lane?
@@ -194,12 +194,18 @@
   (let [{:keys [names zone-map] :as ctx} (menu-context context)
         rows (menu-model (assoc ctx :scope scope :own own :inherited inherited))
         own (targets/normalize-target own)
-        missing? (some :missing? rows)]
+        ;; The show's default inherits nothing (none is All), and a map's
+        ;; lane that names nothing is empty (06 SQ-13)
+        empty-lane? (and (nil? own) (= :lane scope))
+        missing? (or empty-lane? (some :missing? rows))]
     (cond-> {:fx/type :menu-button
-             :text (chip-text names zone-map own inherited compact?)
+             :text (cond
+                     (and (nil? own) (= :show scope)) "All"
+                     empty-lane? "Empty"
+                     :else (chip-text names zone-map own inherited compact?))
              :style-class (cond-> ["menu-button" "target-chip"]
                             compact? (conj "target-chip-compact")
-                            (nil? own) (conj "target-chip-inherited")
+                            (and (nil? own) (not (#{:show :lane} scope))) (conj "target-chip-inherited")
                             missing? (conj "target-chip-missing"))
              :focus-traversable false
              :min-width :use-pref-size

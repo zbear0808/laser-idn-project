@@ -205,6 +205,8 @@
                                 :doc "Cell index whose zone selector popup is open, or nil if none"}
    :vibes {:default {:selected nil :slot :hit :wizard nil}
            :doc "the Vibes tab (views/tabs/vibes.clj): :selected, the vibe edited (nil: the first); :slot, what a click on the picker fills (vibes.library/slots); :wizard, Learn all while it runs: {:queue roles to learn, the first being learned :done learned roles :refused the role a key pressed again is already}; for the session, not saved"}
+   :zone-maps {:default {:selected nil}
+               :doc "the Zone Groups tab's zones and maps (views/components/zone_maps_panel.clj): :selected, the map its editor shows (nil: the one in use); for the session, not saved"}
    :show-lock? {:default false
                 :doc "the Perform tab's show lock (events/show_lock.clj): while true, the edits that would move or remove what the show is built from are refused; for the session, never saved"}
    :show-lock-notice {:default nil

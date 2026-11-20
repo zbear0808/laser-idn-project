@@ -219,6 +219,28 @@
                         (str "Override " (targets/zone-letter zone) " → " n ": " n " no longer exists."))))
                   (sort-by (comp targets/zone-index key) (:overrides m)))))))
 
+
+;; Who uses a group (06 §8.7)
+
+(defn usage
+  "Who draws to ref (06 §8.7, Q-Z5 A), from ref-sets (each cue's refs,
+   targets/cue-refs: its column's and the show's defaults included) and m,
+   the map in use: {:direct (the cues with ref among their refs) :through
+   (the others, with a zone m sends to ref) :zones (those zones, in order)}.
+   A cue that does both counts once, as direct, so the two add up to every
+   cue that reaches ref."
+  [m ref-sets ref]
+  (let [sends? #(and (targets/zone-ref? %) (= ref (zone-lane m %)))]
+    (update (reduce (fn [acc refs]
+                      (if (contains? refs ref)
+                        (update acc :direct inc)
+                        (if-let [zs (seq (filter sends? refs))]
+                          (-> acc (update :through inc) (update :zones into zs))
+                          acc)))
+                    {:direct 0 :through 0 :zones #{}}
+                    ref-sets)
+            :zones #(vec (sort-by targets/zone-index %)))))
+
 (defn next-custom-id
   "A new custom map's id: :map/custom-1, or the first unused one."
   [state]

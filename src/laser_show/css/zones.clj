@@ -3,8 +3,8 @@
    (views/components/target_control.clj; compact in the timeline's track
    headers), the grid cells' badges and the
    column numbers that set a column's target, the zone map pads
-   (views/components/zone_map_pads.clj) and the map editor's warnings
-   (views/components/zone_maps_panel.clj).
+   (views/components/zone_map_pads.clj) and the zones and maps under the
+   Zone Groups tab (views/components/zone_maps_panel.clj).
 
    cljfx.css writes a map of more than eight rules in hash order, so a state
    rule has one class more than the rule it overrides.
@@ -143,6 +143,19 @@
        {:-fx-text-fill text-secondary
         :-fx-font-size 12
         :-fx-font-weight "bold"}
+
+       ;; The zones and maps, under the Zone Groups tab's columns
+       ".zone-maps-panel"
+       {:-fx-padding [10 0 0 0]
+        :-fx-border-color [border "transparent" "transparent" "transparent"]
+        :-fx-border-width [1 0 0 0]}
+       ".zone-map-item"
+       {:-fx-background-radius 4
+        :-fx-cursor "hand"}
+       ".zone-map-item .zone-map-item-name"
+       {:-fx-text-fill text-primary}
+       ".zone-map-item .zone-map-item-dot"
+       {:-fx-text-fill blue}
 
        ;; The map editor
        ".zone-map-warning"

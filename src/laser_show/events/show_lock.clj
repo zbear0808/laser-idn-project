@@ -9,9 +9,12 @@
    shown under the switch, and the status bar's). What a performer plays is
    never refused: the vibe keys, BLACKOUT, the grid's clicks, the transport,
    the tempo, streaming, learning a key, switching the zone map (a pad, its
-   key, Use now), and Exit, which still asks about unsaved changes. A safety zone edit goes through while it makes no zone
-   larger, so the lock never stands between you and a safer show, and is
-   refused when it would let light somewhere new (zones plan Q-Z1-5 A).
+   key, Use now), and Exit, which still asks about unsaved changes. Where
+   content goes is structure (zones plan Z4): the targets, the zones' labels
+   and the maps are refused too. A safety zone edit goes through while it
+   makes no zone larger, so the lock never stands between you and a safer
+   show, and is refused when it would let light somewhere new (zones plan
+   Q-Z1-5 A).
 
    wrap-show-lock is the pipeline's innermost wrapper (events/core.clj), so
    the undo history, the unsaved flag and the output sync see a change to
@@ -58,7 +61,18 @@
     ;; A zone map pad's setting and its keys, as a vibe's options and keys
     ;; (a press, a key's, a due switch and Use now are a performer's, and go
     ;; through)
-    :zone-map/set-pad-bar :zone-map/clear-control})
+    :zone-map/set-pad-bar :zone-map/clear-control
+    ;; The zones and your maps (zones plan Z4): a map edit re-routes every
+    ;; cue that draws into a zone, and a lane can reach the audience; a
+    ;; zone's label, as a vibe's name. Selecting a map is the tab's, and
+    ;; goes through
+    :zones/set-label :zone-maps/create :zone-maps/duplicate :zone-maps/rename :zone-maps/set-lane
+    :zone-maps/add-lane :zone-maps/remove-lane :zone-maps/set-override :zone-maps/request-delete
+    :zone-maps/delete
+    ;; Where a cue, an item, a track or a clip goes (zones plan Z4): as a
+    ;; column's default, it re-routes the cue and can make it reach the
+    ;; audience
+    :cue-chain/set-target :cue-chain/set-item-target :timeline/set-track-target :timeline/set-clip-target})
 
 (def safety-edits
   "The safety zone edits (zones plan Z1). The lock refuses one only when it

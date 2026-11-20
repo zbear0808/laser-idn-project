@@ -13,6 +13,21 @@
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
 
+(deftest picker-offers-the-zones-the-show-uses-test
+  ;; zones plan Z4 (06 §4.5): the zones the show draws into, by name
+  (let [robot (ui/robot)]
+    (state/swap-state! #(-> %
+                            (assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a)
+                            (assoc-in [:zones :labels :zone/a] "Beams")))
+    (ui/click! robot "#preview-zone-label-0")
+    (ui/wait-for! #(= 0 (get-in (state/get-raw-state) [:ui :preview-zone-selector-open])))
+    (ui/assert-text! "#preview-zone-option-0-zone-a .label" "A · Beams")
+    (is (nil? (ui/query "#preview-zone-option-0-zone-b")) "only the zones the show uses")
+    (ui/assert-visible! "#preview-zone-option-0-all")
+    (ui/click! robot "#preview-zone-option-0-zone-a")
+    (ui/wait-for! #(= {:target :zone/a} (get-in (state/get-raw-state) [:config :preview :grid-cells 0])))
+    (ui/assert-text! "#preview-zone-label-0 .label" "A · Beams")))
+
 (deftest preview-layout-selector-and-zone-picker-are-clickable
   (let [robot (ui/robot)]
     (ui/select! robot "#preview-layout-selector" "2x2")
@@ -35,7 +50,7 @@
   "A square on :all whose width follows a 1-beat sine, which starts at its
    peak (time/sine-wave-normalized): x-scale 1.0 at beat 0, 0.6 a quarter
    beat later."
-  {:destination-zone {:zone-group-id :all}
+  {:target :all
    :items [{:id (random-uuid) :type :preset :preset-id :square :enabled? true
             :effects [{:id (random-uuid) :effect-id :scale :enabled? true
                        :params {:x-scale {:type :sine :min 0.2 :max 1.0 :period 1.0}}}]}]})
@@ -96,7 +111,7 @@
           (is (ui/wait-for! #(and (= "No Preview" (message i)) (zero? (lit-in i))))
               (str "cell " i))))
       (testing "switched to the cue's zone, a cell shows it"
-        (events/dispatch! {:event/type :preview/set-cell-zone :cell-index 1 :zone-group-id :all})
+        (events/dispatch! {:event/type :preview/set-cell-zone :cell-index 1 :target :all})
         (ui/wait-for! #(pos? (lit-in 1)))))))
 
 (deftest preview-shows-a-stalled-clock-test
@@ -193,7 +208,7 @@
   []
   (state/swap-state! #(-> %
                           (assoc :projectors {:p1 {:name "Laser A" :host "10.0.0.1" :enabled? true :zone-groups []}})
-                          (assoc-in [:chains :cue-chains [7 3]] {:destination-zone {:zone-group-id :all}
+                          (assoc-in [:chains :cue-chains [7 3]] {:target :all
                                                                   :items [(ring :auto/left 0.2) (ring :auto/right 0.2)]})))
   (events/dispatch! {:event/type :grid/trigger-cell :col 7 :row 3})
   (ui/wait-for! #(some? (get-in (state/get-raw-state) [:playback :active-cues [7 3]]))))

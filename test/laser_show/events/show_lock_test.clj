@@ -86,7 +86,24 @@
    {:event/type :zones/set-default-target :target :graphics}
    ;; A zone map pad's setting and its keys, as a vibe's
    {:event/type :zone-map/set-pad-bar :map :map/odd-even :bar? true}
-   {:event/type :zone-map/clear-control :map :map/odd-even}])
+   {:event/type :zone-map/clear-control :map :map/odd-even}
+   ;; The zones and the maps: they re-route every cue that draws into a
+   ;; zone, and a lane can reach the audience (zones plan Z4, 06 §7.5)
+   {:event/type :zones/set-label :zone :zone/a :label "Beams"}
+   {:event/type :zone-maps/create}
+   {:event/type :zone-maps/duplicate :map :map/odd-even}
+   {:event/type :zone-maps/rename :map :map/custom-1 :name "Wide"}
+   {:event/type :zone-maps/set-lane :map :map/custom-1 :index 1 :target :auto/right}
+   {:event/type :zone-maps/add-lane :map :map/custom-1}
+   {:event/type :zone-maps/remove-lane :map :map/custom-1 :index 1}
+   {:event/type :zone-maps/set-override :map :map/custom-1 :zone :zone/c :target nil}
+   {:event/type :zone-maps/delete :map :map/custom-1}
+   ;; Where a cue, an item, a track or a clip goes (zones plan Z4): as a
+   ;; column's default, they re-route it, and can make it reach the audience
+   {:event/type :cue-chain/set-target :col 0 :row 0 :target :zone/a}
+   {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-path [0] :target :zone/b}
+   {:event/type :timeline/set-track-target :col 6 :row 3 :track-id :t1 :target :zone/a}
+   {:event/type :timeline/set-clip-target :col 6 :row 3 :item-id :c1 :target :graphics}])
 
 (def ^:private opened-show
   "What Open kept of friday.zip's rig (zones plan ZR): P1 with its own
@@ -105,6 +122,12 @@
                (assoc-in [:projectors :p1 :zone-groups] [:graphics])
                (assoc-in [:chains :cue-chains [7 3]] {:items [] :destination-zone {:zone-group-id :auto.laser/p9}})
                (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 50}] {:type :zone-map :target :map/odd-even})
+               ;; a map of yours, and a timeline cue (zones plan Z4)
+               (assoc-in [:zone-maps :map/custom-1] {:name "Sweep" :lanes [:auto/left :graphics] :overrides {:zone/c :auto/center}})
+               (assoc-in [:chains :cue-chains [6 3]] {:editor-type :timeline
+                                                      :tracks [{:id :t1 :type :track :name "T"}]
+                                                      :items [{:type :preset :id :c1 :preset-id :circle :track-id :t1
+                                                               :timeline/start 0.0 :timeline/duration 4.0}]})
                (history/mark-clean))]
     (doseq [event structure-edits]
       (testing (str (:event/type event))
@@ -117,6 +140,12 @@
                  (get-in s [:ui :show-lock-notice])))
           (is (= (show-lock/notice-text (:event/type event)) (get-in s [:ui :notice :text])) "the status bar says it too")
           (is (= #{:state :dispatch-later} (set (keys effects))) "no other effect: the notice's timer only"))))
+    (testing "asking to delete a zone map opens nothing (zones plan Z4)"
+      (let [s (run (lock s0) {:event/type :zone-maps/request-delete :map :map/custom-1})]
+        (is (true? (get-in (run s0 {:event/type :zone-maps/request-delete :map :map/custom-1}) [:ui :dialogs :confirm :open?]))
+            "unlocked, it asks")
+        (is (not (get-in s [:ui :dialogs :confirm :open?])))
+        (is (= :zone-maps/request-delete (get-in s [:ui :show-lock-notice :event])))))
     (testing "undo and redo"
       (let [edited (run s0 {:event/type :grid/clear-cell :col 0 :row 0})
             locked (lock edited)]

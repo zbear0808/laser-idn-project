@@ -275,6 +275,20 @@
                          [:state :ui :dialogs :confirm])]
       (is (= "Columns 1 and 2 use it." (:message dialog)))
       (is (some? (:choice dialog)) "where they go: asked")))
+  (testing "zones plan Z4: a zone map's lane or override names it too, and its lane can be sent elsewhere (06 SQ-13)"
+    (let [ask (fn [maps] (get-in (zone-groups/handle {:event/type :zone-groups/request-remove :group-id :graphics
+                                                      :state (assoc balcony-state :zone-maps maps)})
+                                 [:state :ui :dialogs :confirm]))
+          sweep {:name "Crowd sweep" :lanes [:auto/left :graphics] :overrides {}}]
+      (is (= "The map Crowd sweep uses it." (:message (ask {:map/custom-1 sweep}))))
+      (is (some? (:choice (ask {:map/custom-1 sweep}))) "where its lane goes: asked")
+      (is (= "The maps Crowd sweep and Wide use it."
+             (:message (ask {:map/custom-1 sweep
+                             :map/custom-2 {:name "Wide" :lanes [:auto/left] :overrides {:zone/c :graphics}}}))))
+      (is (= "2 cues, the map Crowd sweep and 1 projector use it."
+             (get-in (zone-groups/handle {:event/type :zone-groups/request-remove :group-id :group-balcony
+                                          :state (assoc balcony-state :zone-maps {:map/custom-1 (assoc sweep :lanes [:group-balcony])})})
+                     [:state :ui :dialogs :confirm :message])))))
   (testing "a group nothing uses asks with no choice"
     (let [dialog (get-in (zone-groups/handle {:event/type :zone-groups/request-remove
                                               :group-id :graphics

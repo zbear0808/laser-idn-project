@@ -89,7 +89,7 @@
       (is (:checked? (row rows :group :auto/left)))))
   (testing "a preview cell: Master instead of Inherit, the zones and groups, nothing to combine or pin"
     (let [rows (target-control/menu-model (assoc ctx :scope :preview :inherited nil))]
-      (is (= {:kind :master :text "Master (all content)" :checked? true :target nil} (first rows)))
+      (is (= {:kind :master :text "Master (everything)" :checked? true :target nil} (first rows)))
       (is (some #{:zone} (kinds rows)))
       (is (not-any? #{:combine :pin :inherit} (kinds rows)))
       (is (not-any? :new? (filter #(= :zone (:kind %)) rows)) "no new zone: nothing draws into it"))))

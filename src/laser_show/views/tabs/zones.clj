@@ -12,14 +12,20 @@
      only, with a sentence that says why. Virtual projectors are listed
      under, with boxes for your groups.
    - The details (right): its colour, name and description, how many cues
-     use it, and for your groups Edit... and Delete...; the others can't be
-     renamed or deleted."
+     use it (and how many more through a zone the map in use sends there,
+     zones plan Z4), and for your groups Edit... and Delete...; the others
+     can't be renamed or deleted.
+   - Under them, the zones and the zone maps (views/components/
+     zone_maps_panel.clj)."
   (:require [cljfx.api :as fx]
+            [clojure.string :as str]
             [laser-show.css.core :as css]
             [laser-show.events.core :as events]
+            [laser-show.routing.targets :as targets]
             [laser-show.subs :as subs]
             [laser-show.views.components.group-matrix :as group-matrix]
-            [laser-show.views.components.zone-chips :as zone-chips]))
+            [laser-show.views.components.zone-chips :as zone-chips]
+            [laser-show.views.components.zone-maps-panel :as zone-maps-panel]))
 
 
 (defn- id-text [id]
@@ -287,6 +293,19 @@
     1 "Used by 1 cue"
     (str "Used by " n " cues")))
 
+(defn usage-text
+  "A group's details line (zones plan Z4, 06 §7.5, §8.7): \"Used by 3
+   cues\", \"Used by 3 cues · 9 more through Zone A\", \"Used by 9 cues
+   through Zones A, C\", \"Used by no cues\"; usage is subs/ref-usage."
+  [{:keys [direct through zones]}]
+  (let [direct (long (or direct 0))
+        through (long (or through 0))
+        via (str (if (next zones) "Zones " "Zone ") (str/join ", " (map targets/zone-letter zones)))]
+    (cond
+      (zero? through) (cue-usage-text direct)
+      (zero? direct) (str (cue-usage-text through) " through " via)
+      :else (str (cue-usage-text direct) " · " through " more through " via))))
+
 (def ^:private kind-texts
   {:all "built in" :auto "automatic" :laser "one laser" :custom "your group"})
 
@@ -294,7 +313,7 @@
   "Details panel for the selected zone group."
   [{:keys [fx/context]}]
   (let [group (fx/sub-ctx context subs/selected-target-group)
-        usage (when group (fx/sub-ctx context subs/zone-group-usage (:id group)))]
+        usage (when group (fx/sub-ctx context subs/ref-usage (:id group)))]
     (if group
       {:fx/type :v-box
        :spacing 12
@@ -317,7 +336,7 @@
                   {:fx/type :separator}
                   {:fx/type :label
                    :id "zone-group-cue-usage"
-                   :text (cue-usage-text (:cue-count usage 0))
+                   :text (usage-text usage)
                    :style-class ["label-secondary"]}
                   {:fx/type :region :v-box/vgrow :always}
                   (if (= :custom (:kind group))
@@ -371,7 +390,7 @@
 
 (defn zones-tab
   "Zone Groups tab: the groups, the selected one's lasers in rig order, and
-   its details."
+   its details; under them the zones and the zone maps (zones plan Z4)."
   [{:keys [fx/context]}]
   {:fx/type :v-box
    :style-class ["container-primary"]
@@ -384,12 +403,30 @@
                :id "zones-subtitle"
                :text "Groups are where cues draw. All and the automatic groups follow the order on the Projectors tab."
                :style-class ["label-secondary"]}
+              ;; The groups' list keeps the full height; the zones and maps
+              ;; sit under the lasers and the details
               {:fx/type :h-box
                :spacing 16
                :v-box/vgrow :always
                :children [{:fx/type zone-groups-panel}
                           {:fx/type :v-box
                            :h-box/hgrow :always
-                           :children [{:fx/type outputs-panel
-                                       :v-box/vgrow :always}]}
-                          {:fx/type details-panel}]}]})
+                           :spacing 8
+                           :children [{:fx/type :h-box
+                                       :spacing 16
+                                       :v-box/vgrow :always
+                                       :min-height 140
+                                       :children [{:fx/type :v-box
+                                                   :h-box/hgrow :always
+                                                   :children [{:fx/type outputs-panel
+                                                               :v-box/vgrow :always}]}
+                                                  {:fx/type details-panel}]}
+                                      {:fx/type :scroll-pane
+                                       :id "zone-maps-scroll"
+                                       :fit-to-width true
+                                       :hbar-policy :never
+                                       :min-height 120
+                                       :pref-height 290
+                                       :max-height 290
+                                       :style-class ["scroll-pane-dark"]
+                                       :content {:fx/type zone-maps-panel/zone-maps-panel}}]}]}]})

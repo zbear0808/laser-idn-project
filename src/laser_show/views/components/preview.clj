@@ -17,9 +17,11 @@
             [clojure.string :as str]
             [laser-show.animation.show-time :as show-time]
             [laser-show.routing.rig :as rig]
+            [laser-show.routing.targets :as targets]
             [laser-show.subs :as subs]
             [laser-show.common.util :as u]
             [laser-show.views.components.clock-view :as clock-view]
+            [laser-show.views.components.target-control :as target-control]
             [laser-show.views.components.zone-chips :as zone-chips]
             [laser-show.views.components.measured :as measured])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
@@ -302,30 +304,55 @@
                           :text "✓"
                           :style "-fx-text-fill: #4AD94A; -fx-font-size: 11;"})])})
 
+(def ^:private zone-fill
+  "A zone's colour in the picker and on its cell (zones have none of their
+   own)."
+  "#4992db")
+
+(defn- popup-header [text]
+  {:fx/type :label
+   :text text
+   :style "-fx-text-fill: #808080; -fx-font-size: 9; -fx-font-weight: bold; -fx-padding: 4 8 2 8;"})
+
 (defn zone-selector-popup
-  "Popup menu for what a preview cell shows: the master view, then
-   everything a cue can be sent to (subs/target-groups: All, the automatic
-   groups, each laser, your groups); a laser's cell shows what that laser
-   draws. Positioned below the label in a stack-pane."
+  "Popup menu for what a preview cell shows, the Target menu's rows in the
+   :preview scope (views/components/target_control.clj): the master view,
+   All, the zones the show uses (zones plan Z4: what is drawn into each),
+   then everything else a cue can be sent to (subs/target-groups: the
+   automatic groups, each laser, your groups); a laser's cell shows what
+   that laser draws. Positioned below the label in a stack-pane."
   [{:keys [fx/context cell-index]}]
-  (let [zone-groups (fx/sub-ctx context subs/target-groups)
+  (let [groups (fx/sub-ctx context subs/target-groups-by-id)
+        {:keys [names] :as ctx} (target-control/menu-context context)
         cell-config (fx/sub-ctx context subs/preview-cell-config cell-index)
-        current-zone-id (:target cell-config)
-        ;; Build items: Master (nil) first, then all zone groups
-        items (into [{:id nil :name "Master (everything)" :color "#808080"}]
-                    zone-groups)]
+        current (:target cell-config)
+        rows (target-control/menu-model (assoc ctx :scope :preview :own current))
+        item (fn [target text color locked?]
+               {:fx/type zone-selector-popup-item
+                :cell-index cell-index
+                :zone-id target
+                :zone-name text
+                :zone-color color
+                :selected? (= target current)
+                :locked? locked?})]
     {:fx/type :v-box
      ;; Use translate-y to position below the label
      :style "-fx-background-color: #2D2D2D; -fx-padding: 4; -fx-background-radius: 4; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.5), 8, 0, 0, 2); -fx-translate-y: 22;"
      :on-mouse-exited {:event/type :preview/close-zone-selector}
-     :children (vec (for [{:keys [id name color] :as item} items]
-                      {:fx/type zone-selector-popup-item
-                       :cell-index cell-index
-                       :zone-id id
-                       :zone-name name
-                       :zone-color (or color "#808080")
-                       :selected? (= id current-zone-id)
-                       :locked? (zone-chips/locked? item)}))}))
+     :children (let [zones? (some #(= :zone (:kind %)) rows)]
+                 (into []
+                       (keep (fn [{:keys [kind text target]}]
+                               (case kind
+                                 :master (item nil text "#808080" false)
+                                 ;; ZONES heads the zones the show uses, when it uses any
+                                 :header (if (str/starts-with? text "ZONES")
+                                           (when zones? (popup-header "ZONES"))
+                                           (popup-header text))
+                                 :zone (item target (targets/ref-name names target) zone-fill false)
+                                 (:ref :group) (let [g (get groups target)]
+                                                 (item target (or (:name g) text) (or (:color g) "#808080") (zone-chips/locked? g)))
+                                 nil)))
+                       rows))}))
 
 (defn zone-selector-label
   "Clickable zone label that opens the zone selector popup."
@@ -383,9 +410,13 @@
         zone-id (:target cell-config)
         zone-groups (fx/sub-ctx context subs/target-groups)
         zone-group (u/seek #(= (:id %) zone-id) zone-groups)
-        zone-name (or (:name zone-group)
-                      (if zone-id (name zone-id) "Master"))
-        zone-color (or (:color zone-group) "#808080")
+        zone? (targets/zone-ref? zone-id)
+        zone-name (cond
+                    zone? (targets/ref-name (fx/sub-ctx context subs/names-ctx) zone-id)
+                    (:name zone-group) (:name zone-group)
+                    zone-id (name zone-id)
+                    :else "Master")
+        zone-color (or (:color zone-group) (when zone? zone-fill) "#808080")
         show-labels? (fx/sub-ctx context subs/preview-show-labels?)
         popup-open-cell (fx/sub-ctx context subs/preview-zone-selector-open)
         popup-open? (= popup-open-cell cell-index)

@@ -153,3 +153,120 @@
     (is (= {{:source :midi :channel 0 :note 38} {:type :zone-map :target :map/unison}} (get-in cleared [:config :input :trigger-map]))
         "its key goes, another pad's stays")
     (is (= "Clear Control" (history/undo-label (:history cleared))))))
+
+
+;; Zones and maps on the Zone Groups tab (06 §6, §7.5)
+
+(defn- with-sweep
+  "A show with the custom map Crowd sweep: lanes Left and Crowd, and C on
+   Center."
+  []
+  (history/mark-clean
+   (assoc-in (fresh) [:zone-maps :map/custom-1] {:name "Crowd sweep" :lanes [:auto/left :crowd]
+                                                 :overrides {:zone/c :auto/center}})))
+
+(deftest map-editing-is-undoable-test
+  (let [s1 (run (fresh) {:event/type :zone-maps/create})
+        id (get-in s1 [:ui :zone-maps :selected])]
+    (testing "a new map: Left / Right's lanes, yours, selected"
+      (is (= :map/custom-1 id))
+      (is (= {:name "New map" :lanes [:auto/left :auto/right] :overrides {}} (get-in s1 [:zone-maps id])))
+      (is (= "New Zone Map" (history/undo-label (:history s1))))
+      (is (true? (get-in s1 [:project :dirty?])) "unsaved"))
+    (testing "renamed, a lane set, one added and one taken out, an override: each an edit"
+      (let [s2 (run s1 {:event/type :zone-maps/rename :map id :name " Crowd sweep "})
+            s3 (run s2 {:event/type :zone-maps/set-lane :map id :index 1 :target :crowd})
+            s4 (run s3 {:event/type :zone-maps/add-lane :map id})
+            s5 (run s4 {:event/type :zone-maps/remove-lane :map id :index 2})
+            s6 (run s5 {:event/type :zone-maps/set-override :map id :zone :zone/c :target :auto/center})]
+        (is (= [:auto/left :crowd :all] (get-in s4 [:zone-maps id :lanes])) "a new lane is All")
+        (is (= {:name "Crowd sweep" :lanes [:auto/left :crowd] :overrides {:zone/c :auto/center}} (get-in s6 [:zone-maps id])))
+        (is (every? #(= "Edit Zone Map" (history/undo-label (:history %))) [s2 s3 s4 s5 s6]))
+        (testing "a blank name, a zone for a lane, a lane that isn't there: nothing"
+          (is (= (:zone-maps s6) (:zone-maps (run s6 {:event/type :zone-maps/rename :map id :name "  "}))))
+          (is (= (:zone-maps s6) (:zone-maps (run s6 {:event/type :zone-maps/set-lane :map id :index 0 :target :zone/b}))))
+          (is (= (:zone-maps s6) (:zone-maps (run s6 {:event/type :zone-maps/remove-lane :map id :index 5})))))
+        (testing "an override moves to another zone, or goes"
+          (is (= {:zone/d :auto/center}
+                 (get-in (run s6 {:event/type :zone-maps/set-override :map id :from :zone/c :zone :zone/d :target :auto/center})
+                         [:zone-maps id :overrides])))
+          (is (= {} (get-in (run s6 {:event/type :zone-maps/set-override :map id :zone :zone/c :target nil})
+                            [:zone-maps id :overrides]))))
+        (testing "an undo takes back one edit"
+          (is (= (:zone-maps s5) (:zone-maps (run s6 {:event/type :edit/undo})))))
+        (testing "a built-in map isn't edited, only duplicated"
+          (is (= (:zone-maps s6) (:zone-maps (run s6 {:event/type :zone-maps/set-lane :map :map/odd-even :index 0 :target :graphics}))))
+          (let [d (run s6 {:event/type :zone-maps/duplicate :map :map/odd-even})
+                d-id (get-in d [:ui :zone-maps :selected])]
+            (is (= :map/custom-2 d-id))
+            (is (= {:name "Odd / Even copy" :lanes [:auto/odd :auto/even] :overrides {}} (get-in d [:zone-maps d-id])))
+            (is (= "Duplicate Zone Map" (history/undo-label (:history d))))
+            (is (= "Crowd sweep copy" (get-in (run s6 {:event/type :zone-maps/duplicate :map id}) [:zone-maps :map/custom-2 :name])))))
+        (testing "a zone's label"
+          (let [l (run s6 {:event/type :zones/set-label :zone :zone/a :label "  Beams "})]
+            (is (= {:zone/a "Beams"} (get-in l [:zones :labels])))
+            (is (= "Rename Zone" (history/undo-label (:history l))))
+            (is (= {} (get-in (run l {:event/type :zones/set-label :zone :zone/a :label ""}) [:zones :labels])) "blank: no label")))
+        (testing "selecting a map is the tab's, no edit"
+          (let [sel (run s6 {:event/type :zone-maps/select :map :map/unison})]
+            (is (= :map/unison (get-in sel [:ui :zone-maps :selected])))
+            (is (= (history/undo-label (:history s6)) (history/undo-label (:history sel))))))))))
+
+(deftest delete-map-asks-first-test
+  (let [s (-> (with-sweep)
+              (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 48}] {:type :zone-map :target :map/custom-1})
+              (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 49}] {:type :zone-map :target :map/custom-1})
+              (assoc-in [:config :zone-map-pads :map/custom-1 :bar?] true))
+        asked (run s {:event/type :zone-maps/request-delete :map :map/custom-1})
+        dialog (get-in asked [:ui :dialogs :confirm])
+        message #(get-in (run % {:event/type :zone-maps/request-delete :map :map/custom-1}) [:ui :dialogs :confirm :message])]
+    (is (= (history/extract-document-state s) (history/extract-document-state asked)) "asking deletes nothing")
+    (is (:open? dialog))
+    (is (= "Delete \"Crowd sweep\"?" (:title dialog)))
+    (is (= "Its 2 learned keys and its pad setting go too." (:message dialog)))
+    (is (= {:event/type :zone-maps/delete :map :map/custom-1} (:confirm-event dialog)))
+    (is (:danger? dialog))
+    (testing "what else goes with it"
+      (is (= "Nothing else uses it." (message (with-sweep))))
+      (is (= "It's the zone map in use: the show switches to Left / Right." (message (assoc-in (with-sweep) [:zone-map :active] :map/custom-1))))
+      (is (= "Its learned key goes too." (message (assoc-in (with-sweep) [:config :input :trigger-map {:source :midi :channel 0 :note 48}]
+                                                            {:type :zone-map :target :map/custom-1}))))
+      (is (= "Its pad setting goes too." (message (assoc-in (with-sweep) [:config :zone-map-pads :map/custom-1 :bar?] true)))))
+    (testing "a built-in map has no Delete"
+      (is (not (get-in (run s {:event/type :zone-maps/request-delete :map :map/odd-even}) [:ui :dialogs :confirm :open?]))))
+    (testing "yes deletes it, in one undo step"
+      (let [deleted (run asked (:confirm-event dialog))]
+        (is (nil? (get-in deleted [:zone-maps :map/custom-1])))
+        (is (= "Delete Zone Map" (history/undo-label (:history deleted))))))))
+
+(deftest delete-active-map-falls-back-test
+  (let [k48 {:source :midi :channel 0 :note 48}
+        k50 {:source :midi :channel 0 :note 50}
+        s (-> (with-sweep)
+              (assoc-in [:config :input :trigger-map k48] {:type :zone-map :target :map/custom-1})
+              (assoc-in [:config :input :trigger-map k50] {:type :zone-map :target :map/odd-even})
+              (assoc-in [:config :zone-map-pads :map/custom-1 :bar?] true)
+              (assoc-in [:zone-map :active] :map/custom-1)
+              (assoc-in [:ui :zone-maps :selected] :map/custom-1))
+        deleted (run s {:event/type :zone-maps/delete :map :map/custom-1})
+        tm (get-in deleted [:config :input :trigger-map])]
+    (is (nil? (get-in deleted [:zone-maps :map/custom-1])))
+    (is (= :map/left-right (get-in deleted [:zone-map :active])) "it was in use: Left / Right")
+    (is (not (contains? tm k48)) "its key goes")
+    (is (contains? tm k50) "another map's stays")
+    (is (nil? (get-in deleted [:config :zone-map-pads :map/custom-1])) "its pad setting goes")
+    (is (nil? (get-in deleted [:ui :zone-maps :selected])))
+    (testing "a switch waiting for it goes"
+      (let [p (run (assoc-in (with-sweep) [:zone-map :pending] {:id 1 :map :map/custom-1 :at-beat 8.0 :bar? false})
+                   {:event/type :zone-maps/delete :map :map/custom-1})]
+        (is (nil? (get-in p [:zone-map :pending])))
+        (is (= :map/left-right (get-in p [:zone-map :active])))))
+    (testing "a built-in map can't be deleted"
+      (is (= (history/extract-document-state s)
+             (history/extract-document-state (run s {:event/type :zone-maps/delete :map :map/odd-even})))))
+    (testing "undo brings the map, its key and its setting back, not the switch: it is live"
+      (let [undone (run deleted {:event/type :edit/undo})]
+        (is (= (:zone-maps s) (:zone-maps undone)))
+        (is (= (get-in s [:config :input :trigger-map]) (get-in undone [:config :input :trigger-map])))
+        (is (= {:bar? true} (get-in undone [:config :zone-map-pads :map/custom-1])))
+        (is (= :map/left-right (get-in undone [:zone-map :active])))))))

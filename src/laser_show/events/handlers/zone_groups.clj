@@ -131,29 +131,44 @@
     (str (str/join ", " (butlast parts)) " and " (last parts))
     (first parts)))
 
+(defn maps-using
+  "The names of your zone maps with a lane or an override that names ref
+   (zones plan Z4), by name."
+  [state ref]
+  (sort (keep (fn [[_ m]] (when (some #{ref} (concat (:lanes m) (vals (:overrides m)))) (:name m)))
+              (:zone-maps state))))
+
 (defn uses-text
   "What a delete's question says uses a group: \"3 cues, column 3, the show
-   default and 2 projectors use it.\", \"1 cue uses it.\", \"Nothing uses
-   it.\" (cues, the columns using it, whether the show default does, how
-   many outputs are in it)."
-  [cue-count cols default? outputs]
-  (let [parts (cond-> []
-                (pos? cue-count) (conj (plural cue-count "cue" "cues"))
-                (seq cols) (conj (if (next cols)
-                                   (str "columns " (and-list (map #(str (inc %)) cols)))
-                                   (str "column " (inc (first cols)))))
-                default? (conj "the show default")
-                (pos? outputs) (conj (plural outputs "projector" "projectors")))
-        one? (and (= 1 (count parts)) (or (= 1 cue-count) (= 1 (count cols)) default? (= 1 outputs)))]
-    (if (empty? parts)
-      "Nothing uses it."
-      (let [text (and-list parts)]
-        (str (str/upper-case (subs text 0 1)) (subs text 1) (if one? " uses it." " use it."))))))
+   default, the map Crowd sweep and 2 projectors use it.\", \"1 cue uses
+   it.\", \"Nothing uses it.\" (cues, the columns using it, whether the
+   show default does, the names of the zone maps using it, how many outputs
+   are in it)."
+  ([cue-count cols default? outputs]
+   (uses-text cue-count cols default? [] outputs))
+  ([cue-count cols default? maps outputs]
+   (let [parts (cond-> []
+                 (pos? cue-count) (conj (plural cue-count "cue" "cues"))
+                 (seq cols) (conj (if (next cols)
+                                    (str "columns " (and-list (map #(str (inc %)) cols)))
+                                    (str "column " (inc (first cols)))))
+                 default? (conj "the show default")
+                 (seq maps) (conj (if (next maps)
+                                    (str "the maps " (and-list maps))
+                                    (str "the map " (first maps))))
+                 (pos? outputs) (conj (plural outputs "projector" "projectors")))
+         one? (and (= 1 (count parts))
+                   (or (= 1 cue-count) (= 1 (count cols)) default? (= 1 (count maps)) (= 1 outputs)))]
+     (if (empty? parts)
+       "Nothing uses it."
+       (let [text (and-list parts)]
+         (str (str/upper-case (subs text 0 1)) (subs text 1) (if one? " uses it." " use it.")))))))
 
 (defn- handle-zone-groups-request-remove
   "Ask before deleting a zone group: which cues, grid columns, the show
-   default (zones plan Z4) and projectors use it, and, when anything routes
-   to it, where to send it (All by default). :all can't be deleted: for :all
+   default, zone maps (zones plan Z4) and projectors use it, and, when
+   anything routes to it, where to send it (All by default; Nothing leaves
+   a map's lane empty, 06 SQ-13). :all can't be deleted: for :all
    or an unknown group, state is returned as it is."
   [{:keys [group-id state]}]
   (if (or (= :all group-id) (not (contains? (:zone-groups state) group-id)))
@@ -161,9 +176,10 @@
     (let [cues (refs/cues-using (get-in state [:chains :cue-chains]) group-id)
           cols (columns-using state group-id)
           default? (boolean (some #{group-id} (targets/target-refs (get-in state [:config :default-target]))))
+          maps (maps-using state group-id)
           outputs (count (filter #(some #{group-id} (:zone-groups %))
                                  (concat (vals (:projectors state)) (vals (:virtual-projectors state)))))
-          message (uses-text (count cues) cols default? outputs)]
+          message (uses-text (count cues) cols default? maps outputs)]
       {:state (assoc-in state [:ui :dialogs :confirm]
                         (cond-> {:open? true
                                  :title (str "Delete \"" (group-name state group-id) "\"?")
@@ -172,7 +188,7 @@
                                  :danger? true
                                  :confirm-event {:event/type :zone-groups/remove :group-id group-id}}
                           (seq cues) (assoc :details (cue-list-text state cues))
-                          (or (seq cues) (seq cols) default?)
+                          (or (seq cues) (seq cols) default? (seq maps))
                           (assoc :choice {:key :retarget-to
                                           :label "Send its cues to:"
                                           :options (retarget-options state group-id)}

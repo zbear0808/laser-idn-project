@@ -936,6 +936,37 @@
      :learning? (= {:type :zone-map :target id} (fx/sub-val context get-in [:backend :input :learning-target]))
      :bindings (fx/sub-ctx context map-pad-bindings id)}))
 
+(defn- cue-ref-sets
+  "Each cue's refs (routing.targets/cue-refs), its column's default and the
+   show's included."
+  [context]
+  (let [cols (fx/sub-val context get-in [:grid :column-targets])
+        show (fx/sub-ctx context default-target)]
+    (into []
+          (keep (fn [[[col _] cue]] (when cue (targets/cue-refs cue (get cols col) show))))
+          (fx/sub-val context get-in [:chains :cue-chains]))))
+
+(defn ref-usage
+  "Who uses ref, through the map in use (06 §8.7): {:direct :through
+   :zones} (routing.zone-maps/usage)."
+  [context ref]
+  (zone-maps/usage (fx/sub-ctx context active-zone-map) (fx/sub-ctx context cue-ref-sets) ref))
+
+(defn map-zones
+  "The zones the Zone Groups tab lists, for their labels and in the map
+   editor: A and B, and every zone the show uses, in order."
+  [context]
+  (vec (sort-by targets/zone-index (into #{:zone/a :zone/b} (fx/sub-ctx context zones-in-use)))))
+
+(defn selected-zone-map-id
+  "The map the map editor shows: the one selected while it is there, else
+   the one in use."
+  [context]
+  (let [id (fx/sub-val context get-in [:ui :zone-maps :selected])]
+    (if (and id (fx/sub-ctx context zone-map id))
+      id
+      (:id (fx/sub-ctx context active-zone-map)))))
+
 (defn cue-target-explain
   "How each level of the cue at [col row] resolves, its column's and the
    show's defaults included (routing.targets/explain-cue)."
@@ -1483,6 +1514,17 @@
   (library/audience-groups {:projectors (fx/sub-val context :projectors)
                             :virtual-projectors (fx/sub-val context :virtual-projectors)
                             :rig (fx/sub-val context :rig)}))
+
+(defn map-warnings
+  "What the map editor says of map id (routing.zone-maps/map-warnings): its
+   empty lanes, the ones with no projector or that reach the audience, the
+   overrides to a group that's gone."
+  [context id]
+  (when-let [m (fx/sub-ctx context zone-map id)]
+    (zone-maps/map-warnings m {:names (fx/sub-ctx context names-ctx)
+                               :zones (fx/sub-ctx context map-zones)
+                               :reach (fx/sub-ctx context ref-reach)
+                               :audience (fx/sub-ctx context vibe-audience-groups)})))
 
 (defn- edited-allows-audience? [state]
   (boolean (:allow-audience? (library/vibe state (library/edited-id state)))))

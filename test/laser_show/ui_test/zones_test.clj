@@ -414,3 +414,89 @@
           (ui/click! robot "#zone-map-pad-odd-even-clear")
           (ui/wait-for! #(nil? (get-in (app-state) [:config :input :trigger-map k36])))
           (ui/assert-text! "#zone-map-pad-odd-even-keys" "Right-click to learn a control"))))))
+
+
+;; Zones and maps on the Zone Groups tab (06 §7.5)
+
+(defn- open-zones-tab! []
+  (events/dispatch! {:event/type :ui/set-active-tab :tab-id :zones})
+  (ui/wait-for! #(ui/visible? "#zone-maps-panel")))
+
+(deftest zone-maps-section-edits-a-map-test
+  (let [robot (ui/robot)]
+    (uses-zone-a!)
+    (open-zones-tab!)
+    (testing "the show's default target"
+      (ui/assert-text! "#target-chip-show" "All")
+      (fire-item! "#target-chip-show" "Graphics")
+      (ui/wait-for! #(= :graphics (get-in (app-state) [:config :default-target])))
+      (ui/assert-text! "#target-chip-show" "Graphics"))
+    (testing "a zone's label"
+      (ui/fill! robot "#zone-label-a" "Beams")
+      (ui/submit! robot "#zone-label-a")
+      (ui/wait-for! #(= "Beams" (get-in (app-state) [:zones :labels :zone/a]))))
+    (testing "a built-in map is read only"
+      (ui/click! robot "#zone-map-item-odd-even")
+      (ui/wait-for! #(= :map/odd-even (get-in (app-state) [:ui :zone-maps :selected])))
+      (ui/assert-text! "#zone-map-built-in" "Built-in maps follow the rig. Duplicate one to change it.")
+      (is (nil? (ui/query "#zone-map-delete")) "no Delete"))
+    (testing "a new map, selected, with Left / Right's lanes"
+      (ui/click! robot "#zone-maps-new")
+      (ui/wait-for! #(= :map/custom-1 (get-in (app-state) [:ui :zone-maps :selected])))
+      (ui/wait-for! #(ui/visible? "#zone-map-name"))
+      (ui/assert-text! "#zone-map-lane-0" "Left")
+      (ui/assert-text! "#zone-map-lane-1" "Right"))
+    (testing "renamed"
+      (ui/fill! robot "#zone-map-name" "Crowd sweep")
+      (ui/submit! robot "#zone-map-name")
+      (ui/wait-for! #(= "Crowd sweep" (get-in (app-state) [:zone-maps :map/custom-1 :name])))
+      (ui/assert-text! "#zone-map-item-custom-1 .zone-map-item-name" "Crowd sweep"))
+    (testing "lane 2 to Graphics, which has no projector: a warning"
+      (is (not (some #(= "Combine" %) (item-texts "#zone-map-lane-1"))) "a lane is All or a group")
+      (fire-item! "#zone-map-lane-1" "Graphics")
+      (ui/wait-for! #(= [:auto/left :graphics] (get-in (app-state) [:zone-maps :map/custom-1 :lanes])))
+      (ui/wait-for! #(some #{"Lane 2 (Graphics) has no projector: zone B goes nowhere."} (texts "#zone-map-warnings .label"))))
+    (testing "where each zone goes"
+      (ui/assert-text! "#zone-map-zones" "A · Beams → Left · B → Graphics"))
+    (testing "a lane added, then taken out"
+      (ui/click! robot "#zone-map-add-lane")
+      (ui/wait-for! #(= [:auto/left :graphics :all] (get-in (app-state) [:zone-maps :map/custom-1 :lanes])))
+      (ui/click! robot "#zone-map-remove-lane-2")
+      (ui/wait-for! #(= [:auto/left :graphics] (get-in (app-state) [:zone-maps :map/custom-1 :lanes]))))
+    (testing "an override"
+      (ui/click! robot "#zone-map-add-override")
+      (ui/wait-for! #(= {:zone/a :all} (get-in (app-state) [:zone-maps :map/custom-1 :overrides])))
+      (ui/assert-text! "#zone-map-zones" "A · Beams → All (override) · B → Graphics")
+      (ui/click! robot "#zone-map-remove-override-a")
+      (ui/wait-for! #(= {} (get-in (app-state) [:zone-maps :map/custom-1 :overrides]))))
+    (testing "Use now; a group's details count the cues that reach it through the map"
+      (ui/click! robot "#zone-map-use-now")
+      (ui/wait-for! #(= :map/custom-1 (active-map)))
+      (events/dispatch! {:event/type :zone-groups/select :group-id :auto/left})
+      (ui/wait-for! #(= "Used by 1 cue through Zone A" (ui/node-text "#zone-group-cue-usage"))))))
+
+(deftest deleting-a-map-asks-first-test
+  (let [robot (ui/robot)
+        title "Delete \"Crowd sweep\"?"
+        asking? #(boolean (some #{title} (ui/window-titles)))]
+    (state/swap-state! #(-> %
+                            (assoc-in [:zone-maps :map/custom-1] {:name "Crowd sweep" :lanes [:auto/left :graphics] :overrides {}})
+                            (assoc-in [:zone-map :active] :map/custom-1)
+                            (assoc-in [:ui :zone-maps :selected] :map/custom-1)))
+    (open-zones-tab!)
+    (ui/wait-for! #(ui/visible? "#zone-map-delete"))
+    (ui/click! robot "#zone-map-delete")
+    (ui/wait-for! asking?)
+    (ui/assert-text! "#confirm-message" "It's the zone map in use: the show switches to Left / Right.")
+    (is (some? (get-in (app-state) [:zone-maps :map/custom-1])) "nothing goes before you say yes")
+    (testing "Cancel keeps it"
+      (ui/click! robot "#confirm-cancel")
+      (ui/wait-for! #(not (asking?)))
+      (is (some? (get-in (app-state) [:zone-maps :map/custom-1]))))
+    (testing "yes deletes it, and the show goes back to Left / Right"
+      (ui/click! robot "#zone-map-delete")
+      (ui/wait-for! asking?)
+      (ui/click! robot "#confirm-ok")
+      (ui/wait-for! #(nil? (get-in (app-state) [:zone-maps :map/custom-1])))
+      (is (= :map/left-right (active-map)))
+      (ui/wait-for! #(nil? (ui/query "#zone-map-item-custom-1"))))))

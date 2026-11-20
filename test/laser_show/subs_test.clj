@@ -945,3 +945,33 @@
     (testing "booleans and keys only: where the pending switch lands isn't in it"
       (let [ctx' (fx/swap-context ctx assoc-in [:zone-map :pending :at-beat] 12.0)]
         (is (= (pad :map/unison) (fx/sub-ctx ctx' subs/map-pad :map/unison)))))))
+
+
+;; Who uses a group (zones plan Z4, 06 §8.7)
+
+(deftest ref-usage-direct-and-through-test
+  (let [cue (fn [t] {:items [{:type :preset :preset-id :circle :target t}]})
+        cells (concat (for [c (range 3)] [[c 0] (cue :auto/left)])
+                      (for [c (range 3 8)] [[c 0] (cue :zone/a)])
+                      (for [c (range 4)] [[c 1] (cue :zone/a)])
+                      (for [c (range 4 6)] [[c 1] (cue :zone/c)]))
+        s (assoc-in (domains/build-initial-state) [:chains :cue-chains] (into {} cells))
+        usage #(fx/sub-ctx (context %1) subs/ref-usage %2)]
+    (is (= {:direct 3 :through 11 :zones [:zone/a :zone/c]} (usage s :auto/left))
+        "3 name Left; under Left / Right, A and C go there too")
+    (is (= {:direct 0 :through 0 :zones []} (usage s :auto/odd)))
+    (testing "under Odd / Even, A and C go to Odd"
+      (let [odd-even (assoc-in s [:zone-map :active] :map/odd-even)]
+        (is (= {:direct 3 :through 0 :zones []} (usage odd-even :auto/left)))
+        (is (= {:direct 0 :through 11 :zones [:zone/a :zone/c]} (usage odd-even :auto/odd)))))
+    (testing "a cue that does both counts once, as direct"
+      (is (= {:direct 4 :through 11 :zones [:zone/a :zone/c]}
+             (usage (assoc-in s [:chains :cue-chains [6 1]] {:items [{:type :preset :preset-id :circle :target :auto/left}
+                                                                     {:type :preset :preset-id :wave :target :zone/a}]})
+                    :auto/left))))
+    (testing "a column's default counts"
+      (is (= {:direct 0 :through 1 :zones [:zone/b]}
+             (usage (-> s
+                        (assoc-in [:chains :cue-chains [7 3]] {:items [{:type :preset :preset-id :circle}]})
+                        (assoc-in [:grid :column-targets 7] :zone/b))
+                    :auto/right))))))
