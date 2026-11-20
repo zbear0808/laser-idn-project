@@ -241,5 +241,6 @@ So the Master costs what one modulated Intensity does (`:macro` resolves once pe
 | `clj -M:mac-arm:test` (full unit suite) | 1,077 tests, 34,178 assertions, 0 failures (baseline at `d298801`: 1,048 tests, 33,931 assertions) |
 | `clj -M:kondo --lint` on every touched file, with `testfx.clj` | 0 errors; 1 warning, there before (the redundant `let` at `input.clj:423`, in `handle-input-update-cell-trigger-action`) |
 | full UI suite | not run here: it runs after the merge |
+| after the merge, on `master` at `8bb1332`: `clj -M:mac-arm:test`, then the full UI suite | 1,083 tests, 34,220 assertions, 0 failures; UI 133 tests, 657 assertions, 0 failures and 1 error: 4b's `tap-reaction-menu-adds-a-cell-to-the-vibe-test` was written on a grid without the Master, so it waited for the new reaction at [0 3], which the Master now holds. `43fa00d` moves its expected cells to [1 3], [2 3] and [3 3]; `vibes-test` then 12 tests, 118 assertions, 0 failures |
 | layout | headless screenshots at 1280×800 and 1200×800: the Controls panel's fader rows and buttons fit the 300 px column; the meters share the Perform tab's width under the pads |
 | manual (unverified) | a real MIDI controller, gamepad and OSC app; a visible (non-headless) run |
