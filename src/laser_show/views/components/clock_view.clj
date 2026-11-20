@@ -1,8 +1,9 @@
 (ns laser-show.views.components.clock-view
   "Widgets that draw straight from the show clock's newest tick
    (show-time/latest) on each screen refresh, without app state: the preview
-   cells and the timeline's playhead and readout (plans/2026-11-17-show-clock/
-   03). Their cljfx descs re-render only when their own props change.
+   cells, the timeline's playhead and readout (plans/2026-11-17-show-clock/
+   03), and the rig cards' thumbnails of what each laser sent (zones plan
+   Z3). Their cljfx descs re-render only when their own props change.
 
    ext-clock-redraw gives the node an AnimationTimer, which runs on the FX
    thread once per pulse and redraws when the tick, the node's user data (the
@@ -28,17 +29,21 @@
   (some-> node .getScene .getWindow .isShowing))
 
 (defn- start-timer!
-  [^Node node redraw!]
+  [^Node node redraw! every-ms]
   (let [last-drawn (volatile! ::never)
+        last-at (volatile! nil)
+        every-ns (when every-ms (* (long every-ms) 1000000))
         failed? (volatile! false)
         timer (proxy [AnimationTimer] []
-                (handle [_pulse-ns]
-                  (when (showing? node)
+                (handle [pulse-ns]
+                  (when (and (showing? node)
+                             (or (nil? every-ns) (nil? @last-at) (>= (- (long pulse-ns) (long @last-at)) every-ns)))
                     (let [snapshot (show-time/latest)
                           data (.getUserData node)
                           drawn [(:tick snapshot) (some-> snapshot (show-time/stale? (System/nanoTime))) data]]
                       (when (not= drawn @last-drawn)
                         (vreset! last-drawn drawn)
+                        (vreset! last-at pulse-ns)
                         (try
                           (redraw! node snapshot data)
                           (catch Throwable t
@@ -57,15 +62,16 @@
 
 (defn ext-clock-redraw
   "desc, redrawn from the show clock's newest tick: on each pulse where
-   something changed, (redraw! node snapshot user-data) on the FX thread.
+   something changed, (redraw! node snapshot user-data) on the FX thread,
+   and with :every-ms at most that often (a rig card's thumbnail: 100).
    snapshot is nil before the first tick, and may be stale
    (show-time/stale?). Put what the drawing needs from props in desc's
    :user-data. Pass redraw! as a var, so a code reload takes effect."
-  [{:keys [desc redraw!]}]
+  [{:keys [desc redraw! every-ms]}]
   {:fx/type fx/ext-on-instance-lifecycle
-   :on-created #(start-timer! % redraw!)
+   :on-created #(start-timer! % redraw! every-ms)
    :on-advanced (fn [old new]
                   (stop-timer! old)
-                  (start-timer! new redraw!))
+                  (start-timer! new redraw! every-ms))
    :on-deleted stop-timer!
    :desc desc})

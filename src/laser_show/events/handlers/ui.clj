@@ -17,6 +17,16 @@
   [{:keys [tab-id state]}]
   {:state (assoc-in state [:ui :active-tab] tab-id)})
 
+(defn- handle-ui-reveal-projector
+  "Open a laser's card: the Projectors tab, with the laser selected (the
+   toolbar's LOW FPS chip, zones plan Z3). A laser that is gone opens the
+   tab only."
+  [{:keys [projector-id state]}]
+  {:state (cond-> (assoc-in state [:ui :active-tab] :projectors)
+            (contains? (:projectors state) projector-id)
+            (-> (assoc-in [:projector-ui :active-projector] projector-id)
+                (assoc-in [:projector-ui :active-virtual-projector] nil)))})
+
 (defn- handle-ui-open-dialog
   "Open a dialog.
    
@@ -174,6 +184,7 @@
   [{:keys [event/type] :as event}]
   (case type
     :ui/set-active-tab (handle-ui-set-active-tab event)
+    :ui/reveal-projector (handle-ui-reveal-projector event)
     :ui/open-dialog (handle-ui-open-dialog event)
     :ui/close-dialog (handle-ui-close-dialog event)
     :ui/update-dialog-data (handle-ui-update-dialog-data event)

@@ -9,15 +9,19 @@
    Alt+← / Alt+→; ← and → alone move the selection. The group rows line up
    under the cards in the same scroll pane (views/components/group_matrix).
 
-   A card is built from a vector of sections; Z2's thumbnail section is
-   empty, and Z3 fills it."
+   A card is built from a vector of sections. Its load section (zones plan
+   Z3) shows what the laser really sent (preview/output-thumbnail), a load
+   meter and what the fit guard did; below its minimum fps the card turns
+   amber."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.css.core :as css]
             [laser-show.events.core :as events]
             [laser-show.subs :as subs]
             [laser-show.views.components.drag-drop-cell :as dnd]
-            [laser-show.views.components.group-matrix :as group-matrix])
+            [laser-show.views.components.group-matrix :as group-matrix]
+            [laser-show.views.components.load-warning :as load-warning]
+            [laser-show.views.components.preview :as preview])
   (:import [javafx.scene Node]
            [javafx.scene.input DragEvent KeyCode KeyEvent MouseButton MouseEvent TransferMode]))
 
@@ -25,6 +29,10 @@
 (def card-width
   "Every card's width, so the group rows under the cards line up with them."
   136)
+
+(def ^:private thumbnail-size
+  "A card's thumbnail is this square, beside its meter and note."
+  44)
 
 (defn- id-text
   "A projector id as part of a node id."
@@ -151,10 +159,11 @@
                                      :enabled? :fx/event}}]})
 
 (defn- card-status
-  "The dot and the status line: the output's while it streams, \"Not found
-   in the last scan\" (amber) when a scan this session didn't find it."
+  "The dot and the status line: the output's while it streams (bold amber
+   while the laser is below its minimum fps), \"Not found in the last scan\"
+   (amber) when a scan this session didn't find it."
   [{:keys [fx/context id found?]}]
-  (let [{:keys [state warning] :as status} (fx/sub-ctx context subs/projector-output-status id)
+  (let [{:keys [state warning low?] :as status} (fx/sub-ctx context subs/projector-output-status id)
         streaming-text (output-status-text status)
         text (or streaming-text (when-not found? "Not found in the last scan"))]
     {:fx/type :h-box
@@ -176,12 +185,76 @@
                               (:detail status) (assoc :tooltip {:fx/type :tooltip :text (:detail status)})
                               (= :error state) (assoc :style (str "-fx-text-fill: " (css/red) ";"))
                               (or (and (= :streaming state) warning) (nil? streaming-text))
-                              (assoc :style (str "-fx-text-fill: " (css/orange) ";")))))}))
+                              (assoc :style (str "-fx-text-fill: " (css/orange) ";"))
+                              (and (= :streaming state) low?)
+                              (assoc :style (str "-fx-text-fill: " (css/orange) "; -fx-font-weight: bold;")))))}))
 
-(defn- card-thumbnail
-  "What the laser draws. Empty in Z2; Z3 fills it."
-  [_card]
-  nil)
+(defn- load-meter
+  "The points the laser is asked for over the points that still reach its
+   minimum (load-warning/load-percent): green, amber from 80%, red past
+   100%, where the guard acts. Its tooltip says the numbers."
+  [{:keys [id load pct]}]
+  (let [track 46
+        level (load-warning/meter-level pct)]
+    {:fx/type :label
+     :id (str "rig-card-load-" (id-text id))
+     :content-display :graphic-only
+     :padding 0
+     :tooltip {:fx/type :tooltip :text (load-warning/meter-tooltip load)}
+     :graphic {:fx/type :h-box
+               :spacing 4
+               :alignment :center-left
+               :children [{:fx/type :stack-pane
+                           :alignment :center-left
+                           :min-width track :pref-width track :max-width track
+                           :min-height 6 :pref-height 6 :max-height 6
+                           :style-class ["load-meter-track"]
+                           :children [{:fx/type :region
+                                       :min-width 0
+                                       :max-width (* track (min 1.0 (/ pct 100.0)))
+                                       :pref-width (* track (min 1.0 (/ pct 100.0)))
+                                       :style-class (cond-> ["load-meter"]
+                                                      (= :near level) (conj "load-meter-near")
+                                                      (= :over level) (conj "load-meter-over"))}]}
+                          {:fx/type :label
+                           :id (str "rig-card-load-pct-" (id-text id))
+                           :text (str pct "%")
+                           :min-width :use-pref-size
+                           :style-class ["text-small" "label-secondary"]}]}}))
+
+(defn- card-load
+  "What the laser really sent, after calibration and safety (the
+   thumbnail), and beside it its load meter and what the fit guard did
+   (load-warning/load-note-text); while it isn't streaming, \"Not
+   streaming\" and no meter (Q-Z3-2 A)."
+  [{:keys [fx/context id limit]}]
+  (let [{:keys [load] :as l} (fx/sub-ctx context subs/projector-load id)
+        streaming? (= :streaming (:state (fx/sub-ctx context subs/projector-output-status id)))
+        pct (when load (load-warning/load-percent load))
+        note (load-warning/load-note-text l)]
+    {:fx/type :h-box
+     :spacing 6
+     :alignment :top-left
+     :children [{:fx/type preview/output-thumbnail
+                 :projector-id id
+                 :limit limit
+                 :size thumbnail-size}
+                {:fx/type :v-box
+                 :spacing 3
+                 :children (cond-> []
+                             (not streaming?)
+                             (conj {:fx/type :label
+                                    :id (str "rig-card-not-streaming-" (id-text id))
+                                    :text "Not streaming"
+                                    :style-class ["text-small" "label-hint"]})
+                             pct (conj {:fx/type load-meter :id id :load load :pct pct})
+                             (seq note) (conj {:fx/type :label
+                                               :id (str "rig-card-load-note-" (id-text id))
+                                               :text note
+                                               :wrap-text true
+                                               :max-width (- card-width thumbnail-size 18)
+                                               :style "-fx-font-size: 10;"
+                                               :style-class ["label-secondary"]}))}]}))
 
 (defn- card-sections
   "A card, top to bottom: its sections (nil ones are left out)."
@@ -189,7 +262,7 @@
   [(card-title card)
    (card-host card)
    {:fx/type card-status :id (:id card) :found? (:found? card)}
-   (card-thumbnail card)])
+   {:fx/type card-load :id (:id card) :limit (:limit card)}])
 
 
 ;; A card's menu
@@ -239,9 +312,10 @@
 
 (defn- rig-card
   "One card, with a bar on the side a dragged card would land on, and its
-   menu."
-  [{:keys [card drop-mark outputting?]}]
+   menu; amber (.rig-card-low) while its laser is below its minimum fps."
+  [{:keys [fx/context card drop-mark outputting?]}]
   (let [{:keys [id selected? enabled?]} card
+        low? (:low? (fx/sub-ctx context subs/projector-load id))
         side (when (= id (:projector-id drop-mark)) (:side drop-mark))
         bar (fn [s] {:fx/type :region
                      :id (str "rig-drop-bar-" (name s) "-" (id-text id))
@@ -258,17 +332,19 @@
                :children [(bar :before)
                           {:fx/type :v-box
                            :id (str "rig-card-" (id-text id))
-                           :style-class ["rig-card"]
+                           :style-class (cond-> ["rig-card"] low? (conj "rig-card-low"))
                            :min-width card-width
                            :pref-width card-width
                            :max-width card-width
                            :spacing 2
                            :padding 6
                            :opacity (if enabled? 1.0 0.55)
+                           ;; while low, the border is .rig-card-low's
                            :style (str "-fx-background-color: #2D2D2D; -fx-background-radius: 6; -fx-border-radius: 6; -fx-cursor: hand; "
-                                       (if selected?
-                                         (str "-fx-border-color: " (css/selection-bg) "; -fx-border-width: 2;")
-                                         "-fx-border-color: #3D3D3D; -fx-border-width: 1;"))
+                                       (cond
+                                         low? ""
+                                         selected? (str "-fx-border-color: " (css/selection-bg) "; -fx-border-width: 2;")
+                                         :else "-fx-border-color: #3D3D3D; -fx-border-width: 1;"))
                            :on-mouse-clicked (fn [^MouseEvent e]
                                                (when (= MouseButton/PRIMARY (.getButton e))
                                                  (focus-strip! (.getSource e))
@@ -341,11 +417,11 @@
    :on-action {:event/type :rig/nudge-projector :projector-id selected :delta delta}})
 
 (defn- strip-height
-  "About the height the cards and rows need (a card, a row each, + Group):
-   the strip takes it, up to a limit past which it scrolls, and the
-   inspector below gets the rest."
+  "About the height the cards and rows need (a card with its thumbnail, a
+   row each, + Group): the strip takes it, up to a limit past which it
+   scrolls, and the inspector below gets the rest."
   [rows]
-  (min 400 (+ 72 (* 17 rows) 38)))
+  (min 400 (+ 72 (+ thumbnail-size 2) (* 17 rows) 38)))
 
 (defn rig-strip
   "The cards between ◀ and ▶, and under them the group rows

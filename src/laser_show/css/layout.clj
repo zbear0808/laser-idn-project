@@ -2,9 +2,10 @@
   "Layout and container styles for the laser show UI using cljfx/css.
    
    Provides CSS classes for:
-   - Toolbar with transport controls (and the OUTPUT OFF chip, a link)
+   - Toolbar with transport controls (and the OUTPUT OFF and LOW FPS chips, a link)
    - Status indicators (connection states)
    - Panel containers
+   - A rig card's load meter and its low state
    
    Usage:
    Include (::css/url layout) in your scene's :stylesheets vector."
@@ -69,6 +70,38 @@
         :-fx-text-fill bg-primary
         :-fx-font-size 11
         :-fx-font-weight "bold"}
+       
+       ;; A laser still below its minimum fps after the fit guard; a click
+       ;; opens its card (views/toolbar.clj, zones plan Z3)
+       ".low-fps-chip"
+       {:-fx-background-color accent-warning
+        :-fx-background-radius 8
+        :-fx-padding ["2px" "8px"]
+        :-fx-text-fill bg-primary
+        :-fx-font-size 11
+        :-fx-font-weight "bold"
+        :-fx-cursor "hand"}
+       
+       ;; A rig card whose laser is below its minimum fps
+       ;; (views/components/rig_strip.clj)
+       ".rig-card-low"
+       {:-fx-border-color accent-warning
+        :-fx-border-width 2}
+       
+       ;; A rig card's load meter: green, amber from 80%, red past 100%
+       ".load-meter-track"
+       {:-fx-background-color bg-subtle
+        :-fx-background-radius 3}
+       
+       ".load-meter"
+       {:-fx-background-color accent-success
+        :-fx-background-radius 3}
+       
+       ".load-meter.load-meter-near"
+       {:-fx-background-color accent-warning}
+       
+       ".load-meter.load-meter-over"
+       {:-fx-background-color accent-danger}
        
        ;; A link in the toolbar (its style class replaces .hyperlink's)
        ".toolbar-link"

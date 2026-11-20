@@ -37,8 +37,8 @@
 
 (defn rig-settings
   "Middle laser (on with 3, 5, 7… lasers) and Split width (on with one
-   laser, or the middle split or in both): stored as they are set; Z2 draws
-   whole lasers, so the split width shows in the rows only until Z3."
+   laser, or the middle split or in both): how wide each half a laser draws
+   is (routing.rig/region-fits)."
   [{:keys [settings]}]
   (let [{:keys [middle split-width middle-on? split-on?]} settings]
     {:fx/type :v-box
@@ -114,8 +114,8 @@
            (str laser " is off"))
     :custom (str "Click to put " laser " in " (:name row) " or take it out")
     (case mark
-      :left-half (str "Left half of " laser ". For now the whole laser draws it.")
-      :right-half (str "Right half of " laser ". For now the whole laser draws it.")
+      :left-half (str "Left half of " laser ".")
+      :right-half (str "Right half of " laser ".")
       :excluded (str laser " is out of All, so out of the automatic groups too")
       :off (str laser " is off")
       "Automatic: follows the order of the cards")))

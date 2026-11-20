@@ -10,9 +10,9 @@
    reject the text, which puts text back. Text left as it was commits
    nothing.
    
-   Props: :id, :text, :on-commit, :pref-width, :style-class (default
-   [\"text-field-dark\"])"
-  [{:keys [id text on-commit pref-width style-class]
+   Props: :id, :text, :on-commit, :pref-width, :disable, :style-class
+   (default [\"text-field-dark\"])"
+  [{:keys [id text on-commit pref-width disable style-class]
     :or {style-class ["text-field-dark"]}}]
   (let [commit! (fn [^javafx.scene.control.TextField field]
                   (let [typed (.getText field)]
@@ -34,6 +34,7 @@
             :id id
             :text text
             :pref-width pref-width
+            :disable (boolean disable)
             :style-class style-class
             :user-data commit!
             :on-action (fn [^javafx.event.ActionEvent e]

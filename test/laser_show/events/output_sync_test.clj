@@ -92,7 +92,13 @@
                                                  :projector-id :a :updates {:port 70000}}]
                          ["enable all with no match" {:event/type :projectors/enable-all-by-ip
                                                       :address "10.9.9.9"}]
-                         ["content" {:event/type :timing/set-bpm :bpm 128.0}]]]
+                         ["content" {:event/type :timing/set-bpm :bpm 128.0}]
+                         ["a fit setting (zones plan Z3)" {:event/type :projectors/set-fit :projector-id :a
+                                                           :key :min-fps :value 30}]
+                         ["the safety limit" {:event/type :projectors/set-safety :projector-id :a
+                                              :safety {:limit [-0.5 -0.5 0.5 0.5]}}]
+                         ["exclude from All" {:event/type :projectors/set-exclude-from-all :projector-id :a
+                                              :exclude? true}]]]
     (testing label
       (is (nil? (refresh (run (streaming-state) event)))))))
 

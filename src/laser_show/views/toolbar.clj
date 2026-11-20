@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [laser-show.subs :as subs]
             [laser-show.views.components.commit-field :as commit-field]
+            [laser-show.views.components.load-warning :as load-warning]
             [clj-font-awesome.core :as fa]
             [cljfx-svg.core :as svg]
             [laser-show.common.util :as u]))
@@ -243,6 +244,24 @@
      :visible (pos? held)
      :managed (pos? held)}))
 
+(defn low-fps-chip
+  "\"LOW FPS · Laser R 14 fps\" while a laser is still below its minimum fps
+   after the fit guard (subs/low-fps-projectors, the lowest, and \" +1\" for
+   each other one; zones plan Z3); a click opens that laser's card. A laser
+   the guard thinned back up to its minimum gets no chip (Q-Z3-5 A). Out of
+   the layout otherwise."
+  [{:keys [fx/context]}]
+  (let [lows (fx/sub-ctx context subs/low-fps-projectors)
+        text (load-warning/low-fps-text lows)]
+    {:fx/type :label
+     :id "low-fps-chip"
+     :text (or text "")
+     :style-class "low-fps-chip"
+     :tooltip {:fx/type :tooltip :text (load-warning/low-fps-tooltip lows)}
+     :visible (some? text)
+     :managed (some? text)
+     :on-mouse-clicked {:event/type :ui/reveal-projector :projector-id (:id (first lows))}}))
+
 (defn connection-status
   "Streaming status and the Stream/Stop button.
    
@@ -298,4 +317,5 @@
               {:fx/type :separator :orientation :vertical}
               {:fx/type :region :h-box/hgrow :always} ;; Spacer
               {:fx/type output-held-chip}
+              {:fx/type low-fps-chip}
               {:fx/type connection-status}]})

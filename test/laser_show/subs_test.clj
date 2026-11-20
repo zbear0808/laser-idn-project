@@ -802,3 +802,25 @@
     (is (= [:crowd nil] (blocked ctx)) "the scanner is the left laser: the cue on Left reaches the audience")
     (is (= [nil :crowd] (blocked (fx/swap-context ctx assoc-in [:rig :order] [:main :aud])))
         "moved to the right end, the mark moves to the cue on Right")))
+
+
+;; Zones plan Z3: what the fit guard did, for the cards and the toolbar
+
+(deftest low-fps-projectors-test
+  (let [load (fn [guard-fps reduced] {:points-in 3000 :points 1800 :budget 1250 :min-fps 20 :scan-rate 25000
+                                      :est-fps 8 :guard-fps guard-fps :reduced-pct reduced :dim-pct 0 :regions 0})
+        state (-> (domains/build-initial-state)
+                  (assoc :projectors {:p1 {:name "Laser L"} :p2 {:name "Laser C"} :p3 {} :p4 {:name "Laser X"}})
+                  (assoc-in [:backend :streaming :status :projectors]
+                            {:p1 {:state :streaming :fps 19.9 :low? true :load (load 16 40)}
+                             :p2 {:state :streaming :fps 30.0 :low? false :load (load 25 0)}
+                             :p3 {:state :streaming :fps 13.9 :low? true :load (load 14 40)}
+                             :p4 {:state :error :error "gone"}}))
+        ctx (context state)]
+    (is (= [{:id :p3 :name "p3" :fps 14 :min-fps 20 :reduced-pct 40}
+            {:id :p1 :name "Laser L" :fps 16 :min-fps 20 :reduced-pct 40}]
+           (fx/sub-ctx ctx subs/low-fps-projectors))
+        "the lasers still low after the guard, the lowest first, named (by id without a name)")
+    (is (= {:load (load 16 40) :low? true} (fx/sub-ctx ctx subs/projector-load :p1)))
+    (is (nil? (fx/sub-ctx ctx subs/projector-load :p4)) "not streaming: no load")
+    (is (= [] (fx/sub-ctx (context (domains/build-initial-state)) subs/low-fps-projectors)) "nothing streaming")))

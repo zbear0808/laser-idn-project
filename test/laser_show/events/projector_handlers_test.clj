@@ -15,6 +15,7 @@
    [laser-show.events.core :as events]
    [laser-show.events.handlers.projector :as projectors]
    [laser-show.events.safety-guard :as guard]
+   [laser-show.animation.fit-guard :as fit-guard]
    [laser-show.routing.refs :as refs]
    [laser-show.routing.rig :as rig]
    [laser-show.vibes.library :as library]
@@ -137,6 +138,37 @@
     (is (identical? state-with-projector
                     (:state (projectors/handle {:event/type :projectors/set-exclude-from-all :projector-id :nope :exclude? true
                                                 :state state-with-projector}))))))
+
+(deftest set-fit-clamps-and-is-undoable-test
+  (let [set-fit (fn [state k v] (:state (projectors/handle {:event/type :projectors/set-fit :projector-id test-projector-id
+                                                            :key k :value v :state state})))
+        fit #(get-in % [:projectors test-projector-id :fit])
+        out (set-fit state-with-projector :min-fps 30)]
+    (is (= (assoc fit-guard/defaults :min-fps 30) (fit out)) "stored whole, the defaults for the rest")
+    (testing "clamped to its range"
+      (is (= [60 5] [(:min-fps (fit (set-fit out :min-fps 100))) (:min-fps (fit (set-fit out :min-fps 1)))]))
+      (is (= 0.3 (:point-floor (fit (set-fit out :point-floor 0.1)))))
+      (is (= 1.0 (:dim-floor (fit (set-fit out :dim-floor 3))))))
+    (is (true? (:dim? (fit (set-fit out :dim? true)))))
+    (is (false? (:reduce-points? (fit (set-fit out :reduce-points? false)))))
+    (testing "a value of the wrong type, another key, an unknown projector or the value it has: nothing changes"
+      (is (identical? out (set-fit out :min-fps "fast")))
+      (is (identical? out (set-fit out :min-fps ##NaN)))
+      (is (identical? out (set-fit out :dim? "yes")))
+      (is (identical? out (set-fit out :colour 1)))
+      (is (identical? out (set-fit out :min-fps 30)))
+      (is (identical? out (:state (projectors/handle {:event/type :projectors/set-fit :projector-id :nope
+                                                      :key :min-fps :value 25 :state out})))))
+    (testing "one undo step, named, an unsaved change, and no engine restarts"
+      (let [pipeline #(events/handle-event-pipeline (assoc %2 :state %1))
+            result (pipeline (-> state-with-projector history/mark-clean (assoc-in [:backend :streaming :running?] true))
+                             {:event/type :projectors/set-fit :projector-id test-projector-id :key :min-fps :value 25})
+            edited (:state result)]
+        (is (= 25 (:min-fps (fit edited))))
+        (is (= "Change Fit Guard" (history/undo-label (:history edited))))
+        (is (true? (get-in edited [:project :dirty?])))
+        (is (nil? (:multi-engine/refresh result)) "fit is no part of an engine's fingerprint")
+        (is (nil? (fit (:state (pipeline edited {:event/type :history/undo})))))))))
 
 (deftest set-enabled-turns-an-output-on-or-off-test
   (let [off (assoc-in state-with-projector [:projectors test-projector-id :enabled?] false)

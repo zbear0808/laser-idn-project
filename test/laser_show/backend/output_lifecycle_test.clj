@@ -288,16 +288,22 @@
         (dac/stop! other)))))
 
 (deftest zone-group-edit-restarts-nothing-test
-  (init-with-projectors! {:a (projector 1 true)})
+  (init-with-projectors! {:a (projector 1 true) :b (projector 2 true)})
   (state/swap-state! assoc-in [:zone-groups :left] {:id :left :name "Left"})
   (dispatch! {:event/type :idn/start-multi-streaming})
-  (is (wait-for-senders! 1))
+  (is (wait-for-senders! 2))
   (let [ports (senders-lately)]
     (dispatch! {:event/type :projectors/toggle-zone-group :projector-id :a :zone-group-id :left})
     (dispatch! {:event/type :projectors/update-settings :projector-id :a :updates {:name "Renamed"}})
+    (testing "zones plan Z3: nor do the fit guard, the safety limit or the rig's order"
+      (dispatch! {:event/type :projectors/set-fit :projector-id :a :key :min-fps :value 30})
+      (dispatch! {:event/type :projectors/set-safety :projector-id :a :safety {:limit [-0.5 -0.5 0.5 0.5]}})
+      (dispatch! {:event/type :rig/move-projector :projector-id :a :target :b :side :before}))
     (is (= [:all :left] (get-in (state/get-raw-state) [:projectors :a :zone-groups])))
+    (is (= 30 (get-in (state/get-raw-state) [:projectors :a :fit :min-fps])))
+    (is (= [:a :b] (get-in (state/get-raw-state) [:rig :order])) "Renamed came after Fake 2 by name; moved back first")
     (is (wait-settled!))
-    (is (= 1 (count @*started*)) "no engine was started")
+    (is (= 2 (count @*started*)) "no engine was started")
     (is (= #{} (closed-ports)) "and none was closed")
     (is (= ports (senders-lately))))
   (is (stop-streaming!)))

@@ -182,3 +182,54 @@
             "1 001 samples at 25 000 pts/s: about 25 fps")
         (ui/click! robot "#stream-btn")
         (ui/wait-for! #(nil? (ui/query "#projector-status-a")))))))
+
+
+;; The LOW FPS chip (zones plan Z3, 05 §7)
+
+(defn- circle-cue
+  "One circle of n points (a dark one and n - 1 lit), to target."
+  [n target]
+  {:destination-zone {:zone-group-id :all}
+   :items [{:id (random-uuid) :type :preset :preset-id :circle :enabled? true :effects []
+            :params {:num-points (dec n)} :zone-group-id target}]})
+
+(defn- play! [cue]
+  (state/swap-state! assoc-in [:chains :cue-chains [7 3]] cue)
+  (events/dispatch! {:event/type :grid/trigger-cell :col 7 :row 3})
+  (ui/wait-for! #(some? (get-in (state/get-raw-state) [:playback :active-cues [7 3]]))))
+
+(deftest low-fps-chip-names-the-laser-and-opens-its-card-test
+  (let [robot (ui/robot)]
+    (state/swap-state! assoc :projectors {:a (assoc (projector 1 "127.0.0.1") :name "Laser L" :scan-rate 25000)
+                                          :b (assoc (projector 2 "127.0.0.1") :name "Laser R" :scan-rate 25000)})
+    (play! (circle-cue 3000 :auto.laser/b))
+    (is (not (ui/visible? "#low-fps-chip")))
+    (fixtures/with-clock
+      (fn [_]
+        (ui/click! robot "#stream-btn")
+        (ui/assert-text! "#low-fps-chip" "LOW FPS · Laser R 14 fps")
+        (is (= "Laser R: 14 fps (minimum 20) · −40% pts\nClick to see it."
+               (ui/on-fx-thread #(.getText (.getTooltip ^javafx.scene.control.Label (ui/query "#low-fps-chip"))))))
+        (testing "a click opens its card"
+          (ui/click! robot "#low-fps-chip")
+          (ui/wait-for! #(= :projectors (get-in (state/get-raw-state) [:ui :active-tab])))
+          (ui/assert-text! "#projector-config-title" "CONFIGURE: Laser R"))
+        (testing "both low: the lowest, and +1"
+          (state/assoc-in-state! [:chains :cue-chains [7 3] :items 0 :zone-group-id] :all)
+          (ui/wait-for! #(= "LOW FPS · Laser L 14 fps +1" (ui/node-text "#low-fps-chip"))))
+        (ui/click! robot "#stream-btn")))
+    (testing "gone when nothing streams"
+      (ui/wait-for! #(not (ui/visible? "#low-fps-chip"))))))
+
+(deftest light-laser-shows-no-chip-test
+  (let [robot (ui/robot)]
+    (state/swap-state! assoc :projectors {:a (assoc (projector 1 "127.0.0.1") :scan-rate 25000)})
+    (play! (circle-cue 400 :all))
+    (fixtures/with-clock
+      (fn [_]
+        (ui/click! robot "#stream-btn")
+        (ui/wait-for! #(get-in (state/get-raw-state) [:backend :streaming :status :projectors :a :load]))
+        (ui/sync-fx!)
+        (is (not (ui/visible? "#low-fps-chip")) "400 points at 25,000 pts/s: 62 fps")
+        (is (false? (get-in (state/get-raw-state) [:backend :streaming :status :projectors :a :low?])))
+        (ui/click! robot "#stream-btn")))))

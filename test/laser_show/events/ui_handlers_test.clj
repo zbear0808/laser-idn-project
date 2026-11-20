@@ -223,3 +223,21 @@
                                                        :confirm-event {:event/type :projectors/remove :projector-id :p1}})})))))
     (testing "a closed dialog continues with nothing"
       (is (nil? (:dispatch (ui/handle {:event/type :ui/confirm :state base-state})))))))
+
+
+;; The LOW FPS chip opens a laser's card (zones plan Z3)
+
+(deftest reveal-projector-opens-its-card-test
+  (let [state (-> base-state
+                  (assoc-in [:projectors :p1] {:name "Laser R" :host "10.0.0.1"})
+                  (assoc-in [:ui :active-tab] :grid)
+                  (assoc-in [:projector-ui :active-virtual-projector] :vp-1))
+        out (:state (ui/handle {:event/type :ui/reveal-projector :projector-id :p1 :state state}))]
+    (is (= :projectors (get-in out [:ui :active-tab])) "the Projectors tab")
+    (is (= :p1 (get-in out [:projector-ui :active-projector])) "with its card selected")
+    (is (nil? (get-in out [:projector-ui :active-virtual-projector])))
+    (testing "a laser that is gone: the tab, nothing selected anew"
+      (let [out (:state (ui/handle {:event/type :ui/reveal-projector :projector-id :gone :state state}))]
+        (is (= :projectors (get-in out [:ui :active-tab])))
+        (is (nil? (get-in out [:projector-ui :active-projector])))))
+    (is (not= {} (ui/handle {:event/type :ui/reveal-projector :state base-state})) "no id: still a handler's answer")))

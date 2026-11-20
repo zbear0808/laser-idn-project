@@ -33,6 +33,7 @@
             [laser-show.css.core :as css]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.chains :as chains]
+            [laser-show.animation.safety :as safety]
             [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
             [laser-show.dev-config :as dev-config]))
@@ -399,6 +400,33 @@
    when it isn't streaming."
   [context projector-id]
   (get-in (fx/sub-ctx context streaming-status) [:projectors projector-id]))
+
+(defn projector-load
+  "What the fit guard made of projector-id's frames, as its card shows it
+   (zones plan Z3): {:load {:points-in :points :budget :min-fps :scan-rate
+   :est-fps :guard-fps :reduced-pct :dim-pct :regions} :low? bool}, or nil
+   while it isn't streaming a frame that has one (output-runtime/status)."
+  [context projector-id]
+  (let [{:keys [load low?]} (fx/sub-ctx context projector-output-status projector-id)]
+    (when load
+      {:load load :low? (boolean low?)})))
+
+(defn low-fps-projectors
+  "The lasers still below their minimum fps after the fit guard, the lowest
+   first: [{:id :name :fps :min-fps :reduced-pct}], :fps what they draw after
+   the guard. The toolbar's LOW FPS chip."
+  [context]
+  (let [projectors (fx/sub-val context :projectors)]
+    (->> (:projectors (fx/sub-ctx context streaming-status))
+         (keep (fn [[id {:keys [low? load]}]]
+                 (when (and low? load)
+                   {:id id
+                    :name (rig/projector-name {:projectors projectors} id)
+                    :fps (:guard-fps load)
+                    :min-fps (:min-fps load)
+                    :reduced-pct (:reduced-pct load)})))
+         (sort-by (juxt :fps (comp str :id)))
+         vec)))
 
 (defn connection-status
   "Streaming status for the toolbar.
@@ -788,7 +816,8 @@
    from All) :name :host :service-id :host-label (\"10.0.0.7 #1\") :enabled?
    :excluded? :tags :identity (rig/identity-label) :selected? :found? (false
    once a scan this session didn't find it) :multi-output? (another output of
-   its device is a card too)}."
+   its device is a card too) :limit (its safety limit as safety/normalize
+   reads it, nil when it can't, for the thumbnail's outline)}."
   [context]
   (let [projectors (fx/sub-val context :projectors)
         inputs (rig/rig-inputs {:projectors projectors :rig (fx/sub-val context :rig)})
@@ -811,7 +840,8 @@
                :identity (rig/identity-label p)
                :selected? (= id selected)
                :found? (or (nil? found) (contains? found [host (or service-id 0)]))
-               :multi-output? (< 1 (get hosts host 0))}))
+               :multi-output? (< 1 (get hosts host 0))
+               :limit (try (:limit (safety/normalize (:safety p))) (catch Exception _ nil))}))
           (:order inputs))))
 
 (defn rig-matrix

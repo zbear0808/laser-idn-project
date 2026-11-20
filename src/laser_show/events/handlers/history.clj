@@ -173,6 +173,7 @@
    :projectors/set-enabled "Turn Projector On or Off"
    :projectors/set-exclude-from-all "Exclude From All"
    :projectors/set-tag "Change Tags"
+   :projectors/set-fit "Change Fit Guard"
    :rig/move-projector "Move Projector"
    :rig/nudge-projector "Move Projector"
    :rig/set-middle "Change Middle Laser"

@@ -11,6 +11,7 @@
             [laser-show.subs :as subs]
             [laser-show.animation.chains :as chains]
             [laser-show.animation.effects :as effects]
+            [laser-show.animation.fit-guard :as fit-guard]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.common.util :as u]
             [laser-show.css.core :as css]
@@ -202,6 +203,82 @@
                                   :wrap-text true
                                   :max-width 320}
                         :on-selected-changed {:event/type :projectors/set-exclude-from-all :projector-id id :exclude? :fx/event}}))}))
+
+
+;; The fit guard (plans/2026-11-19-zones/05 §7)
+
+
+(defn- parse-whole
+  "A whole number typed into a field, or nil."
+  [text]
+  (parse-long (str/trim (str text))))
+
+(defn- fit-number-field
+  "A Fit guard number field: shows stored (in the field's units), commits a
+   whole number clamped to lo-hi as (to-value n), or puts the stored one back
+   when that changes nothing."
+  [{:keys [id projector-id fit-key stored lo hi to-value disable]}]
+  {:fx/type commit-field/commit-field
+   :id id
+   :text (str stored)
+   :pref-width 50
+   :disable disable
+   :on-commit (fn [typed]
+                (when-let [n (parse-whole typed)]
+                  (let [n (max lo (min hi n))]
+                    (when (not= n stored)
+                      {:event/type :projectors/set-fit :projector-id projector-id
+                       :key fit-key :value (to-value n)}))))})
+
+(defn- fit-guard-section
+  "FIT GUARD: the selected projector's minimum fps, and what it may do below
+   it: draw fewer points (never below a floor), then dim (never below a
+   floor). Each control is one :projectors/set-fit, one undo step."
+  [{:keys [projector]}]
+  (let [{:keys [id]} projector
+        {:keys [min-fps reduce-points? point-floor dim? dim-floor]} (fit-guard/settings (:fit projector))
+        percent #(Math/round (* 100.0 (double %)))
+        row (fn [& children] {:fx/type :h-box :spacing 8 :alignment :center-left :children (vec children)})
+        floor (fn [field-id fit-key stored lo disable]
+                [{:fx/type :label :text "never below" :min-width :use-pref-size :style-class ["label-secondary"]}
+                 {:fx/type fit-number-field :id field-id :projector-id id :fit-key fit-key :stored stored
+                  :lo lo :hi 100 :to-value #(/ % 100.0) :disable disable}
+                 {:fx/type :label :text "%" :style-class ["label-secondary"]}])]
+    {:fx/type :v-box
+     :id "projector-fit-guard"
+     :spacing 6
+     :children [{:fx/type :label
+                 :text "FIT GUARD"
+                 :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                (row {:fx/type :label :text "Minimum fps" :min-width :use-pref-size :style-class ["label-secondary"]}
+                     {:fx/type fit-number-field :id "projector-fit-min-fps" :projector-id id :fit-key :min-fps
+                      :stored (long min-fps) :lo 5 :hi 60 :to-value identity}
+                     {:fx/type :label :text "5–60" :style-class ["label-hint"]})
+                (apply row
+                       {:fx/type :check-box
+                        :id "projector-fit-reduce"
+                        :text "Draw fewer points below it"
+                        :selected reduce-points?
+                        :on-selected-changed {:event/type :projectors/set-fit :projector-id id
+                                              :key :reduce-points? :value :fx/event}}
+                       {:fx/type :region :h-box/hgrow :always}
+                       (floor "projector-fit-point-floor" :point-floor (percent point-floor) 30 (not reduce-points?)))
+                (apply row
+                       {:fx/type :check-box
+                        :id "projector-fit-dim"
+                        :text "Then dim"
+                        :selected dim?
+                        :on-selected-changed {:event/type :projectors/set-fit :projector-id id
+                                              :key :dim? :value :fx/event}}
+                       {:fx/type :region :h-box/hgrow :always}
+                       (floor "projector-fit-dim-floor" :dim-floor (percent dim-floor) 20 (not dim?)))
+                {:fx/type :label
+                 :id "projector-fit-note"
+                 :text "Below its minimum fps a laser draws fewer points, then dims if you allow it. Its card shows what it did."
+                 :wrap-text true
+                 :max-width 300
+                 :min-height :use-pref-size
+                 :style-class ["label-hint"]}]}))
 
 
 ;; Calibration effect helpers
@@ -502,6 +579,9 @@
                                                      :projector projector}
                                                     {:fx/type :separator}
                                                     {:fx/type projector-rig-settings
+                                                     :projector projector}
+                                                    {:fx/type :separator}
+                                                    {:fx/type fit-guard-section
                                                      :projector projector}]}
                                         ;; Middle: the calibration chain, and Remove...
                                         {:fx/type :v-box

@@ -164,6 +164,62 @@
           (.setAccessibleText canvas text))))))
 
 
+;; A rig card's thumbnail: what its laser sent (zones plan Z3)
+
+(def ^:private limit-color
+  "The safety limit's outline: dim, so it never reads as light."
+  (Color/rgb 70 70 70))
+
+(defn- draw-thumbnail!
+  "points (what the laser sent, in its output space) on canvas, on black,
+   inside the grey outline of its safety limit [x0 y0 x1 y1] (none for nil)."
+  [^Canvas canvas points limit]
+  (let [gc (.getGraphicsContext2D canvas)
+        w (.getWidth canvas)
+        h (.getHeight canvas)]
+    (.setFill gc Color/BLACK)
+    (.fillRect gc 0 0 w h)
+    (when-let [[x0 y0 x1 y1] limit]
+      (.setStroke gc limit-color)
+      (.setLineWidth gc 1.0)
+      (.strokeRect gc (* (+ (double x0) 1.0) 0.5 w) (* (- 1.0 (double y1)) 0.5 h)
+                   (* (- (double x1) (double x0)) 0.5 w) (* (- (double y1) (double y0)) 0.5 h)))
+    (when (seq points)
+      (draw-lines! gc (if (vector? points) points (vec points)) w h))))
+
+(defn- redraw-thumbnail!
+  "A thumbnail's canvas from what projector-id's provider produced last
+   (show-time/output-frame, after calibration and safety) while that is
+   newer than show-time/STALE_MS; otherwise only the limit, and the canvas
+   says \"Not streaming\" (Q-Z3-2 A). It draws only when that changed."
+  [^Canvas canvas _snapshot {:keys [projector-id limit]}]
+  (let [{:keys [frame at-ns]} (show-time/output-frame projector-id)
+        live? (boolean (and at-ns (< (- (System/nanoTime) (long at-ns)) (* show-time/STALE_MS 1000000))))
+        points (when live? frame)
+        drawn [(System/identityHashCode points) live? limit (.getWidth canvas) (.getHeight canvas)]
+        props (.getProperties canvas)]
+    (when (not= drawn (.get props ::drawn))
+      (.put props ::drawn drawn)
+      (draw-thumbnail! canvas points limit)
+      (let [text (if live? "Laser output" "Not streaming")]
+        (when (not= text (.getAccessibleText canvas))
+          (.setAccessibleText canvas text))))))
+
+(defn output-thumbnail
+  "What projector-id really sent, after calibration and safety (C-10), on a
+   size × size canvas, with its safety limit outlined; redrawn at most 10
+   times a second."
+  [{:keys [projector-id limit size]}]
+  {:fx/type clock-view/ext-clock-redraw
+   :redraw! #'redraw-thumbnail!
+   :every-ms 100
+   :desc {:fx/type :canvas
+          :id (str "rig-card-thumbnail-" (name projector-id))
+          :width size
+          :height size
+          :user-data {:projector-id projector-id :limit limit}}})
+
+
 ;; Zone Group Dropdown Helpers
 
 

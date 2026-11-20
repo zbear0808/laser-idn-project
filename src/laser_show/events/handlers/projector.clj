@@ -29,6 +29,7 @@
             [laser-show.events.helpers :as h]
             [laser-show.common.util :as u]
             [laser-show.idn.stream :as stream]
+            [laser-show.animation.fit-guard :as fit-guard]
             [laser-show.animation.safety :as safety]
             [laser-show.animation.test-pattern :as test-pattern]
             [laser-show.events.safety-guard :as guard]
@@ -343,6 +344,30 @@
              (boolean? on?)
              (not= on? (contains? tags tag)))
       {:state (assoc-in state [:projectors projector-id :tags] ((if on? conj disj) tags tag))}
+      {:state state})))
+
+(defn- fit-value?
+  "Is value one :projectors/set-fit takes for key?"
+  [key value]
+  (case key
+    (:reduce-points? :dim?) (boolean? value)
+    (:min-fps :point-floor :dim-floor) (and (number? value) (Double/isFinite (double value)))
+    false))
+
+(defn- handle-projectors-set-fit
+  "Set one of a projector's fit guard settings (zones plan Z3: :min-fps,
+   :reduce-points?, :point-floor, :dim? or :dim-floor), from the inspector's
+   Fit guard controls, clamped to its range (animation.fit-guard/settings).
+   [:projectors id :fit] is stored whole. It restarts no engine: the routing
+   carries the settings to the engines on the next tick. An unknown
+   projector or key, a value of the wrong type, or the value it has changes
+   nothing."
+  [{:keys [projector-id key value state]}]
+  (let [current (fit-guard/settings (get-in state [:projectors projector-id :fit]))
+        fit (when (and (contains? (:projectors state) projector-id) (fit-value? key value))
+              (fit-guard/settings (assoc current key value)))]
+    (if (and fit (not= fit current))
+      {:state (assoc-in state [:projectors projector-id :fit] fit)}
       {:state state})))
 
 
@@ -680,6 +705,9 @@
     :projectors/set-enabled (handle-projectors-set-enabled event)
     :projectors/set-exclude-from-all (handle-projectors-set-exclude-from-all event)
     :projectors/set-tag (handle-projectors-set-tag event)
+    
+    ;; The fit guard (Z3)
+    :projectors/set-fit (handle-projectors-set-fit event)
     
     ;; Configuration
     :projectors/toggle-device-expand (handle-projectors-toggle-device-expand event)

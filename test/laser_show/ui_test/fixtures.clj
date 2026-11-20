@@ -12,6 +12,7 @@
             [clojure.test :as t]
             [clojure.tools.logging :as log]
             [laser-show.app :as app]
+            [laser-show.services.show-clock :as show-clock]
             [laser-show.ui-test.testfx :as ui]))
 
 (defn with-toolkit
@@ -56,3 +57,23 @@
     (finally
       (app/stop!)
       (ui/sync-fx!))))
+
+(defn with-clock
+  "Call (f at-ms) while a thread ticks the show clock every 16 ms, as the
+   real clock does, at show time t0 + @at-ms (the test moves it).
+   app/start-test! runs no clock. A cell or a thumbnail draws only a tick
+   newer than STALE_MS, and an engine sends only one, so the clock has to
+   keep ticking while a test reads them: on a loaded machine one read can
+   take longer than that (the macOS CI runner)."
+  ([f] (with-clock (System/nanoTime) f))
+  ([t0 f]
+   (let [at-ms (atom 0)
+         running (atom true)
+         ticker (future (while @running
+                          (show-clock/tick! (+ t0 (* @at-ms 1000000)))
+                          (Thread/sleep 16)))]
+     (try
+       (f at-ms)
+       (finally
+         (reset! running false)
+         @ticker)))))

@@ -3,7 +3,6 @@
    drawing the show clock's newest tick (plans/2026-11-17-show-clock/03 §8)."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
-            [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]
@@ -67,23 +66,7 @@
   [i]
   (ui/on-fx-thread #(.getAccessibleText ^Node (ui/query (canvas i)))))
 
-(defn- with-clock
-  "Call (f at-ms) while a thread ticks the show clock every 16 ms, as the
-   real clock does, at show time t0 + @at-ms (the test moves it). A cell
-   draws only a tick newer than STALE_MS, so the clock has to keep ticking
-   while a test reads the canvases: on a loaded machine one read can take
-   longer than that (the macOS CI runner)."
-  [t0 f]
-  (let [at-ms (atom 0)
-        running (atom true)
-        ticker (future (while @running
-                         (show-clock/tick! (+ t0 (* @at-ms 1000000)))
-                         (Thread/sleep 16)))]
-    (try
-      (f at-ms)
-      (finally
-        (reset! running false)
-        @ticker))))
+(def ^:private with-clock fixtures/with-clock)
 
 (deftest preview-draws-the-clocks-tick-test
   (play-square!)
