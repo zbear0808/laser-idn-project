@@ -6,7 +6,7 @@
   (:require [clojure.test :refer [is]])
   (:import [javafx.application Platform]
            [javafx.scene Node]
-           [javafx.scene.control CheckBox ComboBox Control Labeled TextInputControl ToggleButton]
+           [javafx.scene.control CheckBox ComboBox Control Labeled ScrollPane TextInputControl ToggleButton]
            [javafx.scene SnapshotParameters]
            [javafx.scene.image PixelFormat]
            [javafx.event ActionEvent Event]
@@ -186,6 +186,37 @@
                            {:timeout-ms timeout-ms
                             :windows (window-titles)
                             :focus-owner (focus-owner-desc)}))))))))
+
+(defn scroll-into-view!
+  "Scroll each ScrollPane around the node found by selector so that the
+   node's top is in view, as a user scrolls to it: a robot can't click a
+   node outside the scene's visible bounds."
+  [^String selector]
+  (wait-for! #(some? (query selector)))
+  (run-on-fx-thread!
+   (fn []
+     (let [^Node node (query selector)]
+       (loop [^Node parent (.getParent node)]
+         (when parent
+           (when (instance? ScrollPane parent)
+             (let [^ScrollPane pane parent
+                   ^Node content (.getContent pane)
+                   content-bounds (.getLayoutBounds content)
+                   node-bounds (.sceneToLocal content (.localToScene node (.getBoundsInLocal node)))
+                   viewport (.getViewportBounds pane)
+                   spare-h (- (.getHeight content-bounds) (.getHeight viewport))
+                   spare-w (- (.getWidth content-bounds) (.getWidth viewport))
+                   at (fn [offset spare lo hi]
+                        (+ lo (* (- hi lo) (max 0.0 (min 1.0 (/ offset spare))))))]
+               (when (pos? spare-h)
+                 (.setVvalue pane (at (- (.getMinY node-bounds) (.getMinY content-bounds) 8.0) spare-h
+                                      (.getVmin pane) (.getVmax pane))))
+               (when (pos? spare-w)
+                 (.setHvalue pane (at (- (.getMinX node-bounds) (.getMinX content-bounds) 8.0) spare-w
+                                      (.getHmin pane) (.getHmax pane))))
+               (.layout pane)))
+           (recur (.getParent parent)))))))
+  (sync-fx!))
 
 (defn click!
   "Click a node found by CSS selector using TestFX's mouse robot.

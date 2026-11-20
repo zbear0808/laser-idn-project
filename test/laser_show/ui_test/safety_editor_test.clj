@@ -103,9 +103,11 @@
   (let [robot (ui/robot)]
     (with-projector! {:limit [-0.8 -0.6 0.8 1.0] :blocked []})
     (ui/click! robot "#projectors-tab")
+    (ui/scroll-into-view! "#safety-add-blocked-button")
     (ui/click! robot "#safety-add-blocked-button")
     (ui/wait-for! #(= 1 (count (:blocked (zone)))))
     (ui/wait-for! #(some? (ui/query "#safety-remove-blocked-0")))
+    (ui/scroll-into-view! "#safety-remove-blocked-0")
     (ui/click! robot "#safety-remove-blocked-0")
     (ui/wait-for! #(empty? (:blocked (zone))))))
 
