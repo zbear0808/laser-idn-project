@@ -203,3 +203,45 @@
       (is (empty? (get-in released [:vibe-runtime :held])))
       (is (every? #(nil? (get-in released [:playback :active-cues %])) cells) "held a second: cut on release")
       (is (nil? (get-in released [:ui :show-lock-notice]))))))
+
+(deftest locked-safety-zones-only-get-smaller-test
+  ;; Q-Z1-5 A: the lock never stands between you and a safer show, and no
+  ;; area gets larger while it is on
+  (let [small {:limit [-0.5 -0.5 0.5 0.5] :blocked [[-0.1 -0.1 0.1 0.1]]}
+        s0 (-> (starter)
+               (assoc-in [:projectors :p1 :safety] small)
+               (assoc-in [:projectors :p2 :safety] {:limit [-0.9 -0.9 0.9 0.9] :blocked []})
+               (history/mark-clean))
+        zone #(get-in % [:projectors :p1 :safety])]
+    (testing "smaller goes through"
+      (doseq [event [{:event/type :projectors/set-safety :projector-id :p1
+                      :safety (assoc small :limit [-0.4 -0.5 0.5 0.5])}
+                     {:event/type :projectors/add-blocked-area :projector-id :p1}]]
+        (let [s (run (lock s0) event)]
+          (is (not= small (zone s)) (str (:event/type event) " applied"))
+          (is (nil? (get-in s [:ui :show-lock-notice])) (str (:event/type event) ": no notice")))))
+    (testing "larger is refused, and says why"
+      (doseq [event [{:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-1 -1 1 1]}}
+                     {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-1 -1 1 1]} :confirmed? true}
+                     {:event/type :projectors/remove-blocked-area :projector-id :p1 :index 0}
+                     {:event/type :projectors/copy-safety :from :p2 :to [:p1]}]]
+        (let [effects (handle (lock s0) event)
+              s (:state effects)]
+          (is (= (lock s0) (without-notices s)) (str (:event/type event) ": only the notice"))
+          (is (= {:text "Larger safety zone refused" :event (:event/type event)} (get-in s [:ui :show-lock-notice])))
+          (is (= "Show lock is on: Larger safety zone refused. Unlock it on the Perform tab"
+                 (get-in s [:ui :notice :text]))))))
+    (testing "a copy that only makes the others smaller goes through"
+      (let [s (run (lock s0) {:event/type :projectors/copy-safety :from :p1 :to [:p2]})]
+        (is (= small (get-in s [:projectors :p2 :safety])))))
+    (testing "Allow on a question asked before the lock went on is refused too"
+      (let [live (-> s0 (assoc-in [:backend :streaming :running?] true))
+            asked (run live {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-1 -1 1 1]}})
+            _ (is (get-in asked [:ui :dialogs :confirm :open?]) "unlocked and live, it asks")
+            allowed (run (lock asked) {:event/type :ui/confirm})]
+        (is (= small (zone allowed)))
+        (is (= "Larger safety zone refused" (get-in allowed [:ui :show-lock-notice :text])))))
+    (testing "unlocked, a larger area on a laser that isn't streaming applies at once"
+      (is (= [-1.0 -1.0 1.0 1.0] (:limit (zone (run s0 {:event/type :projectors/set-safety :projector-id :p1
+                                                         :safety {:limit [-1 -1 1 1]}}))))))))
+

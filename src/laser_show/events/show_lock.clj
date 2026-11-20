@@ -9,13 +9,16 @@
    shown under the switch, and the status bar's). What a performer plays is
    never refused: the vibe keys, BLACKOUT, the grid's clicks, the transport,
    the tempo, streaming, learning a key, and Exit, which still asks about
-   unsaved changes.
+   unsaved changes. A safety zone edit goes through while it makes no zone
+   larger, so the lock never stands between you and a safer show, and is
+   refused when it would let light somewhere new (zones plan Q-Z1-5 A).
 
    wrap-show-lock is the pipeline's innermost wrapper (events/core.clj), so
    the undo history, the unsaved flag and the output sync see a change to
    [:ui] only. An event the lock refuses that another event dispatches is
    refused too: each goes through the pipeline."
-  (:require [laser-show.events.handlers.history :as history]
+  (:require [laser-show.animation.safety :as safety]
+            [laser-show.events.handlers.history :as history]
             [laser-show.events.helpers :as h]))
 
 (def blocked-events
@@ -45,6 +48,14 @@
     :rig/move-projector :rig/nudge-projector :rig/set-middle :rig/set-split-width
     :projectors/set-enabled :projectors/set-exclude-from-all :projectors/set-tag})
 
+(def safety-edits
+  "The safety zone edits (zones plan Z1). The lock refuses one only when it
+   would make a zone larger (widens-a-zone?)."
+  #{:projectors/set-safety :projectors/add-blocked-area :projectors/remove-blocked-area
+    :projectors/copy-safety})
+
+(def ^:private larger-zone-refused "Larger safety zone refused")
+
 (defn refused-text
   "What the Perform tab says under the switch when the lock refused an event
    of type: \"Move Cell refused\"."
@@ -52,22 +63,41 @@
   (str (history/format-event-description type) " refused"))
 
 (defn notice-text
-  "What the status bar says when the lock refuses an event of type."
-  [type]
-  (str "Show lock is on: " (refused-text type) ". Unlock it on the Perform tab"))
+  "What the status bar says when the lock refuses an event of type, or with
+   what the switch says (refused)."
+  ([type] (notice-text type (refused-text type)))
+  ([_type refused]
+   (str "Show lock is on: " refused ". Unlock it on the Perform tab")))
 
 (defn locked?
   "Is the show lock on?"
   [state]
   (true? (get-in state [:ui :show-lock?])))
 
+(defn- widens-a-zone?
+  "Would event, answered yes, give any projector a larger safety zone? The
+   handler is pure, so it runs once more here with :confirmed? true."
+  [handler {:keys [state] :as event}]
+  (let [after (:state (handler (assoc event :confirmed? true)))]
+    (boolean (some (fn [id] (safety/widens? (get-in state [:projectors id :safety])
+                                            (get-in after [:projectors id :safety])))
+                   (keys (:projectors after))))))
+
+(defn- refuse
+  "state with the notice that the lock refused an event of type: under the
+   switch ([:ui :show-lock-notice] {:text :event}) and on the status bar."
+  [state type refused]
+  (update (h/show-notice state (notice-text type refused) :warning)
+          :state assoc-in [:ui :show-lock-notice] {:text refused :event type}))
+
 (defn wrap-show-lock
   "The pipeline's innermost wrapper around handler: while the lock is on, a
-   blocked event's result is the notice and nothing else (state with
-   [:ui :show-lock-notice] {:text :event}, and the status bar's notice)."
+   blocked event's result is the notice and nothing else, and so is a safety
+   zone edit that would make a zone larger."
   [handler]
   (fn [{:keys [state event/type] :as event}]
-    (if (and (locked? state) (contains? blocked-events type))
-      (update (h/show-notice state (notice-text type) :warning)
-              :state assoc-in [:ui :show-lock-notice] {:text (refused-text type) :event type})
-      (handler event))))
+    (cond
+      (not (locked? state)) (handler event)
+      (contains? blocked-events type) (refuse state type (refused-text type))
+      (and (contains? safety-edits type) (widens-a-zone? handler event)) (refuse state type larger-zone-refused)
+      :else (handler event))))
