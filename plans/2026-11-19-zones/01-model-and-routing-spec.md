@@ -228,7 +228,7 @@ This applies to a zone map switch and to a pattern-pad switch (Z5). It doesn't a
 
 ## 11. Migration on load (D-22, silent)
 
-Old data is converted on load in `state/persistent.clj` (`apply-loaded-project`, `:162-174`, beside `model/normalize-timeline-cues`). The conversion is idempotent and silent, and it routes exactly as before.
+Old data is converted on load in `state/persistent.clj` (`apply-loaded-project`, `:179-191` at `70f7db8`, beside `model/normalize-timeline-cues`). The conversion is idempotent and silent, and it routes exactly as before.
 
 | Old data | New data |
 |---|---|
@@ -262,7 +262,7 @@ Old data is converted on load in `state/persistent.clj` (`apply-loaded-project`,
 
 ## 13. Invariants (every phase keeps them)
 
-1. **Safety is last.** Only the encoder runs after it. It fails closed. No effect, map, pattern or override can skip it.
+1. **Safety is last.** Only `sanitize-frame` and the encoder run after it. `sanitize-frame` only drops bad points, adds a dark first point and doubles a lone point, so it can't light anything (Z1 S-Z1-5). Safety fails closed. No effect, map, pattern or override can skip it.
 2. **No zone setup means everything plays everywhere.** On the default rig with no targets, every enabled projector draws every cue, once. That's today's default.
 3. **Old shows look the same.** A project with no zones, maps or patterns routes and renders exactly as before, after migration. A fixture test checks each case in §11. **The one deliberate exception:** a reference to an *empty* built-in Left, Right or Center used to reach nothing, and now reaches the automatic group of that name (Z2 S-2).
 4. **Each key once, each picture once.** A projector draws each (cue, key) at most once, and each identical frame at most once per cue.

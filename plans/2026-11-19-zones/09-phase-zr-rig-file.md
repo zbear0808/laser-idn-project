@@ -18,7 +18,7 @@ After this phase you can:
 |---|---|---|
 | Where the rig lives | `state/persistent.clj:48-61` | inside the show zip: `hardware.edn` holds projectors, virtual projectors and groups (`:53-56`; Z2 adds `[:rig]`), and `content.edn` holds the calibration chains `[:chains :projector-effects]` (`:61`) |
 | New Project | `:176-185`; `events/handlers/menu.clj:50-59` | `replace-document` with `{}` resets **every** saved path, so the projectors vanish (needs/08 P-10). The next scan brings them back disabled, with default calibration. While streaming, the engines stop (`test/laser_show/events/output_sync_test.clj:53`, `test/laser_show/events/menu_file_handlers_test.clj:263-266`) |
-| Open | `:162-174` (`replace-document` `:129-133`, `replace-at-path` `:112-127`); `events/handlers/menu.clj:88-92` | replaces every saved path, rig included: the show's projectors, calibration (and, after Z1, safety zones) replace this machine's. The engines re-sync to them (`menu_file_handlers_test.clj:187-193`) |
+| Open | `:179-191` at `70f7db8` (`replace-document` `:145-149`, `replace-at-path` `:128-143`); `events/handlers/menu.clj:88-92` | replaces every saved path, rig included: the show's projectors, calibration (and, after Z1, safety zones) replace this machine's. The engines re-sync to them (`menu_file_handlers_test.clj:187-193`). Until ZR, Z1 shows a notice after Open saying so (D-34) |
 | Save | `:94-101` (`project-files`); `events/handlers/menu.clj:105-117` | writes the three files, rig and show together |
 | Undo and "unsaved" | `state/history.clj:14-22` (policy), `:48-50` (roots), `:153-173` | projectors and chains are undoable content, so a rig edit marks the show unsaved |
 | Discovery | `events/handlers/projector.clj:159-186` | backfilled into history and the saved baseline (`:182-186`) |
@@ -49,7 +49,7 @@ D-30 splits them.
 | `serialization/serialize`, `deserialize` (`state/serialization.clj:25-69`) | the rig file's EDN. The write goes through a temp file and an atomic move, not `spit` (`:158-159`) |
 | `show-notice` (`events/helpers.clj:105-123`) | the recovery and write-failure notices |
 | The unsaved-changes guard and dialog (`events/handlers/menu.clj:23-48`; `views/dialogs/unsaved_confirm.clj`) | Exit after a failed rig write asks first, with its own text |
-| Z2: `routing.rig/stable-id`, `match-discovered`, `effective-order`, `laser-ref`; `migration/zones-z2`, `migration/replace-refs`; `:zone-groups/show` | matching a show's lasers and groups to this rig, renaming pins, converting an old show's hardware before an import |
+| Z2: `routing.rig/stable-id`, `match-discovered`, `effective-order`, `laser-ref`; `migration/zones-z2`; Z0's `routing.refs/replace-refs`; `:zone-groups/show` | matching a show's lasers and groups to this rig, renaming pins, converting an old show's hardware before an import |
 | Z0's cue count | "used by 14 cues" in the report |
 | Z1's live-safety rule (D-28) | "Use the show's setup for Laser L" goes through it: growing the area while the laser outputs asks first |
 
@@ -67,7 +67,7 @@ D-30 splits them.
   - `rig-changed? [old new]`: identity on the four rig paths, plus the definitions of the groups the rig's lasers are in.
   - `group-copy [state]`: the previous copy, overridden by the show's current definitions, kept to groups some laser lists.
   - `set-up? [state]`: some projector is enabled.
-  - `rename-pins [state hardware]`: `:auto.laser/<show id>` → `:auto.laser/<rig id>` wherever the stable ids match (the zip's hardware gives show id → stable id; Z2's `stable-id` reads a pre-Z2 projector's `:unit-id`). Through `migration/replace-refs`, so cues, tracks, clips and the preview cells follow.
+  - `rename-pins [state hardware]`: `:auto.laser/<show id>` → `:auto.laser/<rig id>` wherever the stable ids match (the zip's hardware gives show id → stable id; Z2's `stable-id` reads a pre-Z2 projector's `:unit-id`). Through Z0's `routing.refs/replace-refs`, so cues, tracks, clips and the preview cells follow.
   - `match-report [state hardware chains]`: §8's report data.
   - `set-up-from-show`, `import-new-lasers`, `use-show-setup`, `adopt-group`, `repin`, `add-groups-to-show`, `forget-projector`: each a pure state → state for one button (§6).
 - NEW `laser-show.state.rig-store` (I/O at the edge):
@@ -98,7 +98,8 @@ D-30 splits them.
 - Views:
   - NEW `views/dialogs/rig_report.clj` (the set-up question and the report), registered in `views/root.clj` like the other dialogs;
   - the Projectors tab header gains the rig's status line and the read-only banner;
-  - a disabled card's menu gains "Forget this laser…".
+  - a disabled card's menu gains "Forget this laser…" (Z0's remove, through `:rig/forget-projector`).
+  - **Z1's notice after Open** ("Safety zones and calibration come from <file>", D-34) **is removed**, because from ZR on, Open never replaces safety or calibration. The report covers what is different instead.
 
 ## 5. State placement
 
@@ -111,7 +112,7 @@ D-30 splits them.
 | `[:ui :dialogs :rig-report]` `{:open? :mode (:set-up \| :report) :file :report :hardware :chains}` | UI | Open; the Projectors tab link | no | no |
 | zone maps, the active map, targets (Z4) | the show | – | as Z4 says | as Z4 says |
 
-Undo stays one history (Q-ZR-5). Undoing a card move moves it back, and the file follows. History is still cleared by New and Open (`state/persistent.clj:135-152`), so nothing after an Open can undo back into the previous rig.
+Undo stays one history (Q-ZR-5). Undoing a card move moves it back, and the file follows. History is still cleared by New and Open (`reset-session`, `state/persistent.clj:151-169` at `70f7db8`), so nothing after an Open can undo back into the previous rig.
 
 ## 6. Events and effects
 
@@ -132,7 +133,7 @@ Undo stays one history (Q-ZR-5). Undoing a card move moves it back, and the file
 | `:rig/add-groups-to-show {:group-ids}` | **NEW** | the report | yes, undoable (show, unsaved) |
 | `:rig/use-show-setup {:projector-id}` | **NEW** | the report, after its confirm (and Z1's, if the laser is live) | yes, undoable (rig) |
 | `:rig/open-report` | **NEW** | the Projectors tab link | yes |
-| `:rig/forget-projector {:projector-id}` | **NEW** | a disabled card's menu, after a confirm | yes, undoable "Forget Laser" |
+| `:rig/forget-projector {:projector-id}` | **NEW**, a thin wrapper that runs Z0's `:projectors/remove` (02 §4: projector, chain, list state, virtual projectors, selection), then saves the rig | a disabled card's menu, after Z0's confirm | yes, undoable "Forget Laser" |
 | `:zone-groups/show` | Z2 | the report: Choose lasers… | yes |
 | `:ui/close-dialog :rig-report` | yes | Not now; Close | yes |
 

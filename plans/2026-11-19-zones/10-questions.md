@@ -56,6 +56,10 @@ Also tell me the layout: a line on a truss, sides + center, front and back, or w
 - **A ★** Allowed after the confirm. Its engine stops.
 - **B** Only when it is turned off.
 
+**Q-Z0-3 · A calibration effect that fails** (for example, a broken corner pin). Today it is skipped and the rest of the chain runs, as the output plan decided, and only the log says so.
+- **A ★** Keep the skip, and say it on the projector's status line in amber: "Streaming · 59.8 fps · Corner Pin skipped". Z1's safety step still clips whatever the skip lets through.
+- **B** Fail closed for calibration too: that laser goes dark with "Calibration error: output off".
+
 ## Z1 · Safety (`03-phase-z1-safety.md`)
 
 **Q-Z1-1 · Until ZR, opening a show replaces this machine's safety zones with the show's**, as it already does for every projector setting. **Answered A (D-34).**
@@ -69,6 +73,12 @@ Also tell me the layout: a line on a truss, sides + center, front and back, or w
 **Q-Z1-3 · The test pattern's brightness ceiling** (the slider stops at 50% today).
 - **A ★** Keep 50%.
 - **B** Allow 100%, with a warning colour above 50%.
+
+**Q-Z1-4 · Undo or Redo that would make a live laser's area bigger.** There is one undo history for the whole show, so a ⌘Z meant for something else could undo a safety zone you made smaller during the show.
+- **A ★** Ask first, with the same "Allow light in a larger area?" dialog.
+- **B** Just restore it, since it puts back a zone that was in force before.
+
+Either way, Escape during a drag puts the old zone back without asking.
 
 ## Z2 · Rig strip and groups (`04-phase-z2-rig-strip-and-groups.md`)
 

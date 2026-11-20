@@ -1,7 +1,7 @@
 # Phase Z3: routing core (routing in the snapshot, each picture once, split lasers, fit guard, per-laser preview, low-fps warnings)
 
 **Written:** 2026-11-19   **Written for commit:** `90e35c7` (`master`; the source cited is as at `e3d6d1b`, the last commit to touch `src/`)
-**Status:** Proposed.   **Needs:** Z1 (`03-phase-z1-safety.md`: the safety limit and stage) and Z2 (`04-phase-z2-rig-strip-and-groups.md`: rig order, automatic groups, the rig card). Doc 04 landed while this was being written, and the Z2 names below are taken from it. Doc 03 hadn't been written yet, so the Z1 row of the table below is an assumption: re-check it when doc 03 lands. Doc 06 (Z4) calls this phase's accessor `rig/resolve-ref`, and this doc uses that name.
+**Status:** Proposed.   **Needs:** Z1 (`03-phase-z1-safety.md`: the safety limit and stage) and Z2 (`04-phase-z2-rig-strip-and-groups.md`: rig order, automatic groups, the rig card). The Z2 names below are taken from doc 04. Doc 03 now exists (re-checked at `70f7db8`), and the Z1 row of the table below follows it. Doc 06 (Z4) calls this phase's accessor `rig/resolve-ref`, and this doc uses that name.
 **Implements spec** (`01-model-and-routing-spec.md`): §1 (frame keys in normal form), §5, §6 with §6.1 and §6.2 a–h (i and j are Z4), §7, §8, invariants 4, 5, 6, 8 and 9, and needs C-10 (a per-laser preview).   **Size:** ~6 d
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks anything that doesn't exist yet.
@@ -17,7 +17,7 @@ There is still one render per cue per tick (spec invariant 8). Zones (A, B…) a
 
 | Assumed from | What this phase uses |
 |---|---|
-| Z1 (doc 03, not written yet) | `[:projectors id :safety :limit]` `[x0 y0 x1 y1]`, default `[-1 -1 1 1]`. A safety stage after `apply-projector-effects` in `projector-frame` that fails closed and reports under `[:safety id]`. A test-pattern and Identify branch that replaces a laser's content before its projector effects |
+| Z1 (doc 03) | `[:projectors id :safety]` with `:limit [x0 y0 x1 y1]` (default `[-1 -1 1 1]`), **always read through `safety/normalize`** (03 S-Z1-7), so the safe box for regions is the same box the stage clips to. A safety stage after `apply-projector-effects` in `projector-frame` that fails closed and reports under `[:safety id]`. A test-pattern and Identify branch that replaces a laser's content, skipping composition and the fit guard |
 | Z2 (doc 04 §4) | `[:rig]` with `:order`, `:middle` (`:split`) and `:split-width` (0.75), plus `:exclude-from-all?` on each projector. In `routing/rig.clj`: `enabled?` (`(:enabled? p true)`), `effective-order`, `rig-inputs [state]`, `auto-groups`, and `ref-entries [inputs]`, the whole `{ref entries}` map that "Z3's resolver puts under `:refs`". There's also `refs-for`, which Z2's `get-projector-zone-groups` returns: every ref that reaches a laser, with halves counted as the whole laser. `subs/target-groups`, which every picker reads (the preview's too), lists All, the automatic groups, each laser (`:auto.laser/<id>`) and the custom groups. The cards are built in NEW `views/components/rig_strip.clj` from a vector of sections, and Z2's thumbnail section returns nil for Z3 to fill. The card keeps `#projector-dot-<id>` and `#projector-status-<id>`, and the inspector stays in `views/tabs/projectors.clj` |
 
 ## 1. Current behaviour (file:line)

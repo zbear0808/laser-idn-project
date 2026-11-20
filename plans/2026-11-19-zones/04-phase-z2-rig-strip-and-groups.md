@@ -26,7 +26,7 @@ After this phase you can:
 | Enabling | `:199-208` (Enable All by IP), `:211-218` (one output, found again with `make-projector-id`), `:290-295` (toggle) | three paths. The discovery list's checkboxes use the second |
 | What "enabled" means | `backend/multi_engine.clj:220`, `backend/output_runtime.clj:48`; `subs.clj:534-544` | the engines treat a missing `:enabled?` as on, `(:enabled? p true)`. The discovery sub treats it as off |
 | The Projectors tab | `views/tabs/projectors.clj:817-835` | three columns: Discover devices `:226-277` (device rows `:129-224`), Configured projectors `:345-373` (sorted by service id only, `subs.clj:496-504`), and the config panel `:712-811` with zone chips `:474-503`. The subtitle claims safety zones (`:828`, B-1) |
-| The Zone Groups tab | `views/tabs/zones.clj:325-346` | a group list `:89-129`, every output with a checkbox `:135-207` (the row and the box both toggle, `:164-179`, B-6), details `:239-302` with "Cues targeting: 0" (`subs.clj:711`, B-7). Tags are shown read-only (`:41-57`); nothing edits them (B-10) |
+| The Zone Groups tab | `views/tabs/zones.clj:327-349` (at `d298801`; unchanged at `70f7db8`) | a group list `:89-130`, every output with a checkbox `:136-235` (the row and the box both dispatch the toggle, `:166-181`, and still toggle once: B-6, checked in Z0), details `:241-321` with "Cues targeting: 0" (`subs.clj:715-725`, B-7, made real by Z0). Tags are shown read-only (`:41-57`); nothing edits them (B-10) |
 | Routing | `backend/multi_engine.clj:47-59`, `:119-150` | a projector draws the frames of the groups it **lists**, joined in list order (`:133-137`). `:all` is only a name: a projector that doesn't list it never draws it |
 | The groups | `state/domains.clj:340-389` | six stored defaults, `:all :left :right :center :graphics :crowd`. The preview's default cells name `:left :right :center` (`:250-254`) |
 | The pickers | `subs.clj:661-666` (`zone-groups-list`) | every zone picker lists the stored groups: the cue chain editor (`views/dialogs/cue_chain_editor.clj:470-471`, dropdown `:95-129`, labels `:146-199`), the timeline editor (`views/dialogs/timeline_cue_editor.clj:97, 122`), the preview (`views/components/preview.clj:230, 301`), the Zone Selector (`views/components/visual_editors/custom_param_renderers.clj:503-508`), keyframes (`views/components/visual_editors/keyframe_modulator_panel.clj:383, 557`) |
@@ -48,7 +48,7 @@ After this phase you can:
 | Existing thing (file:line) | How it's reused |
 |---|---|
 | `:zone-groups` on each projector | stays the one record of **custom** membership (spec §12). All and the automatic groups are never stored in it |
-| `:projectors/toggle-zone-group` (`events/handlers/projector.clj:303-312`), with Z0's one-toggle fix | the one membership event, from the rows under the strip and from the Zone Groups tab (D-15) |
+| `:projectors/toggle-zone-group` (`events/handlers/projector.clj:303-312`). It already toggles once per click (B-6, checked in Z0: no fix needed) | the one membership event, from the rows under the strip and from the Zone Groups tab (D-15) |
 | `make-projector-id` (`:66-73`) | still makes the id of a *new* projector, made unique by NEW `unique-projector-id` |
 | The scan's backfill (`:182-186`) | also carries host moves and identity upgrades, so they are never undone and never unsaved |
 | `extract-frames-for-zones`, `combine-zone-frames` (`backend/multi_engine.clj:61-88`) | unchanged. Only the list they get changes (`get-projector-zone-groups`) |
@@ -100,7 +100,7 @@ Spec §11's Z2 rows. Z4 adds its rows here.
   - **All's definition** (show row). `[:zone-groups :all]` goes, because All is built in now (S-9). The id `:all` stays a valid ref.
   - **Identity** (rig row). Each projector without `:stable-id` gets one; duplicates are settled as in `match-discovered` step 5.
   - **No order is written.** `effective-order` reads IP, then name (S-11), so loading changes nothing it doesn't have to.
-- `replace-refs [state {old new}]`: Z0's walker if Z0 has one; otherwise it is written here, over the places listed above.
+- `replace-refs`: **Z0's `laser-show.routing.refs/replace-refs [state {old new}]`**, called directly (02 §4). The migration doesn't define its own. It extends Z0's `ref-places` only if it finds a place Z0 missed.
 
 ### Existing namespaces
 

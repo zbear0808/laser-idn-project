@@ -50,7 +50,7 @@ The precise rules are in **`01-model-and-routing-spec.md`**. Every phase doc imp
 | `09-phase-zr-rig-file.md` | ZR: the rig in its own file (physical setup outside the show) |
 | `10-questions.md` | **Every open question in one place**, each with its context, the options and a recommendation, grouped by phase |
 
-The phase docs were written against slightly different commits: 04, 05, 06 and 09 at `90e35c7`; 07 and 08 at `739bd74`; 02 and 03 at `d298801`. Vibe Phases 3 and 4a and UX Phase 3 landed in between, so **re-check each doc's citations at HEAD when its phase starts.**
+The phase docs were written against slightly different commits, then re-checked: 04, 05, 06 and 09 at `90e35c7`; 07 and 08 re-checked at `f178f56`; 02 and 03 re-checked at `70f7db8` by an independent review. Vibe Phases 3–5 and UX Phase 3 landed in between, so **re-check each doc's citations at HEAD when its phase starts.**
 
 ## 2. Decisions
 

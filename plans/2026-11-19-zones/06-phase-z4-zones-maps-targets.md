@@ -35,7 +35,7 @@ After this phase you can:
 | Stop, Retrigger | `events/handlers/timing.clj:81-92`; `animation/show_time.clj:95-98` | a `:restart` request: the global clock goes back to beat 0 |
 | Live and saved | `state/history.clj:14-22, 48-64, 153-159, 262-278`; `state/persistent.clj:48-61, 112-127, 135-152, 162-174` | BPM and effect cells' `:active?` are live. `[:grid]` keeps only `:size`, in the document (`history.clj:60`) and in the file (`persistent.clj:51`) |
 | Audience | `vibes/library.clj:64-116` | group names: `:crowd` and every group of a crowd-scanning projector; `zone-group-ids` reads the four places above |
-| Used by | `subs.clj:703-713` (`:cue-count 0 ;; TODO`), shown at `views/tabs/zones.clj:269-271` | Z0 makes the direct count real |
+| Used by | `subs.clj:715-725` at `70f7db8` (`:cue-count 0 ;; TODO`), shown at `views/tabs/zones.clj:271-273` | Z0 makes the direct count real |
 | Starter cues | `state/templates.clj:30-46` | each says `:destination-zone {:zone-group-id :all}` |
 | Undo labels | `events/handlers/history.clj:125-148`; `timeline/model.clj:735-752` | |
 
@@ -116,7 +116,9 @@ After this phase you can:
 - `events/handlers/triggers.clj`: action `{:type :zone-map :target map-id}`. A press dispatches `{:event/type :zone-map/press :map id :src :input :input-time ts}`; a release nothing. It skips the bookkeeping, as vibe actions do.
 - `events/handlers/input.clj`: re-learning a map pad moves its key, as a role's does (`:291-292`, generalised to the actions of type `:vibe` and `:zone-map`, compared by `learn-target`); `action-name` says "zone map Odd / Even".
 - `events/handlers/ui.clj`: Z3's `:preview/set-cell-zone` already writes `{:target …}`; Z4 only lets the picker offer zones.
-- Z0's reference walker (the one its delete and Z2's migration use) learns the new places: every `:target` (inside a union too), `[:grid :column-targets]`, `[:config :default-target]`, map lanes and overrides. So deleting a group re-targets cues and empties the lanes that named it, and `:zone-groups/remove` needs nothing of its own.
+- Z0's reference walker (`routing.refs`: its delete and Z2's migration use it) learns the new places: every `:target` (inside a union too), `[:grid :column-targets]`, `[:config :default-target]`, map lanes and overrides. So deleting a group re-targets cues, and `:zone-groups/remove` needs nothing of its own.
+  - **A map lane that named the deleted group takes the delete's re-target**, which is All by default (02, Q-Z0-1). With "Nothing (they inherit)", the lane is removed instead, and an override that named the group is dropped.
+  - A map left with no lanes is flagged by the map editor's empty-lanes warning.
 - `events/handlers/history.clj` (`:125-148`): the labels of §6; `:cue-chain/set-destination-zone-group` goes, because the labels test wants routed events only.
 - `events/core.clj`: NEW inline effect `:show-clock/read {:on-read e}`, beside `:link/sync-to-downbeat`: it continues `e` with `:clock {:beats (show-time/global-beats) :running? ((:running? show-time/frame-signal)) :now-ms (System/currentTimeMillis)}` through `run-inline`.
 
