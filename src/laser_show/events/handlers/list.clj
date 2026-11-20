@@ -249,13 +249,16 @@
 
 
 (defn- handle-paste-items
-  "Paste items from clipboard after selected item (or at end)."
+  "Paste items from clipboard after selected item (or at end). A list of
+   effects (:clipboard-type :item-effects, a projector's chain) pastes
+   whatever clipboard/get-effects-to-paste returns, the same test that turns
+   its Paste button on, so a cue's presets never land in it."
   [{:keys [component-id items-path on-change-event on-change-params clipboard-type state]}]
   (let [clip (clipboard/get-clipboard)
         expected-type (or clipboard-type :cue-chain-items)
-        clipboard-items (when (= (:type clip) expected-type)
-                          (if (= expected-type :item-effects)
-                            (:effects clip)
+        clipboard-items (if (= expected-type :item-effects)
+                          (clipboard/get-effects-to-paste)
+                          (when (= (:type clip) expected-type)
                             (:items clip)))]
     (if (seq clipboard-items)
       (let [items (get-in state items-path [])

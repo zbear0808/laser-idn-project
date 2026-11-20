@@ -227,13 +227,15 @@
 
 (defn get-effects-to-paste
   "Get effects from clipboard as a vector.
-   Works for both :effect (returns [effect]) and :effect-chain (returns effects vec).
-   Returns nil if clipboard doesn't contain pasteable effects."
+   Works for :effect (returns [effect]), :effect-chain and :item-effects (a
+   list of effects copied from a list editor: a projector's chain) (returns
+   its effects vec). Returns nil if clipboard doesn't contain pasteable effects."
   []
   (let [clip (get-clipboard)]
     (case (:type clip)
       :effect [(dissoc clip :type :copied-at)]
       :effect-chain (:effects clip [])
+      :item-effects (:effects clip [])
       nil)))
 
 

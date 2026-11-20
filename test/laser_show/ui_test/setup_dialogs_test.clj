@@ -7,6 +7,7 @@
    shows whole."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.state.clipboard :as clipboard]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]))
@@ -230,4 +231,64 @@
     (testing "another group has its Delete... button"
       (events/dispatch! {:event/type :zone-groups/select :group-id :left})
       (ui/wait-for! #(some? (ui/query "#zone-group-delete-button"))))))
+
+(defn- check-box-labelled
+  "The check box whose text is text, or nil."
+  [text]
+  (some #(when (= text (ui/on-fx-thread (fn [] (.getText ^javafx.scene.control.Labeled %)))) %)
+        (ui/query-all ".check-box")))
+
+(defn- with-calibration-chains!
+  "Projectors :a and :b; :a's chain is RGB curves and an Axis Transform, the
+   Axis Transform selected for editing."
+  []
+  (with-projector!)
+  (state/swap-state! #(-> %
+                          (assoc-in [:projectors :b] {:name "Fake 2" :host "127.0.0.2" :port 7255 :service-id 1
+                                                      :enabled? true :zone-groups [:all]
+                                                      :output-config {:color-bit-depth 8 :xy-bit-depth 16}})
+                          (assoc-in [:chains :projector-effects :a :items]
+                                    [{:id #uuid "00000000-0000-0000-0000-0000000000a1" :effect-id :rgb-curves :enabled? true
+                                      :params {:r-curve-points [[0.0 0.0] [1.0 1.0]]
+                                               :g-curve-points [[0.0 0.0] [1.0 1.0]]
+                                               :b-curve-points [[0.0 0.0] [1.0 1.0]]}}
+                                     {:id #uuid "00000000-0000-0000-0000-0000000000a2" :effect-id :axis-transform :enabled? true
+                                      :params {:mirror-x? false :mirror-y? false :swap-axes? false}}])
+                          (assoc-in [:chains :projector-effects :b :items] [])
+                          (assoc-in [:list-ui [:projector-effects :a]]
+                                    {:selected-ids #{#uuid "00000000-0000-0000-0000-0000000000a2"}
+                                     :last-selected-id #uuid "00000000-0000-0000-0000-0000000000a2"}))))
+
+(deftest axis-transform-boxes-stick-test
+  (let [robot (ui/robot)
+        param #(get-in (app-state) [:chains :projector-effects :a :items 1 :params %])]
+    (with-calibration-chains!)
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(some? (check-box-labelled "Mirror X")))
+    (ui/click-node! robot (check-box-labelled "Mirror X"))
+    (ui/wait-for! #(true? (param :mirror-x?)))
+    (ui/click-node! robot (check-box-labelled "Swap Axes"))
+    (ui/wait-for! #(true? (param :swap-axes?)))
+    (is (false? (param :mirror-y?)) "only the boxes clicked change")
+    (ui/click-node! robot (check-box-labelled "Mirror X"))
+    (ui/wait-for! #(false? (param :mirror-x?)))
+    (is (= :rgb-curves (get-in (app-state) [:chains :projector-effects :a :items 0 :effect-id]))
+        "and the chain is still two effects")))
+
+(deftest copy-an-effect-to-another-projector-test
+  (let [robot (ui/robot)
+        b-effects #(mapv :effect-id (get-in (app-state) [:chains :projector-effects :b :items]))]
+    (with-calibration-chains!)
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(some? (ui/query "#chain-copy-selection")))
+    (ui/click! robot "#chain-copy-selection")
+    (ui/wait-for! #(= :item-effects (:type (clipboard/get-clipboard))))
+    (events/dispatch! {:event/type :projectors/select-projector :projector-id :b})
+    (ui/wait-for! #(= "CONFIGURE: Fake 2" (ui/node-text "#projector-config-title")))
+    (ui/wait-for! #(not (ui/on-fx-thread (fn [] (.isDisable ^javafx.scene.Node (ui/query "#chain-paste-items"))))))
+    (ui/click! robot "#chain-paste-items")
+    (ui/wait-for! #(= [:axis-transform] (b-effects)))
+    (is (not= #uuid "00000000-0000-0000-0000-0000000000a2"
+              (get-in (app-state) [:chains :projector-effects :b :items 0 :id]))
+        "the pasted effect is a copy with its own id")))
 

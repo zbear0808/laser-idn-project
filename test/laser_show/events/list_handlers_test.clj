@@ -5,7 +5,8 @@
    selection, drag-drop, and rename operations."
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.events.handlers.list :as list-handlers]
-            [laser-show.state.clipboard :as clipboard]))
+            [laser-show.state.clipboard :as clipboard]
+            [laser-show.state.core :as app-state]))
 
 
 ;; Selection Tests
@@ -437,3 +438,32 @@
                              :state state}))
     (is (= [:timeline-tracks] (mapv first @calls)))
     (is (= "T1" (:name (first (second (first @calls))))))))
+
+
+;; Paste into a list of effects (a projector's calibration chain)
+
+
+(deftest paste-effects-into-an-item-effects-list-test
+  (app-state/init-state! {:ui {:clipboard nil}})
+  (with-redefs [clipboard/copy-to-system-clipboard! (fn [_] nil)
+                clipboard/read-from-system-clipboard (fn [] nil)]
+    (let [state {:chains {:projector-effects {:p1 {:items [{:id #uuid "00000000-0000-0000-0000-000000000001"
+                                                           :effect-id :rgb-curves :enabled? true :params {}}]}}}
+                 :list-ui {}}
+          paste (fn [] (list-handlers/handle {:event/type :list/paste-items
+                                              :component-id [:projector-effects :p1]
+                                              :items-path [:chains :projector-effects :p1 :items]
+                                              :on-change-event :chain/set-items
+                                              :on-change-params {:domain :projector-effects :entity-key :p1}
+                                              :clipboard-type :item-effects
+                                              :state state}))]
+      (testing "effects copied as a chain paste, as the Paste button promises"
+        (clipboard/copy-effect-chain! {:effects [{:effect-id :axis-transform :enabled? true :params {}}]})
+        (is (= [:rgb-curves :axis-transform] (mapv :effect-id (:items (:dispatch (paste)))))))
+      (testing "effects copied from another list of effects paste too"
+        (clipboard/copy-item-effects! [{:effect-id :corner-pin :enabled? true :params {}}])
+        (is (= [:rgb-curves :corner-pin] (mapv :effect-id (:items (:dispatch (paste)))))))
+      (testing "a cue's presets never land in a list of effects"
+        (clipboard/copy-cue-chain-items! [{:type :preset :preset-id :circle :id #uuid "00000000-0000-0000-0000-000000000002"}])
+        (is (nil? (:dispatch (paste))))))))
+

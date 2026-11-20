@@ -912,4 +912,6 @@
                         :fx/context context
                         :v-box/vgrow :always
                         :get-item-label label-fn
+                        ;; The toolbar's Copy and Paste use the same type as ⌘C and ⌘V
+                        :clipboard-type (get on-change-params :clipboard-type :cue-chain-items)
                         :on-copy on-copy-fn)]}}))

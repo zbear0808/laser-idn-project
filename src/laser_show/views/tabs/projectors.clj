@@ -494,15 +494,19 @@
 
 
 (defn- make-projector-param-events
-  "Create event templates for projector effect parameter updates.
+  "Event templates for a projector effect's parameters: the :chain/* param
+   events, as the curves and corner pin editors use, at the effect's full
+   path in the chain (an effect inside a group is the one edited).
    Returns map with :on-change-event and :on-text-event."
-  [projector-id effect-idx]
-  {:on-change-event {:event/type :projectors/update-effect-param
-                     :projector-id projector-id
-                     :effect-idx effect-idx}
-   :on-text-event {:event/type :projectors/update-effect-param-from-text
-                   :projector-id projector-id
-                   :effect-idx effect-idx}})
+  [projector-id effect-path]
+  {:on-change-event {:event/type :chain/update-param
+                     :domain :projector-effects
+                     :entity-key projector-id
+                     :effect-path effect-path}
+   :on-text-event {:event/type :chain/update-param-from-text
+                   :domain :projector-effects
+                   :entity-key projector-id
+                   :effect-path effect-path}})
 
 (defn- standard-effect-params-editor
   "Generic parameter editor using effect registry parameters.
@@ -510,8 +514,8 @@
    Uses param-controls-list to render all parameters from the effect definition.
    This replaces individual effect-specific editors like rgb-calibration-editor,
    gamma-correction-editor, axis-flip-editor, and rotation-offset-editor."
-  [{:keys [projector-id effect-idx effect-def params]}]
-  (let [{:keys [on-change-event on-text-event]} (make-projector-param-events projector-id effect-idx)
+  [{:keys [projector-id effect-path effect-def params]}]
+  (let [{:keys [on-change-event on-text-event]} (make-projector-param-events projector-id effect-path)
         params-map (param-controls/params-vector->map (:parameters effect-def []))]
     {:fx/type param-controls/param-controls-list
      :params-map params-map
@@ -525,10 +529,10 @@
    
    Props:
    - :projector-id - ID of the projector
-   - :effect-idx - Index of the effect in the chain
+   - :effect-path - The effect's full path in the chain ([1], or [2 :items 0] inside a group)
    - :effect - The effect map
    - :ui-state - UI state for this projector (from projector-effect-ui-state sub)"
-  [{:keys [projector-id effect-idx effect ui-state]}]
+  [{:keys [projector-id effect-path effect ui-state]}]
   (let [{:keys [effect-id params]} effect
         effect-def (when effect-id (effects/get-effect effect-id))
         effect-name (or (:name effect-def)
@@ -551,7 +555,7 @@
                     :event-template {:event/type :chain/update-curve-point
                                      :domain :projector-effects
                                      :entity-key projector-id
-                                     :effect-path [effect-idx]}
+                                     :effect-path effect-path}
                     :dialog-data ui-state}
                   
                   ;; Check for custom renderer in ui-hints: corner-pin-2d
@@ -562,16 +566,16 @@
                    :event-template {:event/type :chain/update-spatial-params
                                     :domain :projector-effects
                                     :entity-key projector-id
-                                    :effect-path [effect-idx]}
+                                    :effect-path effect-path}
                    :reset-event {:event/type :chain/reset-params
                                  :domain :projector-effects
                                  :entity-key projector-id
-                                 :effect-path [effect-idx]
+                                 :effect-path effect-path
                                  :defaults-map {:tl-x -1.0 :tl-y 1.0
                                                 :tr-x 1.0 :tr-y 1.0
                                                 :bl-x -1.0 :bl-y -1.0
                                                 :br-x 1.0 :br-y -1.0}}
-                   :fx-key [:projector projector-id effect-idx]
+                   :fx-key [:projector projector-id effect-path]
                    :hint-text "Drag corners to adjust output geometry"}
                   
                   ;; Default: use generic param-controls-list based on effect registry
@@ -580,7 +584,7 @@
                   effect-def
                   {:fx/type standard-effect-params-editor
                    :projector-id projector-id
-                   :effect-idx effect-idx
+                   :effect-path effect-path
                    :effect-def effect-def
                    :params params}
                   
@@ -611,9 +615,9 @@
      :get-item-label (fn [item]
                        (get labels (:effect-id item) "Unknown Effect"))
      :on-change-event :chain/set-items
-     :on-change-params {:domain :projector-effects :entity-key projector-id}
-     :on-copy-fn (fn [items]
-                   (clipboard/copy-effect-chain! {:effects items}))
+     ;; Copied and pasted as effects, so the Paste button (lit by
+     ;; clipboard/get-effects-to-paste) and ⌘V paste the same thing
+     :on-change-params {:domain :projector-effects :entity-key projector-id :clipboard-type :item-effects}
      :clipboard-items clipboard-items
      :header-label "EFFECTS"
      :empty-text "No calibration effects\nAdd from menu above"}))
@@ -705,8 +709,6 @@
                             (first selected-ids))
         selected-effect-path (when first-selected-id
                                (chains/find-path-by-id effects first-selected-id))
-        selected-effect-idx (when selected-effect-path
-                              (first selected-effect-path))
         selected-effect (when selected-effect-path
                           (chains/get-item-at-path effects selected-effect-path))
         clipboard-items (clipboard/get-effects-to-paste)]
@@ -760,7 +762,7 @@
                                                         (when selected-effect
                                                            [{:fx/type effect-parameter-editor
                                                              :projector-id projector-id
-                                                             :effect-idx selected-effect-idx
+                                                             :effect-path selected-effect-path
                                                              :effect selected-effect
                                                              :ui-state effect-ui-state}])
                                                        [{:fx/type :region :v-box/vgrow :always}

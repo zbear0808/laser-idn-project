@@ -34,3 +34,12 @@
     (clipboard/copy-cell-assignment! :spinning-square)
     (is (= "Preset: spinning-square" (clipboard/get-clipboard-description)))))
 
+(deftest item-effects-paste-as-effects-test
+  (with-redefs [clipboard/copy-to-system-clipboard! (fn [_] nil)
+                clipboard/read-from-system-clipboard (fn [] nil)]
+    (clipboard/clear-clipboard!)
+    (clipboard/copy-item-effects! [{:id #uuid "00000000-0000-0000-0000-00000000000a"
+                                    :effect-id :axis-transform :enabled? true :params {:mirror-x? true}}])
+    (is (= [:axis-transform] (mapv :effect-id (clipboard/get-effects-to-paste)))
+        "effects copied from a list of effects paste as effects")))
+

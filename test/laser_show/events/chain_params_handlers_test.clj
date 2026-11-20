@@ -49,3 +49,27 @@
                                  :state state})]
     (is (false? (get-in result [:state :chains :effect-chains [0 0] :items 0
                                 :keyframe-modulator :normalize?])))))
+
+(def ^:private projector-config (chain-helpers/chain-config :projector-effects :p1))
+
+(def ^:private projector-state
+  {:chains {:projector-effects {:p1 {:items [{:effect-id :rgb-curves :params {}}
+                                             {:effect-id :axis-transform :params {:mirror-x? false}}
+                                             {:type :group :items [{:effect-id :rgb-curves :params {}}
+                                                                   {:effect-id :axis-transform :params {}}]}]}}}})
+
+(deftest projector-effect-bool-param-test
+  (let [result (params/handle-update-param projector-state projector-config
+                                           {:effect-path [1] :param-key :mirror-x? :fx/event true})]
+    (is (true? (get-in result [:chains :projector-effects :p1 :items 1 :params :mirror-x?])))
+    (is (false? (get-in (params/handle-update-param result projector-config
+                                                    {:effect-path [1] :param-key :mirror-x? :fx/event false})
+                        [:chains :projector-effects :p1 :items 1 :params :mirror-x?])))))
+
+(deftest nested-projector-effect-param-test
+  (let [result (params/handle-update-param projector-state projector-config
+                                           {:effect-path [2 :items 1] :param-key :swap-axes? :fx/event true})]
+    (is (true? (get-in result [:chains :projector-effects :p1 :items 2 :items 1 :params :swap-axes?])))
+    (is (nil? (get-in result [:chains :projector-effects :p1 :items 2 :params :swap-axes?]))
+        "the group itself is untouched")))
+
