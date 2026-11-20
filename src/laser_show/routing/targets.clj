@@ -260,8 +260,10 @@
    the cue's own target, its column's col-target and the show's show-target)
    :items {id res} (every item, group and clip, at any depth: resolve-item)
    :tracks {id res} (a track's or folder's own target, :from :item; else its
-   folder's, :from :track :via it; else the cue's)}. A res from a group,
-   track or folder also carries :via-name, and :via-folder? for a track."
+   folder's, :from :track :via it; else the cue's) :item-inherits and
+   :track-inherits {id res} (what each would inherit were its own target
+   cleared: what its chip's Inherit says)}. A res from a group, track or
+   folder also carries :via-name, and :via-folder? for a track."
   ([cue col-target show-target]
    (explain-cue cue col-target show-target nil))
   ([cue col-target show-target col]
@@ -273,26 +275,32 @@
                 (reduce (fn [acc node]
                           (if-not (map? node)
                             acc
-                            (let [res (resolve-item (:target node) (get by-track (:track-id node)) parent fallback)
+                            (let [track (get by-track (:track-id node))
+                                  res (resolve-item (:target node) track parent fallback)
                                   acc (cond-> acc
                                         (some? (:id node)) (-> (assoc-in [:items (:id node)] res)
+                                                               (assoc-in [:inherits (:id node)] (resolve-item nil track parent fallback))
                                                                (assoc-in [:names (:id node)] (:name node))))]
                               (if (= :group (:type node))
                                 (walk acc (inherited res (:id node)) (:items node))
                                 acc))))
                         acc
                         nodes))
-         {:keys [items] group-names :names} (walk {:items {} :names {}} nil (:items cue))]
+         {:keys [items inherits] group-names :names} (walk {:items {} :inherits {} :names {}} nil (:items cue))
+         index (index-tracks tracks)
+         track-res (fn [id r]
+                     (cond
+                       (and r (= id (:via r))) {:target (:target r) :from :item}
+                       r (named {:target (:target r) :from :track :via (:via r)} group-names tracks-by-id)
+                       :else fallback))]
      {:cue fallback
       :items (update-vals items #(named % group-names tracks-by-id))
-      :tracks (into {}
-                    (map (fn [id]
-                           (let [r (get by-track id)]
-                             [id (cond
-                                   (and r (= id (:via r))) {:target (:target r) :from :item}
-                                   r (named {:target (:target r) :from :track :via (:via r)} group-names tracks-by-id)
-                                   :else fallback)])))
-                    (keys tracks-by-id))})))
+      :item-inherits (update-vals inherits #(named % group-names tracks-by-id))
+      :tracks (into {} (map (fn [id] [id (track-res id (get by-track id))])) (keys tracks-by-id))
+      ;; A track without its own target takes the nearest folder's above it
+      :track-inherits (into {}
+                            (map (fn [id] [id (track-res id (track-target index (get-in index [:id->parent id])))]))
+                            (keys tracks-by-id))})))
 
 (defn cue-refs
   "Every ref cue's content can draw to: the resolution (spec §2) of each of

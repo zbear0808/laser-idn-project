@@ -171,3 +171,75 @@
   (ui/assert-text! "#target-from-item" "from the cue")
   (testing "an undo step: Change Cue Target"
     (is (= "Change Cue Target" (history/undo-label (:history (app-state)))))))
+
+
+;; The timeline (06 §7.2)
+
+(def ^:private timeline-cue
+  {:editor-type :timeline
+   :tracks [{:id :beat :type :group :name "Beat" :target :zone/c :collapsed? false
+             :items [{:id :kick :type :track :name "Kick" :color "#E91E63"}]}
+            {:id :lead :type :track :name "Lead" :color "#2196F3"}]
+   :items [{:type :preset :id :c1 :preset-id :circle :params {} :effects [] :enabled? true
+            :track-id :kick :timeline/start 0.0 :timeline/duration 4.0}
+           {:type :preset :id :c2 :preset-id :wave :params {} :effects [] :enabled? true
+            :track-id :lead :timeline/start 0.0 :timeline/duration 4.0}]})
+
+(defn- track-target [id]
+  (:target (some #(when (= id (:id %)) %) (tree-seq map? :items {:items (:tracks (cue 0 0))}))))
+
+(defn- clip-target [id]
+  (:target (some #(when (= id (:id %)) %) (:items (cue 0 0)))))
+
+(defn- open-timeline! []
+  (state/swap-state! assoc-in [:chains :cue-chains [0 0]] timeline-cue)
+  (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
+  (ui/wait-for! #(some? (ui/query "#timeline-track-target-2"))))
+
+(defn- header-target-menu
+  "The Target submenu of header row idx's context menu."
+  [idx]
+  (let [^Control row (ui/query (str "#timeline-track-header-" idx))]
+    (ui/on-fx-thread #(some (fn [i] (when (and (instance? Menu i) (= "Target" (.getText ^Menu i))) i))
+                            (some-> row .getContextMenu .getItems)))))
+
+(deftest timeline-chip-and-inspector-set-targets-test
+  (open-timeline!)
+  (testing "the header's chips, compact: the folder's own, the track in it inheriting it, a track with nothing"
+    (ui/assert-text! "#timeline-track-target-0" "C")
+    (ui/assert-text! "#timeline-track-target-1" "(C)")
+    (ui/assert-text! "#timeline-track-target-2" "(All)"))
+  (testing "a header chip sets the track's target"
+    (fire-item! "#timeline-track-target-2" "B → Right")
+    (ui/wait-for! #(= :zone/b (track-target :lead)))
+    (ui/assert-text! "#timeline-track-target-2" "B"))
+  (testing "the row's menu: Target ▸, the same menu"
+    (let [menu (header-target-menu 2)]
+      (is (some? menu) "a Target submenu")
+      (when menu
+        (let [inherit (ui/on-fx-thread #(first (.getItems ^Menu menu)))]
+          (is (= "   Inherit (All)" (ui/on-fx-thread #(.getText ^MenuItem inherit))))
+          (ui/on-fx-thread #(.fire ^MenuItem inherit))
+          (ui/wait-for! #(nil? (track-target :lead)))
+          (ui/assert-text! "#timeline-track-target-2" "(All)")))))
+  (testing "the inspector: a track inherits its folder's"
+    (events/dispatch! {:event/type :timeline/select-track :col 0 :row 0 :track-id :kick})
+    (ui/wait-for! #(= "TRACK PROPERTIES" (ui/node-text "#timeline-inspector-title")))
+    (ui/wait-for! #(some? (ui/query "#target-chip-track")))
+    (ui/assert-text! "#target-chip-track" "(C → Left)")
+    (ui/assert-text! "#target-from-track" "from folder Beat")
+    (fire-item! "#target-chip-track" "A → Left")
+    (ui/wait-for! #(= :zone/a (track-target :kick)))
+    (ui/assert-text! "#target-chip-track" "A → Left")
+    (ui/assert-text! "#timeline-track-target-1" "A")
+    (is (= "Change Track Target" (history/undo-label (:history (app-state))))))
+  (testing "the inspector: a clip inherits its track's"
+    (events/dispatch! {:event/type :timeline/select-items :col 0 :row 0 :ids #{:c1} :mode :replace})
+    (ui/wait-for! #(= "CLIP" (ui/node-text "#timeline-inspector-title")))
+    (ui/wait-for! #(some? (ui/query "#target-chip-clip")))
+    (ui/assert-text! "#target-chip-clip" "(A → Left)")
+    (ui/assert-text! "#target-from-clip" "from track Kick")
+    (fire-item! "#target-chip-clip" "Graphics")
+    (ui/wait-for! #(= :graphics (clip-target :c1)))
+    (ui/assert-text! "#target-chip-clip" "Graphics")
+    (is (= "Change Clip Target" (history/undo-label (:history (app-state)))))))

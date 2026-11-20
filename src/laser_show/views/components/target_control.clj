@@ -169,29 +169,38 @@
         text (if (str/blank? text) "All" text)]
     (if (some? (targets/normalize-target own)) text (str "(" text ")"))))
 
+(defn menu-context
+  "What menu-model reads besides the level (:names :zone-map :zones
+   :audience), from the subs."
+  [context]
+  {:names (fx/sub-ctx context subs/names-ctx)
+   :zone-map (fx/sub-ctx context subs/active-zone-map)
+   :zones (fx/sub-ctx context subs/zones-in-use)
+   :audience (fx/sub-ctx context subs/vibe-audience-groups)})
+
 (defn target-chip
   "The Target chip (06 §4.5): a menu button shaped like the timeline's zone
    chip, saying what the target ends up as (dim, in brackets, when it is
    inherited), its menu menu-items of the scope's rows. Props: :id :scope
    :own (the level's own target) :inherited (what it would inherit, a
    resolution) :on-set (an event map; a choice adds :target) :tooltip
-   :compact?."
+   :compact? (the timeline's rows: the zone letters, and a width it keeps
+   to)."
   [{:keys [fx/context id scope own inherited on-set tooltip compact?]}]
-  (let [names (fx/sub-ctx context subs/names-ctx)
-        zone-map (fx/sub-ctx context subs/active-zone-map)
-        rows (menu-model {:scope scope :own own :inherited inherited :names names :zone-map zone-map
-                          :zones (fx/sub-ctx context subs/zones-in-use)
-                          :audience (fx/sub-ctx context subs/vibe-audience-groups)})
+  (let [{:keys [names zone-map] :as ctx} (menu-context context)
+        rows (menu-model (assoc ctx :scope scope :own own :inherited inherited))
         own (targets/normalize-target own)
         missing? (some :missing? rows)]
     (cond-> {:fx/type :menu-button
              :text (chip-text names zone-map own inherited compact?)
              :style-class (cond-> ["menu-button" "target-chip"]
+                            compact? (conj "target-chip-compact")
                             (nil? own) (conj "target-chip-inherited")
                             missing? (conj "target-chip-missing"))
              :focus-traversable false
              :min-width :use-pref-size
              :items (menu-items rows on-set)}
+      compact? (assoc :max-width 96)
       id (assoc :id id)
       tooltip (assoc :tooltip {:fx/type :tooltip :text tooltip}))))
 

@@ -8,10 +8,10 @@
             [laser-show.animation.presets :as presets]
             [laser-show.common.util :as u]
             [laser-show.events.core :as events]
-            [laser-show.routing.targets :as targets]
             [laser-show.subs :as subs]
             [laser-show.timeline.model :as model]
-            [laser-show.timeline.timecode :as tc])
+            [laser-show.timeline.timecode :as tc]
+            [laser-show.views.components.target-control :as target-control])
   (:import [javafx.scene.control TextField]))
 
 
@@ -20,28 +20,6 @@
 
 (defn- title [text] {:fx/type :label :id "timeline-inspector-title" :text text :style-class "tl-inspector-title"})
 (defn- field-label [text] {:fx/type :label :text text :style-class "tl-field-label"})
-
-(defn- zone-name [zone-groups target]
-  (or (get-in zone-groups [target :name])
-      (some->> (targets/target-refs target) seq (map #(or (get-in zone-groups [% :name]) (name %))) (clojure.string/join " + "))
-      "All"))
-
-(defn- zone-combo
-  "Zone combo: an inherit option labelled inherit-label, then every zone."
-  [{:keys [zone-groups current inherit-label on-change]}]
-  (let [options (into [{:id :inherit :name inherit-label}]
-                      (map (fn [[id zg]] {:id id :name (:name zg (name id))}))
-                      (sort-by (comp :name val) zone-groups))]
-    {:fx/type :combo-box
-     :items options
-     :value (or (u/seek #(= (:id %) (or current :inherit)) options) (first options))
-     :max-width Double/MAX_VALUE
-     :button-cell (fn [opt] {:text (:name opt)})
-     :cell-factory {:fx/cell-type :list-cell :describe (fn [opt] {:text (:name opt)})}
-     :on-value-changed (fn [opt]
-                         (when opt
-                           (let [zone (when-not (= :inherit (:id opt)) (:id opt))]
-                             (when (not= zone current) (on-change zone)))))}))
 
 (defn- beats-field
   "Text field in beats; Enter commits (on-commit beats)."
@@ -90,9 +68,8 @@
     "Timeline"))
 
 (defn- clip-section
-  [{:keys [col row tracks zone-groups destination-zone-id]} clip]
+  [{:keys [col row tracks explain]} clip]
   (let [track (model/find-track tracks (:track-id clip))
-        track-zone (or (:target (get (targets/track-targets tracks) (:track-id clip))) destination-zone-id :all)
         leaves (leaf-tracks tracks)]
     [(title "CLIP")
      {:fx/type :label
@@ -126,11 +103,14 @@
       :on-value-changed (fn [t]
                           (when (and t (not= (:id t) (:track-id clip)))
                             (apply-op! col row {:op :set-clip-track :clip-id (:id clip) :track-id (:id t)})))}
-     (field-label "Zone")
-     (zone-combo {:zone-groups zone-groups
-                  :current (targets/normalize-target (:target clip))
-                  :inherit-label (str "Inherit from Track (" (zone-name zone-groups track-zone) ")")
-                  :on-change #(apply-op! col row {:op :set-clip-target :id (:id clip) :target %})})]))
+     {:fx/type target-control/target-field
+      :id "target-chip-clip"
+      :from-id "target-from-clip"
+      :scope :clip
+      :own (:target clip)
+      :inherited (get-in explain [:item-inherits (:id clip)])
+      :on-set {:event/type :timeline/set-clip-target :col col :row row :item-id (:id clip)}
+      :tooltip "Where this clip goes"}]))
 
 (defn- clips-section [{:keys [col row]} clip-ids]
   [(title "CLIPS")
@@ -140,20 +120,20 @@
     :style-class "button-secondary"
     :on-action {:event/type :timeline/delete-selection :col col :row row}}])
 
-(defn- track-section [{:keys [col row tracks zone-groups destination-zone-id]} track]
-  (let [folder? (model/track-group? track)
-        parent (model/parent-track tracks (:id track))
-        default-zone (or destination-zone-id :all)
-        parent-zone (when parent (or (:target (get (targets/track-targets tracks) (:id parent))) default-zone))]
+(defn- track-section [{:keys [col row explain]} track]
+  (let [folder? (model/track-group? track)]
     (cond-> [(title (if folder? "FOLDER PROPERTIES" "TRACK PROPERTIES"))
              {:fx/type :label :text (:name track (if folder? "Folder" "Track")) :style-class "tl-inspector-name"}
-             (field-label "Zone")
-             (zone-combo {:zone-groups zone-groups
-                          :current (targets/normalize-target (:target track))
-                          :inherit-label (if parent
-                                           (str "Inherit from Folder (" (zone-name zone-groups parent-zone) ")")
-                                           (str "Cue Default Zone (" (zone-name zone-groups default-zone) ")"))
-                          :on-change #(apply-op! col row {:op :set-track-target :id (:id track) :target %})})
+             {:fx/type target-control/target-field
+              :id "target-chip-track"
+              :from-id "target-from-track"
+              :scope :track
+              :own (:target track)
+              :inherited (get-in explain [:track-inherits (:id track)])
+              :on-set {:event/type :timeline/set-track-target :col col :row row :track-id (:id track)}
+              :tooltip (if folder?
+                         "Where this folder's clips go, unless a track or a clip in it sets its own"
+                         "Where this track's clips go, unless a clip sets its own")}
              {:fx/type :check-box
               :text "Muted"
               :selected (true? (:muted? track))
@@ -299,8 +279,8 @@
       :style-class "tl-field-label"}]))
 
 (defn inspector
-  "Props: :col :row :cue :tracks :zone-groups :destination-zone-id :target
-   (selection-target) :global-bpm"
+  "Props: :col :row :cue :tracks :explain (how the cue's levels resolve:
+   subs/cue-target-explain) :target (selection-target) :global-bpm"
   [{:keys [target] :as props}]
   {:fx/type :scroll-pane
    :id "timeline-inspector"

@@ -133,27 +133,6 @@
         :-fx-padding [0 2 0 2]
         :-fx-text-fill text-secondary
         :-fx-cursor "hand"}
-       ".tl-zone-chip"
-       {:-fx-background-radius 9
-        :-fx-border-radius 9
-        :-fx-padding [1 7 1 7]
-        :-fx-font-size 10
-        :-fx-background-color (str blue "40")
-        :-fx-text-fill blue
-        :-fx-cursor "hand"
-        :-fx-mark-color "transparent"}
-       ".tl-zone-chip .label"
-       {:-fx-text-fill "inherit"
-        :-fx-font-size 10}
-       ".tl-zone-chip .arrow-button"
-       {:-fx-padding 0}
-       ".tl-zone-chip .arrow"
-       {:-fx-padding 0}
-       ".tl-zone-chip-inherited"
-       {:-fx-background-color "transparent"
-        :-fx-border-color border
-        :-fx-text-fill text-muted
-        :-fx-font-style "italic"}
        ".tl-mute"
        {:-fx-min-width 18 :-fx-pref-width 18 :-fx-max-width 18
         :-fx-min-height 18 :-fx-pref-height 18 :-fx-max-height 18

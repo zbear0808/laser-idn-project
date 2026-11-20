@@ -96,16 +96,6 @@
 (def ^:private cue-target-tooltip
   "Where the cue's content goes, unless an item, a group or a track sets its own")
 
-(defn- inherited-res
-  "What the item with item-id would inherit (explain: subs/cue-target-explain):
-   its group's resolution as the group's children see it, or the cue's."
-  [explain items item-id]
-  (let [path (chains/find-path-by-id items item-id)
-        parent-path (when (> (count path) 2) (subvec path 0 (- (count path) 2)))]
-    (if-let [group (when parent-path (chains/get-item-at-path items parent-path))]
-      (targets/inherited (get-in explain [:items (:id group)]) (:id group))
-      (:cue explain))))
-
 (defn- routing-label
   "base-name and where the item goes (06 §7.2): \"Circle [A · Beams → Left ·
    column 3]\", \"Star [Graphics, pinned]\", \"[All]\"."
@@ -141,7 +131,7 @@
       (let [rows (target-control/menu-model (assoc menu-ctx
                                                    :scope (if (chains/group? item-or-group) :group :item)
                                                    :own (:target item-or-group)
-                                                   :inherited (inherited-res explain items item-id)))]
+                                                   :inherited (get-in explain [:item-inherits item-id])))]
         {:fx/type :context-menu
          :items [{:fx/type :menu
                   :text "Target"
@@ -222,7 +212,7 @@
                        :from-id "target-from-item"
                        :scope scope
                        :own (:target selected-item)
-                       :inherited (inherited-res explain items (:id selected-item))
+                       :inherited (get-in explain [:item-inherits (:id selected-item)])
                        :on-set {:event/type :cue-chain/set-item-target :col col :row row :item-path selected-item-path}
                        :tooltip (if (= :group scope)
                                   "Where the group's content goes, unless an item in it sets its own"
@@ -341,11 +331,8 @@
         effect-dialog-data (merge dialog-data item-effects-ui {:item-effects-ui item-effects-ui})
 
         ;; Where each item goes, for the labels and the Target menus
-        menu-ctx {:names (fx/sub-ctx context subs/names-ctx)
-                  :zone-map (fx/sub-ctx context subs/active-zone-map)
-                  :zones (fx/sub-ctx context subs/zones-in-use)
-                  :audience (fx/sub-ctx context subs/vibe-audience-groups)
-                  :explain (fx/sub-ctx context subs/cue-target-explain col row)}
+        menu-ctx (assoc (target-control/menu-context context)
+                        :explain (fx/sub-ctx context subs/cue-target-explain col row))
 
         ;; Get chain name for header
         chain-name (:name cue-chain)

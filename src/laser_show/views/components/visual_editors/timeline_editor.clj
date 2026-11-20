@@ -867,13 +867,14 @@
     (.consume e)))
 
 (defn- editor-body
-  [{:keys [fx/context state swap-state col row cue zone-groups destination-zone-id
-           timeline-ui timeline-prefs title]}]
+  [{:keys [fx/context state swap-state col row cue timeline-ui timeline-prefs title]}]
   (let [{:keys [selection cursor-beat] :or {selection #{} cursor-beat 0.0}} timeline-ui
         snap (merge {:enabled? true :value 0.25} (:snap timeline-prefs))
         {drawer-open? :open? preset-tab :preset-tab effect-tab :effect-tab} (:add-panel timeline-prefs)
         inspector-open? (:inspector-open? timeline-prefs true)
         tracks (:tracks cue [])
+        ;; Where each track and clip goes, and what each would inherit
+        explain (fx/sub-ctx context subs/cue-target-explain col row)
         global-bpm (fx/sub-ctx context subs/bpm)
         transport (fx/sub-ctx context subs/timeline-transport col row)
         ruler-opts {:mode (:ruler-mode timeline-prefs :bars)
@@ -919,7 +920,7 @@
        [{:fx/type header/header-column
          :rows rows :view view :col col :row row :tracks tracks
          :selected-track-id selected-track-id
-         :zone-groups zone-groups :destination-zone-id destination-zone-id
+         :explain explain
          :renaming-id (:renaming-id state) :swap-state swap-state
          :on-scroll wheel}
         {:fx/type fx/ext-on-instance-lifecycle
@@ -1019,8 +1020,7 @@
                       :lanes-height (:height view)
                       :swap-state swap-state
                       :inspector-props {:col col :row row :cue cue :tracks tracks
-                                        :zone-groups zone-groups :destination-zone-id destination-zone-id
-                                        :global-bpm global-bpm}}))))
+                                        :explain explain :global-bpm global-bpm}}))))
 
 (defn timeline-editor
   "Main timeline editor component.
@@ -1028,8 +1028,6 @@
    Props:
    - :col, :row             — grid cell of the cue
    - :cue                   — the cue chain ({:items :tracks :loop ...})
-   - :zone-groups           — {zone-group-id -> group}
-   - :destination-zone-id   — the cue's default zone
    - :timeline-ui           — this cue's view state (subs/timeline-ui)
    - :timeline-prefs        — editor preferences (subs/timeline-prefs)
    - :title                 — optional node shown at the left of the toolbar

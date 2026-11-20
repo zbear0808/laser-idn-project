@@ -127,6 +127,31 @@
       (is (= fallback (targets/resolve-item [] nil nil fallback)))
       (is (= {:target :all :from :default} (targets/resolve-item nil nil nil nil))))))
 
+(deftest explain-says-what-each-level-would-inherit-test
+  (let [cue {:editor-type :timeline
+             :target :graphics
+             :tracks [{:id :beat :type :group :name "Beat" :target :zone/c
+                       :items [{:id :kick :type :track :name "Kick" :target :zone/a}
+                               {:id :snare :type :track :name "Snare"}]}
+                      {:id :lead :type :track :name "Lead" :target :zone/b}]
+             :items [{:type :preset :id :c1 :track-id :kick :target :auto/left}
+                     {:type :preset :id :c2 :track-id :snare}
+                     {:type :preset :id :c3 :track-id :lead}]}
+        {:keys [item-inherits track-inherits]} (targets/explain-cue cue nil nil)]
+    (testing "a clip: its track's, whatever its own"
+      (is (= {:target :zone/a :from :track :via :kick :via-name "Kick" :via-folder? false} (item-inherits :c1)))
+      (is (= {:target :zone/c :from :track :via :beat :via-name "Beat" :via-folder? true} (item-inherits :c2))))
+    (testing "a track: its folder's, whatever its own; at the top, the cue's"
+      (is (= {:target :zone/c :from :track :via :beat :via-name "Beat" :via-folder? true} (track-inherits :kick)))
+      (is (= {:target :graphics :from :cue} (track-inherits :lead) (track-inherits :beat))))
+    (testing "list items: their group's, or the cue's fallback"
+      (let [{:keys [item-inherits]} (targets/explain-cue {:items [{:type :group :id :g :name "G" :target :zone/b
+                                                                    :items [{:type :preset :id :x :target :zone/a}]}
+                                                                   {:type :preset :id :y :target :zone/a}]}
+                                                          :zone/d nil 2)]
+        (is (= {:target :zone/b :from :group :via :g :via-name "G"} (item-inherits :x)))
+        (is (= {:target :zone/d :from :column :via 2} (item-inherits :y) (item-inherits :g)))))))
+
 (deftest group-passes-through-what-it-inherits-test
   (let [cue {:target :zone/c
              :items [{:type :group :id :outer :name "Outer"

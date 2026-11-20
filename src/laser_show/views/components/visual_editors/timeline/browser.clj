@@ -58,9 +58,8 @@
          :v-box/vgrow :always
          :fill? true
          :drag-kind :effect
-         ;; Zone effects reroute a clip's content; tracks have a zone setting instead
-         :include-zone? (= :clip kind)
-         :active-tab (if (and (= :zone effect-tab) (not= :clip kind)) :shape (or effect-tab :shape))
+         ;; Where content goes is its Target, not an effect (zones plan Z4)
+         :active-tab (if (= :zone effect-tab) :shape (or effect-tab :shape))
          :on-tab-change {:event/type :timeline/set-add-panel-tab :panel :effect}
          :item-event-template (cond-> {:event/type :timeline/add-effect-to-item :col col :row row}
                                 (= :clip kind) (assoc :target-item-id (:id entity))

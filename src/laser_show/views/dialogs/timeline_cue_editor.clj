@@ -60,7 +60,7 @@
 (defn- timeline-cue-editor-content
   "Main content of the timeline-based cue chain editor.
    Center: timeline-editor (its toolbar starts with the editable name)
-   Footer: destination zone, trigger mode, close button"
+   Footer: the cue's Target, trigger mode, close button"
   [{:keys [fx/context]}]
   (let [dialog-data (fx/sub-ctx context subs/dialog-data :timeline-cue-editor)
         {:keys [col row]} dialog-data
@@ -68,8 +68,6 @@
         ;; Cue chain data
         ;; Only this cell's chain: edits to other cues don't re-render the dialog
         cue-chain (fx/sub-ctx context subs/cue-cell-chain col row)
-
-        destination-zone-id (:target cue-chain)
 
         ;; Timeline UI state: this cue's view, plus editor-wide prefs
         timeline-ui (fx/sub-ctx context subs/timeline-ui col row)
@@ -93,8 +91,6 @@
        :col col
        :row row
        :cue cue-chain
-       :zone-groups (fx/sub-ctx context subs/target-groups-by-id)
-       :destination-zone-id destination-zone-id
        :timeline-ui timeline-ui
        :timeline-prefs timeline-prefs
        ;; The cue's editable name sits at the left of the toolbar

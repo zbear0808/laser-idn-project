@@ -6,19 +6,20 @@
    in a clipped pane translated by the viewport's vertical scroll.
    
    Each row: colour strip, indent, folder chevron, name (double-click to
-   rename), zone chip (click for the zone menu), mute toggle. Right-click for
-   rename / colour / zone / add track inside / delete. Rows drag to reorder
+   rename), Target chip (click for the Target menu, zones plan Z4), mute
+   toggle. Right-click for rename / mute / Target / colour / add track
+   inside / delete. Rows drag to reorder
    through the shared list drag-and-drop (:list/perform-drop ->
    :timeline/update-tracks). Presets and effects dragged from the browser
    drop on a row too (bank-drop-target!, rules in timeline.drop)."
   (:require [cljfx.api :as fx]
             [clj-font-awesome.core :as fa]
             [laser-show.events.core :as events]
-            [laser-show.routing.targets :as targets]
             [laser-show.timeline.layout :as layout]
             [laser-show.timeline.model :as model]
             [laser-show.views.components.drag-drop-cell :as dd]
             [laser-show.views.components.list-dnd :as dnd]
+            [laser-show.views.components.target-control :as target-control]
             [laser-show.views.components.visual-editors.timeline.drop :as drop])
   (:import [javafx.css PseudoClass]
            [javafx.event EventHandler EventType]
@@ -31,31 +32,20 @@
 (defn- apply-op! [col row op]
   (events/dispatch! {:event/type :timeline/apply-op :col col :row row :op op}))
 
-(defn- zone-name [zone-groups target]
-  (or (get-in zone-groups [target :name])
-      (some->> (targets/target-refs target) seq (map #(or (get-in zone-groups [% :name]) (name %))) (clojure.string/join " + "))
-      "All"))
+(defn- track-on-set
+  "The Target event for row r: a choice adds :target."
+  [col row r]
+  {:event/type :timeline/set-track-target :col col :row row :track-id (:id r)})
 
-(defn- zone-menu-items
-  "Inherit + every zone group, each dispatching :set-track-target."
-  [{:keys [col row zone-groups destination-zone-id tracks rows-by-id]} r]
-  (let [track (:track r)
-        parent (model/parent-track tracks (:id r))
-        default-zone (or destination-zone-id :all)
-        inherited-name (if parent
-                         (str "Inherit from Folder ("
-                              (zone-name zone-groups (or (:target (get rows-by-id (:id parent))) default-zone)) ")")
-                         (str "Cue Default Zone (" (zone-name zone-groups default-zone) ")"))
-        current (targets/normalize-target (:target track))]
-    (into [{:fx/type :menu-item
-            :text (str (if (nil? current) "✓ " "   ") inherited-name)
-            :on-action (fn [_] (apply-op! col row {:op :set-track-target :id (:id r) :target nil}))}
-           {:fx/type :separator-menu-item}]
-          (map (fn [[zid zg]]
-                 {:fx/type :menu-item
-                  :text (str (if (= zid current) "✓ " "   ") (:name zg (name zid)))
-                  :on-action (fn [_] (apply-op! col row {:op :set-track-target :id (:id r) :target zid}))}))
-          (sort-by (comp :name val) zone-groups))))
+(defn- target-menu-items
+  "The Target menu for row r (target-control), in the :track scope."
+  [{:keys [col row explain menu-ctx]} r]
+  (target-control/menu-items
+   (target-control/menu-model (assoc menu-ctx
+                                     :scope :track
+                                     :own (get-in r [:track :target])
+                                     :inherited (get-in explain [:track-inherits (:id r)])))
+   (track-on-set col row r)))
 
 (defn- context-menu [{:keys [col row swap-state] :as props} r]
   (let [folder? (= :folder (:kind r))
@@ -68,8 +58,8 @@
                       :text (if muted? "Unmute" "Mute")
                       :on-action (fn [_] (apply-op! col row {:op :set-track-muted :track-id (:id r) :muted? (not muted?)}))}
                      {:fx/type :menu
-                      :text "Zone"
-                      :items (zone-menu-items props r)}]
+                      :text "Target"
+                      :items (target-menu-items props r)}]
               (not folder?)
               (conj {:fx/type :menu
                      :text "Colour"
@@ -119,14 +109,19 @@
        :h-box/hgrow :always
        :min-width 0})))
 
-(defn- zone-chip [{:keys [zone-groups destination-zone-id] :as props} r]
-  (let [inherited? (:target-inherited? r)
-        zname (zone-name zone-groups (or (:target r) destination-zone-id :all))]
-    {:fx/type :menu-button
-     :text (if inherited? (str "(" zname ")") zname)
-     :style-class (cond-> ["menu-button" "tl-zone-chip"] inherited? (conj "tl-zone-chip-inherited"))
-     :focus-traversable false
-     :items (zone-menu-items props r)}))
+(defn- target-chip
+  "Row r's Target chip, compact: \"A\", \"(A)\" when the track inherits it."
+  [{:keys [col row explain]} idx r]
+  {:fx/type target-control/target-chip
+   :id (str "timeline-track-target-" idx)
+   :scope :track
+   :own (get-in r [:track :target])
+   :inherited (get-in explain [:track-inherits (:id r)])
+   :on-set (track-on-set col row r)
+   :compact? true
+   :tooltip (if (= :folder (:kind r))
+              "Where this folder's clips go, unless a track or a clip in it sets its own"
+              "Where this track's clips go, unless a clip sets its own")})
 
 (def ^:private drop-target-class (PseudoClass/getPseudoClass "drop-target"))
 
@@ -225,7 +220,7 @@
                                                     :collapsed? (not (get-in r [:track :collapsed?]))}))}
                   {:fx/type :region :min-width 6 :pref-width 6})
                 (name-node props r)
-                (zone-chip props r)
+                (target-chip props idx r)
                 {:fx/type :toggle-button
                  :text "M"
                  :id (str "timeline-track-mute-" idx)
@@ -238,12 +233,13 @@
                                                   :muted? (not (true? (get-in r [:track :muted?])))}))}])}}}))
 
 (defn header-column
-  "Props: :rows :view :col :row :tracks :selected-track-id :zone-groups
-   :destination-zone-id :renaming-id :swap-state :on-scroll"
-  [{:keys [rows view col row on-scroll] :as props}]
+  "Props: :rows :view :col :row :tracks :selected-track-id :explain (how
+   the cue's levels resolve: subs/cue-target-explain) :renaming-id
+   :swap-state :on-scroll"
+  [{:keys [fx/context rows view col row on-scroll] :as props}]
   (let [items-path [:chains :cue-chains [col row] :tracks]
         props (assoc props :items-path items-path
-                     :rows-by-id (into {} (map (juxt :id identity)) rows))]
+                     :menu-ctx (target-control/menu-context context))]
     {:fx/type :v-box
      :style-class "tl-header-column"
      :children

@@ -1,6 +1,7 @@
 (ns laser-show.css.zones
   "Zones' styles (zones plan Z4): the Target chip and its menu
-   (views/components/target_control.clj), the grid cells' badges and the
+   (views/components/target_control.clj; compact in the timeline's track
+   headers), the grid cells' badges and the
    column numbers that set a column's target, the zone map pads
    (views/components/zone_map_pads.clj) and the map editor's warnings
    (views/components/zone_maps_panel.clj).
@@ -35,6 +36,8 @@
        {:-fx-padding 0}
        ".target-chip .arrow"
        {:-fx-padding 0}
+       ".target-chip.target-chip-compact"
+       {:-fx-font-size 10}
        ".target-chip.target-chip-inherited"
        {:-fx-background-color "transparent"
         :-fx-border-color border
