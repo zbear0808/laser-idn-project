@@ -197,3 +197,37 @@
     (ui/uncheck! robot "#discovered-output-10-0-0-6-1")
     (ui/wait-for! #(false? (enabled?)))
     (is (false? (enabled?)))))
+
+(deftest delete-group-asks-and-retargets-test
+  (let [robot (ui/robot)
+        cue-zone #(get-in (app-state) [:chains :cue-chains [0 0] :items 0 :zone-group-id])]
+    (state/swap-state! #(-> %
+                            (assoc-in [:zone-groups :group-balcony] {:id :group-balcony :name "Balcony"
+                                                                     :description "" :color "#FF0000"})
+                            (assoc-in [:chains :cue-chains [0 0]] {:name "Intro"
+                                                                   :items [{:id "p" :type :preset :preset-id :circle
+                                                                            :zone-group-id :group-balcony}]})))
+    (ui/click! robot "#zones-tab")
+    (events/dispatch! {:event/type :zone-groups/select :group-id :group-balcony})
+    (ui/wait-for! #(= "Used by 1 cue" (ui/node-text "#zone-group-cue-usage")))
+    (ui/click! robot "#zone-group-delete-button")
+    (ui/wait-for! #(window-showing? "Delete \"Balcony\"?"))
+    (ui/assert-text! "#confirm-details" "A1 Intro")
+    (ui/select! robot "#confirm-choice" ":left")
+    (ui/wait-for! #(= :left (get-in (app-state) [:ui :dialogs :confirm :choice-value])))
+    (ui/click! robot "#confirm-ok")
+    (ui/wait-for! #(nil? (get-in (app-state) [:zone-groups :group-balcony])))
+    (is (= :left (cue-zone)) "the cue now goes to Left")
+    (ui/wait-for! #(not (window-showing? "Delete \"Balcony\"?")))))
+
+(deftest all-has-no-delete-test
+  (let [robot (ui/robot)]
+    (ui/click! robot "#zones-tab")
+    (events/dispatch! {:event/type :zone-groups/select :group-id :all})
+    (ui/wait-for! #(some? (ui/query "#zone-group-cannot-delete")))
+    (ui/assert-text! "#zone-group-cannot-delete" "All can't be deleted.")
+    (is (nil? (ui/query "#zone-group-delete-button")))
+    (testing "another group has its Delete... button"
+      (events/dispatch! {:event/type :zone-groups/select :group-id :left})
+      (ui/wait-for! #(some? (ui/query "#zone-group-delete-button"))))))
+

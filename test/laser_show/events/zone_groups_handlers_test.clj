@@ -9,6 +9,9 @@
    [laser-show.state.history :as history]
    [laser-show.events.handlers.zone-groups :as zone-groups]
    [laser-show.state.domains :refer [build-initial-state]]
+   [laser-show.events.core :as events]
+   [laser-show.events.handlers.ui :as ui]
+   [laser-show.routing.refs :as refs]
    [laser-show.common.util :as u]))
 
 
@@ -202,3 +205,108 @@
                  :state base-state}
           result (zone-groups/handle event)]
       (is (= {} result)))))
+
+
+;; Deleting a group: ask first, re-target its cues
+
+
+(def ^:private balcony-state
+  "Balcony is named by cue [0 0]'s item and cue [1 2]'s destination, and by the
+   preview's second cell; the projector is in it."
+  (-> base-state
+      (assoc-in [:zone-groups :group-balcony] {:id :group-balcony :name "Balcony" :description "" :color "#FF0000"})
+      (assoc-in [:projectors test-projector-id :zone-groups] [:all :group-balcony])
+      (assoc-in [:chains :cue-chains [0 0]] {:name "Intro"
+                                             :items [{:id "p" :type :preset :preset-id :circle
+                                                      :zone-group-id :group-balcony}]})
+      (assoc-in [:chains :cue-chains [1 2]] {:name "Drop"
+                                             :destination-zone {:zone-group-id :group-balcony}
+                                             :items []})
+      (assoc-in [:config :preview :grid-cells] [{:zone-group-id nil} {:zone-group-id :group-balcony}])
+      (assoc-in [:zone-group-ui :selected-group] :group-balcony)))
+
+(deftest request-remove-opens-the-confirm-test
+  (let [dialog (get-in (zone-groups/handle {:event/type :zone-groups/request-remove
+                                            :group-id :group-balcony
+                                            :state balcony-state})
+                       [:state :ui :dialogs :confirm])]
+    (is (:open? dialog))
+    (is (= "Delete \"Balcony\"?" (:title dialog)))
+    (is (= "2 cues and 1 projector use it." (:message dialog)))
+    (is (= "A1 Intro · C2 Drop" (:details dialog)))
+    (is (= :retarget-to (get-in dialog [:choice :key])))
+    (is (= :all (:choice-value dialog)) "All by default")
+    (is (= [:all :center :crowd :graphics :left :right :inherit]
+           (mapv :value (get-in dialog [:choice :options])))
+        "All, the other groups by name, and Nothing; never the group itself")
+    (is (= {:event/type :zone-groups/remove :group-id :group-balcony} (:confirm-event dialog))))
+  (testing "a group nothing uses asks with no choice"
+    (let [dialog (get-in (zone-groups/handle {:event/type :zone-groups/request-remove
+                                              :group-id :graphics
+                                              :state balcony-state})
+                         [:state :ui :dialogs :confirm])]
+      (is (= "Nothing uses it." (:message dialog)))
+      (is (nil? (:choice dialog)))))
+  (testing "more than six cues: the first six, then how many more"
+    (let [many (reduce (fn [s col] (assoc-in s [:chains :cue-chains [col 0]]
+                                             {:name (str "Cue " col) :destination-zone {:zone-group-id :graphics} :items []}))
+                       balcony-state (range 8))
+          details (get-in (zone-groups/handle {:event/type :zone-groups/request-remove :group-id :graphics :state many})
+                          [:state :ui :dialogs :confirm :details])]
+      (is (= "A1 Cue 0 · A2 Cue 1 · A3 Cue 2 · A4 Cue 3 · A5 Cue 4 · A6 Cue 5 · and 2 more" details)))))
+
+(deftest remove-retargets-cues-test
+  (let [result (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
+                                    :retarget-to :left :state balcony-state})
+        state (:state result)]
+    (is (nil? (get-in state [:zone-groups :group-balcony])))
+    (is (= :left (get-in state [:chains :cue-chains [0 0] :items 0 :zone-group-id])))
+    (is (= :left (get-in state [:chains :cue-chains [1 2] :destination-zone :zone-group-id])))
+    (is (= {:zone-group-id :left} (get-in state [:config :preview :grid-cells 1])))
+    (is (= #{} (refs/cues-using (get-in state [:chains :cue-chains]) :group-balcony)))
+    (is (nil? (get-in state [:zone-group-ui :selected-group])))
+    (is (= "Deleted Balcony · 2 cues now go to Left" (get-in state [:ui :notice :text])))))
+
+(deftest remove-to-nothing-inherits-test
+  (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
+                                           :retarget-to :inherit :state balcony-state}))]
+    (is (not (contains? (get-in state [:chains :cue-chains [0 0] :items 0]) :zone-group-id)))
+    (is (not (contains? (get-in state [:chains :cue-chains [1 2]]) :destination-zone)))
+    (is (= "Deleted Balcony · 2 cues now inherit" (get-in state [:ui :notice :text]))))
+  (testing "nil means Nothing too"
+    (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
+                                             :retarget-to nil :state balcony-state}))]
+      (is (not (contains? (get-in state [:chains :cue-chains [0 0] :items 0]) :zone-group-id))))))
+
+(deftest retarget-to-a-missing-group-is-all-test
+  (doseq [target [:no-such-group :group-balcony]]
+    (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
+                                             :retarget-to target :state balcony-state}))]
+      (is (= :all (get-in state [:chains :cue-chains [0 0] :items 0 :zone-group-id])) (str target))))
+  (testing "no :retarget-to at all is All"
+    (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
+                                             :state balcony-state}))]
+      (is (= :all (get-in state [:chains :cue-chains [0 0] :items 0 :zone-group-id]))))))
+
+(deftest remove-strips-membership-test
+  (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
+                                           :retarget-to :left :state balcony-state}))]
+    (is (= [:all] (get-in state [:projectors test-projector-id :zone-groups]))
+        "the group leaves the projector; the re-target never adds a membership")))
+
+(deftest all-cannot-be-removed-test
+  (doseq [event-type [:zone-groups/request-remove :zone-groups/remove]]
+    (is (identical? balcony-state
+                    (:state (zone-groups/handle {:event/type event-type :group-id :all :state balcony-state})))
+        (str event-type))))
+
+(deftest remove-is-one-undo-step-test
+  (let [asked (:state (zone-groups/handle {:event/type :zone-groups/request-remove :group-id :group-balcony
+                                           :state balcony-state}))
+        confirmed (ui/handle {:event/type :ui/confirm :state asked})
+        undo-depth #(count (get-in % [:history :undo-stack]))
+        after (:state (events/handle-event-pipeline (assoc (:dispatch confirmed) :state (:state confirmed))))]
+    (is (nil? (get-in after [:zone-groups :group-balcony])))
+    (is (= :all (get-in after [:chains :cue-chains [0 0] :items 0 :zone-group-id])))
+    (is (= (inc (undo-depth balcony-state)) (undo-depth after)) "one undo step")))
+\n

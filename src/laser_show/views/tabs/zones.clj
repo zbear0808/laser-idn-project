@@ -293,19 +293,27 @@
                                :style-class ["label-hint"]
                                :wrap-text true}]}
                   {:fx/type :region :v-box/vgrow :always}
-                  ;; Edit/Delete buttons
+                  ;; Edit/Delete buttons (All can't be deleted)
                   {:fx/type :h-box
                    :spacing 8
+                   :alignment :center-left
                    :children [{:fx/type :button
+                               :id "zone-group-edit-button"
                                :text "Edit..."
                                :style-class ["button-secondary"]
                                :on-action {:event/type :zone-groups/edit
                                            :group-id (:id group)}}
-                              {:fx/type :button
-                               :text "Delete"
-                               :style-class ["button-danger"]
-                               :on-action {:event/type :zone-groups/remove
-                                           :group-id (:id group)}}]}]}
+                              (if (= :all (:id group))
+                                {:fx/type :label
+                                 :id "zone-group-cannot-delete"
+                                 :text "All can't be deleted."
+                                 :style-class ["label-hint"]}
+                                {:fx/type :button
+                                 :id "zone-group-delete-button"
+                                 :text "Delete..."
+                                 :style-class ["button-danger"]
+                                 :on-action {:event/type :zone-groups/request-remove
+                                             :group-id (:id group)}})]}]}
       ;; No group selected
       {:fx/type :v-box
        :children [{:fx/type :label
