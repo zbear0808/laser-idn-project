@@ -438,5 +438,6 @@ Committed as `f5a4f84` on top of `818cd82` (built as `8cb5688` on branch `vibe-p
 | `clj -M:kondo --lint` on the 12 touched files and `testfx.clj` | 0 errors, 0 warnings |
 | layout | headless screenshots at 1200×800: the header's menu fits beside the energy dots, a role's under its options, the lint's rows under the picker |
 | full UI suite | not run here: it runs after the merge |
+| after the merge, on `master` at `2d1f813`: `clj -M:mac-arm:test`, then the full UI suite | 1,054 tests, 33,973 assertions, 0 failures; UI 129 tests, 625 assertions, 0 failures |
 
 Phase 5's files that this branch changes, for the merge: `events/handlers/vibes.clj` (the `:vibe/add-reaction` line in `handle`, and `handle-add-reaction` after `handle-edit`), `vibes/library.clj` (its require, and `:394-512`, the lint), `subs.clj` (`lint-world`, and the sub after `vibe-lint`) and `events/handlers/input_mapper.clj` (the discrete branch, and two docstrings). A Morph cell that `:vibe/add-morph` puts in a vibe's FX set switches on the same way if it too goes through `engine/reconcile`.
