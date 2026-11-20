@@ -445,6 +445,118 @@
           "Should not request a refresh when no projectors match"))))
 
 
+;; Stable identity: a scan finds a laser by its unit id and output (04 §4)
+
+
+(def ^:private unit-l "0A 1B 2C 3D 4E 5F 60 71 82 93 A4 B5 C6 D7 E8 F9")
+(def ^:private unit-r "1F 2E 3D 4C 5B 6A 79 88 97 A6 B5 C4 D3 E2 F1 00")
+
+(defn- scanned
+  "A device as the scan effect reports it, with these outputs."
+  [address unit-id & service-ids]
+  {:address address :host-name "DAC" :unit-id unit-id :port 7255 :status {} :protocol-version {:major 1 :minor 0}
+   :services (mapv (fn [s] {:service-id s :name (str "Head " s)}) service-ids) :relays []})
+
+(def ^:private placed-rig
+  "Laser L and Laser R, found by a scan and set up: named, calibrated, in a
+   group and placed, R first."
+  (-> base-state
+      (assoc-in [:projectors :projector-10-0-0-5-1]
+                {:name "Laser L" :host "10.0.0.5" :port 7255 :service-id 1 :unit-id unit-l
+                 :stable-id [:unit unit-l 1] :enabled? true :zone-groups [:all :graphics] :tags #{}})
+      (assoc-in [:projectors :projector-10-0-0-9-1]
+                {:name "Laser R" :host "10.0.0.9" :port 7255 :service-id 1 :unit-id unit-r
+                 :stable-id [:unit unit-r 1] :enabled? true :zone-groups [:all] :tags #{}})
+      (assoc-in [:chains :projector-effects :projector-10-0-0-5-1 :items]
+                [{:id #uuid "00000000-0000-0000-0000-0000000000c1" :effect-id :rgb-curves :enabled? true
+                  :params {:r-curve-points [[0.0 0.2] [1.0 1.0]]}}])
+      (assoc-in [:rig :order] [:projector-10-0-0-9-1 :projector-10-0-0-5-1])))
+
+(defn- scan [state & devices]
+  (projectors/handle {:event/type :projectors/scan-complete :devices (vec devices) :state state}))
+
+(deftest scan-moves-a-known-unit-to-its-new-ip-test
+  (let [result (scan placed-rig (scanned "10.0.0.57" unit-l 1) (scanned "10.0.0.9" unit-r 1))
+        state (:state result)]
+    (is (= (assoc (get-in placed-rig [:projectors :projector-10-0-0-5-1]) :host "10.0.0.57")
+           (get-in state [:projectors :projector-10-0-0-5-1]))
+        "the same projector: its name, groups and tags kept, only the address changed")
+    (is (= (get-in placed-rig [:chains :projector-effects]) (get-in state [:chains :projector-effects]))
+        "its calibration kept")
+    (is (= [:projector-10-0-0-9-1 :projector-10-0-0-5-1] (get-in state [:rig :order])) "and its place")
+    (is (= #{:projector-10-0-0-5-1 :projector-10-0-0-9-1} (set (keys (:projectors state))))
+        "not a new, disabled projector")
+    (is (= 7300 (get-in (scan placed-rig (assoc (scanned "10.0.0.57" unit-l 1) :port 7300))
+                        [:state :projectors :projector-10-0-0-5-1 :port]))
+        "its port moves with it")))
+
+(deftest scan-move-is-not-undone-and-not-unsaved-test
+  (let [pipeline #(:state (events/handle-event-pipeline (assoc %2 :state %1)))
+        clean (history/mark-clean placed-rig)
+        renamed (pipeline clean {:event/type :projectors/update-settings :projector-id :projector-10-0-0-9-1
+                                 :updates {:name "Stage R"}})
+        scanned-state (pipeline renamed {:event/type :projectors/scan-complete
+                                         :devices [(scanned "10.0.0.57" unit-l 1)]})
+        undone (pipeline scanned-state {:event/type :history/undo})]
+    (is (= "10.0.0.57" (get-in scanned-state [:projectors :projector-10-0-0-5-1 :host])))
+    (is (= 1 (count (get-in scanned-state [:history :undo-stack]))) "the scan is no undo step")
+    (is (= "Laser R" (get-in undone [:projectors :projector-10-0-0-9-1 :name])) "Undo takes back the rename")
+    (is (= "10.0.0.57" (get-in undone [:projectors :projector-10-0-0-5-1 :host])) "and leaves the move")
+    (is (false? (get-in undone [:project :dirty?])) "which isn't an unsaved change")
+    (is (false? (get-in (pipeline clean {:event/type :projectors/scan-complete
+                                         :devices [(scanned "10.0.0.57" unit-l 1)]})
+                        [:project :dirty?]))
+        "a scan never makes a saved show unsaved")))
+
+(deftest scan-gives-a-new-unit-a-free-id-test
+  (let [moved-away (assoc-in placed-rig [:projectors :projector-10-0-0-5-1 :host] "10.0.0.57")
+        state (:state (scan moved-away (scanned "10.0.0.5" "99 88 77 66" 1)))
+        new-one (get-in state [:projectors :projector-10-0-0-5-1-2])]
+    (is (= {:name "Head 1" :host "10.0.0.5" :service-id 1 :enabled? false :stable-id [:unit "99 88 77 66" 1]}
+           (select-keys new-one [:name :host :service-id :enabled? :stable-id]))
+        "a different unit at Laser L's old address is a new laser, off")
+    (is (= "Laser L" (get-in state [:projectors :projector-10-0-0-5-1 :name])) "and never takes Laser L's id")
+    (is (= [:rgb-curves :corner-pin] (mapv :effect-id (get-in state [:chains :projector-effects :projector-10-0-0-5-1-2 :items])))
+        "with the default calibration")))
+
+(deftest scan-shows-a-notice-for-moves-test
+  (let [result (scan placed-rig (scanned "10.0.0.57" unit-l 1))]
+    (is (= {:text "Laser L moved to 10.0.0.57 (same unit)." :level :info} (dissoc (get-in result [:state :ui :notice]) :id)))
+    (is (= 6000 (get-in result [:dispatch-later :delay-ms])) "it goes after 6 s"))
+  (is (= "2 lasers have new addresses: Laser L, Laser R."
+         (get-in (scan placed-rig (scanned "10.0.0.57" unit-l 1) (scanned "10.0.0.91" unit-r 1)) [:state :ui :notice :text])))
+  (is (nil? (get-in (scan placed-rig (scanned "10.0.0.5" unit-l 1)) [:state :ui :notice])) "nothing moved: no notice")
+  (is (= "Two devices report the same unit id (10.0.0.5, 10.0.0.6): matched by IP."
+         (get-in (scan base-state (scanned "10.0.0.6" "unit" 1) (scanned "10.0.0.5" "unit" 1)) [:state :ui :notice :text]))))
+
+(deftest set-service-enabled-finds-a-moved-laser-test
+  (let [moved (:state (scan (assoc-in placed-rig [:projectors :projector-10-0-0-5-1 :enabled?] false)
+                            (scanned "10.0.0.57" unit-l 1)))
+        result (projectors/handle {:event/type :projectors/set-service-enabled
+                                   :host "10.0.0.57" :service-id 1 :enabled? true :state moved})]
+    (is (true? (get-in result [:state :projectors :projector-10-0-0-5-1 :enabled?])))
+    (is (= moved (:state (projectors/handle {:event/type :projectors/set-service-enabled
+                                             :host "10.0.0.5" :service-id 1 :enabled? true :state moved})))
+        "nothing is at its old address any more")))
+
+(deftest host-edit-moves-a-host-identity-test
+  (let [state (assoc-in placed-rig [:projectors :hand] {:name "Hand" :host "10.0.0.20" :stable-id [:host "10.0.0.20" 0]
+                                                         :enabled? true})
+        edit (fn [id host] (get-in (projectors/handle {:event/type :projectors/update-settings :projector-id id
+                                                       :updates {:host host} :state state})
+                                   [:state :projectors id :stable-id]))]
+    (is (= [:host "10.0.0.21" 0] (edit :hand "10.0.0.21")) "an identity by address follows a new address")
+    (is (= [:unit unit-l 1] (edit :projector-10-0-0-5-1 "10.0.0.21")) "a unit's doesn't")))
+
+(deftest new-projectors-have-a-stable-id-test
+  (is (= [[:host "10.0.0.5" 0]]
+         (map :stable-id (vals (get-in (projectors/handle {:event/type :projectors/add-manual :name "Manual"
+                                                           :host "10.0.0.5" :state sample-state})
+                                       [:state :projectors])))))
+  (is (= {:projector-10-0-0-5-1 [:unit unit-l 1] :projector-10-0-0-5-2 [:unit unit-l 2]}
+         (update-vals (get-in (scan base-state (scanned "10.0.0.5" unit-l 1 2)) [:state :projectors]) :stable-id))))
+
+
 ;; Removing a projector
 
 

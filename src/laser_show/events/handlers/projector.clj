@@ -7,7 +7,10 @@
    - Virtual projectors provide alternate corner-pin with inherited color curves
    
    AUTO-DISCOVERY FLOW:
-   - Network scan automatically creates projector entries (disabled by default)
+   - A network scan matches each output it finds to a projector by its stable
+     id (routing.rig/match-discovered): a known unit and output keeps its id
+     and setup when its address changes (it moves); anything else becomes a
+     new projector, disabled by default
    - Users enable/disable projectors via toggle controls
    - A projector can be removed (:projectors/remove, after a confirm); a later
      scan finds the device again, turned off, with default calibration
@@ -27,7 +30,8 @@
             [laser-show.idn.stream :as stream]
             [laser-show.animation.safety :as safety]
             [laser-show.animation.test-pattern :as test-pattern]
-            [laser-show.events.safety-guard :as guard]))
+            [laser-show.events.safety-guard :as guard]
+            [laser-show.routing.rig :as rig]))
 
 
 (def DEFAULT_PROJECTOR_EFFECTS
@@ -64,19 +68,6 @@
   [:ui :projector-effect-ui-state projector-id])
 
 
-;; Deterministic Projector ID
-
-
-(defn- make-projector-id
-  "Create a deterministic projector ID based on host and service-id.
-   This ensures the same device always gets the same ID across scans,
-   preventing duplicate entries."
-  [host service-id]
-  (let [;; Sanitize host for keyword (replace dots with dashes)
-        sanitized-host (str/replace (str host) "." "-")]
-    (keyword (str "projector-" sanitized-host "-" (or service-id 0)))))
-
-
 ;; Projector Configuration Factory
 
 
@@ -84,13 +75,14 @@
   "Create a projector configuration map with defaults.
    
    Required keys: :name, :host
-   Optional keys: :port, :service-id, :service-name, :unit-id, :zone-groups, :tags, :scan-rate, :enabled?
+   Optional keys: :port, :service-id, :service-name, :unit-id, :stable-id, :zone-groups, :tags, :scan-rate, :enabled?
+   Without :stable-id, it is the one routing.rig/stable-id gives.
    
    NOTE: Auto-discovered projectors default to enabled?=false.
    Manual projectors should pass enabled?=true explicitly.
    
    Throws: IllegalArgumentException if host is nil or blank"
-  [{:keys [name host port service-id service-name unit-id zone-groups tags scan-rate enabled?]
+  [{:keys [name host port service-id service-name unit-id stable-id zone-groups tags scan-rate enabled?]
     :or {port 7255 zone-groups [:all] tags #{} scan-rate stream/DEFAULT_SCAN_RATE enabled? false}}]
   {:pre [(and host (not (str/blank? host)))]}
   {:name name
@@ -99,6 +91,7 @@
    :service-id service-id
    :service-name service-name
    :unit-id unit-id
+   :stable-id (or stable-id (rig/stable-id {:unit-id unit-id :service-id service-id :host host}))
    :zone-groups zone-groups
    :tags tags
    :enabled? enabled?
@@ -118,76 +111,71 @@
      :projectors/scan {:broadcast-address broadcast-addr}}))
 
 
-(defn- auto-create-projector-for-service
-  "Create a projector entry for a discovered device service if it doesn't exist.
-   Returns updated state. Does NOT overwrite existing projectors."
-  [state device service-or-nil]
-  (let [{:keys [address host-name unit-id]
-         device-port :port} device
-        {:keys [service-id]
-         service-name :name
-         :or {service-id 0}} service-or-nil
-        projector-id (make-projector-id address service-id)]
-    ;; Only create if projector doesn't already exist
-    (if (get-in state [:projectors projector-id])
-      state  ;; Already exists, don't overwrite
-      (let [proj-name (or service-name
-                          (when host-name (str host-name (when (pos? service-id) (str " #" service-id))))
-                          (str address (when (pos? service-id) (str " #" service-id))))
-            projector-config (make-projector-config
-                               {:name proj-name
-                                :host address
-                                :port (or device-port 7255)
-                                :service-id service-id
-                                :service-name service-name
-                                :unit-id unit-id
-                                :enabled? false})]  ;; Auto-discovered = disabled by default
-        (-> state
-            (assoc-in [:projectors projector-id] projector-config)
-            (assoc-in [:chains :projector-effects projector-id :items]
-                      (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS)))))))
+(defn- discovered-projector
+  "A new projector for an output a scan found (one of match-discovered's
+   :new): disabled, named after the output or the device."
+  [{:keys [device service stable-id]}]
+  (let [{:keys [address host-name unit-id] device-port :port} device
+        {:keys [service-id] service-name :name :or {service-id 0}} service]
+    (make-projector-config
+      {:name (or service-name
+                 (when host-name (str host-name (when (pos? service-id) (str " #" service-id))))
+                 (str address (when (pos? service-id) (str " #" service-id))))
+       :host address
+       :port (or device-port 7255)
+       :service-id service-id
+       :service-name service-name
+       :unit-id unit-id
+       :stable-id stable-id
+       :enabled? false})))
 
+(defn- with-identity
+  "p with the stable id a scan found, and that unit id when it is a unit's."
+  [p [kind v :as sid]]
+  (cond-> (assoc p :stable-id sid)
+    (and (= :unit kind) (not= v (second (rig/stable-id p)))) (assoc :unit-id v)))
 
-(defn- auto-create-projectors-for-device
-  "Create projector entries for all services on a device.
-   For devices with no services, creates one projector with service-id 0."
-  [state device]
-  (let [services (:services device)]
-    (if (seq services)
-      ;; Device has services - create one projector per service
-      (reduce #(auto-create-projector-for-service %1 device %2) state services)
-      ;; No services - create single projector with service-id 0
-      (auto-create-projector-for-service state device nil))))
-
+(defn- found-in-scan
+  "(fn [document] document) that puts what a scan found into a document:
+   the new projectors and their calibration, the moves (host and port) and
+   the identities. A projector the document doesn't have is left out of the
+   moves and identities."
+  [new-projectors new-effects moves upgrades]
+  (let [present (fn [f m] (fn [ps] (reduce-kv (fn [ps id v] (if (contains? ps id) (update ps id f v) ps)) ps m)))
+        move (present (fn [p {:keys [host port]}] (assoc p :host host :port port)) moves)
+        upgrade (present with-identity upgrades)]
+    (fn [doc]
+      (-> doc
+          (update :projectors #(-> (merge new-projectors %) move upgrade))
+          (update-in [:chains :projector-effects] #(merge new-effects %))))))
 
 (defn- handle-projectors-scan-complete
-  "Handle scan completion - update discovered devices list and auto-create projectors.
+  "Handle scan completion: the discovered devices list, and each output found
+   matched to a projector by its stable id (routing.rig/match-discovered):
+   - a known unit and output at a new address moves there (host and port), and
+     keeps its id, name, calibration, groups and place; a notice says so;
+   - a projector added by hand, or known by its address, takes the unit's
+     identity;
+   - any other output is a new projector, disabled, with a free id and the
+     default calibration.
    
-   Auto-creates projector entries for all discovered devices/services:
-   - Uses deterministic IDs so re-scanning doesn't create duplicates
-   - New projectors are disabled by default (enabled? = false)
-   - Existing projectors are NOT overwritten (preserves user settings)
-   
-   Discovery isn't a user edit: the new projectors are backfilled into undo
-   history and the saved baseline, so they are never undone and never count
-   as an unsaved change."
+   Discovery isn't a user edit: all of it is backfilled into undo history and
+   the saved baseline, so it is never undone and never counts as an unsaved
+   change."
   [{:keys [devices state]}]
-  (let [;; Auto-create projectors for all discovered devices
-        state-with-projectors (reduce auto-create-projectors-for-device state devices)
-        old-projectors (get state :projectors {})
-        new-projectors (into {} (remove (fn [[id _]] (contains? old-projectors id)))
-                             (get state-with-projectors :projectors))
-        new-effects (select-keys (get-in state-with-projectors [:chains :projector-effects])
-                                 (keys new-projectors))]
-    (cond-> {:state (-> state-with-projectors
-                        (assoc-in [:projector-ui :scanning?] false)
-                        (assoc-in [:projector-ui :discovered-devices] (vec devices)))}
-      (seq new-projectors)
-      (assoc :history/backfill
-             (fn [doc]
-               (-> doc
-                   (update :projectors #(merge new-projectors %))
-                   (update-in [:chains :projector-effects] #(merge new-effects %))))))))
+  (let [{:keys [moves upgrades new notices]} (rig/match-discovered (:projectors state) devices)
+        new-projectors (into {} (map (fn [output] [(:id output) (discovered-projector output)])) new)
+        new-effects (into {} (map (fn [id] [id {:items (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS)}]))
+                          (keys new-projectors))
+        found (found-in-scan new-projectors new-effects moves upgrades)
+        new-state (-> (found state)
+                      (assoc-in [:projector-ui :scanning?] false)
+                      (assoc-in [:projector-ui :discovered-devices] (vec devices)))]
+    (cond-> (if (seq notices)
+              (h/show-notice new-state (str/join " " notices) :info)
+              {:state new-state})
+      (or (seq new-projectors) (seq moves) (seq upgrades))
+      (assoc :history/backfill found))))
 
 
 (defn- handle-projectors-scan-failed
@@ -215,11 +203,14 @@
 
 
 (defn- handle-projectors-set-service-enabled
-  "Set enabled state for a projector identified by host and service-id.
-   Used by enable/disable toggles in discovery panel."
+  "Set enabled state for the projector at host with service-id (0 for none),
+   found by its address and output, so a laser that moved is found at its
+   new address."
   [{:keys [host service-id enabled? state]}]
-  (let [projector-id (make-projector-id host service-id)]
-    (if (get-in state [:projectors projector-id])
+  (let [service (or service-id 0)
+        projector-id (some (fn [[id p]] (when (and (= host (:host p)) (= service (or (:service-id p) 0))) id))
+                           (sort-by (comp str key) (:projectors state)))]
+    (if projector-id
       {:state (assoc-in state [:projectors projector-id :enabled?] enabled?)}
       {:state state})))
 
@@ -277,7 +268,9 @@
    
    A nil or blank host and a port outside 1-65535 are ignored (the other
    updates still apply), so a half-cleared field can't reach an engine. A scan
-   rate is clamped to 1 000-100 000 pts/s; one that isn't a number is ignored."
+   rate is clamped to 1 000-100 000 pts/s; one that isn't a number is ignored.
+   A projector known by its address ([:host …] stable id) is known by the new
+   one after a host change; a unit's identity doesn't change."
   [{:keys [projector-id updates state]}]
   (let [updates (cond-> updates
                   (and (contains? updates :host)
@@ -289,8 +282,13 @@
                   (dissoc :port)
 
                   (contains? updates :scan-rate)
-                  clamp-scan-rate-update)]
-    {:state (update-in state [:projectors projector-id] merge updates)}))
+                  clamp-scan-rate-update)
+        follow-host (fn [p]
+                      (let [[kind _ s] (:stable-id p)]
+                        (if (and (contains? updates :host) (= :host kind))
+                          (assoc p :stable-id [:host (:host p) s])
+                          p)))]
+    {:state (update-in state [:projectors projector-id] #(follow-host (merge % updates)))}))
 
 
 (defn- handle-projectors-toggle-enabled
