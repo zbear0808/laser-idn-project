@@ -16,7 +16,8 @@
             [laser-show.input.store :as store]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
-            [laser-show.ui-test.testfx :as ui])
+            [laser-show.ui-test.testfx :as ui]
+            [laser-show.vibes.faders :as faders])
   (:import [javafx.scene Node Parent]
            [javafx.scene.control Labeled MenuButton MenuItem]))
 
@@ -250,15 +251,17 @@
       (ui/assert-text! "#vibe-control-slider-1-keys" "MIDI Ch 1 CC 1")
       (ui/wait-for! #(nil? (learning-target)))
       (is (= "Learn Fader" (undo-label)))
-      (testing "the fader drives its slot now, through the input mapper"
+      (testing "the fader is where the learn left it, at once (05 §11), and follows the control through the mapper"
+        (is (= {:slider-1 0.31} (faders/fader-values (store/get-all-continuous-values) (macro-map))))
         (cc! 1 0.4)
-        (is (= 0.4 (store/get-continuous-value [:macro :slider-1] nil))))
+        (is (= {:slider-1 0.4} (faders/fader-values (store/get-all-continuous-values) (macro-map)))))
       (testing "learned again on another fader: the slot moves to it"
         (ui/click! robot "#vibe-control-slider-1-learn")
         (ui/wait-for! learning-slider-1?)
         (cc! 9 0.9 0.5)
         (ui/wait-for! #(= {[:midi 0 9] :slider-1} (macro-map)))
-        (ui/assert-text! "#vibe-control-slider-1-keys" "MIDI Ch 1 CC 9"))
+        (ui/assert-text! "#vibe-control-slider-1-keys" "MIDI Ch 1 CC 9")
+        (is (= {:slider-1 0.5} (faders/fader-values (store/get-all-continuous-values) (macro-map)))))
       (testing "Clear"
         (ui/click! robot "#vibe-control-slider-1-clear")
         (ui/wait-for! #(empty? (macro-map)))

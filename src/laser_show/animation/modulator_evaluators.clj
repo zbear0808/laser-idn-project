@@ -256,9 +256,10 @@
 
 (defn- eval-macro
   "Evaluate a fader (:macro) modulator: min + v·(max − min), v the fader
-   slot's value, [:macro slot] in the input values (the input mapper writes
-   it for the control learned for the slot), or :default (0..1, where the
-   fader is taken to be until it first moves) before it has one."
+   slot's value, [:macro slot] in the input values (the render puts the
+   value of the control learned for the slot there, vibes.faders/
+   with-faders), or :default (0..1, where the fader is taken to be until it
+   first moves) while it has none."
   [{:keys [slot min max default]} {:keys [input-values]}]
   (let [v (double (or (get input-values [:macro slot]) default 0.0))
         lo (double (or min 0.0))]

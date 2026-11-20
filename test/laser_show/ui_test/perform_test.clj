@@ -363,33 +363,38 @@
   (let [^ProgressBar bar (first (ui/query-all selector))]
     (ui/on-fx-thread #(.getProgress bar))))
 
+(defn- meter-ticks
+  "A tick! fn on a fake clock: the meters draw the newest tick (no clock runs
+   in these tests)."
+  []
+  (let [t0 (System/nanoTime)
+        n (atom 0)]
+    #(show-clock/tick! (+ t0 (* (swap! n inc) 17 1000000)))))
+
 (deftest meters-follow-the-store-and-say-not-wired-test
   (let [robot (ui/robot)
-        t0 (System/nanoTime)
-        n (atom 0)
-        tick! #(show-clock/tick! (+ t0 (* (swap! n inc) 17 1000000)))
-        fader! (fn [slot v] (store/set-continuous-value! [:macro slot] v) (tick!))]
+        tick! (meter-ticks)
+        controls {:slider-1 1 :slider-2 2}
+        fader! (fn [slot v]
+                 (input-router/dispatch! (input-events/control-change :midi 0 (controls slot) v))
+                 (tick!))]
     (try
       (store/clear-continuous-values!)
+      (flush-event-queue!)
+      (state/swap-state! assoc-in [:config :input :macro-map] {[:midi 0 1] :slider-1 [:midi 0 2] :slider-2})
       (open-perform! robot)
       (tick!)
       (ui/assert-text! "#vibe-meter-slider-1-text" "Intensity –")
       (ui/assert-text! "#vibe-meter-slider-2-text" "Morph – · not wired")
       (is (ui/has-style-class? "#vibe-meter-slider-2" "vibe-meter-off") "invariant 6: dimmed, and says so")
       (is (not (ui/has-style-class? "#vibe-meter-slider-1" "vibe-meter-off")) "a new project's Master wires Intensity")
-      (testing "a fader's value, drawn from the input store at the next tick"
+      (testing "a learned control's value, through the input mapper, drawn from the next tick"
         (fader! :slider-1 0.45)
         (ui/assert-text! "#vibe-meter-slider-1-text" "Intensity 45 %")
         (is (< (Math/abs (- 0.45 (progress "#vibe-meter-slider-1-bar"))) 1e-9))
         (fader! :slider-1 0.0)
         (ui/assert-text! "#vibe-meter-slider-1-text" "Intensity 0 %")
         (is (= 0.0 (progress "#vibe-meter-slider-1-bar")) "invariant 3: dark, and Perform says so"))
-      (testing "from a learned control, through the input mapper"
-        (flush-event-queue!)
-        (state/swap-state! assoc-in [:config :input :macro-map] {[:midi 0 7] :slider-1})
-        (input-router/dispatch! (input-events/control-change :midi 0 7 0.25))
-        (tick!)
-        (ui/assert-text! "#vibe-meter-slider-1-text" "Intensity 25 %"))
       (testing "a Morph in the vibe that plays wires fader 2"
         (events/dispatch! {:event/type :vibe/add-morph :vibe :vibe-1 :kind :size})
         (ui/wait-for! #(not (ui/has-style-class? "#vibe-meter-slider-2" "vibe-meter-off")))
@@ -401,5 +406,30 @@
         (ui/wait-for! #(= :vibe-2 (rt :current)))
         (ui/wait-for! #(ui/has-style-class? "#vibe-meter-slider-2" "vibe-meter-off"))
         (ui/assert-text! "#vibe-meter-slider-2-text" "Morph 100 % · not wired"))
+      (finally
+        (store/clear-continuous-values!)))))
+
+(deftest meters-say-a-dash-for-an-unbound-slot-test
+  (let [robot (ui/robot)
+        tick! (meter-ticks)]
+    (try
+      (store/clear-continuous-values!)
+      (flush-event-queue!)
+      (state/swap-state! assoc-in [:config :input :macro-map] {[:midi 0 7] :slider-1})
+      (open-perform! robot)
+      (input-router/dispatch! (input-events/control-change :midi 0 7 0.3))
+      (tick!)
+      (ui/assert-text! "#vibe-meter-slider-1-text" "Intensity 30 %")
+      (testing "Cleared: the meter says – (the Master is at its default), though the control keeps its value"
+        (events/dispatch! {:event/type :vibe/clear-control :slot :slider-1})
+        (ui/wait-for! #(empty? (get-in (app-state) [:config :input :macro-map])))
+        (tick!)
+        (ui/assert-text! "#vibe-meter-slider-1-text" "Intensity –")
+        (is (= 0.0 (progress "#vibe-meter-slider-1-bar")))
+        (is (= 0.3 (store/get-continuous-value [:midi 0 7] nil))))
+      (testing "and for a slot nothing was ever learned for, whatever the store holds"
+        (store/set-continuous-value! [:macro :slider-2] 0.9)
+        (tick!)
+        (ui/assert-text! "#vibe-meter-slider-2-text" "Morph – · not wired"))
       (finally
         (store/clear-continuous-values!)))))

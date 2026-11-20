@@ -1,8 +1,9 @@
 (ns laser-show.events.handlers.input-mapper-test
   "The input mapper: discrete inputs go to the trigger map as :trigger/input,
    continuous ones to the input store, and a learn keeps the press it
-   catches (K-15) but not the releases. A control learned for a fader also
-   writes the fader's slot (plans/2026-11-18-vibe-mode/05 §7)."
+   catches (K-15) but not the releases. A control learned for a fader writes
+   its own key only: the render derives the fader from it
+   (plans/2026-11-18-vibe-mode/05 §11)."
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.input-mapper :as input-mapper]
@@ -14,7 +15,8 @@
             [laser-show.input.store :as store]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
-            [laser-show.state.templates :as templates]))
+            [laser-show.state.templates :as templates]
+            [laser-show.vibes.faders :as faders]))
 
 (defn- input [type & {:as m}]
   (merge {:type type :source :midi :channel 0 :timestamp 1000} m))
@@ -109,15 +111,27 @@
 
 (defn- written [] (store/get-all-continuous-values))
 
-(deftest bound-cc-also-writes-its-macro-test
+(deftest bound-cc-moves-its-fader-test
   (with-macro-map {[:midi 0 1] :slider-1}
     (fn [sent]
       (router/dispatch! (cc 0 1 64))
-      (is (= {[:midi 0 1] (/ 64 127.0) [:macro :slider-1] (/ 64 127.0)} (written))
-          "CC 1, channel 0: its own key and the fader's slot, the same value")
+      (is (= {[:midi 0 1] (/ 64 127.0)} (written)) "CC 1, channel 0: its own key, no stored copy for the fader (05 §11)")
+      (is (= {:slider-1 (/ 64 127.0)} (faders/fader-values (written) {[:midi 0 1] :slider-1}))
+          "which the render reads the fader from")
       (router/dispatch! (cc 0 1 0))
-      (is (= 0.0 (store/get-continuous-value [:macro :slider-1] nil)) "down to 0: the slot follows")
+      (is (= {:slider-1 0.0} (faders/fader-values (written) {[:midi 0 1] :slider-1})) "down to 0: the fader follows")
       (is (empty? @sent) "invariant 1: a fader never visits the event agent"))))
+
+(deftest cc-reads-no-app-state-test
+  (testing "the mapper looks up no binding for a CC on the controller's thread: the render does, once a tick"
+    (with-macro-map {[:midi 0 1] :slider-1}
+      (fn [_]
+        (let [reads (atom 0)
+              get-raw-state state/get-raw-state]
+          (with-redefs [state/get-raw-state (fn [] (swap! reads inc) (get-raw-state))]
+            (run! #(router/dispatch! (cc 0 1 %)) (range 0 128 8)))
+          (is (= 0 @reads))
+          (is (= {[:midi 0 1] (/ 120 127.0)} (written))))))))
 
 (deftest unbound-cc-writes-only-its-own-key-test
   (with-macro-map {[:midi 0 1] :slider-1}
@@ -134,7 +148,8 @@
                                                   {0 {:buttons {} :axes {:trigger-left 0.8}}})]
         (is (= 1 (count moves)) "the poller's one control change")
         (run! router/dispatch! moves)
-        (is (= {[:gamepad 0 :trigger-left] 0.8 [:macro :slider-2] 0.8} (written)))))))
+        (is (= {[:gamepad 0 :trigger-left] 0.8} (written)))
+        (is (= {:slider-2 0.8} (faders/fader-values (written) {[:gamepad 0 :trigger-left] :slider-2})))))))
 
 (deftest unmapped-osc-value-can-be-a-macro-test
   (with-macro-map {[:osc "/fader/1"] :slider-1}
@@ -143,7 +158,8 @@
             v (double (float 0.3))]
         (is (= [:trigger] (mapv :type events)) "an unmapped address is a trigger carrying its value")
         (run! router/dispatch! events)
-        (is (= {[:osc "/fader/1"] v [:macro :slider-1] v} (written)))))))
+        (is (= {[:osc "/fader/1"] v} (written)))
+        (is (= {:slider-1 v} (faders/fader-values (written) {[:osc "/fader/1"] :slider-1})))))))
 
 (deftest missing-macro-map-is-empty-test
   (testing "invariant 7: a project saved before faders has no :macro-map (the load merges [:config] shallowly)"

@@ -44,6 +44,7 @@
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.timeline.model :as model]
             [laser-show.timeline.playback :as playback]
+            [laser-show.vibes.faders :as faders]
             [laser-show.animation.effects.shape]
             [laser-show.animation.effects.color]
             [laser-show.animation.effects.intensity]
@@ -103,7 +104,9 @@
   "What every cue's render in one tick shares. The show clock makes it once
    per tick, from the tick's app state, input values, global clock and
    presses (show-time/pulse-view, nil without):
-   - :input-values: the input store's values;
+   - :input-values: the input store's values, and each fader's at [:macro
+     slot]: the value of the control learned for it now ([:config :input
+     :macro-map], vibes.faders/with-faders), never a stored copy;
    - :pulses: the presses, which the clock puts on each cue's timing context;
    - :global-effects: the effects grid's active chain in state, or nil;
    - :global-ctx: the global clock's timing context, with the input values
@@ -113,12 +116,13 @@
   ([state input-values global-clock]
    (render-context state input-values global-clock nil))
   ([state input-values global-clock pulses]
-   {:input-values input-values
-    :pulses pulses
-    :global-effects (get-active-global-effects state)
-    :global-ctx (assoc (cue-timing/get-global-timing-context global-clock (get-in state [:timing :bpm]))
-                       :input-values input-values
-                       :pulses pulses)}))
+   (let [input-values (faders/with-faders input-values (get-in state [:config :input :macro-map]))]
+     {:input-values input-values
+      :pulses pulses
+      :global-effects (get-active-global-effects state)
+      :global-ctx (assoc (cue-timing/get-global-timing-context global-clock (get-in state [:timing :bpm]))
+                         :input-values input-values
+                         :pulses pulses)})))
 
 ;; Cue Chain Rendering
 ;;

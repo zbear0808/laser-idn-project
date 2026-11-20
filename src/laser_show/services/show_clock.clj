@@ -7,13 +7,16 @@
       timecode (show-time/step);
    2. renders every playing cue once (frame-service/generate-frames-by-zone),
       each in its own try, at its timing context and with one render context
-      for the whole tick: the tick's one read of app state, the input store,
-      the presses tap reactions follow (show-time/pulse-view; calibration
-      gets none) and the global effects (frame-service/render-context);
+      for the whole tick: the tick's one read of app state and of the input
+      store (every tick, playing or not), the faders as their bindings now
+      give them (vibes.faders), the presses tap reactions follow
+      (show-time/pulse-view; calibration gets none) and the global effects
+      (frame-service/render-context);
    3. publishes the result (show-time/publish!), which wakes every projector's
       engine: each takes its zones and sends them on its own thread
       (backend/multi_engine.clj). The snapshot also carries where each cue is,
-      the presses (the Perform pads' pulse bars), and the preview as a delay
+      the presses (the Perform pads' pulse bars), where the faders are (the
+      Perform tab's meters), and the preview as a delay
       that the screen forces (views/components/clock_view.clj draws it on
       each screen refresh);
    4. sends what it learned back as events: a timeline's end and a timecode
@@ -36,7 +39,8 @@
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
             [laser-show.state.extractors :as ex]
-            [laser-show.timeline.playback :as playback]))
+            [laser-show.timeline.playback :as playback]
+            [laser-show.vibes.faders :as faders]))
 
 (def ^:const TICK_HZ 60)
 
@@ -77,13 +81,14 @@
   "The snapshot fields for runs (show-time/active-runs), or none while not
    playing: {:cues [{:cell :run :zone-frames}] :projector-ctx :render-us}.
    Every cue shares one render context (frame-service/render-context): the
-   tick's input values, its presses (pulses, show-time/pulse-view), its
-   global effects and global-clock's timing. Calibration gets no presses."
-  [state global-clock runs pulses]
+   tick's input values with the faders' slots derived from their bindings,
+   its presses (pulses, show-time/pulse-view), its global effects and
+   global-clock's timing. Calibration gets the same input values and no
+   presses."
+  [state input-values global-clock runs pulses]
   (if (empty? runs)
     {:cues [] :projector-ctx nil :render-us 0.0}
     (let [bpm (double (or (ex/bpm state) 120.0))
-          input-values (input-store/get-all-continuous-values)
           t0 (System/nanoTime)
           render-ctx (frame-service/render-context state input-values global-clock pulses)
           cues (mapv (fn [run]
@@ -94,7 +99,7 @@
       {:cues cues
        ;; Projector effects run at the first cue's timing and the global BPM
        :projector-ctx (assoc (cue-timing/get-cue-timing-context (:cue-timing (first runs)) bpm)
-                             :input-values input-values)
+                             :input-values (:input-values render-ctx))
        :render-us (/ render-ns 1000.0)})))
 
 
@@ -147,6 +152,7 @@
    milliseconds since the first tick after a reset. Returns the snapshot."
   [now-ns]
   (let [state (state/get-raw-state)
+        input-values (input-store/get-all-continuous-values)
         mtc-pos (mtc/current)
         before @show-time/!runtime
         t0 (or (:t0-ns before) now-ns)
@@ -156,12 +162,14 @@
         _ (reset! show-time/!runtime runtime)
         playing? (boolean (get-in state [:playback :playing?]))
         pulses (show-time/pulse-view runtime)
-        {:keys [cues] :as rendered} (render state (:global runtime) (when playing? (show-time/active-runs state runtime)) pulses)
+        {:keys [cues] :as rendered} (render state input-values (:global runtime)
+                                            (when playing? (show-time/active-runs state runtime)) pulses)
         snapshot (show-time/publish! (assoc rendered
                                             :at-ns (System/nanoTime)
                                             :playing? playing?
                                             :positions (show-time/positions runtime)
                                             :pulses pulses
+                                            :faders (faders/fader-values input-values (get-in state [:config :input :macro-map]))
                                             :preview (delay (frame-service/preview-data cues))))
         ;; After publish!, so the engines never wait for it
         [runtime status] (status-step runtime state mtc-pos now-ms)]

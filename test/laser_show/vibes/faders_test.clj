@@ -99,3 +99,24 @@
     (testing "the Master switched off or deleted: fader 1 does nothing"
       (is (not (wired? (assoc-in s [:chains :effect-chains [0 3] :active?] false) :vibe-1 :slider-1)))
       (is (not (wired? (update-in s [:chains :effect-chains] dissoc [0 3]) :vibe-1 :slider-1))))))
+
+
+;; The slots follow the bindings (05 §11): derived from the control learned
+;; for each fader now, never kept
+
+(deftest fader-values-follow-the-bindings-test
+  (let [values {[:midi 0 7] 0.3 [:midi 0 9] 0.0 [:osc "/f"] 0.8}]
+    (is (= {:slider-1 0.3} (faders/fader-values values {[:midi 0 7] :slider-1})))
+    (is (= {:slider-1 0.3 :slider-2 0.0} (faders/fader-values values {[:midi 0 7] :slider-1 [:midi 0 9] :slider-2}))
+        "a fader at 0 is a value")
+    (is (= {} (faders/fader-values values {[:midi 0 5] :slider-1}))
+        "learned on a control that hasn't moved: no value yet, so its Faders sit at their :default")
+    (is (= {} (faders/fader-values values {})) "nothing learned")
+    (is (= {} (faders/fader-values values nil)) "a project from before the faders")
+    (testing "with-faders: the render's input values, each fader's at [:macro slot] and no other, whatever the store holds"
+      (is (= (assoc values [:macro :slider-1] 0.3) (faders/with-faders values {[:midi 0 7] :slider-1})))
+      (let [stale (assoc values [:macro :slider-1] 0.0 [:macro :slider-2] 0.0)]
+        (is (= (assoc values [:macro :slider-2] 0.8) (faders/with-faders stale {[:osc "/f"] :slider-2})))
+        (is (= values (faders/with-faders stale {})) "nothing learned: no slot")
+        (is (= values (faders/with-faders stale {[:midi 0 5] :slider-1})) "learned on a control that hasn't moved"))
+      (is (identical? values (faders/with-faders values {})) "nothing to derive: the same map, no garbage a tick"))))

@@ -1,14 +1,14 @@
 (ns laser-show.views.components.slider-meters
   "The Perform tab's two meters, under the pads: where the faders are, 1
    Intensity and 2 Morph (plans/2026-11-18-vibe-mode/05). Each draws its
-   fader straight from the input store ([:macro slot], which the input
-   mapper writes on the controller's own thread) on each screen refresh
+   fader from the show clock's newest tick (the snapshot's :faders, the
+   values the render used: the control learned for each fader now,
+   vibes.faders/fader-values) on each screen refresh
    (clock-view/ext-clock-redraw), so a fader never goes through app state:
-   a bar and a percentage, \"–\" until the fader first moves, and \"not
-   wired\" (dimmed) while nothing the vibe that plays plays follows it
-   (subs/vibe-meter)."
+   a bar and a percentage, \"–\" until the fader first moves or while no
+   control is learned for it, and \"not wired\" (dimmed) while nothing the
+   vibe that plays plays follows it (subs/vibe-meter)."
   (:require [cljfx.api :as fx]
-            [laser-show.input.store :as store]
             [laser-show.subs :as subs]
             [laser-show.views.components.clock-view :as clock-view])
   (:import [javafx.scene Node]
@@ -23,9 +23,10 @@
 
 (defn redraw-meter!
   "A meter, whose user data is {:slot :label :wired?}: its bar and its text
-   from the slot's value in the input store."
-  [^Node node _snapshot {:keys [slot label wired?]}]
-  (let [value (store/get-continuous-value [:macro slot] nil)]
+   from where the newest tick had the fader (snapshot :faders; none before
+   the first tick)."
+  [^Node node snapshot {:keys [slot label wired?]}]
+  (let [value (get-in snapshot [:faders slot])]
     (when-let [^ProgressBar bar (.lookup node ".vibe-meter-bar")]
       (.setProgress bar (if value (double value) 0.0)))
     (when-let [^Label text (.lookup node ".vibe-meter-text")]

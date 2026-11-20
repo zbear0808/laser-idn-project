@@ -368,8 +368,8 @@
 
 (defn- handle-fader-captured
   "Bind the control a fader's learn caught (its input store key, :store-key)
-   to the fader's slot in [:config :input :macro-map], where the input
-   mapper looks it up: the slot's other control goes (one control a slot),
+   to the fader's slot in [:config :input :macro-map], where the render
+   looks it up each tick: the slot's other control goes (one control a slot),
    and the key's other slot with it (one slot a key). Ignored if the learn
    was cancelled or restarted for another target, and for an input that
    writes no such key: a note or a button never binds a fader."

@@ -346,9 +346,12 @@
 
 (defn effects-grid-empty?
   "True while no effects cell has an effect in it (groups don't count), as
-   effect-cell-display-data's :has-effects? would say for every cell."
+   effect-cell-display-data's :has-effects? would say for every cell; but
+   for Masters, by the Master rule: a cell that is a Master and nothing more
+   (vibes.faders/master-only?) doesn't count, so a new project's grid, which
+   has one, still says what effect cells are for."
   [context]
-  (not-any? #(seq (chains/flatten-chain (:items % [])))
+  (not-any? #(and (seq (chains/flatten-chain (:items % []))) (not (faders/master-only? %)))
             (vals (fx/sub-val context get-in [:chains :effect-chains]))))
 
 

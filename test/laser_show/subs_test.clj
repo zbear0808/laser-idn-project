@@ -115,7 +115,20 @@
   (testing "one effect, on or off, anywhere"
     (is (false? (fx/sub-ctx (context base-state) subs/effects-grid-empty?)))
     (is (false? (fx/sub-ctx (context (assoc-in base-state [:chains :effect-chains [0 0] :active?] false))
-                            subs/effects-grid-empty?)))))
+                            subs/effects-grid-empty?))))
+  (testing "the Master alone doesn't count: a new project's grid is still a fresh one (05 §11)"
+    (let [mastered (templates/apply-starter-effects (domains/build-initial-state))
+          empty? #(fx/sub-ctx (context %) subs/effects-grid-empty?)]
+      (is (true? (empty? mastered)))
+      (is (true? (empty? (assoc-in mastered [:chains :effect-chains [0 3] :active?] false))) "switched off")
+      (is (true? (empty? (assoc-in mastered [:chains :effect-chains [5 0]] (get-in mastered [:chains :effect-chains [0 3]]))))
+          "moved, or copied: Masters only")
+      (is (false? (empty? (assoc-in mastered [:chains :effect-chains [2 1]] {:items [{:effect-id :scale}]})))
+          "with another cell that has an effect")
+      (is (false? (empty? (update-in mastered [:chains :effect-chains [0 3] :items] conj {:effect-id :scale :enabled? true})))
+          "with another effect in its own chain")
+      (is (false? (empty? (assoc-in mastered [:chains :effect-chains [0 3] :items 0 :params :amount] 0.5)))
+          "its Intensity on a fixed amount: an effect cell like any"))))
 
 (deftest beat-index-sub-test
   (let [ctx (context base-state)]

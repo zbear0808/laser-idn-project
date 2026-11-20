@@ -331,7 +331,7 @@
 (defonce ^{:private true
            :doc "The newest tick's snapshot, nil before the first: {:tick :at-ns :playing? :cues
                  [{:cell :run :zone-frames}] :positions {cell beats} :pulses (pulse-view)
-                 :projector-ctx :preview (delay …) :render-us}."}
+                 :faders {slot value} (vibes.faders/fader-values) :projector-ctx :preview (delay …) :render-us}."}
   !snapshot
   (atom nil))
 

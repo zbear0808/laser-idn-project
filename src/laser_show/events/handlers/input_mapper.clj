@@ -46,22 +46,13 @@
 
     :else []))
 
-(defn- update-macro-value!
-  "Also writes value to [:macro slot] when source-key is the control learned
-   for a fader slot ([:config :input :macro-map], none in a project saved
-   before it): a map lookup on the input's own thread, so a fader never
-   waits for the event agent. :macro modulators read the slot."
-  [source-key value]
-  (when-let [slot (get-in (state/get-raw-state) [:config :input :macro-map source-key])]
-    (store/set-continuous-value! [:macro slot] value)))
-
 (defn- update-input-value!
-  "Updates a continuous input value in the fast store, and the fader slot
-   it drives (update-macro-value!).
+  "Updates a continuous input value in the fast store. A fader's slot isn't
+   written here: the render derives it from the control learned for it
+   (vibes.faders/with-faders), so the mapper reads no app state for a CC.
    e.g. source-key `[:midi 0 10]` -> value `0.5`"
   [source-key value]
-  (store/set-continuous-value! source-key value)
-  (update-macro-value! source-key value))
+  (store/set-continuous-value! source-key value))
 
 (defn- learning?
   "Is a learn waiting for an input? It catches the press itself

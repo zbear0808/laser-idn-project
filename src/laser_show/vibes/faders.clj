@@ -1,16 +1,19 @@
 (ns laser-show.vibes.faders
   "The two faders (plans/2026-11-18-vibe-mode/05): 1 Intensity, a master
    dimmer, and 2 Morph, whatever the vibe that plays wires to it. A fader is
-   a slot, :slider-1 or :slider-2: the control learned for it ([:config
-   :input :macro-map], handlers/input.clj) writes its value to [:macro slot]
-   in the input store too (the input mapper), and a Fader modulator
-   ({:type :macro :slot}) on any parameter follows it.
+   a slot, :slider-1 or :slider-2, and a Fader modulator ({:type :macro
+   :slot}) on any parameter follows it. Where a fader is comes from the
+   control learned for it ([:config :input :macro-map], handlers/input.clj)
+   at each tick: fader-values, which the render (frame-service/
+   render-context) and the Perform tab's meters (the snapshot's :faders)
+   share. Nothing keeps a copy, so a slot never outlives its binding (05
+   §11).
 
-   Here: the cells that wire them in one click, the Master (an effects-grid
-   cell, at [0 3] in a new project, state.templates) and the Morphs (in a
-   vibe's FX set), each neutral until its fader first moves; where they go,
-   the first empty effect cell, as a tap reaction's (vibes.reactions); and
-   whether a vibe wires a fader, for the Perform tab's meters."
+   Here too: the cells that wire them in one click, the Master (an
+   effects-grid cell, at [0 3] in a new project, state.templates) and the
+   Morphs (in a vibe's FX set), each neutral until its fader first moves;
+   where they go, the first empty effect cell, as a tap reaction's
+   (vibes.reactions); and whether a vibe wires a fader, for the meters."
   (:require [laser-show.events.helpers :as h]
             [laser-show.vibes.library :as library]
             [laser-show.vibes.reactions :as reactions]))
@@ -18,6 +21,31 @@
 (def slots
   "The two faders: 1 Intensity, 2 Morph."
   [:slider-1 :slider-2])
+
+(def ^:private slot-keys (mapv #(vector :macro %) slots))
+
+(defn fader-values
+  "Where each fader is: {slot value}, the value in input-values (the input
+   store's) of the control learned for the slot in macro-map ({store key
+   slot}, [:config :input :macro-map]). A slot with nothing learned, or
+   whose control has no value yet, is absent: its Faders sit at their
+   :default. Derived from the bindings as they are now and never kept, so a
+   binding cleared, learned again, undone or left behind by New or Open
+   leaves no old value."
+  [input-values macro-map]
+  (reduce-kv (fn [m k slot]
+               (if-let [v (get input-values k)] (assoc m slot v) m))
+             {}
+             macro-map))
+
+(defn with-faders
+  "input-values as the Fader modulators read them: each fader's value
+   (fader-values) at [:macro slot], and no other [:macro slot], whatever
+   the store holds."
+  [input-values macro-map]
+  (reduce-kv (fn [m slot v] (assoc m [:macro slot] v))
+             (apply dissoc input-values slot-keys)
+             (fader-values input-values macro-map)))
 
 (defn- fader
   "A Fader modulator: lo..hi as the fader on slot goes 0..1, at default
@@ -76,6 +104,15 @@
                :when (some #(and (= :intensity (:effect-id %)) (follows? :slider-1 (get-in % [:params :amount])))
                            (reactions/effects-in chain))]
            cell)))
+
+(defn master-only?
+  "Is chain a Master and nothing more: its one enabled effect an Intensity
+   whose amount follows fader 1, as a new project's has it?"
+  [chain]
+  (let [[effect & more] (reactions/effects-in chain)]
+    (boolean (and effect (empty? more)
+                  (= :intensity (:effect-id effect))
+                  (follows? :slider-1 (get-in effect [:params :amount]))))))
 
 (defn add-master
   "state with a Master in the first empty effect cell (reactions/

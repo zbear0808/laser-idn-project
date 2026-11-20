@@ -3,6 +3,7 @@
    Most tests tick by hand; the ones that need the thread start it."
   (:require [cljfx.api :as fx]
             [cljfx.event-handler :as event-handler]
+            [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.animation.effects.shape]
             [laser-show.animation.show-time :as show-time]
@@ -12,15 +13,22 @@
             [laser-show.backend.streaming-engine :as se]
             [laser-show.dev.reload :as reload]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.input :as input-handlers]
+            [laser-show.events.handlers.input-mapper :as mapper]
             [laser-show.events.handlers.timing :as timing]
             [laser-show.idn.fake-dac :as dac]
+            [laser-show.input.events :as ie]
             [laser-show.input.mtc :as mtc]
+            [laser-show.input.router :as router]
             [laser-show.input.store :as input-store]
             [laser-show.profiling.frame-profiler :as profiler]
             [laser-show.services.frame-service :as fs]
             [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
-            [laser-show.state.domains :as domains]))
+            [laser-show.state.domains :as domains]
+            [laser-show.state.history :as history]
+            [laser-show.state.persistent :as persistent]
+            [laser-show.state.templates :as templates]))
 
 (defn- sine [lo hi period] {:type :sine :min lo :max hi :period period})
 
@@ -194,7 +202,8 @@
       (is (= [false []] ((juxt :playing? :cues) s)))
       (is (pos-int? (:tick s)))
       (is (number? (:at-ns s)))
-      (is (= {} (:pulses s)) "what tap reactions see: no press yet")))
+      (is (= {} (:pulses s)) "what tap reactions see: no press yet")
+      (is (= {} (:faders s)) "where the faders are, for the meters, even with nothing playing: none learned")))
   (testing "playing"
     (trigger! 0 0)
     (let [s (show-clock/tick! 16666667)
@@ -417,3 +426,150 @@
         (is (= #{:hit :vibe :cue :any} (set (keys (:pulses s)))))
         (is (some? (:projector-ctx s)))
         (is (not (contains? (:projector-ctx s) :pulses)))))))
+
+
+;; The faders: what the render sees follows the bindings as they are now,
+;; never a stored copy (plans/2026-11-18-vibe-mode/05 §11)
+
+(defn- brightness [snapshot]
+  (reduce + 0.0 (for [{:keys [zone-frames]} (:cues snapshot) [_ frame] zone-frames [_ _ r g b] frame] (+ r g b))))
+
+(defn- close? [a b] (< (Math/abs (- (double a) (double b))) (* 1e-9 (max 1.0 (Math/abs (double a))))))
+
+(defn- with-faders
+  "(f) on a new project's state (starter cues, vibes and the Master) with
+   macro-map learned, cue [0 0] triggered, and the input mapper on the
+   router, as in the app; the input store empty before and after, and the
+   ticks' own events left out."
+  [macro-map f]
+  (state/init-state! (-> (domains/build-initial-state)
+                         (templates/apply-starter-cue-chains)
+                         (templates/apply-starter-vibes)
+                         (templates/apply-starter-effects)
+                         (assoc-in [:timing :bpm] 120.0)
+                         (assoc-in [:config :input :macro-map] macro-map)
+                         (history/mark-clean)))
+  (show-time/reset-runtime!)
+  (input-store/clear-continuous-values!)
+  (mapper/set-dispatch-fn! (fn [_]))
+  (mapper/start-mapper!)
+  (try
+    (with-redefs [events/dispatch! (fn [_])]
+      (trigger! 0 0)
+      (f))
+    (finally
+      (mapper/stop-mapper!)
+      (mapper/set-dispatch-fn! nil)
+      (router/clear-handlers!)
+      (input-store/clear-continuous-values!))))
+
+(def ^:private !ticks (atom 0))
+
+(defn- tick-faders
+  "The next tick's [brightness faders]."
+  []
+  ((juxt brightness :faders) (show-clock/tick! (* (swap! !ticks inc) 16666667))))
+
+(defn- cc! [control v] (router/dispatch! (ie/control-change :midi 0 control v)))
+
+(defn- learn! [slot control]
+  (state/swap-state! assoc-in [:backend :input :learning-target] {:type :macro :slot slot})
+  (events/event-handler {:event/type :input/learn-captured :target-action {:type :macro :slot slot}
+                         :input-event (assoc (ie/control-change :midi 0 control 0.5) :store-key [:midi 0 control])}))
+
+(defn- macro-map [] (get-in (state/get-raw-state) [:config :input :macro-map]))
+
+(deftest cleared-fader-leaves-the-master-full-test
+  (with-faders {[:midi 0 7] :slider-1}
+    (fn []
+      (let [[full faders] (tick-faders)]
+        (is (pos? full))
+        (is (= {} faders) "the fader not moved yet: the Master at its default, full")
+        (cc! 7 0.5)
+        (is (close? (* 0.5 full) (first (tick-faders))))
+        (cc! 7 0.0)
+        (is (= [0.0 {:slider-1 0.0}] (tick-faders)) "at 0: dark")
+        (events/event-handler {:event/type :vibe/clear-control :slot :slider-1})
+        (is (= {} (macro-map)))
+        (let [[b faders] (tick-faders)]
+          (is (close? full b) "Cleared: the Master at its default, though the fader is still at 0")
+          (is (= {} faders)))
+        (cc! 7 0.0)
+        (is (close? full (first (tick-faders))) "and the control moves nothing now")))))
+
+(deftest relearned-fader-holds-its-default-until-it-moves-test
+  (with-faders {[:midi 0 7] :slider-1}
+    (fn []
+      (let [[full] (tick-faders)]
+        (cc! 7 0.0)
+        (is (zero? (first (tick-faders))))
+        (testing "learned again on CC 9, which hasn't moved: its default, not CC 7's 0"
+          (learn! :slider-1 9)
+          (is (= {[:midi 0 9] :slider-1} (macro-map)))
+          (is (= [true {}] ((juxt #(close? full (first %)) second) (tick-faders)))))
+        (testing "until CC 9 moves; CC 7 moves nothing"
+          (cc! 9 0.5)
+          (is (close? (* 0.5 full) (first (tick-faders))))
+          (cc! 7 1.0)
+          (is (= [true {:slider-1 0.5}] ((juxt #(close? (* 0.5 full) (first %)) second) (tick-faders)))))
+        (testing "learned for real, the catcher and the mapper both listening: the slot is where the control was left, at once"
+          (let [{s :state {p :promise} :input/await-learn}
+                (input-handlers/handle {:event/type :input/start-learn :target-action {:type :macro :slot :slider-1}
+                                        :capture :continuous :state (state/get-raw-state)})]
+            (state/reset-state! s)
+            (cc! 11 0.1)
+            (cc! 11 0.25)
+            (events/event-handler {:event/type :input/learn-captured :target-action {:type :macro :slot :slider-1}
+                                   :input-event (deref p 1000 nil)})
+            (is (= {[:midi 0 11] :slider-1} (macro-map)))
+            (is (close? (* 0.25 full) (first (tick-faders))) "no move needed after the learn")))))))
+
+(deftest undone-learn-leaves-the-master-full-test
+  (with-faders {}
+    (fn []
+      (let [[full] (tick-faders)]
+        (learn! :slider-1 7)
+        (is (= {[:midi 0 7] :slider-1} (macro-map)))
+        (cc! 7 0.0)
+        (is (zero? (first (tick-faders))))
+        (events/event-handler {:event/type :edit/undo})
+        (is (empty? (macro-map)) "the learn undone")
+        (is (= [true {}] ((juxt #(close? full (first %)) second) (tick-faders)))
+            "the Master at its default, though the fader is still at 0")
+        (events/event-handler {:event/type :edit/redo})
+        (is (= [0.0 {:slider-1 0.0}] (tick-faders)) "redone: it follows the fader again")))))
+
+(deftest new-and-open-give-a-full-master-test
+  (let [file "test-output/faders-open.zip"
+        saved (fn [macro-map] (persistent/project-files (-> (persistent/new-project-state (domains/build-initial-state))
+                                                              (assoc-in [:config :input :macro-map] macro-map))))]
+    (.mkdirs (io/file "test-output"))
+    (try
+      (with-faders {[:midi 0 7] :slider-1}
+        (fn []
+          (let [[full] (tick-faders)
+                dark! (fn []
+                        (state/swap-state! assoc-in [:config :input :macro-map] {[:midi 0 7] :slider-1})
+                        (cc! 7 0.0)
+                        (is (zero? (first (tick-faders)))))]
+            (dark!)
+            (testing "File > New: the starter Master, full, though the store still holds the old fader at 0"
+              (events/event-handler {:event/type :file/new-project :force? true})
+              (is (= {} (macro-map)))
+              (is (zero? (input-store/get-continuous-value [:midi 0 7] nil)))
+              (trigger! 0 0)
+              (is (= [true {}] ((juxt #(close? full (first %)) second) (tick-faders)))))
+            (testing "File > Open of a project with no fader learned: full"
+              (dark!)
+              (is (persistent/write-project! file (saved {})))
+              (events/event-handler {:event/type :file/open-result :file-path file})
+              (is (= {} (macro-map)))
+              (trigger! 0 0)
+              (is (close? full (first (tick-faders)))))
+            (testing "and one that learned the same control follows it at once: that fader is at 0"
+              (is (persistent/write-project! file (saved {[:midi 0 7] :slider-1})))
+              (events/event-handler {:event/type :file/open-result :file-path file})
+              (trigger! 0 0)
+              (is (= [0.0 {:slider-1 0.0}] (tick-faders)))))))
+      (finally
+        (io/delete-file file true)))))

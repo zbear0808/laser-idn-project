@@ -15,8 +15,9 @@
 
 (defn effects-tab
   "Complete effects tab with grid.
-   Uses generic-grid-tab with effects cells. While no cell has an effect, a
-   line says what they are for and how to start one."
+   Uses generic-grid-tab with effects cells. While no cell has an effect
+   (but a new project's Master: subs/effects-grid-empty?), a line says what
+   they are for and how to start one."
   [{:keys [fx/context]}]
   {:fx/type grid-tab/generic-grid-tab
    :cell-component cell/effects-cell

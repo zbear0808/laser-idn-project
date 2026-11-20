@@ -177,11 +177,14 @@
       (ui/wait-for! #(some? (hint "#grid-hint")))
       (is (= "Click: play or stop · Double-click or right-click: edit · Drag: move" (hint "#grid-hint")))
       (is (nil? (hint "#grid-empty-hint"))))
-    (testing "the Effects tab, while no cell has an effect: what they are, and how to start"
-      ;; A new project has its Master (vibe Phase 5): an old one's grid can be empty
-      (state/swap-state! assoc-in [:chains :effect-chains] {})
+    (testing "the Effects tab, while no cell has an effect but a new project's Master: what they are, and how to start"
+      (is (= "Master" (get-in (state/get-raw-state) [:chains :effect-chains [0 3] :name])))
       (ui/click! robot "#effects-tab")
       (ui/wait-for! #(= "Click: on or off · Double-click or right-click: edit · Drag: move" (hint "#grid-hint")))
+      (is (= "Effect cells change every playing cue. Double-click one to start" (hint "#grid-empty-hint"))))
+    (testing "an empty grid too"
+      (state/swap-state! assoc-in [:chains :effect-chains] {})
+      (ui/sync-fx!)
       (is (= "Effect cells change every playing cue. Double-click one to start" (hint "#grid-empty-hint"))))
     (testing "once a cell has one, the line goes"
       (state/swap-state! assoc-in [:chains :effect-chains [3 1]]
