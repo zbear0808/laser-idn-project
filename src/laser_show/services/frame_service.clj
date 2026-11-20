@@ -278,6 +278,27 @@
         frame))
     frame))
 
+(defn apply-global-effects-once
+  "The effects grid's chain (global-effects, or nil) on each frame of
+   frames-by-key ({key frame}, one cue's), at global-ctx, once per distinct
+   frame object (spec 01 §6.1): keys that hold one object get one result
+   object, so a picture placed under two keys stays one picture and a laser
+   draws it once (routing.compose). There is no value hashing: equal frames
+   that aren't identical? are two pictures. Empty frames are left out."
+  [frames-by-key global-effects global-ctx]
+  (let [done (java.util.IdentityHashMap.)]
+    (reduce-kv
+     (fn [acc zone-id zone-frame]
+       (if (seq zone-frame)
+         (assoc acc zone-id (if (.containsKey done zone-frame)
+                              (.get done zone-frame)
+                              (let [out (apply-global-effects-to-frame zone-frame global-effects global-ctx)]
+                                (.put done zone-frame out)
+                                out)))
+         acc))
+     {}
+     frames-by-key)))
+
 (defn- merge-zone-maps
   "Merge {zone-id frame} maps, concatenating frames that share a zone."
   [zone-maps]
@@ -375,13 +396,7 @@
                             (merge-zone-maps item-zone-maps))
          ;; The global effects run at the cue's tempo
          global-ctx (when global-effects (assoc global-ctx :bpm bpm))]
-     (reduce-kv
-      (fn [acc zone-id zone-frame]
-        (if (seq zone-frame)
-          (assoc acc zone-id (apply-global-effects-to-frame zone-frame global-effects global-ctx))
-          acc))
-      {}
-      combined-by-zone))))
+     (apply-global-effects-once combined-by-zone global-effects global-ctx))))
 
 (defn preview-data
   "What the preview shows for one tick, from its rendered cues

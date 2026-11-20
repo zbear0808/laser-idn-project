@@ -10,7 +10,8 @@
    Main Entry Point: group-items-by-zone - groups cue chain items by destination zone"
   (:require [clojure.tools.logging :as log]
             [laser-show.animation.chains :as chains]
-            [laser-show.common.util :as u]))
+            [laser-show.common.util :as u]
+            [laser-show.routing.rig :as rig]))
 
 
 ;; Debug Logging (one-shot per playback session to avoid per-frame spam)
@@ -138,17 +139,18 @@
    - timing-ctx: Timing context for keyframe evaluation
    - opts: Map with :tracks, :default-zone-id, and optional :inherited-zone
    
-   Returns: Single zone-group-id keyword"
+   Returns: the target in normal form (routing.rig/normalize-target), the
+   item's frame key: a keyword, or a vector of 2 or more refs, sorted"
   [item timing-ctx {:keys [tracks default-zone-id inherited-zone]}]
   (let [explicit-zone (or (:zone-group-id item)
                           (when-let [fx (first (item-zone-effects item))]
                             (get-in fx [:params :target-zone])))
         track-zone (when-let [tid (:track-id item)]
                      (resolve-track-effective-zone tracks tid nil))
-        result (or explicit-zone
-                   track-zone
-                   inherited-zone
-                   default-zone-id
+        result (or (rig/normalize-target explicit-zone)
+                   (rig/normalize-target track-zone)
+                   (rig/normalize-target inherited-zone)
+                   (rig/normalize-target default-zone-id)
                    :all)]
     (log-once [:resolve-item (:id item)]
               (format "[zone-debug] resolve-item: id=%s result=%s"

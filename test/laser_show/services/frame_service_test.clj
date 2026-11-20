@@ -7,6 +7,8 @@
    - Per-item zone routing generates separate frames per zone"
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.animation.cue-timing :as ct]
+            [laser-show.animation.effects :as effects]
+            [laser-show.routing.zone-effects :as ze]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]))
@@ -307,3 +309,71 @@
     (is (< (Math/abs (- 1.0 (width-at 0))) 0.01) "at the start the sawtooth is at 1")
     (is (< (Math/abs (- 0.5 (width-at 1000))) 0.01) "2 beats into 4: half")
     (is (< (width-at 3000) 0.01) "done: held at 0")))
+
+
+;; Zones plan Z3: the effects grid runs once per distinct picture (spec 01
+;; §6.1), and frame keys are targets in normal form (§1)
+
+(def ^:private grid-scale
+  "An effects-grid chain: half as wide."
+  {:effects [{:id :grid-scale :effect-id :scale :enabled? true :params {:x-scale 0.5 :y-scale 1.0}}]})
+
+(def ^:private grid-ctx
+  {:accumulated-beats 2.0 :accumulated-ms 1000.0 :phase-offset 0.0 :effective-beats 2.0 :time-ms 1000 :bpm 120.0})
+
+(defn- square [x] [[x 0.0 1.0 1.0 1.0] [(+ x 0.2) 0.0 1.0 1.0 1.0] [(+ x 0.2) 0.2 1.0 1.0 1.0] [x 0.2 1.0 1.0 1.0]])
+
+(defn- counting-chains
+  "(f) with effects/apply-effect-chain counted; [result calls]."
+  [f]
+  (let [calls (atom 0)
+        apply-chain effects/apply-effect-chain]
+    (with-redefs [effects/apply-effect-chain (fn [& args] (swap! calls inc) (apply apply-chain args))]
+      [(f) @calls])))
+
+(deftest global-effects-run-once-per-distinct-frame-test
+  (let [shared (square 0.0)
+        other (square 0.4)
+        [out calls] (counting-chains #(frame-service/apply-global-effects-once
+                                       {:auto/left shared :auto/right shared :all other} grid-scale grid-ctx))]
+    (is (= 2 calls) "two pictures, two runs of the chain, though three keys")
+    (is (identical? (:auto/left out) (:auto/right out)) "both keys hold the one result object")
+    (is (= (effects/apply-effect-chain shared grid-scale grid-ctx) (:auto/left out)) "what the chain makes of it")
+    (is (not (identical? (:auto/left out) (:all out))))
+    (testing "no chain: every frame as it was, the same objects"
+      (let [out (frame-service/apply-global-effects-once {:auto/left shared :auto/right shared} nil grid-ctx)]
+        (is (identical? shared (:auto/left out)))
+        (is (identical? shared (:auto/right out)))))
+    (testing "an empty frame is left out, as before"
+      (is (= #{:all} (set (keys (frame-service/apply-global-effects-once {:all other :auto/left []} grid-scale grid-ctx))))))))
+
+(deftest distinct-frames-are-not-shared-test
+  (let [a (square 0.0)
+        b (into [] (square 0.0))
+        [out calls] (counting-chains #(frame-service/apply-global-effects-once {:auto/left a :auto/right b} grid-scale grid-ctx))]
+    (is (= a b))
+    (is (= 2 calls) "equal frames that aren't one object are two pictures: no value hashing")
+    (is (not (identical? (:auto/left out) (:auto/right out))))
+    (testing "through the render: two items, two pictures, each through the chain once"
+      (let [cue {:destination-zone {:zone-group-id :all}
+                 :items [{:id :a :type :preset :preset-id :circle :enabled? true :effects [] :zone-group-id :auto/left}
+                         {:id :b :type :preset :preset-id :circle :enabled? true :effects [] :zone-group-id :auto/right}]}
+            [frames calls] (counting-chains #(frame-service/generate-frames-by-zone
+                                              cue test-timing-ctx {:global-effects grid-scale :global-ctx grid-ctx}))]
+        (is (= #{:auto/left :auto/right} (set (keys frames))))
+        (is (= 2 calls))
+        (is (not (identical? (:auto/left frames) (:auto/right frames))))))))
+
+(deftest frame-keys-are-normal-targets-test
+  (let [item (fn [id zone] {:id id :type :preset :preset-id :square :enabled? true :effects [] :zone-group-id zone})
+        render #(frame-service/generate-frames-by-zone {:destination-zone {:zone-group-id :all} :items %} test-timing-ctx)]
+    (is (= #{[:auto/left :auto/right]} (set (keys (render [(item :a [:auto/right :auto/left])]))))
+        "a vector target: its refs sorted, so a key")
+    (is (= #{:graphics} (set (keys (render [(item :a [:graphics :graphics])])))) "one ref left: that ref")
+    (let [frames (render [(item :a [:auto/right :auto/left]) (item :b [:auto/left :auto/right])])
+          one (render [(item :a [:auto/left :auto/right])])]
+      (is (= [[:auto/left :auto/right]] (keys frames)) "the same refs in another order: one key")
+      (is (= (frame-service/concatenate-frames [(val (first one)) (val (first one))]) (val (first frames)))
+          "and their frames joined, as two items on one zone are"))
+    (is (= [:auto/left :zone/a] (ze/resolve-item-zone-destination {:zone-group-id [:zone/a :auto/left]} {} {})))
+    (is (= :all (ze/resolve-item-zone-destination {} {} {})) "a keyword, or the fallback, as before")))
