@@ -338,3 +338,13 @@
       (is (= initial (get-in (persistent/new-project-state busy) [:ui :vibes])) "File > New")
       (is (= initial (get-in (persistent/apply-loaded-project busy (persistent/project-files busy) "x.zip") [:ui :vibes]))
           "File > Open"))))
+
+(deftest open-and-new-stop-the-test-pattern-test
+  (let [testing-pattern (-> (laser-show.state.domains/build-initial-state)
+                            (assoc-in [:projector-ui :calibrating-projector-id] :p)
+                            (assoc-in [:projector-ui :identify :p] 12345))]
+    (doseq [[label after] [["New" (persistent/new-project-state testing-pattern)]
+                           ["Open" (persistent/apply-loaded-project testing-pattern {} "/tmp/show.zip")]]]
+      (is (nil? (get-in after [:projector-ui :calibrating-projector-id])) label)
+      (is (= {} (get-in after [:projector-ui :identify])) label))))
+

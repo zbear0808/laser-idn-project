@@ -562,3 +562,61 @@
     (finally
       (swap! effects/!effect-registry #(apply dissoc % (map :id failing-calibration-effects))))))
 
+
+;; The test pattern (zones plan Z1)
+
+
+(defn- lit-points [frame] (remove #(and (< (% 2) 1e-6) (< (% 3) 1e-6) (< (% 4) 1e-6)) frame))
+
+(deftest test-pattern-shows-with-nothing-playing-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:projectors :p] {:zone-groups [:all] :safety {:limit [-0.8 -0.8 0.8 0.8]}})
+                          (assoc-in [:projector-ui :calibrating-projector-id] :p)
+                          (assoc-in [:projector-ui :calibration-brightness] 0.2)))
+  (let [out (#'me/projector-frame :p (snapshot [] :playing? false))]
+    (is (seq (lit-points out)) "the pattern shows, though nothing plays")
+    (is (inside-limit? [-0.8 -0.8 0.8 0.8] out) "through the safety zone")
+    (is (every? #(= [0.2 0.2 0.2] (subvec % 2 5)) (lit-points out)) "at the calibration brightness")
+    (is (= {:tick 1} (select-keys (meta out) [:tick]))))
+  (testing "only the calibrating projector shows it"
+    (state/swap-state! #(assoc-in % [:projectors :q] {:zone-groups [:all]}))
+    (is (nil? (#'me/projector-frame :q (snapshot [] :playing? false))))))
+
+(deftest test-pattern-replaces-the-show-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:projectors :p] {:zone-groups [:all]})
+                          (assoc-in [:projector-ui :calibrating-projector-id] :p)))
+  (let [out (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:all lit-line}}]))]
+    (is (not= lit-line out))
+    (is (< 300 (count out)) "the pattern, not the cue")))
+
+(deftest master-doesnt-dim-the-test-pattern-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:projectors :p] {:zone-groups [:all]})
+                          (assoc-in [:projector-ui :calibrating-projector-id] :p)
+                          (assoc-in [:projector-ui :calibration-brightness] 0.25)
+                          (assoc-in [:chains :effect-chains [0 3]]
+                                    {:name "Master" :active? true
+                                     :items [{:id (random-uuid) :effect-id :intensity :enabled? true
+                                              :params {:amount 0.0}}]})))
+  (let [out (#'me/projector-frame :p (snapshot [] :playing? false))]
+    (is (seq (lit-points out)))
+    (is (every? #(= [0.25 0.25 0.25] (subvec % 2 5)) (lit-points out))
+        "the pattern skips the render, so a Master at 0 can't hide it")))
+
+(deftest blackout-hides-the-test-pattern-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:projectors :p] {:zone-groups [:all]})
+                          (assoc-in [:projector-ui :calibrating-projector-id] :p)
+                          (assoc-in [:vibe-runtime :blackout?] true)))
+  (let [out (#'me/projector-frame :p (snapshot [] :playing? false))]
+    (is (= [] out))
+    (is (= {:tick 1} (select-keys (meta out) [:tick])))))
+
+(deftest blackout-leaves-a-grid-cue-alone-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:projectors :p] {:zone-groups [:all]})
+                          (assoc-in [:vibe-runtime :blackout?] true)))
+  (is (= lit-line (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:all lit-line}}])))
+      "BLACKOUT changes only the test pattern; a grid cue started by hand plays as today"))
+

@@ -23,9 +23,10 @@
    - Filter nil means show all content regardless of routing (master view)
    
    Calibration Mode:
-   - When a projector is in calibration mode, it receives a boundary box test pattern
-   - The test pattern has corner pin applied for live preview during calibration
-   - Only the calibrating projector receives the test pattern
+   - The test pattern (animation/test_pattern.clj) is made by the engine
+     (backend/multi_engine.clj projector-frame), not here: only the calibrating
+     or identified projector shows it, its grid through the corner pin and its
+     safety outline on top
    
    Performance Note:
    - All collection operations use eager evaluation (vec, mapv, filterv, keepv)

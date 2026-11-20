@@ -338,6 +338,8 @@
                               :doc "ID of projector currently in calibration mode, or nil"}
    :calibration-brightness {:default 0.1
                             :doc "Brightness for calibration test pattern (0.0-1.0)"}
+   :identify {:default {}
+              :doc "{projector-id until-ms}: projectors whose test pattern flashes until then (Identify)"}
    :discovered-devices {:default []
                         :doc "List of devices from last network scan"}
    :scanning? {:default false

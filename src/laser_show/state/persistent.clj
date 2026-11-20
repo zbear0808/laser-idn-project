@@ -165,8 +165,10 @@
       (assoc-in [:ui :notice] (get-in initial [:ui :notice]))
       (assoc-in [:ui :vibes] (get-in initial [:ui :vibes]))
       (assoc-in [:grid :selected-cell] nil)
+      ;; The test pattern and Identify belong to the show that was open
       (update :projector-ui merge (select-keys (:projector-ui initial)
-                                               [:active-projector :active-virtual-projector]))
+                                               [:active-projector :active-virtual-projector
+                                                :calibrating-projector-id :identify]))
       (cond-> (contains? state :effects) (assoc-in [:effects :selected-cell] nil))))
 
 (defn zip-contents->file-data

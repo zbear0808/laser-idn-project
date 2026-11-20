@@ -30,6 +30,7 @@
             [laser-show.animation.chains :as chains]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.safety :as safety]
+            [laser-show.animation.test-pattern :as test-pattern]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.idn.output-config :as output-config]))
 
@@ -160,13 +161,44 @@
       (output-errors/report! [:safety projector-id] e)
       (stamp snapshot []))))
 
+(defn- test-pattern-mode
+  "Is projector-id showing the test pattern at now-ms: :identify-on or
+   :identify-off while Identify flashes ([:projector-ui :identify id], until
+   its end time), else :calibrate while it is the calibrating projector, else
+   nil. Identify wins while it flashes."
+  [raw-state projector-id now-ms]
+  (let [until (get-in raw-state [:projector-ui :identify projector-id])]
+    (cond
+      (and until (< (long now-ms) (long until)))
+      (if (test-pattern/identify-on? now-ms until) :identify-on :identify-off)
+
+      (= projector-id (get-in raw-state [:projector-ui :calibrating-projector-id]))
+      :calibrate)))
+
+(defn- test-pattern-frame
+  "The test pattern (animation.test-pattern): the grid through the projector
+   effects, the safety outline on top in output space, at the calibration
+   brightness, then the safety stage."
+  [raw-state projector-id snapshot]
+  (let [brightness (get-in raw-state [:projector-ui :calibration-brightness] 0.1)]
+    (guard-safety raw-state projector-id snapshot
+                  (fn [zone]
+                    (frame-service/concatenate-frames
+                     [(apply-projector-effects (test-pattern/content-layer brightness) projector-id
+                                               (:projector-ctx snapshot))
+                      (test-pattern/safety-layer zone brightness)])))))
+
+(declare show-frame)
+
 (defn- projector-frame
   "The projector's frame for the show clock's tick in snapshot: each cue's
    frames for its zones, joined, then its projector effects at the first
-   cue's timing. Nil before the first tick, while nothing is playing and when
-   none of the cues reach its zones. Its safety zone comes last
-   (guard-safety): it clips what the projector effects made, and if it fails
-   the projector sends an empty frame. A snapshot older than
+   cue's timing (show-frame). While it shows the test pattern (calibration or
+   Identify), the pattern instead, even with nothing playing; dark during
+   BLACKOUT and in Identify's dark halves. Nil before the first tick, while
+   nothing is playing and when none of the cues reach its zones. Its safety
+   zone comes last (guard-safety): it clips what the projector effects made,
+   and if it fails the projector sends an empty frame. A snapshot older than
    show-time/STALE_MS throws \"Show clock stalled\". The frame carries the
    snapshot's {:tick :at-ns} as metadata, so the engine knows which tick it
    sends."
@@ -175,26 +207,38 @@
     (let [now (System/nanoTime)]
       (when (show-time/stale? snapshot now)
         (throw (stalled snapshot now))))
-    (when (:playing? snapshot)
-      (let [raw-state (state/get-raw-state)
-            zone-groups (get-projector-zone-groups raw-state projector-id)
-            cues (:cues snapshot)
-            combined-frame (combine-zone-frames
-                            (into [] (keep #(combine-zone-frames (extract-frames-for-zones (:zone-frames %) zone-groups)))
-                                  cues))
-            log-count (swap! routing-log-counter inc)]
-        
-        (when (and (dev-config/idn-stream-logging?)
-                   (zero? (mod log-count ROUTING_LOG_INTERVAL)))
-          (log/debug (format "Zone routing [%s]: zone-groups=%s, active-cues=%d, combined-points=%s"
-                             projector-id
-                             (pr-str zone-groups)
-                             (count cues)
-                             (if combined-frame (count combined-frame) "nil"))))
-        
-        (when combined-frame
-          (guard-safety raw-state projector-id snapshot
-                        (fn [_] (apply-projector-effects combined-frame projector-id (:projector-ctx snapshot)))))))))
+    (let [raw-state (state/get-raw-state)
+          pattern (test-pattern-mode raw-state projector-id (System/currentTimeMillis))]
+      (cond
+        ;; BLACKOUT darkens the test pattern, and only the pattern
+        (and pattern (get-in raw-state [:vibe-runtime :blackout?])) (stamp snapshot [])
+        (= :identify-off pattern) (stamp snapshot [])
+        ;; Even with nothing playing; it skips the render, so the effects grid
+        ;; (the Master included) never touches it
+        pattern (test-pattern-frame raw-state projector-id snapshot)
+        (:playing? snapshot) (show-frame raw-state projector-id snapshot)))))
+
+(defn- show-frame
+  "What the projector draws of the show: each cue's frames for its zones,
+   joined, then its projector effects and its safety zone. Nil when none of
+   the cues reach its zones."
+  [raw-state projector-id snapshot]
+  (let [zone-groups (get-projector-zone-groups raw-state projector-id)
+        cues (:cues snapshot)
+        combined-frame (combine-zone-frames
+                        (into [] (keep #(combine-zone-frames (extract-frames-for-zones (:zone-frames %) zone-groups)))
+                              cues))
+        log-count (swap! routing-log-counter inc)]
+    (when (and (dev-config/idn-stream-logging?)
+               (zero? (mod log-count ROUTING_LOG_INTERVAL)))
+      (log/debug (format "Zone routing [%s]: zone-groups=%s, active-cues=%d, combined-points=%s"
+                         projector-id
+                         (pr-str zone-groups)
+                         (count cues)
+                         (if combined-frame (count combined-frame) "nil"))))
+    (when combined-frame
+      (guard-safety raw-state projector-id snapshot
+                    (fn [_] (apply-projector-effects combined-frame projector-id (:projector-ctx snapshot)))))))
 
 (defn- create-projector-frame-provider
   "Create a frame provider function for a specific projector or virtual projector.
