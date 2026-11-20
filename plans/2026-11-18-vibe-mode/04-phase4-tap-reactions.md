@@ -376,6 +376,7 @@ So the real types cost what `:midi` does, within the noise (1–10 % apart in th
 | `clj -M:mac-arm:test` (full unit suite) | 1,003 tests, 33,496 assertions, 0 failures (32 s; baseline 951) |
 | `clj -M:test-ui:mac-arm:test-ui-headless -n` modulator-editor-test, perform-test, grid-test, cue-chain-list-test, reentry-test, timeline-editor-test, main-window-test, setup-dialogs-test | 69 tests, 316 assertions, 0 failures (`modulator-editor-test` twice more on its own: 0 failures) |
 | full UI suite | not run here: it runs after the merge |
+| after the merge, on `master` at `d298801` (vibe Phases 3 and 4a, UX Phases 2 and 3): `clj -M:mac-arm:test`, then the full UI suite | 1,048 tests, 33,931 assertions, 0 failures; UI 128 tests, 612 assertions, 0 failures |
 | `clj -M:kondo --lint` on the 42 touched files | 0 errors, 0 warnings |
 | probes v13–v16 and v18 | the probe namespace still loads; v13 prints `true` for both contexts and the clip |
 

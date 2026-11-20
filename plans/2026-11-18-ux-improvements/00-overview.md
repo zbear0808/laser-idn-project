@@ -592,4 +592,5 @@ Committed as `b9b9d55` on top of `f3ef771` (built as `1beb36d` on branch `ux-pha
 | `cue-chain-list-test` again, after its Delete width check changed | 6 tests, 17 assertions, 0 failures |
 | `clj -M:mac-arm:test` (full unit suite) | 963 tests, 33,111 assertions, 0 failures (957 before, 6 new) |
 | `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | Not run here: it runs after the merge onto master. 110 tests now, 97 before |
+| after the merge, on `master` at `d298801` (vibe Phases 3 and 4a, UX Phases 2 and 3): `clj -M:mac-arm:test`, then the full UI suite | 1,048 tests, 33,931 assertions, 0 failures; UI 128 tests, 612 assertions, 0 failures |
 | `clj -M:kondo --lint` on every touched file | 0 errors; 4 warnings, all there at `90e35c7`: a redundant `let` in `events/handlers/input.clj`, an unused require in `events/handlers/projector.clj`, two "Condition always true" in `views/dialogs/cue_chain_editor.clj` |
