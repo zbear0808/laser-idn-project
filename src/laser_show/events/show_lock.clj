@@ -47,9 +47,10 @@
     ;; the audience
     :rig/move-projector :rig/nudge-projector :rig/set-middle :rig/set-split-width
     :projectors/set-enabled :projectors/set-exclude-from-all :projectors/set-tag
-    ;; A show's rig onto this one (zones plan ZR): it rebuilds and re-routes
-    ;; the engines, and changes safety zones and calibration
-    :rig/set-up-from-show})
+    ;; A show's rig onto this one (zones plan ZR): they rebuild and re-route
+    ;; the engines, change safety zones and calibration, or re-route cues
+    :rig/set-up-from-show :rig/import-new-lasers :rig/request-use-show-setup :rig/use-show-setup
+    :rig/adopt-group :rig/repin})
 
 (def safety-edits
   "The safety zone edits (zones plan Z1). The lock refuses one only when it

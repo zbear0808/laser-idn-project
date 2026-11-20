@@ -97,18 +97,21 @@
    show's copy of a rig is only read, to match the show onto this one. It is
    kept in [:ui :dialogs :rig-report] while the show is open (rig-file):
    on a rig with no laser on, and a show made with lasers, it opens the
-   set-up question (Q-ZR-3)."
+   set-up question (Q-ZR-3); on a rig that is set up, the report, when
+   something doesn't fit (a ⚠ row: rig-file/warning-count)."
   [{:keys [state file-path contents]}]
   (log/info "Project loaded:" file-path)
   (let [loaded (persistent/apply-loaded-project state contents file-path)
         hardware (get contents (:hardware persistent/zip-filenames))
-        set-up? (boolean (and (not (rig-file/set-up? loaded)) (rig-file/set-up-question loaded hardware)))]
+        chains (get-in contents [(:content persistent/zip-filenames) :chains :projector-effects])
+        set-up? (boolean (and (not (rig-file/set-up? loaded)) (rig-file/set-up-question loaded hardware)))
+        warnings? (and (not set-up?) (pos? (rig-file/warning-count (rig-file/match-report loaded hardware chains))))]
     {:state (assoc-in loaded [:ui :dialogs :rig-report]
-                      {:open? set-up?
+                      {:open? (or set-up? warnings?)
                        :mode (if set-up? :set-up :report)
                        :file (file-name file-path)
                        :hardware hardware
-                       :chains (get-in contents [(:content persistent/zip-filenames) :chains :projector-effects])
+                       :chains chains
                        :pins (rig-file/pin-map state hardware)})}))
 
 (defn- handle-file-project-load-failed

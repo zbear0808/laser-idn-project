@@ -10,6 +10,7 @@
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.css.core :as css]
+            [laser-show.routing.rig :as rig]
             [laser-show.state.rig-file :as rig-file]
             [laser-show.subs :as subs]))
 
@@ -80,26 +81,162 @@
 
 ;; The report
 
+(defn- report-inputs
+  "What match-report reads of the state."
+  [state]
+  {:projectors (:projectors state)
+   :virtual-projectors (:virtual-projectors state)
+   :zone-groups (:zone-groups state)
+   :chains (select-keys (:chains state) [:cue-chains :projector-effects])
+   :rig-file (select-keys (:rig-file state) [:group-copy])
+   :project (select-keys (:project state) [:current-file])})
+
+(defn report
+  "rig-file/match-report for the show that is open, or nil before one was."
+  [context]
+  (when-let [{:keys [hardware chains]} (fx/sub-ctx context subs/dialog-data :rig-report)]
+    (rig-file/match-report (fx/sub-val context report-inputs) hardware chains)))
+
+(defn warning-count
+  "How many ⚠ rows the open show's report has."
+  [context]
+  (rig-file/warning-count (fx/sub-ctx context report)))
+
+(defn- lasers-in-order
+  "{:id :name} of this rig's lasers, left to right."
+  [state]
+  (mapv (fn [id] {:id id :name (rig/projector-name state id)})
+        (rig/effective-order (get-in state [:rig :order]) (:projectors state))))
+
+(defn- id-text [k] (if (keyword? k) (name k) (str k)))
+
+(defn- count-text [n one many] (str n " " (if (= 1 n) one many)))
+
+(defn- names-text
+  "\"Beams\", \"Beams and Crowd 2\", \"A, B and C\"."
+  [names]
+  (if (< (count names) 2)
+    (str/join names)
+    (str (str/join ", " (butlast names)) " and " (last names))))
+
+(defn- button [id text event]
+  {:fx/type :button :id id :text text :min-width :use-pref-size :style-class ["button-secondary"] :on-action event})
+
+(defn- report-row
+  "A ⚠ or ℹ line, and its buttons below it."
+  [id mark text buttons]
+  {:fx/type :v-box
+   :spacing 4
+   :children (cond-> [{:fx/type :label
+                       :id id
+                       :text (str mark " " text)
+                       :wrap-text true
+                       :min-height :use-pref-size
+                       :style (if (= "⚠" mark) (str "-fx-text-fill: " (css/orange) ";") "-fx-text-fill: #C8C8C8;")}]
+               (seq buttons) (conj {:fx/type :h-box :spacing 8 :padding {:left 18} :children buttons}))})
+
+(defn- group-row [{:keys [group-id cues same-name] group-name :name}]
+  (let [g (id-text group-id)]
+    (report-row (str "rig-report-group-" g) "⚠"
+                (str group-name " (used by " (count-text cues "cue" "cues") ") has no laser on this rig.")
+                (cond-> []
+                  same-name (conj (button (str "rig-report-use-group-" g)
+                                          (str "Use this rig's \"" (:name same-name) "\" (" (count-text (:lasers same-name) "laser" "lasers") ")")
+                                          {:event/type :rig/adopt-group :group-id group-id :from (:group-id same-name)}))
+                  true (conj (button (str "rig-report-choose-" g) "Choose lasers…"
+                                     {:event/type :rig/choose-lasers :group-id group-id}))))))
+
+(defn- pin-row [lasers {:keys [ref cues] laser-name :name}]
+  (let [l (id-text (rig/laser-of ref))
+        them (if (= 1 cues) "it" "them")]
+    (report-row (str "rig-report-pin-" l) "⚠"
+                (str (count-text cues "cue" "cues") (if (= 1 cues) " is" " are") " pinned to " laser-name ", which isn't on this rig.")
+                [{:fx/type :menu-button
+                  :id (str "rig-report-pin-to-" l)
+                  :text (str "Pin " them " to…")
+                  :disable (empty? lasers)
+                  :style-class ["button-secondary"]
+                  :items (mapv (fn [{:keys [id] n :name}]
+                                 {:fx/type :menu-item
+                                  :id (str "rig-report-pin-" l "-to-" (id-text id))
+                                  :text n
+                                  :on-action {:event/type :rig/repin :from ref :to (rig/laser-ref id)}})
+                               lasers)}
+                 (button (str "rig-report-send-to-all-" l) (str "Send " them " to All")
+                         {:event/type :rig/repin :from ref :to :all})])))
+
+(defn- differs-row [{:keys [projector-id what unreadable?] laser-name :name}]
+  (let [p (id-text projector-id)]
+    (if unreadable?
+      (report-row (str "rig-report-differs-" p) "ℹ" (str "The show's safety zone for " laser-name " can't be read.") [])
+      (let [both? (= #{:safety :calibration} what)
+            thing (cond both? "safety and calibration" (contains? what :safety) "safety zone" :else "calibration")]
+        (report-row (str "rig-report-differs-" p) "ℹ"
+                    (str "The show has its own " thing " for " laser-name ". This rig's " (if both? "are" "is") " in use.")
+                    [(button (str "rig-report-use-show-" p) (str "Use the show's for " laser-name "…")
+                             {:event/type :rig/request-use-show-setup :projector-id projector-id})])))))
+
+(defn- report-rows
+  [{:keys [file show-lasers rig-lasers groups-without-lasers missing-pins rig-groups-not-in-show
+           setup-differs matched-by-ip]}
+   lasers]
+  (concat
+   (map group-row groups-without-lasers)
+   (map #(pin-row lasers %) missing-pins)
+   (when (not= show-lasers rig-lasers)
+     [(report-row "rig-report-counts" "ℹ"
+                  (str file " was made on " (count-text show-lasers "laser" "lasers") "; this rig has " rig-lasers
+                       ". Left, Right, Odd and Even follow this rig.")
+                  [])])
+   (when (seq rig-groups-not-in-show)
+     (let [one? (= 1 (count rig-groups-not-in-show))]
+       [(report-row "rig-report-rig-groups" "ℹ"
+                    (str "This rig's " (if one? "group " "groups ") (names-text (map :name rig-groups-not-in-show))
+                         (if one? " isn't" " aren't") " in this show.")
+                    [(button "rig-report-add-groups" (if one? "Add it to this show" "Add them to this show")
+                             {:event/type :rig/add-groups-to-show :group-ids (mapv :group-id rig-groups-not-in-show)})])]))
+   (map differs-row setup-differs)
+   (when (seq matched-by-ip)
+     [(report-row "rig-report-by-ip" "ℹ"
+                  (str "Matched by IP only, check them: " (str/join ", " (map #(str (:name %) " (" (:host %) ")") matched-by-ip)))
+                  [])])))
+
 (defn- report-content
   [{:keys [fx/context]}]
-  (let [{:keys [file]} (fx/sub-ctx context subs/dialog-data :rig-report)]
+  (let [{:keys [file new-lasers] :as r} (fx/sub-ctx context report)
+        rows (report-rows r (fx/sub-val context lasers-in-order))
+        file (or (:file (fx/sub-ctx context subs/dialog-data :rig-report)) file)]
     {:fx/type :v-box
      :id "rig-report-dialog"
-     :spacing 10
+     :spacing 12
      :padding 20
-     :pref-width 560
+     :pref-width 600
      :style-class ["container-primary"]
      :children [(text-line "rig-report-title" (str file " on this rig") "header-primary")
                 (text-line "rig-report-kept" "Your rig's safety zones and calibration are kept.")
+                {:fx/type :scroll-pane
+                 :fit-to-width true
+                 :max-height 420
+                 :style "-fx-background-color: transparent; -fx-background: transparent;"
+                 :content {:fx/type :v-box
+                           :spacing 10
+                           :children (if (seq rows)
+                                       (vec rows)
+                                       [(text-line "rig-report-fits" (str "Everything in " file " fits this rig."))])}}
                 {:fx/type :h-box
                  :alignment :center-right
-                 :children [{:fx/type :button
-                             :id "rig-report-close"
-                             :text "Close"
-                             :cancel-button true
-                             :default-button true
-                             :style-class ["button-secondary"]
-                             :on-action {:event/type :ui/close-dialog :dialog-id :rig-report}}]}]}))
+                 :spacing 8
+                 :children (cond-> []
+                             (seq new-lasers) (conj (button "rig-report-import"
+                                                            (str "Import " (count-text (count new-lasers) "new laser" "new lasers") "…")
+                                                            {:event/type :rig/import-new-lasers}))
+                             true (conj {:fx/type :button
+                                         :id "rig-report-close"
+                                         :text "Close"
+                                         :cancel-button true
+                                         :default-button true
+                                         :style-class ["button-primary"]
+                                         :on-action {:event/type :ui/close-dialog :dialog-id :rig-report}}))}]}))
 
 
 (defn rig-report-dialog

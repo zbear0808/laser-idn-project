@@ -320,6 +320,22 @@
         (is (= {} (:projectors not-now)))
         (is (true? (get-in (open not-now two-lasers) [:ui :dialogs :rig-report :open?])))))))
 
+(deftest open-shows-the-report-only-with-a-warning-test
+  (let [open (fn [show]
+               (:state (menu/handle {:event/type :file/project-loaded :file-path "shows/friday.zip"
+                                     :contents (zip-contents-of show) :state document-state})))
+        fits (open two-lasers)
+        pinned (open (assoc-in two-lasers [:chains :cue-chains [0 0]]
+                               {:items [] :destination-zone {:zone-group-id :auto.laser/p-r}}))]
+    (testing "a show that fits this rig: no report, but what it kept for one"
+      (is (= {:open? false :mode :report :file "friday.zip"}
+             (select-keys (get-in fits [:ui :dialogs :rig-report]) [:open? :mode :file]))))
+    (testing "a cue pinned to a laser this rig doesn't have: the report"
+      (is (= {:open? true :mode :report} (select-keys (get-in pinned [:ui :dialogs :rig-report]) [:open? :mode]))))
+    (testing "an ℹ row alone doesn't open it"
+      (is (false? (get-in (open (assoc-in two-lasers [:projectors :p-l :safety] {:limit [-0.5 -0.5 0.5 0.5]}))
+                          [:ui :dialogs :rig-report :open?]))))))
+
 
 ;; Unsaved-changes guard (New / Open / Exit ask first when the project is dirty)
 

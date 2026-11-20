@@ -7,7 +7,9 @@
    The rig file holds the rig paths (rig-paths) and a copy of the groups the
    rig's lasers are in (group-copy), so New Project can bring them along and
    a show that doesn't define them can be told so."
-  (:require [laser-show.animation.safety :as safety]
+  (:require [clojure.string :as str]
+            [clojure.walk :as walk]
+            [laser-show.animation.safety :as safety]
             [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
             [laser-show.state.domains :as domains]
@@ -225,6 +227,198 @@
         (assoc-in [:rig :order] (mapv #(get pins % %) ids))
         (update :rig merge (select-keys rig-of-show [:middle :split-width]))
         (refs/replace-refs (renamed-since pins-then pins)))))
+
+;; The report (09 §7, §8)
+
+(defn- name-key
+  "A group's name to compare by: no case, no spaces around it; nil when blank."
+  [n]
+  (let [k (str/lower-case (str/trim (str n)))]
+    (when-not (str/blank? k) k)))
+
+(defn- listing
+  "The rig's projectors (ids) that list group."
+  [state group]
+  (into [] (comp (filter #(some #{group} (rig/custom-refs (val %)))) (map key)) (:projectors state)))
+
+(defn- cue-count [state ref]
+  (count (refs/cues-using (get-in state [:chains :cue-chains]) ref)))
+
+(defn- used-refs
+  "Every ref the show's cues name (routing.refs/cue-refs)."
+  [state]
+  (into #{} (mapcat refs/cue-refs) (remove nil? (vals (get-in state [:chains :cue-chains])))))
+
+(defn- by-name [k]
+  (fn [row] [(or (name-key (:name row)) "") (str (get row k))]))
+
+(defn- groups-without-lasers
+  "The show's groups its cues use that no projector or virtual projector
+   here is in, with this rig's group of the same name, if there is one."
+  [state]
+  (let [listed (listed-groups state)
+        used (used-refs state)
+        rig-groups (sort-by (comp str key) (group-copy state))]
+    (->> (:zone-groups state)
+         (remove (comp rig/derived-ref? key))
+         (filter (fn [[id _]] (and (contains? used id) (not (contains? listed id)))))
+         (map (fn [[id g]]
+                (let [k (name-key (:name g))
+                      same (when k (some (fn [[rid rg]] (when (and (not= rid id) (= k (name-key (:name rg)))) [rid rg])) rig-groups))]
+                  (cond-> {:group-id id :name (:name g) :cues (cue-count state id)}
+                    same (assoc :same-name {:group-id (first same) :name (:name (second same))
+                                            :lasers (count (listing state (first same)))})))))
+         (sort-by (by-name :group-id))
+         vec)))
+
+(defn- missing-pins
+  "The lasers the show's cues are pinned to that aren't on this rig, named
+   as in the show (hardware), with how many cues."
+  [state hardware]
+  (let [show-id (into {} (map (fn [[s r]] [r s])) (pin-map state hardware))]
+    (->> (used-refs state)
+         (keep (fn [ref]
+                 (when-let [id (rig/laser-of ref)]
+                   (when-not (contains? (:projectors state) id)
+                     {:ref ref :name (rig/projector-name hardware (get show-id id id)) :cues (cue-count state ref)}))))
+         (sort-by (by-name :ref))
+         vec)))
+
+(defn- strip-ids
+  "Calibration items as compared: without their ids and collapsed flags."
+  [items]
+  (walk/postwalk #(if (map? %) (dissoc % :id :collapsed?) %) (vec items)))
+
+(defn- setup-differs
+  "The lasers here whose safety zone or calibration the show's differs
+   from: {:projector-id :name :what #{:safety :calibration}}, and
+   :unreadable? when the show's zone can't be read."
+  [state hardware chains]
+  (let [pins (pin-map state hardware)]
+    (into []
+          (keep (fn [s]
+                  (let [r (get pins s)]
+                    (when (contains? (:projectors state) r)
+                      (let [show-zone (readable-zone (get-in hardware [:projectors s :safety]))
+                            what (cond-> #{}
+                                   (not= show-zone (readable-zone (get-in state [:projectors r :safety]))) (conj :safety)
+                                   (not= (strip-ids (get-in chains [s :items]))
+                                         (strip-ids (get-in state [:chains :projector-effects r :items])))
+                                   (conj :calibration))]
+                        (when (seq what)
+                          (cond-> {:projector-id r :name (rig/projector-name state r) :what what}
+                            (= ::unreadable show-zone) (assoc :unreadable? true))))))))
+          (show-lasers hardware))))
+
+(defn match-report
+  "What doesn't fit when a show (its hardware.edn and calibration chains) is
+   open on this rig (09 §8): {:file :show-lasers :rig-lasers (the lasers
+   on) :groups-without-lasers [{:group-id :name :cues :same-name {:group-id
+   :name :lasers}}]
+   :missing-pins [{:ref :name :cues}] :rig-groups-not-in-show [{:group-id
+   :name :lasers}] :setup-differs [{:projector-id :name :what :unreadable?}]
+   :matched-by-ip [{:name :host}] :new-lasers [show id …]}. The first two
+   are its ⚠ rows (warning-count)."
+  [state hardware chains]
+  (let [pins (pin-map state hardware)
+        without (groups-without-lasers state)
+        offered (into #{} (keep #(get-in % [:same-name :group-id])) without)
+        file (get-in state [:project :current-file])]
+    {:file (when file (last (str/split (str file) #"[/\\]")))
+     :show-lasers (count (show-lasers hardware))
+     :rig-lasers (count (filter rig/enabled? (vals (:projectors state))))
+     :groups-without-lasers without
+     :missing-pins (missing-pins state hardware)
+     :rig-groups-not-in-show (->> (group-copy state)
+                                  (remove (fn [[id _]] (or (contains? (:zone-groups state) id) (contains? offered id))))
+                                  (map (fn [[id g]] {:group-id id :name (:name g) :lasers (count (listing state id))}))
+                                  (sort-by (by-name :group-id))
+                                  vec)
+     :setup-differs (setup-differs state hardware chains)
+     :matched-by-ip (mapv (fn [id] {:name (rig/projector-name hardware id) :host (get-in hardware [:projectors id :host])})
+                          (matched-by-ip state hardware))
+     :new-lasers (filterv #(not (contains? (:projectors state) (get pins %))) (show-lasers hardware))}))
+
+(defn warning-count
+  "How many ⚠ rows a report has: a group with no laser here, a pinned laser
+   that isn't here. The report opens after an Open only with one."
+  [report]
+  (+ (count (:groups-without-lasers report)) (count (:missing-pins report))))
+
+
+;; The report's fixes, each a pure state → state for one button
+
+(defn import-new-lasers
+  "state with the show's lasers that aren't on this rig brought on
+   (bring-lasers: their setup, calibration and virtual projectors; zones as
+   for the set-up), at the ids their pins have. Never changes a laser
+   already here, nor the order: the new ones follow, by IP."
+  [state hardware chains pins-then]
+  (let [hardware (migration/zones-z2-rig hardware)
+        pins (pin-map state hardware)
+        ids (filterv #(not (contains? (:projectors state) (get pins %))) (show-lasers hardware))]
+    (-> state
+        (bring-lasers hardware chains ids pins)
+        (refs/replace-refs (renamed-since pins-then pins)))))
+
+(defn use-show-setup
+  "state with the show's safety zone (through safety/normalize) and
+   calibration for projector-id, a laser here (Use the show's…): nothing
+   else of it changes. nil when the show has no laser with its stable id,
+   or the show's zone can't be read (refused, as set-safety refuses it). A
+   show's laser with no zone or calibration gives it none."
+  [state hardware chains projector-id]
+  (when-let [s (and (contains? (:projectors state) projector-id)
+                    (some (fn [[s r]] (when (= r projector-id) s)) (pin-map state hardware)))]
+    (let [p (get-in hardware [:projectors s])
+          zone (when (contains? p :safety) (readable-zone (:safety p)))
+          chain (get chains s)]
+      (when-not (= ::unreadable zone)
+        (cond-> state
+          zone (assoc-in [:projectors projector-id :safety] zone)
+          (nil? zone) (update-in [:projectors projector-id] dissoc :safety)
+          chain (assoc-in [:chains :projector-effects projector-id] chain)
+          (nil? chain) (update-in [:chains :projector-effects] dissoc projector-id))))))
+
+(defn adopt-group
+  "state with the show's group group-id on the lasers in this rig's group
+   from (Use this rig's \"Graphics\"): each projector and virtual projector
+   that lists from lists group-id too."
+  [state group-id from]
+  (if (or (nil? group-id) (nil? from) (rig/derived-ref? group-id) (rig/derived-ref? from))
+    state
+    (let [adopt (fn [outputs]
+                  (reduce-kv (fn [m id o]
+                               (if (and (some #{from} (:zone-groups o)) (not (some #{group-id} (:zone-groups o))))
+                                 (assoc m id (update o :zone-groups #(conj (vec %) group-id)))
+                                 m))
+                             outputs
+                             outputs))]
+      (cond-> (update state :projectors adopt)
+        (contains? state :virtual-projectors) (update :virtual-projectors adopt)))))
+
+(defn add-groups-to-show
+  "state with this rig's groups group-ids (their copy's definitions) in the
+   show (Add them to this show)."
+  [state group-ids]
+  (let [copy (group-copy state)]
+    (reduce (fn [s id]
+              (if (and (contains? copy id) (not (contains? (:zone-groups s) id)))
+                (assoc-in s [:zone-groups id] (get copy id))
+                s))
+            state
+            group-ids)))
+
+(defn repin
+  "state with the cues pinned to from, a laser that isn't here, pinned to
+   to instead: one of this rig's lasers (Pin them to…), or :all (Send them
+   to All)."
+  [state from to]
+  (if (and (rig/laser-of from)
+           (not= from to)
+           (or (= :all to) (and (rig/laser-of to) (rig/known-ref? state to))))
+    (refs/replace-refs state {from to})
+    state))
 
 (defn- map-or-nil? [v]
   (or (nil? v) (map? v)))

@@ -169,3 +169,96 @@
     (is (= [-1.0 -1.0 1.0 1.0] (get-in (handle asked {:event/type :rig/set-up-from-show :confirmed? true})
                                        [:projectors :a :safety :limit]))
         "confirmed, it applies")))
+
+
+;; The report's buttons
+
+(defn- reporting
+  "rig-state (all on) with friday.zip's show open: its Graphics group, with
+   no laser here, used by a cue; a cue pinned to Laser D, which isn't here;
+   and Laser A's own, larger, zone."
+  []
+  (-> (rig-state)
+      (assoc-in [:projectors :a :zone-groups] [:group-gfx])
+      (assoc-in [:projectors :a :safety] {:limit [-0.5 -0.5 0.5 0.5] :blocked []})
+      (assoc-in [:rig-file :group-copy] {:group-gfx {:id :group-gfx :name "Graphics" :color "#000000"}})
+      (assoc-in [:chains :cue-chains] {[0 0] {:items [] :destination-zone {:zone-group-id :graphics}}
+                                       [1 0] {:items [] :destination-zone {:zone-group-id :auto.laser/d}}})
+      (assoc-in [:ui :dialogs :rig-report] {:open? true :mode :report :file "friday.zip"
+                                            :hardware show-hardware :chains {} :pins {:a :a :d :d}})
+      (history/mark-clean)))
+
+(deftest use-show-setup-asks-before-widening-a-live-laser-test
+  (let [s (reporting)
+        asked (handle s {:event/type :rig/request-use-show-setup :projector-id :a})]
+    (is (= {:open? true :title "Replace A's safety zone with the show's?" :message "This changes where A can draw."
+            :confirm-label "Replace" :confirm-event {:event/type :rig/use-show-setup :projector-id :a}}
+           (select-keys (get-in asked [:ui :dialogs :confirm]) [:open? :title :message :confirm-label :confirm-event]))
+        "Use the show's… asks first")
+    (testing "off the air, Replace applies: one undo step, never unsaved"
+      (let [effects (pipeline s {:event/type :rig/use-show-setup :projector-id :a})
+            used (:state effects)]
+        (is (= [-0.8 -0.8 0.8 0.8] (get-in used [:projectors :a :safety :limit])))
+        (is (= ["Use Show's Setup"] (mapv :description (get-in used [:history :undo-stack]))))
+        (is (false? (get-in used [:project :dirty?])))))
+    (testing "while A outputs, the larger area asks again (Z1's rule, D-28), and only then applies"
+      (let [live (assoc-in s [:backend :streaming :running?] true)
+            again (handle live {:event/type :rig/use-show-setup :projector-id :a})]
+        (is (= [-0.5 -0.5 0.5 0.5] (get-in again [:projectors :a :safety :limit])) "nothing yet")
+        (is (= "Allow light in a larger area?" (get-in again [:ui :dialogs :confirm :title])))
+        (is (= {:event/type :rig/use-show-setup :projector-id :a :confirmed? true}
+               (get-in again [:ui :dialogs :confirm :confirm-event])))
+        (is (= [-0.8 -0.8 0.8 0.8] (get-in (handle again {:event/type :rig/use-show-setup :projector-id :a :confirmed? true})
+                                           [:projectors :a :safety :limit])))))
+    (testing "a shrinking zone on a live laser applies at once"
+      (let [live (-> s
+                     (assoc-in [:backend :streaming :running?] true)
+                     (assoc-in [:projectors :a :safety] {:limit [-1.0 -1.0 1.0 1.0] :blocked []}))]
+        (is (= [-0.8 -0.8 0.8 0.8] (get-in (handle live {:event/type :rig/use-show-setup :projector-id :a})
+                                           [:projectors :a :safety :limit])))))
+    (testing "a show's zone that can't be read is refused, and not even asked about"
+      (let [bad (assoc-in s [:ui :dialogs :rig-report :hardware :projectors :a :safety] {:limit "x"})]
+        (is (identical? bad (handle bad {:event/type :rig/request-use-show-setup :projector-id :a})))
+        (is (identical? bad (handle bad {:event/type :rig/use-show-setup :projector-id :a :confirmed? true})))))))
+
+(deftest report-buttons-test
+  (let [s (reporting)
+        run (fn [state event] (:state (pipeline state event)))
+        last-label #(:description (peek (get-in % [:history :undo-stack])))]
+    (testing "Use this rig's \"Graphics\": the show's group on its lasers; the rig's"
+      (let [adopted (run s {:event/type :rig/adopt-group :group-id :graphics :from :group-gfx})]
+        (is (= [:group-gfx :graphics] (get-in adopted [:projectors :a :zone-groups])))
+        (is (= "Use Rig's Group" (last-label adopted)))
+        (is (false? (get-in adopted [:project :dirty?])))))
+    (testing "Pin them to… and Send them to All: the show's, unsaved"
+      (let [repinned (run s {:event/type :rig/repin :from :auto.laser/d :to :auto.laser/b})]
+        (is (= :auto.laser/b (get-in repinned [:chains :cue-chains [1 0] :destination-zone :zone-group-id])))
+        (is (= "Re-pin Cues" (last-label repinned)))
+        (is (true? (get-in repinned [:project :dirty?]))))
+      (is (= :all (get-in (run s {:event/type :rig/repin :from :auto.laser/d :to :all})
+                          [:chains :cue-chains [1 0] :destination-zone :zone-group-id]))))
+    (testing "Add them to this show"
+      (let [added (run s {:event/type :rig/add-groups-to-show :group-ids [:group-gfx]})]
+        (is (= "Graphics" (get-in added [:zone-groups :group-gfx :name])))
+        (is (= "Add Rig's Groups" (last-label added)))
+        (is (true? (get-in added [:project :dirty?])))))
+    (testing "Import 1 new laser…: Laser D comes in, and its cue reaches it"
+      (let [imported (run s {:event/type :rig/import-new-lasers})]
+        (is (= "Laser D" (get-in imported [:projectors :d :name])))
+        (is (= (get-in s [:projectors :a]) (get-in imported [:projectors :a])) "Laser A is left as it is")
+        (is (= "Import Lasers" (last-label imported)))))
+    (testing "Choose lasers…: the report closes and the group opens in its tab"
+      (let [chosen (run s {:event/type :rig/choose-lasers :group-id :graphics})]
+        (is (false? (get-in chosen [:ui :dialogs :rig-report :open?])))
+        (is (= [:zones :graphics] [(get-in chosen [:ui :active-tab]) (get-in chosen [:zone-group-ui :selected-group])]))))
+    (testing "What doesn't fit (n) reopens it"
+      (let [closed (assoc-in s [:ui :dialogs :rig-report :open?] false)]
+        (is (= {:open? true :mode :report} (select-keys (get-in (run closed {:event/type :rig/open-report}) [:ui :dialogs :rig-report]) [:open? :mode])))
+        (is (= :set-up (get-in (run (update closed :projectors update-vals #(assoc % :enabled? false)) {:event/type :rig/open-report})
+                               [:ui :dialogs :rig-report :mode]))
+            "on a rig with no laser on, as the set-up question")))
+    (testing "called bare, every button does nothing"
+      (let [bare (rig-state)]
+        (doseq [type [:rig/adopt-group :rig/repin :rig/add-groups-to-show :rig/import-new-lasers :rig/use-show-setup
+                      :rig/request-use-show-setup :rig/open-report :rig/choose-lasers]]
+          (is (identical? bare (handle bare {:event/type type})) (str type)))))))

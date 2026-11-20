@@ -7,7 +7,8 @@
    nothing to press while all is well."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
-            [laser-show.css.core :as css])
+            [laser-show.css.core :as css]
+            [laser-show.views.dialogs.rig-report :as rig-report])
   (:import [java.time Instant ZoneId]
            [java.time.format DateTimeFormatter]
            [java.util Locale]))
@@ -53,26 +54,36 @@
                   " -fx-text-fill: #1E1E1E; -fx-font-size: 12; -fx-font-weight: bold;")))
 
 (defn rig-file-status
-  "The rig file's line (or banner) under the Projectors tab's title. Takes
-   no room without a rig file."
+  "The rig file's line (or banner) under the Projectors tab's title, and at
+   its right, while an open show has ⚠ rows, What doesn't fit (n), which
+   reopens its report. Takes no room when there is nothing to say."
   [{:keys [fx/context]}]
   (let [rig-file (fx/sub-val context :rig-file)
-        {:keys [text tone retry? banner?] :as line} (status-line rig-file (System/currentTimeMillis) (ZoneId/systemDefault))]
-    (if (nil? line)
+        {:keys [text tone retry? banner?] :as line} (status-line rig-file (System/currentTimeMillis) (ZoneId/systemDefault))
+        warnings (fx/sub-ctx context rig-report/warning-count)]
+    (if (and (nil? line) (zero? warnings))
       {:fx/type :region :managed false :visible false}
       {:fx/type :h-box
        :spacing 8
        :alignment :center-left
-       :children (cond-> [{:fx/type :label
-                           :id (if banner? "rig-file-banner" "rig-file-status")
-                           :text text
-                           :wrap-text true
-                           :min-height :use-pref-size
-                           :style (tone-style tone)
-                           :tooltip {:fx/type :tooltip :text (path-text (:path rig-file))}}]
+       :children (cond-> []
+                   line (conj {:fx/type :label
+                               :id (if banner? "rig-file-banner" "rig-file-status")
+                               :text text
+                               :wrap-text true
+                               :min-height :use-pref-size
+                               :style (tone-style tone)
+                               :tooltip {:fx/type :tooltip :text (path-text (:path rig-file))}})
                    retry? (conj {:fx/type :button
                                  :id "rig-file-retry"
                                  :text "Retry"
                                  :min-width :use-pref-size
                                  :style-class ["button-secondary"]
-                                 :on-action {:event/type :rig/retry-write}}))})))
+                                 :on-action {:event/type :rig/retry-write}})
+                   (pos? warnings) (conj {:fx/type :region :h-box/hgrow :always}
+                                         {:fx/type :hyperlink
+                                          :id "rig-report-link"
+                                          :text (str "What doesn't fit (" warnings ")")
+                                          :min-width :use-pref-size
+                                          :style (str "-fx-text-fill: " (css/orange) ";")
+                                          :on-action {:event/type :rig/open-report}}))})))

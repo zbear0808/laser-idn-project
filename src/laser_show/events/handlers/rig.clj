@@ -9,6 +9,7 @@
    notice. The writes themselves are asked for by the pipeline
    (handlers/rig_autosave.clj)."
   (:require [laser-show.events.handlers.rig-autosave :as rig-autosave]
+            [laser-show.events.handlers.zone-groups :as zone-groups]
             [laser-show.events.helpers :as h]
             [laser-show.events.safety-guard :as guard]
             [laser-show.routing.rig :as rig]
@@ -173,6 +174,99 @@
                                       :open? false :mode :report :pins (rig-file/pin-map state hardware)))
                        event))))
 
+
+;; The report's buttons (09 §7)
+
+(defn- handle-open-report
+  "What doesn't fit (n), on the Projectors tab: the report again, or the
+   set-up question while no laser here is on. Nothing before a show was
+   opened."
+  [{:keys [state]}]
+  (if-let [{:keys [hardware]} (opened-show state)]
+    {:state (update-in state [:ui :dialogs :rig-report] assoc
+                       :open? true
+                       :mode (if (and (not (rig-file/set-up? state)) (rig-file/set-up-question state hardware))
+                               :set-up
+                               :report))}
+    {:state state}))
+
+(defn- handle-choose-lasers
+  "Choose lasers…: the report closes and the group opens in the Zone Groups
+   tab (:zone-groups/show), to tick its lasers there."
+  [{:keys [group-id state]}]
+  (if (and (some? group-id) (opened-show state))
+    (zone-groups/handle {:event/type :zone-groups/show
+                         :group-id group-id
+                         :state (assoc-in state [:ui :dialogs :rig-report :open?] false)})
+    {:state state}))
+
+(defn- handle-adopt-group
+  "Use this rig's \"Graphics\": the show's group group-id on the lasers in
+   this rig's same-named group from. The rig's: undoable, saved by itself."
+  [{:keys [group-id from state]}]
+  {:state (rig-file/adopt-group state group-id from)})
+
+(defn- handle-repin
+  "Pin them to… (a laser here) or Send them to All: the cues pinned to
+   from, a laser that isn't here, go to to. The show's: undoable, unsaved."
+  [{:keys [from to state]}]
+  {:state (rig-file/repin state from to)})
+
+(defn- handle-add-groups-to-show
+  "Add them to this show: this rig's groups group-ids, as the rig's copy
+   defines them. The show's: undoable, unsaved."
+  [{:keys [group-ids state]}]
+  {:state (rig-file/add-groups-to-show state group-ids)})
+
+(defn- handle-import-new-lasers
+  "Import n new lasers…: the show's lasers that aren't on this rig, with
+   their setup (rig-file/import-new-lasers). One undo step; a laser already
+   here never changes."
+  [{:keys [state]}]
+  (let [{:keys [hardware chains pins]} (opened-show state)]
+    (if (seq (:projectors hardware))
+      {:state (-> (rig-file/import-new-lasers state hardware chains pins)
+                  (assoc-in [:ui :dialogs :rig-report :pins] (rig-file/pin-map state hardware)))}
+      {:state state})))
+
+(defn- what-text [what]
+  (cond
+    (= #{:safety} what) "safety zone"
+    (= #{:calibration} what) "calibration"
+    :else "safety zone and calibration"))
+
+(defn- handle-request-use-show-setup
+  "Use the show's for Laser L…: asks first (the shared confirm), Replace
+   going on to :rig/use-show-setup. Not for a laser the show's setup doesn't
+   differ for, nor one whose zone in the show can't be read."
+  [{:keys [projector-id state]}]
+  (let [{:keys [hardware chains] :as shown} (opened-show state)
+        row (when shown
+              (some #(when (= projector-id (:projector-id %)) %)
+                    (:setup-differs (rig-file/match-report state hardware chains))))]
+    (if (or (nil? row) (:unreadable? row))
+      {:state state}
+      (let [n (guard/projector-name state projector-id)]
+        {:state (assoc-in state [:ui :dialogs :confirm]
+                          {:open? true
+                           :title (str "Replace " n "'s " (what-text (:what row)) " with the show's?")
+                           :message (str "This changes where " n " can draw.")
+                           :confirm-label "Replace"
+                           :confirm-event {:event/type :rig/use-show-setup :projector-id projector-id}})}))))
+
+(defn- handle-use-show-setup
+  "Replace: the show's safety zone and calibration for projector-id
+   (rig-file/use-show-setup, the zone through safety/normalize; one it can't
+   read is refused). While the laser outputs and its area grows, Z1's
+   \"Allow light in a larger area?\" first (D-28), which sends this again
+   with :confirmed? true. One undo step."
+  [{:keys [projector-id state] :as event}]
+  (let [{:keys [hardware chains]} (opened-show state)]
+    (if-let [after (when (seq (:projectors hardware))
+                     (rig-file/use-show-setup state hardware chains projector-id))]
+      (ask-if-it-grows state after event)
+      {:state state})))
+
 (defn handle
   "Dispatch :rig/* events."
   [{:keys [event/type] :as event}]
@@ -190,4 +284,12 @@
     :rig/startup-notice (handle-startup-notice event)
     ;; A show's rig onto this one
     :rig/set-up-from-show (handle-set-up-from-show event)
+    :rig/open-report (handle-open-report event)
+    :rig/choose-lasers (handle-choose-lasers event)
+    :rig/adopt-group (handle-adopt-group event)
+    :rig/repin (handle-repin event)
+    :rig/add-groups-to-show (handle-add-groups-to-show event)
+    :rig/import-new-lasers (handle-import-new-lasers event)
+    :rig/request-use-show-setup (handle-request-use-show-setup event)
+    :rig/use-show-setup (handle-use-show-setup event)
     {}))

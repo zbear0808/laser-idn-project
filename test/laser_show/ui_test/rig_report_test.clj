@@ -158,3 +158,46 @@
       (ui/wait-for! 5000 #(= 2 (count (:projectors (:doc (rig-store/read! (rig-path)))))))
       (is (= "Set Up Rig From Show" (get-in (app-state) [:history :undo-stack 0 :description])) "one undo step")
       (is (false? (get-in (app-state) [:project :dirty?])) "and the show isn't unsaved for it"))))
+
+
+;; The report, after opening a show on a rig that is set up
+
+(defn- start-on-laser-l!
+  "Mount the app on a rig file holding Laser L, on."
+  []
+  (rig-store/write! (rig-path) rig-doc)
+  (start-with-rig!))
+
+(deftest report-choose-lasers-opens-the-group-test
+  (let [robot (ui/robot)
+        show (show-zip! "graphics.zip" {:projector-10-0-0-5-1 (laser "Laser L" "10.0.0.5")}
+                        {[0 0] {:items [] :destination-zone {:zone-group-id :graphics}}})]
+    (start-on-laser-l!)
+    (open! show)
+    (ui/assert-text! "#rig-report-title" "graphics.zip on this rig")
+    (ui/assert-text! "#rig-report-group-graphics" "⚠ Graphics (used by 1 cue) has no laser on this rig.")
+    (ui/click! robot "#rig-report-choose-graphics")
+    (ui/wait-for! #(= [:zones :graphics] [(get-in (app-state) [:ui :active-tab]) (get-in (app-state) [:zone-group-ui :selected-group])]))
+    (ui/wait-for! #(not (ui/visible? "#rig-report-title")))
+    (testing "the Projectors tab's link reopens it while the show is open"
+      (ui/click! robot "#projectors-tab")
+      (ui/assert-text! "#rig-report-link" "What doesn't fit (1)")
+      (ui/click! robot "#rig-report-link")
+      (ui/assert-visible! "#rig-report-title"))))
+
+(deftest report-pin-to-repins-the-cues-test
+  (let [robot (ui/robot)
+        show (show-zip! "beams.zip" {:projector-10-0-0-5-1 (laser "Laser L" "10.0.0.5")
+                                     :projector-10-0-0-9-1 (laser "SR Beam" "10.0.0.9")}
+                        {[0 0] {:items [] :destination-zone {:zone-group-id :auto.laser/projector-10-0-0-9-1}}
+                         [1 0] {:items [] :destination-zone {:zone-group-id :auto.laser/projector-10-0-0-9-1}}})]
+    (start-on-laser-l!)
+    (open! show)
+    (ui/assert-text! "#rig-report-pin-projector-10-0-0-9-1" "⚠ 2 cues are pinned to SR Beam, which isn't on this rig.")
+    (ui/click! robot "#rig-report-pin-to-projector-10-0-0-9-1")
+    (ui/click! robot "#rig-report-pin-projector-10-0-0-9-1-to-projector-10-0-0-5-1")
+    (ui/wait-for! #(= [:auto.laser/projector-10-0-0-5-1 :auto.laser/projector-10-0-0-5-1]
+                      (mapv (fn [cell] (get-in (app-state) [:chains :cue-chains cell :destination-zone :zone-group-id])) [[0 0] [1 0]])))
+    (ui/wait-for! #(nil? (ui/query "#rig-report-pin-projector-10-0-0-9-1")))
+    (is (true? (get-in (app-state) [:project :dirty?])) "a show edit: unsaved")
+    (is (= "Re-pin Cues" (get-in (app-state) [:history :undo-stack 0 :description])))))
