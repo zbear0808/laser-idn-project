@@ -8,6 +8,7 @@
    
    State is stored at [:backend :input :midi] and [:backend :input :osc]"
   (:require [clojure.string :as str]
+            [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.events.helpers :as h]
             [laser-show.input.midi :as midi]
             [laser-show.input.osc :as osc]
@@ -230,11 +231,11 @@
     (deliver p nil)))
 
 (defn- learn-target
-  "What a learn is for: the target action's :type and :target (a cell) or
-   :role (a vibe role). The binding it learns is the whole action, its
-   :behavior included."
+  "What a learn is for: the target action's :type and :target (a cell),
+   :role (a vibe role) or :slot (a fader). The binding it learns is the
+   whole action, its :behavior included."
   [target-action]
-  (select-keys target-action [:type :target :role]))
+  (select-keys target-action [:type :target :role :slot]))
 
 (defn- wizard-target
   "The learn Learn all waits on ([:ui :vibes :wizard], handlers/vibes.clj):
@@ -251,22 +252,47 @@
     (and (get-in state [:ui :vibes :wizard]) (not= target (wizard-target state)))
     (assoc-in [:ui :vibes :wizard] nil)))
 
+(def ^:private fader-travel
+  "How far (0..1) a control must move for a fader's learn to take it: about
+   10 of a MIDI CC's 127 steps, more than a fader's noise."
+  0.08)
+
+(defn- fader-catcher
+  "The router handler of a fader's learn: it keeps the first value it sees
+   for each input store key an event writes (input-mapper/store-keys: a
+   CC, an axis, an OSC value; a note or a button writes none), and delivers
+   to p the first event whose key has moved fader-travel or more from it,
+   with that key as :store-key."
+  [p]
+  (let [!first (atom {})]
+    (fn [event]
+      (let [v (max 0.0 (min 1.0 (double (or (:value event) 0.0))))
+            ks (input-mapper/store-keys event)
+            seen (swap! !first (fn [m] (reduce #(cond-> %1 (not (contains? %1 %2)) (assoc %2 v)) m ks)))]
+        (when-let [k (some #(when (>= (Math/abs (- v (double (get seen %)))) fader-travel) %) ks)]
+          (deliver p (assoc event :store-key k))
+          (router/unregister-handler! ::generalized-input-learn))))))
+
 (defn- handle-input-start-learn
   "Start generic input learn mode for a target action.
    Registers a temporary global handler to capture the next input event
-   and bind it to the target action."
-  [{:keys [state target-action]}]
+   and bind it to the target action: a press (a note or a button), or with
+   :capture :continuous, as a fader's learn ({:type :macro :slot}) always
+   is, a control that moves (fader-catcher)."
+  [{:keys [state target-action capture]}]
   (release-pending-learn!)
   (let [learn-promise (promise)]
     (reset! !pending-learn learn-promise)
     ;; Register a global handler to catch the next trigger event
     (router/register-global-handler! ::generalized-input-learn
-                                     (fn [event]
-                                       ;; Only capture discrete triggers (NoteOn or Trigger type)
-                                       (when (or (input-events/note-on? event)
-                                                 (input-events/trigger? event))
-                                         (deliver learn-promise event)
-                                         (router/unregister-handler! ::generalized-input-learn))))
+                                     (if (or (= :continuous capture) (= :macro (:type target-action)))
+                                       (fader-catcher learn-promise)
+                                       (fn [event]
+                                         ;; Only capture discrete triggers (NoteOn or Trigger type)
+                                         (when (or (input-events/note-on? event)
+                                                   (input-events/trigger? event))
+                                           (deliver learn-promise event)
+                                           (router/unregister-handler! ::generalized-input-learn)))))
 
     ;; The :input/await-learn effect waits for the captured input off the event
     ;; thread, then dispatches :input/learn-captured, which writes the binding
@@ -339,6 +365,27 @@
                                         "Learn Trigger")}
           (and wizard (seq queue))
           (assoc :dispatch {:event/type :input/start-learn :target-action {:type :vibe :role (first queue)}}))))))
+
+(defn- handle-fader-captured
+  "Bind the control a fader's learn caught (its input store key, :store-key)
+   to the fader's slot in [:config :input :macro-map], where the input
+   mapper looks it up: the slot's other control goes (one control a slot),
+   and the key's other slot with it (one slot a key). Ignored if the learn
+   was cancelled or restarted for another target, and for an input that
+   writes no such key: a note or a button never binds a fader."
+  [{:keys [state input-event target-action]}]
+  (let [target (learn-target target-action)
+        learning? (= (get-in state [:backend :input :learning-target]) target)
+        k (some #{(:store-key input-event)} (input-mapper/store-keys input-event))
+        slot (:slot target-action)]
+    (if (and learning? k slot)
+      {:state (-> state
+                  (update-in [:config :input :macro-map] #(into {} (remove (fn [[_ s]] (= slot s))) %))
+                  (assoc-in [:config :input :macro-map k] slot)
+                  (update-in [:backend :input] dissoc :learning-target))
+       :history/description "Learn Fader"}
+      {:state (cond-> state
+                learning? (update-in [:backend :input] dissoc :learning-target))})))
 
 (defn- handle-input-cancel-learn
   "Cancel generic input learn mode, and Learn all with it."
@@ -431,7 +478,9 @@
 
     ;; Generalized triggers
     :input/start-learn (handle-input-start-learn event)
-    :input/learn-captured (handle-input-learn-captured event)
+    :input/learn-captured (if (= :macro (get-in event [:target-action :type]))
+                            (handle-fader-captured event)
+                            (handle-input-learn-captured event))
     :input/cancel-learn (handle-input-cancel-learn event)
     :input/remove-trigger (handle-input-remove-trigger event)
     :input/clear-cell-triggers (handle-input-clear-cell-triggers event)

@@ -1,7 +1,7 @@
 (ns laser-show.ui-test.perform-test
   "The Perform tab: five pads played by mouse, touch or a learned control,
-   the vibe strip, the banner, learning a pad's control, and a pointer's
-   hold ending when the window loses focus.
+   the vibe strip, the banner, learning a pad's control, a pointer's hold
+   ending when the window loses focus, and the faders' meters.
    
    The headless robot marks every mouse event synthesized, as JavaFX marks
    the ones it makes from a touch, and the pads leave those out (a touch
@@ -11,7 +11,9 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.input-mapper :as input-mapper]
+            [laser-show.input.events :as input-events]
             [laser-show.input.router :as input-router]
+            [laser-show.input.store :as store]
             [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
@@ -20,6 +22,7 @@
            [com.sun.javafx.tk.quantum WindowStage]
            [javafx.event Event]
            [javafx.scene Node]
+           [javafx.scene.control ProgressBar]
            [javafx.scene.input MouseButton MouseEvent TouchEvent TouchPoint TouchPoint$State]
            [javafx.stage Stage]))
 
@@ -342,7 +345,7 @@
     (ui/wait-for! #(= {:id 1 :held? true :src :pad} (pulse :accent)))
     (ui/wait-for! #(ui/has-style-class? "#vibe-pad-accent" "vibe-pad-held"))
     (is (empty? (get-in (app-state) [:playback :active-cues])) "it plays no cue")
-    (is (true? (get-in (app-state) [:chains :effect-chains [0 3] :active?])) "the vibe's reactions are on")
+    (is (true? (get-in (app-state) [:chains :effect-chains [1 3] :active?])) "the vibe's reactions are on (the Master has [0 3])")
     (ui/assert-text! "#vibe-pad-accent-now" "Effects only")
     (ui/release-node! robot "#vibe-pad-accent")
     (ui/wait-for! #(= {:id 1 :held? false} (pulse :accent)))
@@ -352,3 +355,51 @@
       (state/swap-state! assoc-in [:config :vibes :library :vibe-1 :hit :cells] [])
       (ui/mouse-click! robot "#vibe-pad-hit")
       (ui/assert-text! "#vibe-pad-hit-now" "Nothing to play"))))
+
+
+;; The faders' meters (plans/2026-11-18-vibe-mode/05)
+
+(defn- progress [selector]
+  (let [^ProgressBar bar (first (ui/query-all selector))]
+    (ui/on-fx-thread #(.getProgress bar))))
+
+(deftest meters-follow-the-store-and-say-not-wired-test
+  (let [robot (ui/robot)
+        t0 (System/nanoTime)
+        n (atom 0)
+        tick! #(show-clock/tick! (+ t0 (* (swap! n inc) 17 1000000)))
+        fader! (fn [slot v] (store/set-continuous-value! [:macro slot] v) (tick!))]
+    (try
+      (store/clear-continuous-values!)
+      (open-perform! robot)
+      (tick!)
+      (ui/assert-text! "#vibe-meter-slider-1-text" "Intensity –")
+      (ui/assert-text! "#vibe-meter-slider-2-text" "Morph – · not wired")
+      (is (ui/has-style-class? "#vibe-meter-slider-2" "vibe-meter-off") "invariant 6: dimmed, and says so")
+      (is (not (ui/has-style-class? "#vibe-meter-slider-1" "vibe-meter-off")) "a new project's Master wires Intensity")
+      (testing "a fader's value, drawn from the input store at the next tick"
+        (fader! :slider-1 0.45)
+        (ui/assert-text! "#vibe-meter-slider-1-text" "Intensity 45 %")
+        (is (< (Math/abs (- 0.45 (progress "#vibe-meter-slider-1-bar"))) 1e-9))
+        (fader! :slider-1 0.0)
+        (ui/assert-text! "#vibe-meter-slider-1-text" "Intensity 0 %")
+        (is (= 0.0 (progress "#vibe-meter-slider-1-bar")) "invariant 3: dark, and Perform says so"))
+      (testing "from a learned control, through the input mapper"
+        (flush-event-queue!)
+        (state/swap-state! assoc-in [:config :input :macro-map] {[:midi 0 7] :slider-1})
+        (input-router/dispatch! (input-events/control-change :midi 0 7 0.25))
+        (tick!)
+        (ui/assert-text! "#vibe-meter-slider-1-text" "Intensity 25 %"))
+      (testing "a Morph in the vibe that plays wires fader 2"
+        (events/dispatch! {:event/type :vibe/add-morph :vibe :vibe-1 :kind :size})
+        (ui/wait-for! #(not (ui/has-style-class? "#vibe-meter-slider-2" "vibe-meter-off")))
+        (ui/assert-text! "#vibe-meter-slider-2-text" "Morph –")
+        (fader! :slider-2 1.0)
+        (ui/assert-text! "#vibe-meter-slider-2-text" "Morph 100 %"))
+      (testing "in a vibe that doesn't, it does nothing, and the meter says so"
+        (ui/click! robot "#vibe-chip-vibe-2")
+        (ui/wait-for! #(= :vibe-2 (rt :current)))
+        (ui/wait-for! #(ui/has-style-class? "#vibe-meter-slider-2" "vibe-meter-off"))
+        (ui/assert-text! "#vibe-meter-slider-2-text" "Morph 100 % · not wired"))
+      (finally
+        (store/clear-continuous-values!)))))

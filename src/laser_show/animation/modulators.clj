@@ -130,6 +130,16 @@
    {:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}
    {:key :max :label "Max" :type :float :min -10.0 :max 10.0 :default 1.0}])
 
+(def ^:private macro-params
+  "Fader (:macro) parameters: the fader it follows, whichever control is
+   learned for it (plans/2026-11-18-vibe-mode/05), the range its 0..1 maps
+   to, and where it is taken to be (0..1) until it first moves."
+  [{:key :slot :label "Fader" :type :choice :choices [:slider-1 :slider-2]
+    :labels {:slider-1 "1: Intensity" :slider-2 "2: Morph"} :default :slider-1}
+   {:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}
+   {:key :max :label "Max" :type :float :min -10.0 :max 10.0 :default 1.0}
+   {:key :default :label "Until moved" :type :float :min 0.0 :max 1.0 :default 0.0}])
+
 (def ^:private generic-input-params
   "Generic Input (MIDI/OSC/Keyboard) modulator parameters."
   [{:key :source-key :label "Input Source Key" :type :text :default "[:midi 1 1]"}
@@ -337,6 +347,17 @@
   :per-point?  false
   :retrigger?  false
   :description "OSC input modulator"})
+
+(reg/register-modulator!
+ {:id          :macro
+  :name        "Fader"
+  :icon-name   :sliders
+  :category    :external
+  :evaluator   (get eval/modulator-evaluators :macro)
+  :params      macro-params
+  :per-point?  false
+  :retrigger?  false
+  :description "Fader 1 (Intensity) or 2 (Morph): whichever control is learned for it"})
 
 
 ;; Unified Keyframe Param Modulator

@@ -25,11 +25,43 @@
 
 ;; --- State Update Helpers ---
 
+(defn store-keys
+  "The input store keys an input event writes, for this mapper and a
+   fader's learn (handlers/input.clj): a MIDI control change's [:midi
+   channel control]; an OSC one's [:osc path] and [:osc channel control];
+   another source's [:input path] and [source channel control] (a gamepad
+   axis is [:gamepad controller axis]); and the value an unmapped OSC
+   address carries, [:osc path]. [] for anything else: a note or a button
+   writes none."
+  [{:keys [type source channel control path value] :as event}]
+  (cond
+    (input-events/control-change? event)
+    (case source
+      :midi [[:midi (or channel 0) control]]
+      :osc (cond-> [] path (conj [:osc path]) (some? control) (conj [:osc (or channel 0) control]))
+      (cond-> [] path (conj [:input path]) (some? control) (conj [source (or channel 0) control])))
+
+    (and (#{:note-on :note-off :trigger :trigger-release} type) (= :osc source) path (number? value))
+    [[:osc path]]
+
+    :else []))
+
+(defn- update-macro-value!
+  "Also writes value to [:macro slot] when source-key is the control learned
+   for a fader slot ([:config :input :macro-map], none in a project saved
+   before it): a map lookup on the input's own thread, so a fader never
+   waits for the event agent. :macro modulators read the slot."
+  [source-key value]
+  (when-let [slot (get-in (state/get-raw-state) [:config :input :macro-map source-key])]
+    (store/set-continuous-value! [:macro slot] value)))
+
 (defn- update-input-value!
-  "Updates a continuous input value in the fast store.
+  "Updates a continuous input value in the fast store, and the fader slot
+   it drives (update-macro-value!).
    e.g. source-key `[:midi 0 10]` -> value `0.5`"
   [source-key value]
-  (store/set-continuous-value! source-key value))
+  (store/set-continuous-value! source-key value)
+  (update-macro-value! source-key value))
 
 (defn- learning?
   "Is a learn waiting for an input? It catches the press itself
@@ -50,25 +82,8 @@
   (cond
     ;; Continuous Events
     (input-events/control-change? event)
-    (let [{:keys [source channel control path value]} event
-          val (double (or value 0.0))]
-      (case source
-        :midi
-        (update-input-value! [:midi (or channel 0) control] val)
-
-        :osc
-        (do
-          (when path
-            (update-input-value! [:osc path] val))
-          (when (some? control)
-            (update-input-value! [:osc (or channel 0) control] val)))
-
-        ;; Default / other sources
-        (do
-          (when path
-            (update-input-value! [:input path] val))
-          (when (some? control)
-            (update-input-value! [source (or channel 0) control] val)))))
+    (let [val (double (or (:value event) 0.0))]
+      (run! #(update-input-value! % val) (store-keys event)))
 
     ;; Discrete triggers are resolved by the normal application event pipeline.
     (or (input-events/note-on? event)

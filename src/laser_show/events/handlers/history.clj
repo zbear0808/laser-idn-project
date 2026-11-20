@@ -146,6 +146,8 @@
    :zone-groups/save-edit "Edit Zone Group"
    :zone-groups/remove "Delete Zone Group"
    :vibe/clear-control "Clear Control"
+   :vibe/add-master "Add Master Intensity"
+   :vibe/add-morph "Add Morph"
    :vibe/add "Add Vibe"
    :vibe/duplicate "Duplicate Vibe"
    :vibe/remove "Delete Vibe"

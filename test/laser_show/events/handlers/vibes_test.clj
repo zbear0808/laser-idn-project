@@ -5,6 +5,7 @@
             [laser-show.events.handlers.history :as history-handlers]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
+            [laser-show.state.persistent :as persistent]
             [laser-show.state.templates :as templates])
   (:import [javafx.scene.input MouseButton MouseEvent TouchEvent TouchPoint TouchPoint$State]))
 
@@ -371,3 +372,117 @@
       (is (= :vibe-1 (get-in s1 [:vibe-runtime :current])))
       (is (true? (get-in s1 [:chains :effect-chains [1 3] :active?])))
       (is (= [[1 3]] (get-in s1 [:vibe-runtime :fx-on])) "the FX set's, so leaving Shapes switches it off"))))
+
+
+;; The faders (Phase 5, plans/2026-11-18-vibe-mode/05)
+
+(defn- fader [slot lo hi default]
+  {:type :macro :active? true :slot slot :min lo :max hi :default default})
+
+(defn- full-grid [state]
+  (update-in state [:chains :effect-chains] merge (into {} (for [c (range 8) r (range 4)] [[c r] {:items []}]))))
+
+(deftest add-master-uses-the-first-empty-effect-cell-test
+  (let [s0 (history/mark-clean (starter))
+        s1 (run s0 {:event/type :vibe/add-master})
+        cell (get-in s1 [:chains :effect-chains [1 3]])]
+    (is (= "Master" (:name cell)) "[0 3] is taken: the next of the bottom row, as a tap reaction's")
+    (is (true? (:active? cell)) "on at once: full until fader 1 moves")
+    (is (= [{:effect-id :intensity :enabled? true :params {:amount (fader :slider-1 0.0 1.0 1.0)}}]
+           (mapv #(dissoc % :id) (:items cell))))
+    (is (uuid? (get-in cell [:items 0 :id])))
+    (is (= (:config s0) (:config s1)) "in no vibe: the Master is every vibe's")
+    (is (= 1 (undo-count s1)))
+    (is (= "Add Master Intensity" (history/undo-label (:history s1))))
+    (is (true? (get-in s1 [:project :dirty?])))
+    (testing "one Master: again, nothing"
+      (is (= (:chains s1) (:chains (run s1 {:event/type :vibe/add-master})))))
+    (testing "no free cell: nothing"
+      (let [full (full-grid s0)]
+        (is (= (:chains full) (:chains (run full {:event/type :vibe/add-master}))))))
+    (testing "undone: gone"
+      (is (nil? (get-in (run s1 {:event/type :history/undo}) [:chains :effect-chains [1 3]]))))))
+
+(deftest add-morph-puts-the-cell-in-the-fx-set-test
+  (let [s0 (history/mark-clean (starter))
+        s1 (run s0 {:event/type :vibe/add-morph :vibe :vibe-2 :kind :size})
+        cell (get-in s1 [:chains :effect-chains [1 3]])
+        size (fader :slider-2 0.5 1.5 0.5)]
+    (is (= "Lines · Morph: Size" (:name cell)))
+    (is (false? (:active? cell)) "Lines isn't playing: its FX set switches it on when it does")
+    (is (= [{:effect-id :scale :enabled? true :params {:x-scale size :y-scale size :uniform? false}}]
+           (mapv #(dissoc % :id) (:items cell))))
+    (is (= [[1 3]] (get-in s1 [:config :vibes :library :vibe-2 :fx])))
+    (is (= [] (get-in s1 [:config :vibes :library :vibe-1 :fx])))
+    (is (= 1 (undo-count s1)))
+    (is (= "Add Morph" (history/undo-label (:history s1))))
+    (testing "Spin and Colour"
+      (let [s (-> s1
+                  (run {:event/type :vibe/add-morph :vibe :vibe-2 :kind :spin})
+                  (run {:event/type :vibe/add-morph :vibe :vibe-2 :kind :colour}))]
+        (is (= [[1 3] [2 3] [3 3]] (get-in s [:config :vibes :library :vibe-2 :fx])))
+        (is (= [:rotation {:angle (fader :slider-2 0.0 360.0 0.0)}]
+               ((juxt :effect-id :params) (get-in s [:chains :effect-chains [2 3] :items 0]))))
+        (is (= [:hue-shift {:degrees (fader :slider-2 -180.0 180.0 0.5)}]
+               ((juxt :effect-id :params) (get-in s [:chains :effect-chains [3 3] :items 0]))))))
+    (testing "the vibe that plays: on at once (engine/reconcile), off when it is left"
+      (let [playing (run s0 {:event/type :vibe/select :vibe :vibe-1 :input-time 1000})
+            s (run playing {:event/type :vibe/add-morph :vibe :vibe-1 :kind :spin})]
+        (is (true? (get-in s [:chains :effect-chains [1 3] :active?])))
+        (is (= [[1 3]] (get-in s [:vibe-runtime :fx-on])))
+        (is (false? (get-in (run s {:event/type :vibe/select :vibe :vibe-2 :input-time 2000})
+                            [:chains :effect-chains [1 3] :active?])))
+        (testing "during blackout it waits for blackout to end"
+          (let [dark (-> playing
+                         (run {:event/type :vibe/press :role :blackout :input-time 1100})
+                         (run {:event/type :vibe/add-morph :vibe :vibe-1 :kind :size}))]
+            (is (false? (get-in dark [:chains :effect-chains [1 3] :active?])))
+            (is (true? (get-in (run dark {:event/type :vibe/press :role :blackout :input-time 1200})
+                               [:chains :effect-chains [1 3] :active?])))))))
+    (testing "no such vibe or kind, or no free cell: nothing"
+      (is (= (:chains s0) (:chains (run s0 {:event/type :vibe/add-morph :vibe :gone :kind :size}))))
+      (is (= (:chains s0) (:chains (run s0 {:event/type :vibe/add-morph :vibe :vibe-1 :kind :nope}))))
+      (let [full (full-grid s0)]
+        (is (= (:config full) (:config (run full {:event/type :vibe/add-morph :vibe :vibe-1 :kind :size}))))))
+    (testing "undone: the cell and its place in the FX set go"
+      (let [undone (run s1 {:event/type :history/undo})]
+        (is (nil? (get-in undone [:chains :effect-chains [1 3]])))
+        (is (= [] (get-in undone [:config :vibes :library :vibe-2 :fx])))))))
+
+(deftest clear-control-clears-a-fader-test
+  (let [hit-key {:source :midi :channel 0 :note 36}
+        s0 (-> (starter)
+               (assoc-in [:config :input :macro-map] {[:midi 0 1] :slider-1 [:osc "/fader/2"] :slider-2})
+               (assoc-in [:config :input :trigger-map] {hit-key {:type :vibe :role :hit}})
+               (history/mark-clean))
+        s1 (run s0 {:event/type :vibe/clear-control :slot :slider-1})]
+    (is (= {[:osc "/fader/2"] :slider-2} (get-in s1 [:config :input :macro-map])))
+    (is (= {hit-key {:type :vibe :role :hit}} (get-in s1 [:config :input :trigger-map])) "the roles keep their keys")
+    (is (= 1 (undo-count s1)))
+    (is (= "Clear Control" (history/undo-label (:history s1))))
+    (is (= {hit-key {:type :vibe :role :hit}}
+           (get-in (run s0 {:event/type :vibe/clear-control :slot :slider-2}) [:config :input :trigger-map])))
+    (is (= {} (get-in (run s0 {:event/type :vibe/clear-control :role :hit}) [:config :input :trigger-map]))
+        "a role's Clear as before")
+    (testing "nothing learned for it: nothing, and no undo step"
+      (let [s2 (run s1 {:event/type :vibe/clear-control :slot :slider-1})]
+        (is (= (:config s1) (:config s2)))
+        (is (= (undo-count s1) (undo-count s2)))))
+    (testing "a project from before the faders (no :macro-map): nothing"
+      (let [old (update-in s0 [:config :input] dissoc :macro-map)]
+        (is (= (:config old) (:config (run old {:event/type :vibe/clear-control :slot :slider-1}))))))))
+
+(deftest starter-project-reactions-find-a-free-cell-test
+  (let [fresh (persistent/new-project-state (domains/build-initial-state))
+        master (get-in fresh [:chains :effect-chains [0 3]])
+        s1 (run fresh {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :punch-size})]
+    (is (= "Master" (:name master)) "a new project's Master, at [0 3]")
+    (is (= "Shapes · Punch size" (get-in s1 [:chains :effect-chains [1 3] :name])) "a tap reaction: the next cell")
+    (is (= master (get-in s1 [:chains :effect-chains [0 3]])) "the Master as it was")
+    (testing "a Morph next, and then the reactions fill the grid from the bottom row up, around the Master"
+      (let [s2 (run s1 {:event/type :vibe/add-morph :vibe :vibe-1 :kind :size})
+            s (reduce run s2 (repeat 29 {:event/type :vibe/add-reaction :vibe :vibe-2 :kind :flip}))]
+        (is (= "Shapes · Morph: Size" (get-in s2 [:chains :effect-chains [2 3] :name])))
+        (is (= 32 (count (get-in s [:chains :effect-chains]))) "the grid is full")
+        (is (= master (get-in s [:chains :effect-chains [0 3]])))
+        (is (= (:chains s) (:chains (run s {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :flip}))) "full: nothing")))))

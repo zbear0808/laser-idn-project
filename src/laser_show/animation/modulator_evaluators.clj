@@ -254,6 +254,16 @@
         range-v (- (double max) (double min))]
     (+ (double min) (* norm-val range-v))))
 
+(defn- eval-macro
+  "Evaluate a fader (:macro) modulator: min + v·(max − min), v the fader
+   slot's value, [:macro slot] in the input values (the input mapper writes
+   it for the control learned for the slot), or :default (0..1, where the
+   fader is taken to be until it first moves) before it has one."
+  [{:keys [slot min max default]} {:keys [input-values]}]
+  (let [v (double (or (get input-values [:macro slot]) default 0.0))
+        lo (double (or min 0.0))]
+    (+ lo (* v (- (double (or max 1.0)) lo)))))
+
 
 ;; Per-Point Modulators
 
@@ -432,6 +442,7 @@
    :midi         eval-midi
    :osc          eval-osc
    :input        eval-input
+   :macro        eval-macro
    :point-index  eval-point-index
    :pos-x        eval-pos-x
    :pos-y        eval-pos-y

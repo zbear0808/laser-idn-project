@@ -198,6 +198,7 @@
         (replace-document initial {})
         (templates/apply-starter-cue-chains)
         (templates/apply-starter-vibes)
+        (templates/apply-starter-effects)
         (reset-session initial)
         history/mark-clean)))
 

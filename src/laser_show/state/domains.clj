@@ -263,8 +263,8 @@
          :doc "OSC server settings"}
    :midi {:default {:enabled? false :device nil}
           :doc "MIDI input settings"}
-   :input {:default {:trigger-map {}}
-           :doc "Map of generic input triggers (MIDI/OSC/Key -> actions)"}
+   :input {:default {:trigger-map {} :macro-map {}}
+           :doc "Map of generic input triggers (MIDI/OSC/Key -> actions), and :macro-map {input store key -> :slider-1 or :slider-2}: the control learned for each fader (plans/2026-11-18-vibe-mode/05), which the input mapper writes to [:macro slot] in the input store too. A project saved before it has no :macro-map ([:config] merges shallowly on load): read nil as {}"}
    :cue {:default {:trigger-mode :default}
          :doc "Cue playback settings. :trigger-mode can be :default (use per-cue setting), :toggle (click ON/OFF), or :retrigger (always restart)"}
    :vibes {:default {:order []

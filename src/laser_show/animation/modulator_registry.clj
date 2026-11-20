@@ -47,7 +47,7 @@
    
    - :wave      - Wave-based oscillators (sine, triangle, sawtooth, square, random)
    - :special   - Per-point/position based (pos-x, pos-y, radial, point-index)
-   - :external  - External input (midi, osc)
+   - :external  - External input (midi, osc, and macro: a fader, whichever control is learned for it)
    - :pulse     - Follow a press (envelope, step, energy): plans/2026-11-18-vibe-mode/04
    - :internal  - Internal helpers (e.g. :unified-keyframe-param) - not exposed in UI"
   #{:wave

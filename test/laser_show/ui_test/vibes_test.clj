@@ -1,8 +1,9 @@
 (ns laser-show.ui-test.vibes-test
   "The Vibes tab: the vibes, the editor and its picker, Make from rows,
-   Learn all, deleting the vibe that plays and undoing a delete, and the tap
-   reaction menus. And the Grid and Effects tabs stay as they were (V8 B:
-   the vibe stuff has its own tabs), with cells that are in vibes.
+   Learn all, learning a fader and the faders' buttons, deleting the vibe
+   that plays and undoing a delete, and the tap reaction menus. And the
+   Grid and Effects tabs stay as they were (V8 B: the vibe stuff has its own
+   tabs), with cells that are in vibes.
 
    The picker's cells are grid cells (views/components/grid_cell.clj
    generic-grid-cell), whose plain click handler takes the robot's clicks."
@@ -10,7 +11,9 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.input-mapper :as input-mapper]
+            [laser-show.input.events :as input-events]
             [laser-show.input.router :as input-router]
+            [laser-show.input.store :as store]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
@@ -218,6 +221,73 @@
       (is (empty? (rt :held)))
       (is (zero? (rt :started)) "no HIT, ACCENT or FLASH played")
       (is (false? (rt :blackout?)) "BLACKOUT's own key didn't black the room out"))))
+
+(deftest learn-a-fader-binds-a-slot-test
+  (let [robot (ui/robot)
+        cc! (fn [control & vs] (doseq [v vs] (input-router/dispatch! (input-events/control-change :midi 0 control v))))
+        macro-map #(get-in (app-state) [:config :input :macro-map])
+        learning-slider-1? #(= {:type :macro :slot :slider-1} (learning-target))]
+    (try
+      (store/clear-continuous-values!)
+      (open-vibes! robot)
+      (ui/assert-count! ".vibe-fader" 2)
+      (ui/assert-text! "#vibe-control-slider-1-keys" "Not learned")
+      (ui/assert-disabled! "#vibe-control-slider-1-clear")
+      (ui/click! robot "#vibe-control-slider-1-learn")
+      (ui/wait-for! learning-slider-1?)
+      (ui/assert-text! "#vibe-control-slider-1-keys" "Move a fader…")
+      (ui/assert-text! "#vibe-control-slider-1-learn" "Cancel")
+      (testing "invariants 8 and 9: a note, and a fader's wiggle, bind nothing"
+        (input-router/dispatch! (note :note-on 36))
+        (input-router/dispatch! (note :note-off 36))
+        (cc! 7 0.50 0.52)
+        (flush-event-queue!)
+        (is (learning-slider-1?) "still waiting")
+        (is (empty? (macro-map)))
+        (is (empty? (get-in (app-state) [:config :input :trigger-map]))))
+      (cc! 1 0.10 0.31)
+      (ui/wait-for! #(= {[:midi 0 1] :slider-1} (macro-map)))
+      (ui/assert-text! "#vibe-control-slider-1-keys" "MIDI Ch 1 CC 1")
+      (ui/wait-for! #(nil? (learning-target)))
+      (is (= "Learn Fader" (undo-label)))
+      (testing "the fader drives its slot now, through the input mapper"
+        (cc! 1 0.4)
+        (is (= 0.4 (store/get-continuous-value [:macro :slider-1] nil))))
+      (testing "learned again on another fader: the slot moves to it"
+        (ui/click! robot "#vibe-control-slider-1-learn")
+        (ui/wait-for! learning-slider-1?)
+        (cc! 9 0.9 0.5)
+        (ui/wait-for! #(= {[:midi 0 9] :slider-1} (macro-map)))
+        (ui/assert-text! "#vibe-control-slider-1-keys" "MIDI Ch 1 CC 9"))
+      (testing "Clear"
+        (ui/click! robot "#vibe-control-slider-1-clear")
+        (ui/wait-for! #(empty? (macro-map)))
+        (ui/assert-text! "#vibe-control-slider-1-keys" "Not learned")
+        (is (= "Clear Control" (undo-label))))
+      (finally
+        (store/clear-continuous-values!)))))
+
+(deftest fader-buttons-add-the-master-and-a-morph-test
+  (let [robot (ui/robot)]
+    (open-vibes! robot)
+    (ui/assert-visible! "#vibe-add-master")
+    (ui/assert-disabled! "#vibe-add-master")
+    (is (= "Master" (get-in (app-state) [:chains :effect-chains [0 3] :name])) "a new project has its Master already")
+    (ui/assert-text! "#vibe-add-morph" "Add Morph to Shapes")
+    (ui/click! robot "#vibe-add-morph")
+    (ui/click! robot "#vibe-add-morph-size")
+    (ui/wait-for! #(= [[1 3]] (vibes :library :vibe-1 :fx)))
+    (is (= "Shapes · Morph: Size" (get-in (app-state) [:chains :effect-chains [1 3] :name])))
+    (is (= "Add Morph" (undo-label)))
+    (testing "the Master gone, Add master intensity puts one back"
+      (flush-event-queue!)
+      (state/swap-state! update-in [:chains :effect-chains] dissoc [0 3])
+      (ui/assert-enabled! "#vibe-add-master")
+      (ui/click! robot "#vibe-add-master")
+      (ui/wait-for! #(= "Master" (get-in (app-state) [:chains :effect-chains [0 3] :name])))
+      (is (true? (get-in (app-state) [:chains :effect-chains [0 3] :active?])))
+      (is (= "Add Master Intensity" (undo-label)))
+      (ui/assert-disabled! "#vibe-add-master"))))
 
 (deftest deleting-the-current-vibe-keeps-perform-working-test
   (let [robot (ui/robot)]

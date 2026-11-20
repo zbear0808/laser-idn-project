@@ -3,7 +3,8 @@
    
    Provides UI for assigning MIDI, OSC, or Keyboard inputs to trigger
    the current cue or effect cell."
-  (:require [laser-show.common.util :as u])
+  (:require [clojure.string :as str]
+            [laser-show.common.util :as u])
   (:import [javafx.util StringConverter]))
 
 (def ^:private option-name
@@ -44,6 +45,18 @@
     :osc (str "OSC " (:id trigger-key))
     :keyboard (str "Key " (:id trigger-key))
     (str trigger-key)))
+
+(defn fader-label
+  "An input store key learned for a fader as the user knows the control:
+   \"MIDI Ch 1 CC 7\", \"OSC /fader/1\", \"OSC CC 5\" (a mapped address),
+   \"Gamepad 1 trigger left\", or the key itself."
+  [[source a b :as store-key]]
+  (cond
+    (and (= :midi source) (number? a)) (str "MIDI Ch " (inc (long a)) " CC " b)
+    (and (= :osc source) (string? a)) (str "OSC " a)
+    (= :osc source) (str "OSC CC " b)
+    (and (= :gamepad source) (number? a)) (str "Gamepad " (inc (long a)) " " (str/replace (name b) "-" " "))
+    :else (str store-key)))
 
 (defn trigger-bank
   "Configuration UI for resolving generalized triggers.

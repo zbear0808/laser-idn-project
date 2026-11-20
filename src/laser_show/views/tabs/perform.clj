@@ -1,8 +1,8 @@
 (ns laser-show.views.tabs.perform
   "The Perform tab: vibe mode, made to read from two metres. The current
    vibe's name and colour with the tempo and the beat, the vibes to jump to,
-   the five pads, and whether the output and the controllers are there. The
-   preview stays beside it (views/root.clj).
+   the five pads, where the two faders are, and whether the output and the
+   controllers are there. The preview stays beside it (views/root.clj).
    
    Each part subscribes to what it shows (subs.clj, Vibe mode), so a press
    re-renders its own pad, a vibe change the strip, the header and VIBE's
@@ -14,6 +14,7 @@
             [clojure.string :as str]
             [laser-show.subs :as subs]
             [laser-show.views.components.clock-view :as clock-view]
+            [laser-show.views.components.slider-meters :as slider-meters]
             [laser-show.views.components.vibe-pads :as vibe-pads]
             [laser-show.views.components.vibe-strip :as vibe-strip]))
 
@@ -126,7 +127,8 @@
                          "MIDI: none connected")}]}))
 
 (defn perform-tab
-  "The Perform tab: banner, header, vibe strip, pads and status line."
+  "The Perform tab: banner, header, vibe strip, pads, the faders' meters and
+   status line."
   [_]
   {:fx/type :v-box
    :id "perform-content"
@@ -136,4 +138,5 @@
               {:fx/type header}
               {:fx/type vibe-strip/vibe-strip}
               {:fx/type vibe-pads/pad-row :v-box/vgrow :always}
+              {:fx/type slider-meters/meter-row}
               {:fx/type status-line}]})

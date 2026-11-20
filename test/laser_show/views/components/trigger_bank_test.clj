@@ -9,3 +9,11 @@
   (is (= "Key :space" (trigger-bank/binding-label {:source :keyboard :id :space})))
   (is (= "{:source :gamepad, :id :a}" (trigger-bank/binding-label {:source :gamepad :id :a}))
       "any other source: the key itself"))
+
+(deftest fader-label-test
+  (is (= "MIDI Ch 1 CC 7" (trigger-bank/fader-label [:midi 0 7])))
+  (is (= "MIDI Ch 16 CC 1" (trigger-bank/fader-label [:midi 15 1])))
+  (is (= "OSC /fader/1" (trigger-bank/fader-label [:osc "/fader/1"])))
+  (is (= "OSC CC 5" (trigger-bank/fader-label [:osc 0 5])) "a mapped OSC address's control")
+  (is (= "Gamepad 1 trigger left" (trigger-bank/fader-label [:gamepad 0 :trigger-left])))
+  (is (= "[:keyboard 0 :k]" (trigger-bank/fader-label [:keyboard 0 :k])) "any other: the key itself"))

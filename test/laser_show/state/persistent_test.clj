@@ -294,3 +294,37 @@
       (is (= [false false true] (on (persistent/apply-loaded-project (domains/build-initial-state)
                                                                      (persistent/read-project test-project-file)
                                                                      test-project-file)))))))
+
+
+;; The faders (plans/2026-11-18-vibe-mode/05)
+
+(deftest new-project-has-the-master-test
+  (let [fresh (persistent/new-project-state (-> (domains/build-initial-state)
+                                                (assoc-in [:chains :effect-chains [4 1]] {:items [{:effect-id :scale}]})))]
+    (is (= [[0 3]] (keys (get-in fresh [:chains :effect-chains]))) "File > New: the old cells go, the Master comes")
+    (is (= ["Master" true] ((juxt :name :active?) (get-in fresh [:chains :effect-chains [0 3]]))))
+    (is (= {} (get-in fresh [:config :input :macro-map])) "no fader learned yet")
+    (is (false? (get-in fresh [:project :dirty?])))))
+
+(deftest macro-map-survives-save-and-load-test
+  (let [m {[:midi 0 7] :slider-1 [:osc "/fader/2"] :slider-2 [:gamepad 0 :trigger-left] :slider-2}
+        saved (-> (with-starter-vibes)
+                  (templates/apply-starter-effects)
+                  (assoc-in [:config :input :macro-map] m))]
+    (is (persistent/write-project! test-project-file (persistent/project-files saved)))
+    (let [loaded (persistent/apply-loaded-project (domains/build-initial-state)
+                                                  (persistent/read-project test-project-file)
+                                                  test-project-file)]
+      (is (= m (get-in loaded [:config :input :macro-map])))
+      (is (= (get-in saved [:chains :effect-chains]) (get-in loaded [:chains :effect-chains])) "the Master too")
+      (is (false? (get-in loaded [:project :dirty?]))))))
+
+(deftest old-project-without-macro-map-loads-test
+  (testing "invariant 7: a file from before the faders has no :macro-map, and gets no Master"
+    (let [files (-> (persistent/project-files (domains/build-initial-state))
+                    (assoc-in ["project-metadata.edn" :config :input] {:trigger-map {{:source :midi :channel 0 :note 36} {:type :vibe :role :hit}}}))
+          loaded (persistent/apply-loaded-project (persistent/new-project-state (domains/build-initial-state)) files "old.zip")]
+      (is (nil? (get-in loaded [:config :input :macro-map])) "[:config] merges shallowly: readers take nil as {}")
+      (is (= 1 (count (get-in loaded [:config :input :trigger-map]))))
+      (is (= {} (get-in loaded [:chains :effect-chains])) "its effects grid as it was: empty")
+      (is (false? (get-in loaded [:project :dirty?]))))))

@@ -3,7 +3,8 @@
    types that follow a press (Envelope, Step, Energy) in its dropdown, what
    a press source and Restart on are called in it, the Step's palette, and
    none of that for calibration, which never sees a press
-   (plans/2026-11-18-vibe-mode/04 §4, invariant 4)."
+   (plans/2026-11-18-vibe-mode/04 §4, invariant 4). And the Fader, which
+   follows fader 1 or 2 (05)."
   (:require [cljfx.api :as fx]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
@@ -163,3 +164,16 @@
     (choose! "#keyframe-restart-on" :accent)
     (ui/wait-for! #(= :accent (get-in (state/get-raw-state) [:chains :effect-chains [0 0] :items 0 :keyframe-modulator :restart-on])))
     (ui/wait-for! #(= "ACCENT" (shown "#keyframe-restart-on")))))
+
+(deftest fader-type-follows-a-slot-test
+  (testing "the Fader (plans/2026-11-18-vibe-mode/05): on any parameter, it follows fader 1 until told otherwise"
+    (open-amount-editor! {:type :sine :active? true :min 0.0 :max 1.0 :period 1.0})
+    (choose! "#modulator-type-amount" (first (filter #(= :macro (:id %)) (items "#modulator-type-amount"))))
+    (ui/wait-for! #(= :macro (:type (amount))))
+    (is (= {:slot :slider-1 :default 0.0 :min 0.0 :max 1.0} (select-keys (amount) [:slot :default :min :max])))
+    (ui/wait-for! #(= "Fader" (shown "#modulator-type-amount")))
+    (ui/wait-for! #(= "1: Intensity" (shown "#modulator-amount-slot")))
+    (is (= [:slider-1 :slider-2] (items "#modulator-amount-slot")))
+    (choose! "#modulator-amount-slot" :slider-2)
+    (ui/wait-for! #(= :slider-2 (:slot (amount))))
+    (ui/wait-for! #(= "2: Morph" (shown "#modulator-amount-slot")))))

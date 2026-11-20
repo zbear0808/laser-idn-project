@@ -250,7 +250,8 @@
     (testing "document is fresh, with starter cues"
       (is (= 120.0 (get-in new-state [:timing :bpm])))
       (is (= {} (:projectors new-state)))
-      (is (= {} (get-in new-state [:chains :effect-chains])))
+      (is (= [[0 3]] (keys (get-in new-state [:chains :effect-chains]))) "and the Master, the only effect cell")
+      (is (= "Master" (get-in new-state [:chains :effect-chains [0 3] :name])))
       (is (seq (get-in new-state [:chains :cue-chains])))
       (is (not= (get-in current [:chains :cue-chains [0 0]])
                 (get-in new-state [:chains :cue-chains [0 0]]))))

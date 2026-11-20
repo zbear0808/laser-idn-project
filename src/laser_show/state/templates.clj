@@ -9,6 +9,7 @@
    - Resetting to a 'starter' state
    - Providing demo content for new users"
   (:require [laser-show.animation.cue-chains :as cue-chains]
+            [laser-show.vibes.faders :as faders]
             [laser-show.vibes.library :as library]))
 
 
@@ -95,4 +96,23 @@
   [state]
   (if (empty? (get-in state [:config :vibes :library]))
     (update-in state [:config :vibes] #(merge (create-starter-vibes) (select-keys % [:settings])))
+    state))
+
+
+;; Starter Effects
+
+
+(defn create-starter-effects
+  "The effect cells a new project starts with, for [:chains :effect-chains]:
+   the Master at [0 3] (vibes.faders/master-cell), on, whose Intensity
+   follows fader 1 and is full until the fader first moves (V5 A)."
+  []
+  {[0 3] (faders/master-cell)})
+
+(defn apply-starter-effects
+  "Apply the starter effect cells to a state map if its effects grid is
+   empty: a new project. A loaded one keeps its own (even none)."
+  [state]
+  (if (empty? (get-in state [:chains :effect-chains]))
+    (assoc-in state [:chains :effect-chains] (create-starter-effects))
     state))

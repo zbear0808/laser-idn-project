@@ -1,7 +1,8 @@
 (ns laser-show.css.vibes
   "Vibe mode's styles: the Perform tab (views/tabs/perform.clj), its header,
-   the vibe strip's chips, the five pads and the BLACKOUT banner, sized to
-   read from two metres; and the Vibes tab (views/tabs/vibes.clj), its
+   the vibe strip's chips, the five pads, the faders' meters and the
+   BLACKOUT banner, sized to read from two metres; and the Vibes tab
+   (views/tabs/vibes.clj), its
    list, editor, picker (views/components/vibe_picker.clj), Controls panel
    (vibe_controls.clj), checklist and lint. A vibe's own colour is data and
    is applied inline, as the zone group colours are
@@ -137,6 +138,29 @@
 
        ".vibe-status.vibe-status-none"
        {:-fx-text-fill text-muted}
+
+       ;; The faders' meters: the input store's value sets the bar and the text
+       ".vibe-meter"
+       {:-fx-background-color bg-interactive
+        :-fx-background-radius 10
+        :-fx-padding "8 12"}
+
+       ".vibe-meter.vibe-meter-off"
+       {:-fx-opacity 0.45}
+
+       ".vibe-meter-text"
+       {:-fx-text-fill text-primary
+        :-fx-font-size 18}
+
+       ".vibe-meter-bar"
+       {:-fx-pref-height 14
+        " > .track" {:-fx-background-color border-default
+                     :-fx-background-insets 0
+                     :-fx-background-radius 4}
+        " > .bar" {:-fx-background-color blue
+                   :-fx-background-insets 0
+                   :-fx-background-radius 4
+                   :-fx-padding 0}}
 
        ;; The Vibes tab
 
@@ -277,6 +301,10 @@
        ".vibe-control-keys.vibe-control-waiting"
        {:-fx-text-fill orange
         :-fx-font-weight "bold"}
+
+       ;; A menu button's label has a padding of its own: as tall as the buttons
+       "#vibe-add-morph"
+       {:-fx-padding "2 6"}
 
        ".vibe-wizard-status"
        {:-fx-text-fill orange

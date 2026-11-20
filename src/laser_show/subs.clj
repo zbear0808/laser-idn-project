@@ -26,6 +26,7 @@
        ...))"
   (:require [cljfx.api :as fx]
             [laser-show.state.extractors :as ex]
+            [laser-show.vibes.faders :as faders]
             [laser-show.vibes.library :as library]
             [laser-show.vibes.reactions :as reactions]
             [laser-show.css.core :as css]
@@ -1240,3 +1241,61 @@
         learning (fx/sub-val context learning-role)]
     (when (and (seq queue) (= learning (first queue)))
       {:role learning :step (inc (count done)) :of (+ (count queue) (count done)) :refused refused})))
+
+
+;; The faders (plans/2026-11-18-vibe-mode/05): the Controls panel's fader
+;; rows and buttons, and the Perform tab's meters. Where a fader is never
+;; comes here: the meters draw it from the input store.
+
+(def ^:private fader-labels {:slider-1 "INTENSITY" :slider-2 "MORPH"})
+
+(def ^:private meter-labels {:slider-1 "Intensity" :slider-2 "Morph"})
+
+(defn vibe-fader-bindings
+  "The input store keys of the controls learned for the fader slot
+   ([:config :input :macro-map]), in a stable order."
+  [context slot]
+  (->> (fx/sub-val context get-in [:config :input :macro-map])
+       (keep (fn [[k s]] (when (= slot s) k)))
+       (sort-by pr-str)
+       vec))
+
+(defn- fader-learning? [state slot]
+  (= {:type :macro :slot slot} (get-in state [:backend :input :learning-target])))
+
+(defn vibe-fader-control
+  "A fader row of the Vibes tab's Controls panel: {:slot :label :bindings
+   (input store keys) :learning?}."
+  [context slot]
+  {:slot slot
+   :label (fader-labels slot)
+   :bindings (fx/sub-ctx context vibe-fader-bindings slot)
+   :learning? (fx/sub-val context fader-learning? slot)})
+
+(defn vibe-meter
+  "A meter of the Perform tab: {:slot :label :wired?}, :wired? while
+   something the vibe that plays plays follows the fader
+   (vibes.faders/slot-wired?). Recomputed when the chains, the vibes or the
+   vibe that plays change."
+  [context slot]
+  (let [{:keys [library]} (fx/sub-ctx context vibe-config)
+        state {:chains (fx/sub-val context :chains) :config {:vibes {:library library}}}]
+    {:slot slot
+     :label (meter-labels slot)
+     :wired? (faders/slot-wired? state (fx/sub-ctx context vibe-current-id) slot)}))
+
+(defn- fader-cells [state]
+  {:chains {:effect-chains (get-in state [:chains :effect-chains])}
+   :grid {:size (get-in state [:grid :size])}})
+
+(defn vibe-fader-actions
+  "What the Controls panel's fader buttons can do: {:master (the cell of
+   the Master, or nil) :free? (an effect cell is free for one) :vibe (the
+   vibe the tab edits, for Add Morph) :vibe-name}."
+  [context]
+  (let [cells (fx/sub-val context fader-cells)
+        {:keys [id] vibe-name :name} (fx/sub-ctx context vibe-editor)]
+    {:master (faders/master-at cells)
+     :free? (some? (reactions/first-empty-effect-cell cells))
+     :vibe id
+     :vibe-name vibe-name}))

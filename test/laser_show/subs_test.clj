@@ -441,6 +441,36 @@
       (is (nil? (fx/sub-ctx (fx/swap-context ctx' update-in [:backend :input] dissoc :learning-target) subs/vibe-wizard))
           "nothing learning: no wizard shows, whatever is left in the UI state"))))
 
+(deftest fader-subs-test
+  (let [ctx (context (-> (vibe-state)
+                         (templates/apply-starter-effects)
+                         (assoc-in [:config :input :macro-map] {[:midi 0 7] :slider-1})))]
+    (testing "the Controls panel's fader rows"
+      (is (= {:slot :slider-1 :label "INTENSITY" :bindings [[:midi 0 7]] :learning? false}
+             (fx/sub-ctx ctx subs/vibe-fader-control :slider-1)))
+      (is (= {:slot :slider-2 :label "MORPH" :bindings [] :learning? false}
+             (fx/sub-ctx ctx subs/vibe-fader-control :slider-2)))
+      (let [learning (fx/swap-context ctx assoc-in [:backend :input :learning-target] {:type :macro :slot :slider-2})]
+        (is (true? (:learning? (fx/sub-ctx learning subs/vibe-fader-control :slider-2))))
+        (is (false? (:learning? (fx/sub-ctx learning subs/vibe-fader-control :slider-1))))
+        (is (false? (:learning? (fx/sub-ctx learning subs/vibe-control :hit))) "a role's row doesn't wait")
+        (is (nil? (:learning (fx/sub-ctx learning subs/vibe-header))) "nor does Perform ask for a key"))
+      (is (= {:slot :slider-1 :label "INTENSITY" :bindings [] :learning? false}
+             (fx/sub-ctx (fx/swap-context ctx update-in [:config :input] dissoc :macro-map) subs/vibe-fader-control :slider-1))
+          "a project from before the faders"))
+    (testing "the meters: the Master wires Intensity, nothing Morph yet"
+      (is (= {:slot :slider-1 :label "Intensity" :wired? true} (fx/sub-ctx ctx subs/vibe-meter :slider-1)))
+      (is (= {:slot :slider-2 :label "Morph" :wired? false} (fx/sub-ctx ctx subs/vibe-meter :slider-2)))
+      (let [morphed (handle ctx {:event/type :vibe/add-morph :vibe :vibe-1 :kind :size})]
+        (is (true? (:wired? (fx/sub-ctx morphed subs/vibe-meter :slider-2))) "Shapes plays, and its FX set wires it")
+        (is (false? (:wired? (fx/sub-ctx (handle morphed {:event/type :vibe/select :vibe :vibe-2 :time 1000}) subs/vibe-meter :slider-2)))
+            "Lines doesn't")
+        (is (= (fx/sub-ctx morphed subs/vibe-meter :slider-2) (fx/sub-ctx (press morphed :hit 2000) subs/vibe-meter :slider-2))
+            "a press changes nothing a meter shows")))
+    (testing "the buttons: where the Master is, a free cell, and the vibe the tab edits"
+      (is (= {:master [0 3] :free? true :vibe :vibe-1 :vibe-name "Shapes"} (fx/sub-ctx ctx subs/vibe-fader-actions)))
+      (is (nil? (:master (fx/sub-ctx (fx/swap-context ctx update-in [:chains :effect-chains] dissoc [0 3]) subs/vibe-fader-actions)))))))
+
 
 (deftest pad-names-its-reactions-sub-test
   (let [ctx (context (-> (vibe-state)

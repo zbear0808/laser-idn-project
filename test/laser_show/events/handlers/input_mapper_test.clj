@@ -1,10 +1,15 @@
 (ns laser-show.events.handlers.input-mapper-test
   "The input mapper: discrete inputs go to the trigger map as :trigger/input,
    continuous ones to the input store, and a learn keeps the press it
-   catches (K-15) but not the releases."
+   catches (K-15) but not the releases. A control learned for a fader also
+   writes the fader's slot (plans/2026-11-18-vibe-mode/05 §7)."
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.input-mapper :as input-mapper]
+            [laser-show.input.fixtures :as fixtures]
+            [laser-show.input.gamepad :as gamepad]
+            [laser-show.input.midi :as midi]
+            [laser-show.input.osc :as osc]
             [laser-show.input.router :as router]
             [laser-show.input.store :as store]
             [laser-show.state.core :as state]
@@ -74,3 +79,98 @@
           (events/event-handler {:event/type :input/cancel-learn})
           (input-mapper/stop-mapper!)
           (input-mapper/set-dispatch-fn! nil))))))
+
+
+;; The faders: the macro map ([:config :input :macro-map])
+
+(defn- with-macro-map
+  "(f sent) with the mapper started on app state whose macro map is m (none
+   at all for ::none, as in a project saved before it), the store empty
+   before and after; sent holds what the mapper dispatches to the app."
+  [m f]
+  (state/init-state! (cond-> (domains/build-initial-state)
+                       (= ::none m) (update-in [:config :input] dissoc :macro-map)
+                       (not= ::none m) (assoc-in [:config :input :macro-map] m)))
+  (store/clear-continuous-values!)
+  (let [sent (atom [])]
+    (input-mapper/set-dispatch-fn! #(swap! sent conj %))
+    (input-mapper/start-mapper!)
+    (try
+      (f sent)
+      (finally
+        (input-mapper/stop-mapper!)
+        (input-mapper/set-dispatch-fn! nil)
+        (store/clear-continuous-values!)))))
+
+(defn- cc
+  "A MIDI CC as the device delivers it: midi-clj's message, through midi/midi-msg->event."
+  [channel control value-127]
+  (midi/midi-msg->event (fixtures/control-change channel control value-127)))
+
+(defn- written [] (store/get-all-continuous-values))
+
+(deftest bound-cc-also-writes-its-macro-test
+  (with-macro-map {[:midi 0 1] :slider-1}
+    (fn [sent]
+      (router/dispatch! (cc 0 1 64))
+      (is (= {[:midi 0 1] (/ 64 127.0) [:macro :slider-1] (/ 64 127.0)} (written))
+          "CC 1, channel 0: its own key and the fader's slot, the same value")
+      (router/dispatch! (cc 0 1 0))
+      (is (= 0.0 (store/get-continuous-value [:macro :slider-1] nil)) "down to 0: the slot follows")
+      (is (empty? @sent) "invariant 1: a fader never visits the event agent"))))
+
+(deftest unbound-cc-writes-only-its-own-key-test
+  (with-macro-map {[:midi 0 1] :slider-1}
+    (fn [_]
+      (router/dispatch! (cc 0 2 64))
+      (router/dispatch! (cc 1 1 64))
+      (is (= {[:midi 0 2] (/ 64 127.0) [:midi 1 1] (/ 64 127.0)} (written))
+          "CC 2 on channel 0, and CC 1 on another channel: no fader moves"))))
+
+(deftest gamepad-axis-can-be-a-macro-test
+  (with-macro-map {[:gamepad 0 :trigger-left] :slider-2}
+    (fn [_]
+      (let [moves (gamepad/diff-controller-states {0 {:buttons {} :axes {:trigger-left 0.0}}}
+                                                  {0 {:buttons {} :axes {:trigger-left 0.8}}})]
+        (is (= 1 (count moves)) "the poller's one control change")
+        (run! router/dispatch! moves)
+        (is (= {[:gamepad 0 :trigger-left] 0.8 [:macro :slider-2] 0.8} (written)))))))
+
+(deftest unmapped-osc-value-can-be-a-macro-test
+  (with-macro-map {[:osc "/fader/1"] :slider-1}
+    (fn [_]
+      (let [events (osc/osc-msg->events (fixtures/osc-msg "/fader/1" (float 0.3)) {})
+            v (double (float 0.3))]
+        (is (= [:trigger] (mapv :type events)) "an unmapped address is a trigger carrying its value")
+        (run! router/dispatch! events)
+        (is (= {[:osc "/fader/1"] v [:macro :slider-1] v} (written)))))))
+
+(deftest missing-macro-map-is-empty-test
+  (testing "invariant 7: a project saved before faders has no :macro-map (the load merges [:config] shallowly)"
+    (with-macro-map ::none
+      (fn [_]
+        (is (nil? (get-in (state/get-raw-state) [:config :input :macro-map])))
+        (router/dispatch! (cc 0 1 64))
+        (run! router/dispatch! (osc/osc-msg->events (fixtures/osc-msg "/fader/1" (float 0.3)) {}))
+        (is (= #{[:midi 0 1] [:osc "/fader/1"]} (set (keys (written)))) "every control writes its own key, no fader")))))
+
+(deftest store-keys-name-what-the-mapper-writes-test
+  (testing "store-keys, which a fader's learn watches, are the keys the mapper writes"
+    (doseq [event (concat [(cc 3 7 100)
+                           (assoc (input :control-change :source :osc :control 5 :value 0.5) :path "/xy")
+                           (input :control-change :source :osc :control 6 :value 0.5)
+                           (input :control-change :source :keyboard :path "/k" :value 0.5)]
+                          (gamepad/diff-controller-states {} {1 {:buttons {} :axes {:right-x 0.9}}})
+                          (osc/osc-msg->events (fixtures/osc-msg "/fader/2" (float 0.6)) {})
+                          (osc/osc-msg->events (fixtures/osc-msg "/fader/2" (float 0.0)) {})
+                          (osc/osc-msg->events (fixtures/osc-msg "/fader1" (float 0.4)) osc/default-mappings)
+                          (osc/osc-msg->events (fixtures/osc-msg "/go") {})
+                          discrete
+                          [(midi/midi-msg->event (fixtures/note-on 0 36 100))])]
+      (with-macro-map {}
+        (fn [_]
+          (router/dispatch! event)
+          (is (= (set (input-mapper/store-keys event)) (set (keys (written)))) (pr-str event)))))
+    (is (= [] (input-mapper/store-keys (midi/midi-msg->event (fixtures/note-on 0 36 100)))) "a note writes none")
+    (is (= [[:gamepad 1 :right-x]] (input-mapper/store-keys (first (gamepad/diff-controller-states {} {1 {:buttons {} :axes {:right-x 0.9}}}))))
+        "a gamepad's axis")))

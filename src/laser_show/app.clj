@@ -144,6 +144,7 @@
   (state/init-state! (-> (domains/build-initial-state)
                          (templates/apply-starter-cue-chains)
                          (templates/apply-starter-vibes)
+                         (templates/apply-starter-effects)
                          (history/mark-clean)))
 
   (init-styles!)
@@ -260,6 +261,7 @@
    (start-test! (-> (domains/build-initial-state)
                     (templates/apply-starter-cue-chains)
                     (templates/apply-starter-vibes)
+                    (templates/apply-starter-effects)
                     (history/mark-clean))))
   ([initial-state]
    (stop!)

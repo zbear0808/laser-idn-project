@@ -114,9 +114,9 @@
 
 ;; What reacts to what
 
-(defn- effects-in
+(defn effects-in
   "Every enabled effect in x (a chain, an item, a group, a track, or a
-   vector of them), through the enabled ones."
+   vector of them), through the enabled ones (also vibes.faders')."
   [x]
   (cond
     (map? x) (when (not= false (:enabled? x))

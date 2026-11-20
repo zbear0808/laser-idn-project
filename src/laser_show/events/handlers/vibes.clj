@@ -16,9 +16,14 @@
    :make-from-rows, each one undo step, and what plays follows the edit at
    once (engine/reconcile). :vibe/select-for-edit and :set-slot are its
    selection, :learn-all and :wizard-cancel its Learn all (handlers/input.clj
-   chains the learns): UI state, never undone."
+   chains the learns): UI state, never undone.
+
+   Its Controls panel's faders (plans/2026-11-18-vibe-mode/05):
+   :vibe/add-master and :vibe/add-morph make their effect cells
+   (vibes.faders), and :vibe/clear-control with a :slot unbinds a fader."
   (:require [laser-show.events.helpers :as h]
             [laser-show.vibes.engine :as engine]
+            [laser-show.vibes.faders :as faders]
             [laser-show.vibes.library :as library]
             [laser-show.vibes.reactions :as reactions])
   (:import [javafx.scene.input MouseButton MouseEvent TouchEvent]))
@@ -79,10 +84,22 @@
     {}))
 
 (defn- handle-clear-control
-  "Unbind the controls of role (an undoable edit of the trigger map)."
-  [{:keys [state role]}]
-  {:state (update-in state [:config :input :trigger-map]
-                     #(into {} (remove (fn [[_ action]] (library/binds-role? action role))) %))})
+  "Unbind the controls of role, or the control learned for the fader slot
+   (an undoable edit of the trigger map or the macro map; nothing to unbind
+   changes nothing)."
+  [{:keys [state role slot]}]
+  (if slot
+    (let [m (get-in state [:config :input :macro-map])
+          kept (into {} (remove (fn [[_ s]] (= slot s))) m)]
+      {:state (cond-> state (not= (count m) (count kept)) (assoc-in [:config :input :macro-map] kept))})
+    {:state (update-in state [:config :input :trigger-map]
+                       #(into {} (remove (fn [[_ action]] (library/binds-role? action role))) %))}))
+
+(defn- handle-add-morph
+  "A Morph of kind for the vibe (vibes.faders/add-morph), switched on at once
+   if the vibe plays, as any edit of its FX set is (engine/reconcile)."
+  [{:keys [state vibe kind] :as event}]
+  {:state (engine/reconcile (faders/add-morph state vibe kind) (get-in state [:config :vibes]) (h/current-time-ms event))})
 
 
 ;; The Vibes tab: edits (undoable; an edit with nothing to do, such as an
@@ -183,6 +200,8 @@
     :vibe/pointer (handle-pointer event)
     :vibe/window-focus (handle-window-focus event)
     :vibe/clear-control (handle-clear-control event)
+    :vibe/add-master {:state (faders/add-master state)}
+    :vibe/add-morph (handle-add-morph event)
 
     ;; The Vibes tab
     :vibe/add (handle-add event library/add-vibe)

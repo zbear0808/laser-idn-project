@@ -2,6 +2,8 @@
   (:require [clojure.test :refer [deftest testing is]]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.input :as input]
+            [laser-show.input.events :as input-events]
+            [laser-show.input.fixtures :as fixtures]
             [laser-show.input.midi :as midi]
             [laser-show.input.osc :as osc]
             [laser-show.input.router :as router]
@@ -277,6 +279,147 @@
             (is (= target (learning-target s)))
             (is (nil? (wizard s)))
             (is (= target (get (trigger-map s') (note-key 60))))
+            (is (nil? (learning-target s')))))))
+    (finally
+      (stop-learning!))))
+
+
+;; Learning a fader (Phase 5): {:type :macro :slot} with :capture :continuous
+
+(def ^:private slider-1 {:type :macro :slot :slider-1})
+(def ^:private slider-2 {:type :macro :slot :slider-2})
+
+(defn- start-fader-learn
+  "[state promise]: the learn for a fader slot started on state, its router
+   handler registered; promise gets what it catches."
+  [state target]
+  (let [effects (input/handle {:event/type :input/start-learn :target-action target :capture :continuous :state state})]
+    [(:state effects) (get-in effects [:input/await-learn :promise])]))
+
+(defn- move!
+  "MIDI CC control on channel moved through values, through the router."
+  [channel control & values]
+  (doseq [v values]
+    (router/dispatch! (input-events/control-change :midi channel control v))))
+
+(defn- caught [p] (deref p 0 nil))
+
+(defn- macro-map [state] (get-in state [:config :input :macro-map]))
+
+(defn- fader-learned
+  "state after the learn for target caught a move of MIDI CC control on
+   channel 0 from a to b, as :input/await-learn hands it on."
+  [state target control a b]
+  (let [[s p] (start-fader-learn state target)]
+    (move! 0 control a b)
+    (piped s {:event/type :input/learn-captured :target-action target :input-event (caught p)})))
+
+(deftest learn-cc-needs-movement-test
+  (try
+    (let [[s p] (start-fader-learn (initial-state) slider-1)]
+      (is (= slider-1 (learning-target s)) "the learn aims at the slot")
+      (testing "the doc's example: CC 7 at 0.50, then 0.52: nothing; CC 1 at 0.10, then 0.31: caught"
+        (move! 0 7 0.50 0.52 0.47 0.55)
+        (is (nil? (caught p)) "invariant 9: a noisy CC that wiggles by less than 0.08 is never captured")
+        (move! 0 1 0.10)
+        (is (nil? (caught p)) "a first value is no movement")
+        (move! 0 1 0.31)
+        (is (= [:midi 0 1] (:store-key (caught p))))
+        (is (= 0.31 (:value (caught p))))
+        (is (not-any? #{::input/generalized-input-learn} (:global-handlers (router/list-handlers)))
+            "it stops listening once it caught")))
+    (testing "about 10 of a CC's 127 steps: 10 aren't enough, 11 are, either way"
+      (let [[_ p] (start-fader-learn (initial-state) slider-1)
+            step! #(router/dispatch! (midi/midi-msg->event (fixtures/control-change 0 9 %)))]
+        (step! 64)
+        (step! 74)
+        (step! 54)
+        (is (nil? (caught p)))
+        (step! 75)
+        (is (= [:midi 0 9] (:store-key (caught p))))))
+    (testing "an OSC fader on an address of its own, and a gamepad trigger"
+      (let [[_ p] (start-fader-learn (initial-state) slider-2)]
+        (run! router/dispatch! (osc/osc-msg->events (fixtures/osc-msg "/fader/1" (float 0.2)) {}))
+        (run! router/dispatch! (osc/osc-msg->events (fixtures/osc-msg "/fader/1" (float 0.5)) {}))
+        (is (= [:osc "/fader/1"] (:store-key (caught p)))))
+      (let [[_ p] (start-fader-learn (initial-state) slider-2)]
+        (router/dispatch! (input-events/control-change :gamepad 0 :trigger-left 0.0))
+        (router/dispatch! (input-events/control-change :gamepad 0 :trigger-left 0.9))
+        (is (= [:gamepad 0 :trigger-left] (:store-key (caught p))))))
+    (finally
+      (stop-learning!))))
+
+(deftest learn-cc-binds-a-slot-and-replaces-its-old-source-test
+  (try
+    (let [s0 (history/mark-clean (initial-state))
+          s1 (fader-learned s0 slider-1 1 0.10 0.31)]
+      (is (= {[:midi 0 1] :slider-1} (macro-map s1)))
+      (is (nil? (learning-target s1)))
+      (is (= "Learn Fader" (history/undo-label (:history s1))) "one undo step")
+      (is (true? (get-in s1 [:project :dirty?])) "a saved, undoable edit")
+      (is (= {} (trigger-map s1)) "the trigger map isn't touched")
+      (testing "learning slider-1 again on CC 9 removes CC 1: one source per slot (invariant 5)"
+        (is (= {[:midi 0 9] :slider-1} (macro-map (fader-learned s1 slider-1 9 0.9 0.5)))))
+      (testing "slider-2 gets its own; then learned on slider-1's CC, it takes it: a key has one slot"
+        (let [s2 (fader-learned s1 slider-2 2 0.0 1.0)]
+          (is (= {[:midi 0 1] :slider-1 [:midi 0 2] :slider-2} (macro-map s2)))
+          (is (= {[:midi 0 1] :slider-2} (macro-map (fader-learned s2 slider-2 1 0.6 0.2))))))
+      (testing "the same control again changes nothing, so no undo step"
+        (let [again (fader-learned s1 slider-1 1 0.2 0.6)]
+          (is (= (macro-map s1) (macro-map again)))
+          (is (= 1 (count (get-in again [:history :undo-stack]))))))
+      (testing "a capture for slider-1 while slider-2 is learned binds nothing"
+        (let [[s p] (start-fader-learn s1 slider-2)]
+          (move! 0 5 0.0 0.5)
+          (is (= (macro-map s1)
+                 (macro-map (piped s {:event/type :input/learn-captured :target-action slider-1 :input-event (caught p)}))))))
+      (testing "undone: no binding"
+        (is (empty? (macro-map (piped s1 {:event/type :edit/undo}))))))
+    (testing "a fader's learn ends Learn all, as any other learn does"
+      (let [s (piped (initial-state) {:event/type :vibe/learn-all})
+            [s' _] (start-fader-learn s slider-1)]
+        (is (some? (get-in s [:ui :vibes :wizard])))
+        (is (nil? (wizard s')))
+        (is (= slider-1 (learning-target s')))))
+    (finally
+      (stop-learning!))))
+
+(deftest learn-continuous-ignores-notes-test
+  (try
+    (let [[s p] (start-fader-learn (initial-state) slider-1)]
+      (router/dispatch! (input-events/note-on :midi 0 36 1.0))
+      (router/dispatch! (input-events/note-off :midi 0 36))
+      (router/dispatch! (input-events/trigger :osc "/hit" :pressed))
+      (router/dispatch! (input-events/trigger :gamepad [0 :a] :pressed))
+      (router/dispatch! (input-events/note-on :midi 0 37 0.2))
+      (is (nil? (caught p)) "invariant 8: notes and buttons never bind a fader")
+      (testing "and a note handed to a fader's learn binds nothing, and ends it"
+        (let [s' (captured s slider-1 (note 36))]
+          (is (empty? (macro-map s')))
+          (is (= (trigger-map s) (trigger-map s')))
+          (is (nil? (learning-target s')))))
+      (testing "even with a :store-key: a note writes no store key"
+        (is (empty? (macro-map (captured s slider-1 (assoc (note 36) :store-key [:midi 0 36])))))))
+    (finally
+      (stop-learning!))))
+
+(deftest learn-a-role-ignores-cc-test
+  (try
+    (let [effects (input/handle {:event/type :input/start-learn :target-action hit-role :state (initial-state)})
+          s (:state effects)
+          p (get-in effects [:input/await-learn :promise])]
+      (move! 0 1 0.1 0.9 0.0 1.0)
+      (is (nil? (caught p)) "probe v6, now pinned: a CC never captures a role's learn")
+      (router/dispatch! (input-events/note-on :midi 0 36 1.0))
+      (is (= :note-on (:type (caught p))) "a note does")
+      (testing "and a CC handed to a role's learn binds nothing, even caught by a fader's catcher"
+        (let [[_ fp] (start-fader-learn (initial-state) hit-role)]
+          (move! 0 1 0.1 0.9)
+          (let [cc (caught fp)
+                s' (captured s hit-role cc)]
+            (is (= [:midi 0 1] (:store-key cc)))
+            (is (= (trigger-map s) (trigger-map s')))
+            (is (empty? (macro-map s')))
             (is (nil? (learning-target s')))))))
     (finally
       (stop-learning!))))

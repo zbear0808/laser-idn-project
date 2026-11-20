@@ -1160,3 +1160,39 @@
         (let [before (at cfg cue-ctx)]
           (is (= before (at cfg pressed)) (str (:type cfg) ": presses don't move it"))
           (is (= before (at (assoc cfg :restart-on :own) pressed)) (str (:type cfg) " with :own")))))))
+
+
+;; The faders (plans/2026-11-18-vibe-mode/05 §7): a Fader follows a slot of
+;; the input store, which the input mapper writes for the control learned
+
+(deftest macro-reads-its-slot-test
+  (let [master {:type :macro :slot :slider-1 :min 0.0 :max 1.0 :default 1.0}
+        eval-macro (get mod-eval/modulator-evaluators :macro)]
+    (is (= 0.25 (eval-macro master {:input-values {[:macro :slider-1] 0.25}})))
+    (is (= 0.25 (at master {:input-values {[:macro :slider-1] 0.25}})) "through resolve-param, as an effect resolves it")
+    (is (= 0.0 (at master {:input-values {[:macro :slider-1] 0.0}})) "at 0 the show is dark")
+    (is (= 1.0 (at master {:input-values {[:macro :slider-2] 0.25}})) "the other fader's value isn't its own")
+    (is (= 1.0 (at master {:input-values {[:midi 0 1] 0.25}})) "nor the control's: only what the mapper writes for the slot")
+    (testing "min + v·(max − min)"
+      (is (approx= 90.0 (at {:type :macro :slot :slider-2 :min -180.0 :max 180.0 :default 0.5}
+                            {:input-values {[:macro :slider-2] 0.75}})
+                   1e-9)))))
+
+(deftest macro-default-when-unseen-test
+  (testing "R-6: a fader nobody moved reads 0.0 in the store (probe v9), so until it moves the Fader sits at :default"
+    (is (= 1.0 (at {:type :macro :slot :slider-1 :min 0.0 :max 1.0 :default 1.0} {:input-values {}})) "unseen: full")
+    (is (= 1.0 (at {:type :macro :slot :slider-2 :min 0.5 :max 1.5 :default 0.5} {:input-values {}})) "neutral until moved")
+    (is (= 0.0 (at {:type :macro :slot :slider-2 :min 0.0 :max 1.0} {:input-values {}})) "no :default: 0.0")
+    (is (= 1.0 (at {:type :macro :slot :slider-1 :min 0.0 :max 1.0 :default 1.0} {})) "no input values at all")
+    (is (= 0.0 ((get mod-eval/modulator-evaluators :macro) {:slot :slider-2 :min 0.0 :max 1.0} {}))
+        "the evaluator alone, without the registry's defaults")))
+
+(deftest macro-is-registered-and-listed-test
+  (is (some #{:macro} (map :id (mod-reg/all-ui-modulators))) "a choice on every modulatable parameter")
+  (let [{:keys [name category per-point? retrigger?]} (mod-reg/get-modulator :macro)
+        params (into {} (map (juxt :key identity)) (mod-reg/get-params :macro))]
+    (is (= ["Fader" :external false false] [name category per-point? retrigger?]))
+    (is (= [:slider-1 :slider-2] (get-in params [:slot :choices])))
+    (is (= :slider-1 (get-in params [:slot :default])))
+    (is (= [0.0 1.0 0.0] ((juxt :min :max :default) (:default params))) "where it sits until moved, on the fader's 0..1")
+    (is (= [:slot :min :max :default] (mapv :key (mod-reg/get-params :macro))))))
