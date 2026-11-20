@@ -187,27 +187,33 @@
 
 
 (defn- handle-zone-groups-edit
-  "Open dialog to edit an existing zone group."
+  "Open dialog to edit an existing zone group. All and the automatic groups
+   can't be edited: state is returned as it is for them."
   [{:keys [group-id state]}]
-  (let [group (get-in state [:zone-groups group-id])]
-    {:state (-> state
-                (update-in [:ui :dialogs :zone-group-editor] merge
-                           {:open? true
-                            :editing? true
-                            :group-id group-id
-                            :name (:name group "")
-                            :description (:description group "")
-                            :color (:color group "#808080")}))}))
+  (if (rig/derived-ref? group-id)
+    {:state state}
+    (let [group (get-in state [:zone-groups group-id])]
+      {:state (-> state
+                  (update-in [:ui :dialogs :zone-group-editor] merge
+                             {:open? true
+                              :editing? true
+                              :group-id group-id
+                              :name (:name group "")
+                              :description (:description group "")
+                              :color (:color group "#808080")}))})))
 
 (defn- handle-zone-groups-save-edit
-  "Save changes to an existing zone group from dialog."
+  "Save changes to an existing zone group from dialog. All and the automatic
+   groups are never stored: state is returned as it is for them."
   [{:keys [group-id name description color state]}]
-  {:state (-> state
-              (update-in [:zone-groups group-id] merge
-                         {:name name
-                          :description description
-                          :color color})
-              (assoc-in [:ui :dialogs :zone-group-editor :open?] false))})
+  (if (rig/derived-ref? group-id)
+    {:state state}
+    {:state (-> state
+                (update-in [:zone-groups group-id] merge
+                           {:name name
+                            :description description
+                            :color color})
+                (assoc-in [:ui :dialogs :zone-group-editor :open?] false))}))
 
 (defn- handle-zone-groups-set-editor-color
   "Set color in the zone group editor dialog (from color swatch click)."

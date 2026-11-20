@@ -283,3 +283,20 @@
     (testing "Graphics is a tag too"
       (ui/check! robot "#projector-tag-graphics")
       (ui/wait-for! #(= #{:crowd-scanning :graphics} (:tags (projector)))))))
+
+(deftest card-menu-turns-on-every-output-test
+  (let [robot (ui/robot)
+        enabled? #(get-in (app-state) [:projectors % :enabled?])]
+    (events/dispatch! {:event/type :projectors/scan-complete :devices [(device "10.0.0.5" "AA" 1 2) (device "10.0.0.6" "BB" 1)]})
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(some? (ui/query "#rig-card-projector-10-0-0-5-1")))
+    (ui/right-click-node! robot (ui/query "#rig-card-projector-10-0-0-5-1"))
+    (ui/wait-for! #(some? (ui/query "#rig-card-identify-projector-10-0-0-5-1")))
+    (ui/click! robot "#rig-card-enable-all-projector-10-0-0-5-1")
+    (ui/wait-for! #(and (true? (enabled? :projector-10-0-0-5-1)) (true? (enabled? :projector-10-0-0-5-2))))
+    (is (false? (enabled? :projector-10-0-0-6-1)) "another device's output stays off")
+    (testing "a card of a device with one output has no such item"
+      (ui/right-click-node! robot (ui/query "#rig-card-projector-10-0-0-6-1"))
+      (ui/wait-for! #(some? (ui/query "#rig-card-identify-projector-10-0-0-6-1")))
+      (is (nil? (ui/query "#rig-card-enable-all-projector-10-0-0-6-1")))
+      (ui/press! robot KeyCode/ESCAPE))))

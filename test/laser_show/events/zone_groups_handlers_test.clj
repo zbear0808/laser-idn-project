@@ -192,6 +192,17 @@
       (is (false? (get-in result [:state :ui :dialogs :zone-group-editor :open?]))))))
 
 
+(deftest built-in-groups-are-never-stored-test
+  (doseq [ref [:all :auto/left :auto.laser/proj-1]]
+    (testing (str ref)
+      (is (identical? base-state (:state (zone-groups/handle {:event/type :zone-groups/save-edit :group-id ref
+                                                              :name "Mine" :description "" :color "#FF0000"
+                                                              :state base-state})))
+          "saving an edit never stores All or an automatic group")
+      (is (identical? base-state (:state (zone-groups/handle {:event/type :zone-groups/edit :group-id ref :state base-state})))
+          "and the editor doesn't open for one"))))
+
+
 (deftest handle-zone-groups-set-editor-color-test
   (testing "Set editor color updates dialog data"
     ;; FLATTENED: Dialog fields live alongside :open?, not under :data
