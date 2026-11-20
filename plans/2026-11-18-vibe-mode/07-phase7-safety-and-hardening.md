@@ -1,7 +1,7 @@
 # Phase 7: safety and hardening
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`)
-**Status:** Proposed. Needs Phases 1–6   **Last verified against:** `b1da0f2` (probes v4, v10, v12 in `00-overview.md` §3)
+**Status:** Done in `5b59774` (2026-11-19), built on branch `vibe-phase7` from `989c315` (vibe Phases 1–6 and zones Z0 in it). As built: §10   **Last verified against:** `5b59774` (§10)
 **Supersedes / Superseded by:** none   **Related findings:** the review overview's "Next" item (the event agent's blocking I/O) is the real fix for R-1; this phase only keeps the performer out of its way
 
 Everything that makes a show survive a bad moment: a lock against accidental edits, protection against a key that never lets go, a loud "no output", an audience mark, a soak test, a hardware checklist and the docs. Parts of it can land earlier; the blackout and the audience rule already did (Phase 1).
@@ -156,3 +156,110 @@ Gear: a real DAC, one real controller (pad and faders), the show laptop, the ven
 - **Locking the toolbar's Stop**: never. Stop is a safety control.
 - **Controller LED feedback**: the app has no MIDI output.
 - **Taking blocking I/O off the agent**: the review's "Next" item; if it lands before this phase, R-1 shrinks and the lock's file rules can relax.
+
+## 10. As built (2026-11-19)
+
+Committed as `5b59774` on top of `989c315` (zones Z0 done, on top of vibe Phase 6). §1–9 cite `b1da0f2`; the lines below are at `5b59774`. The session that first built it lost its worktree, so this is the second build, from `989c315`; nothing of the first survived.
+
+**Where it is now** (paths under `src/laser_show/`)
+- `events/show_lock.clj` (NEW, pure): `blocked-events` `:21`, `refused-text` `:43` (Perform's notice, "Move Cell refused"), `notice-text` `:49` (the status bar's), `locked?` `:54`, `wrap-show-lock` `:59`. `events/core.clj:480`: the pipeline's innermost wrapper, right after `handlers/handle-event` (one require, one line, the docstring). Z0's dead `:clipboard/paste-projector-effects` effect is untouched, for Z0 to remove after this merges.
+- `events/handlers/vibes.clj`: NEW private `handle-set-show-lock` `:106`, routed `:223` in its own block; `handle-clear-control` `:90` lets go of a role whose key it unbound (item a).
+- `vibes/watchdog.clj` (NEW, pure): `limit-ms` `:25`, `due` `:46` (`[state now-ms pulses]`), `stuck?` `:68` (the engine's re-check); private `pulse-only?` `:35`, `any-pulse-held?` `:42`.
+- `vibes/engine.clj`: NEW private `let-go-of-hold` `:490` (release-all's per-role step, now shared), `let-go-of-stuck` `:501`; `release` routes `:reason :watchdog` to it; `release-all` `:548`; NEW public `release-unbound` `:561` (item a); NEW private `refresh-audience` `:653`, the last step of `reconcile` `:670` (item b). The ns docstring says both.
+- `services/show_clock.clj`: `rotation-step` is now `vibe-step` `:153`: auto-advance's report and the watchdog's (with the tick's pulse view, which `tick!` already makes) go through one `show-time/due-reports` call on the runtime's `:vibe-sent`; `tick!` `:194`. `animation/show_time.clj`: the ns docstring only.
+- `events/handlers/input_mapper.clj`: NEW private `all-notes-off-controls` `:68`, `all-notes-off?` `:73`; the continuous branch dispatches `:vibe/release-all` after the store write (`:91`). The discrete branch, `learning?` and `store-keys` are as they were.
+- `events/handlers/input.clj`: MIDI disconnect (`:72-87`, one device and all) dispatches `:vibe/release-all {:only :input}`; `handle-input-learn-captured` lets go of a role whose key the learn rebound (`:371`); one require.
+- `state/domains.clj`: `ui` `:show-lock?` `:206`, `:show-lock-notice` `:208`; `[:config :vibes :settings :max-hold-secs] 60` `:282`; the `:problem` doc names `:stuck-key`. `state/persistent.clj:166`: `reset-session` resets `[:ui :vibes]` (item c), one line after the notice's. `vibes/library.clj`: the ns docstring's settings.
+- `subs.clj`, a section of its own at the end (`:1326-1382`): `vibe-show-lock` `:1330`, private `vibe-played?` `:1337`, `vibe-output-banner` `:1345`, `vibe-audience?` `:1358`, `vibe-pad-audience?` `:1364`, `vibes-tab-label` `:1377`. Phase 2's `vibe-header` and `vibe-pad` keep their shapes (their tests compare whole maps).
+- `views/tabs/perform.clj`: NEW private `output-banner` `:36` (`#vibe-no-output`, under the BLACKOUT banner, always in the tree), `show-lock-controls` `:50` (`#vibe-lock-notice`, the toggle `#vibe-show-lock`, after AUTO in the header's second row `:149`); the header's AUDIENCE ALLOWED badge `#vibe-header-audience` `:125`. `views/components/vibe_pads.clj`: `#vibe-pad-<role>-audience` `:115`; "Stuck key released" `:42`, before "Effects only". `views/root.clj:89`: `tab-bar` takes the Vibes label from `subs/vibes-tab-label`. `css/vibes.clj:88-123`: `.toggle-button.vibe-show-lock` (and `:selected`, red), `.vibe-lock-notice`, `.vibe-header-audience`, `.vibe-pad-audience`.
+- Docs: `README.md` "Vibe Mode" after "Input System", with the keys, the faders, setup, tap reactions, auto-advance, safety and a "Vibe mode cheat sheet"; `QUICKSTART.md` "Vibe mode in ten minutes" under Usage, the Vibes tab's checklist as steps; `.github/copilot-instructions.md`: `src/laser_show/vibes/` in the key directories and the state rule on vibe presses and faders.
+
+**Items a–c (from earlier phases' "Found, not done")**
+- a. A key that loses its binding while it holds a role lets go of it at once: `engine/release-unbound [state was t]` compares the trigger map before the edit with after, and every role that lost a binding and is held by a key (`:src :input`, the engine's hold or, for a press that played nothing, its pulse) is let go of as `release-all` does. Called by a learn that rebinds a key or moves a role (`handle-input-learn-captured`) and by Clear (`handle-clear-control`). A pad's hold stays. The engine doesn't record which key holds a role, so a role with two keys that loses one lets go even if the other holds it (a role keeps one key through learn).
+- b. Unticking **Allow audience cells** stops an audience cue that plays at once, whichever role plays it: `refresh-audience`, the last step of `reconcile`, stops each HIT, ACCENT or FLASH voice whose cell the old vibe could play and the edited one can't; HIT's and ACCENT's are forgotten, the flash's cue stops while its effect cells stay on until FLASH is let go (they aren't cues). The bed was already `refresh-bed`'s. Ticking it again starts nothing; the next press may pick them.
+- c. `reset-session` resets `[:ui :vibes]` (the selection, the slot, Learn all) with the rest of the session, on New and Open.
+
+**Deviations, and why**
+
+| Plan | As built | Why |
+|---|---|---|
+| a hold is `[:vibe-runtime :held role]`; `due [state now-ms]` | also the pulse of a press that played nothing, held that long by the tick's pulse view: `due [state now-ms pulses]`, and its report carries the press's `:pulse` id | follow the code: Phase 4 made a press that plays nothing hold its pulse only, and Phase 6 counts that as a key down (`rotation/key-down?`). Stuck, such a key held a Swell at its peak and auto-advance off for ever. App state has no time for a pulse; the pulse view has its age |
+| `:vibe/release {:reason :watchdog}` sets the problem | the engine asks again first (`watchdog/stuck?`: the engine's hold still that old at the event's time, or the same press's pulse still held) and lets go as `release-all` does: no switch, no lock, no auto-advance on FLASH | Phase 6's pattern: a report that comes late or twice changes nothing, and a key pressed again since keeps its hold. The table's VIBE row (no lock, no switch) holds for every role: a stuck key mustn't change the look |
+| §7's blocked list | also `:file/open-result` and `:file/project-loaded` (a read can't finish while locked), Z0's `:projectors/request-remove`, `:projectors/remove`, `:zone-groups/request-remove`, `:zone-groups/remove` (the zones overview asks for Z0's remove; both re-route the engines), and every vibe edit with an undo label, which the test checks against `history/event-descriptions` (`:vibe/clear-control`, `:vibe/add-reaction`, `:vibe/add-master`, `:vibe/add-morph` besides Phase 3's eleven) | invariants 1 and 3 by construction. `:file/save-as-result` and the unsaved dialog's buttons are left alone, so Exit's Save still writes the project (exit-still-asks-test) |
+| the notice at `[:ui :show-lock-notice]` | that (`{:text "Move Cell refused" :event type}`, under the switch until unlocked), and the status bar's notice for 6 s ("Show lock is on: Move Cell refused. Unlock it on the Perform tab") | a drag refused on the Grid tab says why where it happened |
+| NO OUTPUT when `:running?` is false and a pad was pressed | from `subs/connection-status` (brief note 3): "press Stream" while `:stopped` or `:stopping`, "no projectors enabled" while `:idle`, nothing while starting, streaming or streaming with errors; after any vibe press of the session (a vibe made current, or HIT, ACCENT or FLASH pressed, by a pad or a key) | the toolbar and Perform agree; a key's press plays into nothing as a pad's does |
+| an audience mark on a pad "whose cue is audience-capable" | AUDIENCE on HIT's, ACCENT's or FLASH's pad while the vibe that plays allows audience cells and its pool (or flash cue) has one it may play; the header says AUDIENCE ALLOWED | without the box, V6 never plays them, so there is nothing to warn of |
+| `:max-hold-secs` written by the Vibes tab (§5) | no editor (§4 and §8 list none, as Phase 6's rotation settings); a file can set it; a value that is no positive number is 60 | |
+| the lint badge on the tab label | "Vibes ⚠ 2" (errors only), from `subs/vibes-tab-label`; `tab-bar` maps the label into `main-tabs` | brief note 2; the label was fixed data |
+| delete the plan folder | kept; 07 marked done | brief note 1: Phase 8 is open (V10) |
+
+**Tests**: 26 new unit tests (1,153 → 1,179), 1 soak test (`^:performance`), 5 UI tests
+- NEW `laser-show.events.show-lock-test` (7): the seven of §8. `locked-blocks-structure-edits-test` runs twelve real edits (moves, clears, vibe edits, Clear control, a projector's switch and removal, a zone group's delete) unlocked (they edit) and locked (only the notices change, and no effect but the notice's timer), undo and redo both ways, the four file events (no chooser, read or write) and a read that finishes while locked. `locked-allows-performance-events-test`: twelve events give the same state locked or not (requests' random ids aside), and Stream, Play and a learn give their effects. `blocked-events-name-real-events-test` also checks every vibe edit with an undo label is blocked.
+- NEW `laser-show.vibes.watchdog-test` (6): the four of §8 (the table's rows: 59 s, 61 s, FLASH with what it stepped aside, VIBE, the setting and bad values), `a-press-that-played-nothing-is-a-hold-too-test`, `due-allocates-nothing-when-idle-test` (under 4 KB over 10,000 calls).
+- `laser-show.events.handlers.input-mapper-test` (+3): the three of §8, on midi-clj messages (`input/fixtures.clj`), a key's hold and a pad's. `laser-show.events.handlers.input-test` (+2): `midi-disconnect-releases-input-holds-only-test` (one device, all devices), `a-key-that-loses-its-role-lets-go-test` (item a: a learn moves HIT, a cell learned on HIT's key, HIT on its own key, a pad's hold). `laser-show.events.handlers.vibes-test` (+2): `clear-control-lets-go-of-a-held-role-test` (item a), `unticking-allow-audience-stops-what-plays-test` (item b). `laser-show.state.persistent-test` (+1): `session-reset-clears-the-vibes-tab-selection-test` (item c). `laser-show.services.show-clock-test` (+1): `watchdog-event-is-sent-once-per-interval-test`; `one-state-and-input-read-per-tick-test` and `snapshot-shape-test` unchanged and green. `laser-show.subs-test` (+4): `vibe-output-banner-sub-test`, `vibe-show-lock-sub-test`, `vibe-audience-subs-test`, `vibes-tab-label-sub-test`.
+- `laser-show.vibes.engine-fuzz-test` (widened): the show lock switched (a locked walk refuses its moves, clears, vibe edits and undos, and skips the direct edits an undo would make), undo and redo through their handlers, keys that stick (a press, then 10.5 s of clock) and stuck-key reports that come late or for another press; the world's limit is 10 s, so the walk's own long holds meet it too. The clock's part sends the watchdog's reports with auto-advance's, as `tick!` does. New checks: `check-lock` (07 invariants 1, 2, 8: refused events change only the notices, unlocking only the switch and the notice, a vibe event does locked what it does unlocked), `check-watchdog` and `check-stuck-holds` (invariant 5: let go of once, alone, as a cut, with its problem, no switch or lock; nothing held past the limit after a tick), and in `check-always` invariant 7: no engine cue plays without its voice ("two voices for a role"), none is held without its role held, no count is negative; `check-vibe-edit` allows an audience cue to stop when the box is unticked, and checks that none plays after. NEW public `new-world`, `random-step`, `take-step` for the soak.
+- NEW `laser-show.vibes.engine-soak-test/engine-soak-test` (`^:performance`): the fuzz's walk as one long walk, every step's checks, and its own: what vibe mode keeps stays under the world's ceilings (bags, voices, holds, ducks, FX cells, cues playing, press sources, the undo stack, the runtime printed), and the median of the last 1,000 presses' pipeline time is at most 3 times the first 1,000's.
+- UI `laser-show.ui-test.perform-test` (+4): the four of §8; `stuck-pad-shows-its-problem-test` holds a pad past a 0.5 s limit and ticks the clock by hand; `no-output-banner-test` clicks Stream with no projector enabled (the toolbar and the banner agree), then Stop, and drains the output runtime. `laser-show.ui-test.vibes-test` (+1): `vibes-tab-label-counts-lint-errors-test`. Pads are clicked with `ui/mouse-click!` and held with `ui/press-node!` (brief note 9), `:quick-tap-ms` raised where a click must stay a tap.
+
+**Red first**
+- The tests against `989c315`'s `src/`: the five extended namespaces, 104 tests, 702 assertions, 25 failures (CC 123 and 120 let go of nothing; a disconnect, a learn and Clear left the key's hold, pulse and cue; unticking left both audience cues playing; the clock sent no stuck-key report; New and Open kept the Vibes tab's selection). `show-lock-test` and `watchdog-test` didn't load (no such namespaces).
+- UI, with the views, CSS and subs set aside: 5 tests, 5 errors, each timing out.
+- First green run: `blocked-events-name-real-events-test` failed for `:file/open-result`, which returns `{}` without a file (a cancelled chooser): the test passes a `:file-path`.
+- The widened fuzz, first run: all three seeds failed "inv 3: bag … refilled after playing …". The walk's cycle tracker renamed the picks of a move the lock had refused; it now renames only when the grid changed, takes the picks of a tick (a stuck FLASH let go of starts what it kept waiting) and marks the cycles unclean after an undo or redo that changed the document (cells renamed behind the bags' backs). No engine change.
+- The soak, 1,000,000 events of seed 7: step 277,178, "a tick step changed the vibe with 2 :vibe pulses": a stuck key's 10.5 s tick step holds two auto-advances once the key is let go of at 10 s. The walk's check now counts one pulse per tick that changes the vibe. No engine change; it also showed that a second press of a role that plays nothing leaves the engine's hold at the first press's time, so the watchdog counts from the first (below).
+
+**Mutants**: each against the watchdog, show-lock, vibes-handlers and input tests and the fuzz's three seeds (68 tests). All killed.
+
+| # | Mutant | Fuzz | Unit tests failing |
+|---|---|---|---|
+| W1 | `stuck?` doesn't ask the age again | 3 of 3 ("a stuck-key report … which isn't stuck, changed the state") | `released-once-test` |
+| W2 | `due` leaves the pulse-only holds out | 2 of 3 ("…'s pulse is held 10483 ms, past the limit") | `a-press-that-played-nothing-is-a-hold-too-test` |
+| L1 | the lock not in the pipeline | 3 of 3 (07 inv 1) | 57: `locked-blocks-structure-edits-test` (56), `unlock-restores-everything-test` (1) |
+| L2 | `:file/project-loaded` not blocked | 0 of 3 | `locked-blocks-structure-edits-test` (1) |
+| A1 | `reconcile` without `refresh-audience` | 1 of 3 ("…'s audience rule left :flash playing [2 1]") | `unticking-allow-audience-stops-what-plays-test` (4) |
+| U1 | `release-unbound` lets go of a pad's hold too | 0 of 3 | `a-key-that-loses-its-role-lets-go-test`, `clear-control-lets-go-of-a-held-role-test` |
+| V1 | a stuck VIBE released as a VIBE release (locks) | 3 of 3 ("a stuck :vibe locked or unlocked the rotation") | `stuck-hold-is-released-test` |
+
+U1's first version (the filter before the reduce) survived: it was equivalent, the reduce checks `:src` itself; the filter is gone.
+
+**Soak**: 200,000 events (the default, seed 20261119) in 36 s: 0 failures; 54,970 presses, median 31.0 µs over the first 1,000 (the JIT still warming) and 7.4 µs over the last 1,000; at most 8 bags, 4 voices, 4 holds, 3 ducked, 3 FX cells on, 9 cues playing, 5 press sources, 50 undo steps, the runtime 1,373 characters printed. A million events of seed 7 failed at step 277,178 (red first above); after the walk's fix, 300,000 events of seed 7, past that step: 0 failures in 177 s with the machine under load (82,423 presses, median 74.3 µs over the first 1,000 and 8.6 µs over the last 1,000; the same ceilings, at most 10 cues playing). The run is about 5,500 events a second here, so the half-hour soak is `VIBE_SOAK_EVENTS=10000000 clj -M:mac-arm:test-timing soak` (another walk: `VIBE_SOAK_SEED=<n>`); it prints its progress every 20,000 events.
+
+**Found, not done**
+- `:input/midi-disable` drops a held key's note-off as a disconnect does, but lets go of nothing; the watchdog covers it.
+- A playing cue that becomes audience-capable through a projector's tag or zone groups, or its own destination, plays on: only the vibe's box (item b) stops one.
+- Two sources, one role: a second press that plays nothing (a pad after a key, or the other way) leaves the engine's hold at the first press's time, and the watchdog counts from it (04 §10's two sources).
+- After a show clock restart a pulse-only hold has no age in the pulse view (`reset-runtime!` seeds the stamps without press times) until its next press, so the watchdog can't see it.
+- The zones plan's later events that re-route or change safety (Z1's safety edits, Z2's order and membership, Z4's map switches, ZR's rig) join `blocked-events` when they land, and zone group create and edit aren't blocked (the zones overview, "Running alongside vibe Phases 6 and 7"; whether a safety edit should be refused is for Z1 and this plan to agree).
+- The agent's blocking I/O (R-1) is as it was: the lock only refuses save, open and new while it is on.
+
+**Hardware check (§8): unverified.** None of the thirteen was run: there is no DAC, controller or venue screen here.
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Latency feel (filmed at 120 fps) | unverified |
+| 2 | Tap and hold, the 150 ms line | unverified |
+| 3 | Blackout within a frame | unverified |
+| 4 | A pulled cable: the watchdog ends the hold within the limit, the pad says so | unverified |
+| 5 | Faders | unverified |
+| 6 | Legibility at 2 m (now with the NO OUTPUT banner, AUDIENCE ALLOWED and the SHOW LOCK switch) | unverified |
+| 7 | Touch, two pads at once | unverified |
+| 8 | Auto-advance through a 20-minute set, then locked | unverified |
+| 9 | The window hidden or covered | unverified |
+| 10 | A save mid-show with the lock off (the key delay), refused with it on | unverified |
+| 11 | Thirty minutes of random presses into the running app | unverified (the soak test walks the handlers and the clock's step, not the running app) |
+| 12 | Tap reactions and their cost | unverified |
+| 13 | Zone effects | not applicable until Phase 8 lands |
+
+**Verification, 2026-11-19, macOS arm64, JDK 25**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test show-lock watchdog vibes input-mapper input show-clock persistent core engine reactions subs` | 394 tests, 2,698 assertions, 0 failures |
+| `VIBE_FUZZ_SEEDS=200 clj -M:mac-arm:test -n laser-show.vibes.engine-fuzz-test` | seeds 1–200, 2,000 steps each: 0 failures (113 s with the machine at load 10 to 97; 81 s at load 5 before the walk's last fix) |
+| `clj -M:mac-arm:test-timing soak` | 200,000 events, 0 failures (36 s); 300,000 events of seed 7, 0 failures (177 s, load 10 to 97) |
+| `clj -M:test-ui:mac-arm:test-ui-headless -n` perform-test, vibes-test, grid-test, menu-bar-test, main-window-test | 60 tests, 411 assertions, 0 failures |
+| `clj -M:mac-arm:test` (full unit suite) | 1,179 tests, 34,887 assertions, 0 failures (baseline at `989c315`: 1,153 tests, 34,606 assertions) |
+| `clj -M:kondo --lint src test` | 0 errors, 21 warnings, the same 21 as at `989c315` |
+| layout | a headless screenshot at 1200×800: the header's two rows hold AUDIENCE ALLOWED, AUTO and its countdown, the refused notice and SHOW LOCK, with the NO OUTPUT banner above and "Vibes ⚠ 1" on the tab |
+| full UI suite | not run here: it runs after the merge |
+| manual (unverified) | the hardware check above; a visible (non-headless) run; the header's layout at 2 m |

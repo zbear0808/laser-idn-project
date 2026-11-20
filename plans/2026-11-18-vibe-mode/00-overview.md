@@ -1,7 +1,7 @@
 # Vibe mode: five buttons, two faders, cues grouped by feel
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`; `src/` is unchanged since `378db47`)
-**Status:** Proposed. V1–V9 answered 2026-11-18 (§7: V8 B, V9 A with a palette option, the rest A)   **Last verified against:** `b1da0f2`. The unit tests whose names contain `triggers`, `input-mapper` or `show-time` pass (42 tests, 149 assertions, 0 failures). Probes v1–v24 (§3) ran on macOS arm64, JDK 25.0.5 (v13–v24, for Phases 4 and 8, on 2026-11-18; for v19–v24 the working tree also held Phase 1's uncommitted edits, in files those probes don't touch).
+**Status:** Phases 1–7 done: 1 `9177b1e`, 2 `94f905e`, 3 `38f92ad`, 4 (4a `6715fb4`, 4b `f5a4f84`), 5 `9f5d78a` (its fader slots fixed in `0faa18c`), 6 `4a4a10a`, 7 `5b59774`; each doc's §10 (and 04 §11, 05 §11) says what was built. Phase 8 (zone effects) is open: V10 isn't answered. V1–V9 answered 2026-11-18 (§7: V8 B, V9 A with a palette option, the rest A)   **Last verified against:** `b1da0f2` for §1–§3 and the probes. The unit tests whose names contain `triggers`, `input-mapper` or `show-time` pass (42 tests, 149 assertions, 0 failures). Probes v1–v24 (§3) ran on macOS arm64, JDK 25.0.5 (v13–v24, for Phases 4 and 8, on 2026-11-18; for v19–v24 the working tree also held Phase 1's uncommitted edits, in files those probes don't touch).
 **Supersedes / Superseded by:** supersedes the unused trigger-group scaffolding from `23fc7cc` ("build out vibe tapping", see V7); answers the open "adopt or delete the `triggers/` engine" decision (review 05 L1). Superseded by: none
 **Related findings:** review 05 F13, F14, F15, L1, M4 (step 1 only), M5, M6; review 02 #10, T3; keyboard plan K-13 (its Phase 5); output runtime O4 (blackout); show clock §7 (input timestamps, Stop and blackout, the agent's blocking I/O); modulator time base §9 ("once" on the effects grid counts from the clock's start); the UX plan (`plans/2026-11-18-ux-improvements/`: the Grid tab is the performer's tab)
 
@@ -29,16 +29,16 @@ Two faders: **Intensity** (a master dimmer that works out of the box) and **Morp
 
 **What the app already has:** the cue grid, the trigger map and learn, momentary cues, effect cells, the lock-free input store and modulators, and the show clock that owns time. **What is missing:** the grouping model, a beat-length decay, a picker that never repeats, a blackout that stays on, a screen you can read at a glance, a way for a press to reach an effect, a way to move a look between zones, and a way to learn a fader.
 
-| Phase | Doc | Goal | Size | Needs |
-|---|---|---|---|---|
-| 1 | `01-phase1-engine-core.md` | Vibes, pools, the roles, beat decay, the no-repeat bag. No UI | ~3.5 d | none |
-| 2 | `02-phase2-perform-view.md` | A Perform tab: five pads, vibe strip, readouts. Playable by mouse, touch or learned keys | ~2.5 d | 1 |
-| 3 | `03-phase3-setup-and-grouping.md` | A Vibes tab, badges on the grid, make-vibes-from-rows, learn-all wizard, starter vibes | ~3.5 d | 1, 2 |
-| 4 | `04-phase4-tap-reactions.md` | Presses move effects: pulses, Restart on, Envelope / Step / Energy, tap reactions, hue stepping | ~3.5 d | 1 (2 and 3 for the pad and Vibes tab parts) |
-| 5 | `05-phase5-faders-and-macros.md` | The fader path: macro modulator, CC learn, master intensity, Morph | ~1.75 d | 1, 2 |
-| 6 | `06-phase6-rotation-and-tempo.md` | Auto-advance on phrase gaps, and one tap-tempo algorithm | ~2.5 d | 1, 2 |
-| 7 | `07-phase7-safety-and-hardening.md` | Audience marks on Perform, show lock, stuck-key guards, hardware check, docs | ~2 d | 1–6 |
-| 8 | `08-phase8-zone-effects.md` | Zone chase, swap and shift: three effects, a render stage, the pickers. With vibes: four reactions and the audience rule | ~3.5 d (2.5 d for the effects, 1 d with vibes) | none for the effects; 1 and 4 for the reactions |
+| Phase | Doc | Goal | Size | Needs | Status |
+|---|---|---|---|---|---|
+| 1 | `01-phase1-engine-core.md` | Vibes, pools, the roles, beat decay, the no-repeat bag. No UI | ~3.5 d | none | Done, `9177b1e` |
+| 2 | `02-phase2-perform-view.md` | A Perform tab: five pads, vibe strip, readouts. Playable by mouse, touch or learned keys | ~2.5 d | 1 | Done, `94f905e` |
+| 3 | `03-phase3-setup-and-grouping.md` | A Vibes tab, badges on the grid, make-vibes-from-rows, learn-all wizard, starter vibes | ~3.5 d | 1, 2 | Done, `38f92ad` |
+| 4 | `04-phase4-tap-reactions.md` | Presses move effects: pulses, Restart on, Envelope / Step / Energy, tap reactions, hue stepping | ~3.5 d | 1 (2 and 3 for the pad and Vibes tab parts) | Done, 4a `6715fb4`, 4b `f5a4f84` |
+| 5 | `05-phase5-faders-and-macros.md` | The fader path: macro modulator, CC learn, master intensity, Morph | ~1.75 d | 1, 2 | Done, `9f5d78a` (fader slots `0faa18c`) |
+| 6 | `06-phase6-rotation-and-tempo.md` | Auto-advance on phrase gaps, and one tap-tempo algorithm | ~2.5 d | 1, 2 | Done, `4a4a10a` |
+| 7 | `07-phase7-safety-and-hardening.md` | Audience marks on Perform, show lock, stuck-key guards, hardware check, docs | ~2 d | 1–6 | Done, `5b59774` (the hardware check unverified) |
+| 8 | `08-phase8-zone-effects.md` | Zone chase, swap and shift: three effects, a render stage, the pickers. With vibes: four reactions and the audience rule | ~3.5 d (2.5 d for the effects, 1 d with vibes) | none for the effects; 1 and 4 for the reactions | Open (V10 pending) |
 
 About 23 days. Phase 8 stands apart: its effects need nothing from the other phases and can land any time, and its reactions follow Phases 1 and 4. Phase 1 alone is only drivable from the REPL, so **land 1 and 2 together** for first use. Each later phase ships on its own; Phase 4 is the one that makes tapping feel alive, so it comes before the faders.
 
