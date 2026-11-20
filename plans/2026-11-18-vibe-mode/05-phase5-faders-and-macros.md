@@ -273,4 +273,5 @@ Committed as `0faa18c` on top of `7559aad` (built as `ca4554e` on branch `vibe-p
 | `clj -M:mac-arm:test` (full unit suite) | 1,089 tests, 34,272 assertions, 0 failures (baseline at `8bb1332`: 1,083 tests, 34,221 assertions) |
 | `clj -M:kondo --lint` on the touched files, with `testfx.clj` and `vibes/reactions.clj` | 0 errors; 1 warning, there before (`input.clj:423`). Without `reactions.clj`, kondo's cache still had its 2-argument `reactions` from before 4b and reported `subs.clj:1222` |
 | full UI suite | not run here: it runs after the merge |
+| after the merge, on `master` at `70f7db8`: `clj -M:mac-arm:test`, then the full UI suite | 1,089 tests, 34,273 assertions, 0 failures; UI 134 tests, 675 assertions, 0 failures |
 
