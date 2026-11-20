@@ -382,6 +382,25 @@
         (is (stop-streaming!))))))
 
 
+(deftest skipped-calibration-shows-as-a-warning-test
+  (init-with-projectors! {:a (projector 1 true)})
+  (let [status #(get-in (state/get-raw-state) [:backend :streaming :status :projectors :a])
+        lit [[0.0 0.0 1.0 1.0 1.0] [0.5 0.0 1.0 1.0 1.0]]]
+    (try
+      (with-redefs-fn {#'me/projector-frame (constantly lit)}
+        (fn []
+          (dispatch! {:event/type :idn/start-multi-streaming})
+          (is (dac/wait-for! #(= :streaming (:state (status))) 3000) (pr-str (status)))
+          (output-errors/report! [:calibration :a] "Corner Pin skipped")
+          (is (dac/wait-for! #(= "Corner Pin skipped" (:warning (status))) 3000) (pr-str (status)))
+          (is (= :streaming (:state (status))) "it still streams")
+          (output-errors/ok! [:calibration :a])
+          (is (dac/wait-for! #(nil? (:warning (status))) 3000) "and the warning goes once it works")
+          (is (stop-streaming!))))
+      (finally
+        (output-errors/ok! [:calibration :a])))))
+
+
 ;; Each engine on its own thread (invariant 6); stop signals all first (invariant 7)
 
 (deftest slow-projector-does-not-delay-others-test

@@ -177,17 +177,20 @@
       error {:state :error :error error}
       (and thread (not (.isAlive thread))) {:state :error :error "The streaming thread ended"}
       (zero? frames-sent) {:state :starting}
-      :else (cond-> {:state :streaming :fps (/ (Math/round (* 10.0 (double draw-fps))) 10.0)}
-              scan-limited? (assoc :scan-limited? true)))))
+      :else (let [skipped (:message (get errors [:calibration id]))]
+              (cond-> {:state :streaming :fps (/ (Math/round (* 10.0 (double draw-fps))) 10.0)}
+                scan-limited? (assoc :scan-limited? true)
+                skipped (assoc :warning skipped))))))
 
 (defn status
   "Pure-data status for app state, or nil when stopped with nothing running:
    {:engines n :wanted m :pending? bool
     :projectors {id {:state :streaming|:starting|:error :fps 59.8 :scan-limited? true
-                     :error \"…\"}}}
+                     :warning \"Corner Pin skipped\" :error \"…\"}}}
    :fps is how many new frames the projector draws per second
    (streaming-engine/update-stats :draw-fps); :scan-limited? is there when its
-   scan rate, not the send rate, sets that."
+   scan rate, not the send rate, sets that; :warning names the calibration
+   effects skipped because they fail (multi-engine report-skips!)."
   []
   (let [registry @!registry
         {:keys [wanted failed busy?]} @!intent

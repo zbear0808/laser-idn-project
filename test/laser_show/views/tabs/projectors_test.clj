@@ -14,7 +14,10 @@
   (is (= "Streaming" (output-status-text {:state :streaming})))
   (is (= "Starting…" (output-status-text {:state :starting})))
   (is (= "Error: no host" (output-status-text {:state :error :error "no host"})))
-  (is (nil? (output-status-text nil)) "not streaming: no line"))
+  (is (nil? (output-status-text nil)) "not streaming: no line")
+  (is (= "Streaming · 59.8 fps · Corner Pin skipped"
+         (output-status-text {:state :streaming :fps 59.8 :warning "Corner Pin skipped"}))
+      "a skipped calibration effect is named"))
 
 (deftest parse-scan-rate-test
   (doseq [[text expected] [["25000" 25000] ["25 000" 25000] ["25,000" 25000] [" 30000 " 30000]

@@ -7,8 +7,9 @@
    with how often it failed meanwhile. ok! clears a key and logs its recovery.
 
    Keys: [:engine id], [:provider projector-id], [:projector-effects
-   projector-id], [:item-effects item-id], [:global-effects], [:effect
-   instance-id], [:render cell], [:show-clock]."
+   projector-id], [:calibration projector-id] (a calibration effect was
+   skipped: the message names it), [:item-effects item-id],
+   [:global-effects], [:effect instance-id], [:render cell], [:show-clock]."
   (:require [clojure.tools.logging :as log]))
 
 (def ^:const LOG_INTERVAL_MS 10000)
@@ -17,8 +18,12 @@
 
 (defn- now-ms [] (System/currentTimeMillis))
 
-(defn- message-of [^Throwable e]
-  (str (.getName (class e)) ": " (.getMessage e)))
+(defn- message-of
+  "A failure's message: a Throwable's class and message, or a string as it is."
+  [e]
+  (if (string? e)
+    e
+    (str (.getName (class e)) ": " (.getMessage ^Throwable e))))
 
 (defn- record
   "The key's next entry after a failure at now. :log says what this failure
@@ -40,13 +45,16 @@
     (assoc entry :message message :count (inc (:count entry)) :last-ms now :log nil)))
 
 (defn report!
-  "Record a failure of key. Logs at most once per 10 s per key."
-  [key ^Throwable e]
+  "Record a failure of key: a Throwable, or a message string. Logs at most
+   once per 10 s per key."
+  [key e]
   (let [now (now-ms)
         message (message-of e)
         entry (get (swap! errors update key record now message) key)]
     (case (:log entry)
-      :stack (log/warn e (str "Output error " (pr-str key) ":") message)
+      :stack (if (string? e)
+               (log/warn (str "Output error " (pr-str key) ":") message)
+               (log/warn e (str "Output error " (pr-str key) ":") message))
       :count (log/warn (format "Output error %s still failing: %d times in the last %d s (%s)"
                                (pr-str key) (:since-log entry)
                                (quot (:log-interval-ms entry) 1000) message))

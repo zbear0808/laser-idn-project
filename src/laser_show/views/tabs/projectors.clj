@@ -254,13 +254,15 @@
 
 (defn- output-status-text
   "One line for a projector's output status, or nil when it isn't streaming.
-   The fps is how many new frames the projector draws per second."
-  [{:keys [state fps scan-limited? error]}]
+   The fps is how many new frames the projector draws per second; a warning
+   (a calibration effect skipped because it fails) comes last."
+  [{:keys [state fps scan-limited? error warning]}]
   (case state
-    :streaming (cond
-                 (nil? fps) "Streaming"
-                 scan-limited? (format "Streaming · %.1f fps (limited by scan rate)" (double fps))
-                 :else (format "Streaming · %.1f fps" (double fps)))
+    :streaming (cond-> (cond
+                         (nil? fps) "Streaming"
+                         scan-limited? (format "Streaming · %.1f fps (limited by scan rate)" (double fps))
+                         :else (format "Streaming · %.1f fps" (double fps)))
+                 warning (str " · " warning))
     :starting "Starting…"
     :error (str "Error: " error)
     nil))
@@ -311,7 +313,9 @@
                                             :wrap-text true
                                             :max-width 200
                                             :style-class ["text-small" "label-secondary"]}
-                                     (= :error state) (assoc :style (str "-fx-text-fill: " (css/red) ";")))))}
+                                     (= :error state) (assoc :style (str "-fx-text-fill: " (css/red) ";"))
+                                     (and (= :streaming state) (:warning output-status))
+                                     (assoc :style (str "-fx-text-fill: " (css/orange) ";")))))}
                 {:fx/type :region :h-box/hgrow :always}]}))
 
 (defn- configured-projectors-list

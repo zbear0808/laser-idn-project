@@ -27,6 +27,7 @@
             [laser-show.dev-config :as dev-config]
             [laser-show.state.core :as state]
             [laser-show.state.extractors :as ex]
+            [laser-show.animation.chains :as chains]
             [laser-show.animation.effects :as effects]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.idn.output-config :as output-config]))
@@ -91,6 +92,25 @@
 ;; Frame Provider Creation
 
 
+(defn- report-skips!
+  "A calibration effect that throws is skipped and the rest of the chain runs
+   (effects/apply-effect-chain reports it under [:effect id]). Say so under
+   [:calibration projector-id], naming the skipped effects (\"Corner Pin
+   skipped\"), so the projector's status line shows it; clear it once none is
+   skipped. Costs nothing while no output error is failing."
+  [projector-id projector-effects]
+  (when (output-errors/failing?)
+    (let [errors (output-errors/snapshot)
+          skipped (filterv #(contains? errors [:effect (or (:id %) (:effect-id %))])
+                           (chains/flatten-chain projector-effects))]
+      (if (seq skipped)
+        (output-errors/report! [:calibration projector-id]
+                               (str (str/join ", " (map #(:name (effects/get-effect (:effect-id %))
+                                                              (name (:effect-id %)))
+                                                        skipped))
+                                    " skipped"))
+        (output-errors/ok! [:calibration projector-id])))))
+
 (defn- apply-projector-effects
   "Apply projector-level calibration effects to a frame, at timing-ctx (the
    snapshot's projector context).
@@ -104,6 +124,7 @@
       (try
         (let [out (effects/apply-effect-chain frame {:effects projector-effects} timing-ctx)]
           (output-errors/ok! [:projector-effects projector-id])
+          (report-skips! projector-id projector-effects)
           out)
         (catch Throwable e
           (output-errors/report! [:projector-effects projector-id] e)

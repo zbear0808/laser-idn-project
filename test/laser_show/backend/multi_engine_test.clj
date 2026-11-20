@@ -468,3 +468,28 @@
             (is (every? #(< 0.49 (% 2) 0.51) out) "rgb-curves still raises red to 0.5")))))
     (finally
       (swap! effects/!effect-registry #(apply dissoc % (map :id failing-calibration-effects))))))
+
+(deftest skipped-calibration-effect-is-reported-test
+  (run! effects/register-effect! failing-calibration-effects)
+  (output-errors/clear!)
+  (try
+    (let [frame [[0.9 0.9 0.0 1.0 1.0] [-0.9 -0.9 0.0 1.0 1.0]]
+          fails {:id #uuid "00000000-0000-0000-0000-0000000000c1" :effect-id :test-calibration-fails-per-point :enabled? true :params {}}
+          curves {:id (random-uuid) :effect-id :rgb-curves :enabled? true
+                  :params {:r-curve-points [[0.0 0.5] [1.0 1.0]]
+                           :g-curve-points [[0.0 0.0] [1.0 1.0]]
+                           :b-curve-points [[0.0 0.0] [1.0 1.0]]}}
+          apply-projector-effects #'me/apply-projector-effects
+          warning #(get-in (output-errors/snapshot) [[:calibration :proj-a] :message])]
+      (state/assoc-in-state! [:chains :projector-effects :proj-a :items] [fails curves])
+      (let [out (apply-projector-effects frame :proj-a {:time-ms 0 :bpm 120.0})]
+        (is (every? #(< 0.49 (% 2) 0.51) out) "the frame is the same as before: the others still apply"))
+      (is (= "Test: corner pin fails skipped" (warning)) "the skip is named under [:calibration id]")
+      (testing "it clears when the effect works again"
+        (state/assoc-in-state! [:chains :projector-effects :proj-a :items] [curves])
+        (apply-projector-effects frame :proj-a {:time-ms 0 :bpm 120.0})
+        (is (nil? (warning)))))
+    (finally
+      (output-errors/clear!)
+      (swap! effects/!effect-registry #(apply dissoc % (map :id failing-calibration-effects))))))
+
