@@ -15,8 +15,10 @@
      1. Composes the projector's frame from the snapshot's cues and routing
         (routing/compose.clj): each key and each picture once, Left and Right
         fitted into its halves
-     2. Applies projector calibration effects (color curves + corner-pin)
-     3. Clips it to the projector's safety zone
+     2. Below the projector's minimum fps, the fit guard draws fewer points,
+        then dims if it may (animation/fit_guard.clj)
+     3. Applies projector calibration effects (color curves + corner-pin)
+     4. Clips it to the projector's safety zone
    
    No engine reads the groups from app state: the routing comes with the
    tick, so an engine's frame and the preview agree, and a group edit shows
@@ -34,6 +36,7 @@
             [laser-show.state.extractors :as ex]
             [laser-show.animation.chains :as chains]
             [laser-show.animation.effects :as effects]
+            [laser-show.animation.fit-guard :as fit-guard]
             [laser-show.animation.safety :as safety]
             [laser-show.animation.test-pattern :as test-pattern]
             [laser-show.services.frame-service :as frame-service]
@@ -184,10 +187,14 @@
 
 (defn- show-frame
   "What the projector draws of the show: its frame composed from the tick's
-   cues and routing (routing.compose/projector-frame), then its projector
-   effects and its safety zone. Nil when none of the cues reach it."
+   cues and routing (routing.compose/projector-frame), then the fit guard
+   (animation.fit-guard, with the routing's scan rate and fit settings for
+   it), then its projector effects and its safety zone. The frame carries
+   the guard's record, with how many halves it drew, as :fit. Nil when none
+   of the cues reach it."
   [raw-state projector-id snapshot]
-  (let [{:keys [frame regions]} (compose/projector-frame (:cues snapshot) (:routing snapshot) projector-id)
+  (let [routing (:routing snapshot)
+        {:keys [frame regions no-room?]} (compose/projector-frame (:cues snapshot) routing projector-id)
         log-count (swap! routing-log-counter inc)]
     (when (and (dev-config/idn-stream-logging?)
                (zero? (mod log-count ROUTING_LOG_INTERVAL)))
@@ -197,8 +204,12 @@
                          (if frame (count frame) "nil")
                          regions)))
     (when frame
-      (guard-safety raw-state projector-id snapshot
-                    (fn [_] (apply-projector-effects frame projector-id (:projector-ctx snapshot)))))))
+      (let [{:keys [scan-rate fit]} (get-in routing [:outputs projector-id])
+            {guarded :frame record :fit} (fit-guard/guard frame scan-rate fit)
+            out (guard-safety raw-state projector-id snapshot
+                              (fn [_] (apply-projector-effects guarded projector-id (:projector-ctx snapshot))))]
+        (vary-meta out assoc :fit (cond-> (assoc record :regions regions)
+                                    no-room? (assoc :no-room? true)))))))
 
 (defn- create-projector-frame-provider
   "Create a frame provider function for a specific projector or virtual projector.

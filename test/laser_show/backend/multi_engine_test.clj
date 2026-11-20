@@ -619,3 +619,56 @@
     (is (< 300 (count (frame-at 7500))) "lit again")
     (is (= lit-line (frame-at 10000)) "at its end time the show comes back, even before it is cleared")))
 
+
+
+;; The fit guard (zones plan Z3): after composition, before the projector
+;; effects; its record rides on the frame
+
+(def ^:private heavy
+  "3,000 lit points: at 25,000 pts/s, 8 fps."
+  (vec (for [i (range 3000)]
+         (let [a (/ (* 2.0 Math/PI i) 3000)] [(* 0.5 (Math/cos a)) (* 0.5 (Math/sin a)) 1.0 1.0 1.0]))))
+
+(def ^:private identity-curves
+  {:id (random-uuid) :effect-id :rgb-curves :enabled? true
+   :params {:r-curve-points [[0.0 0.0] [1.0 1.0]] :g-curve-points [[0.0 0.0] [1.0 1.0]] :b-curve-points [[0.0 0.0] [1.0 1.0]]}})
+
+(deftest fit-guard-runs-before-projector-effects-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:projectors :p] {:host "10.0.0.5" :enabled? true :zone-groups [] :scan-rate 25000})
+                          (assoc-in [:chains :projector-effects :p :items] [identity-curves])))
+  (let [seen (atom [])
+        apply-chain effects/apply-effect-chain]
+    (with-redefs [effects/apply-effect-chain (fn [frame chain ctx] (swap! seen conj (count frame)) (apply-chain frame chain ctx))]
+      (let [out (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:all heavy}}]))]
+        (is (= [1800] @seen) "the calibration gets the thinned frame: 60% of 3,000")
+        (is (= 1800 (count out)))
+        (is (= [3000 1800] ((juxt :points-in :points) (:fit (meta out)))))))))
+
+(deftest frame-carries-its-fit-record-test
+  (state/assoc-in-state! [:projectors :p] {:host "10.0.0.5" :enabled? true :zone-groups []})
+  (let [a [[-0.5 0.0 1.0 1.0 1.0] [0.5 0.0 1.0 1.0 1.0]]
+        b [[-0.5 0.2 0.0 1.0 0.0] [0.5 0.2 0.0 1.0 0.0]]
+        out (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:auto/left a :auto/right b}}]))
+        {:keys [fit tick]} (meta out)]
+    (is (= 1 tick) "still the tick it shows")
+    (is (= {:points-in 6 :points 6 :budget 1250 :min-fps 20 :scan-rate 25000 :reduced-pct 0.0 :dim-pct 0.0 :regions 2}
+           (dissoc fit :est-fps :guard-fps))
+        "one laser, Left and Right: its two halves, 6 points, nothing cut")
+    (is (= (/ 25000.0 6) (:est-fps fit) (:guard-fps fit))))
+  (testing "a heavy frame: what the guard cut"
+    (let [{:keys [fit]} (meta (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:all heavy}}])))]
+      (is (= [3000 1800 0] ((juxt :points-in :points :regions) fit)))
+      (is (< 39.9 (:reduced-pct fit) 40.1))))
+  (testing "a safe area too small to split says so"
+    (state/assoc-in-state! [:projectors :p :safety] {:limit [0.0 -1.0 0.04 1.0]})
+    (is (true? (:no-room? (:fit (meta (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:auto/left heavy}}])))))))))
+
+(deftest test-pattern-frame-carries-no-load-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:projectors :p] {:zone-groups [:all]})
+                          (assoc-in [:projector-ui :calibrating-projector-id] :p)))
+  (let [out (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:all heavy}}]))]
+    (is (< 300 (count out)) "the pattern, not the 3,000 points")
+    (is (= 1 (:tick (meta out))))
+    (is (not (contains? (meta out) :fit)) "it skips composition and the guard: no load while it shows (S-13)")))
