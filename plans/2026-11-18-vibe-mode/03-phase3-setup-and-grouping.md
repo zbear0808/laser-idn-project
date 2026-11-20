@@ -231,7 +231,7 @@ Committed as `38f92ad` on top of `90e35c7` (built as `3f85bc0` on branch `vibe-p
 
 **Found, not done**
 - Unticking **Allow audience cells** stops an audience bed at once (a bed change), but a HIT, ACCENT or FLASH cue already playing an audience cell plays on until its decay, its release or the next press; a `:sustain` one until it is replaced.
-- The release of a key held when a learn starts is dropped with the rest (correction 2): a vibe role it held waits for that role's next press, or BLACKOUT.
+- Fixed in `f5a4f84` (Phase 4b: a learn holds back presses only): the release of a key held when a learn starts is dropped with the rest (correction 2): a vibe role it held waits for that role's next press, or BLACKOUT.
 - `[:ui :vibes]` survives New and Open (`reset-session` resets the dialogs only); a selection naming a vibe that went falls back to the first.
 - A double click on a picker cell is two clicks (in, then out), and a right-click is one: `generic-grid-cell` sends both to `:on-right-click`, which the picker sets to the same toggle (it has no menu).
 

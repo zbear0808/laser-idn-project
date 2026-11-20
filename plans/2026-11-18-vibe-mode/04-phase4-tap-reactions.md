@@ -1,7 +1,7 @@
 # Phase 4: tap reactions (presses move effects, not only cues)
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`)
-**Status:** 4a done in `6715fb4` (2026-11-19); 4b (the Vibes tab parts) to do, now that Phase 3 is on `master` (§10). V9 answered A with a palette (2026-11-18)   **Last verified against:** `6715fb4` (§10)
+**Status:** Done (4a `6715fb4`, 4b `f5a4f84`), 2026-11-19; as built: §10 (4a) and §11 (4b). V9 answered A with a palette (2026-11-18)   **Last verified against:** `f5a4f84` (§11)
 **Supersedes / Superseded by:** with V9 A it replaces Phase 5's palette hue step (`:palette`, `[:vibe-runtime :palette-idx]`, the `:macro/set` effect)   **Related findings:** review 02 T3 (live actions must not flood undo); review 05 F18 (velocity) stays open; `plans/2026-11-17-modulator-time-base.md` §9 ("once" on the effects grid counts from the clock's start)
 
 A press today can only start or stop a cue. This phase lets a press **move effects**: punch the size on every HIT, step the colour or the spin, scatter the position on ACCENT, swell while FLASH is held, and let the tapping rate itself drive an effect. It works for the vibe roles and for anyone playing the Grid tab with a key bound to HIT.
@@ -385,3 +385,58 @@ So the real types cost what `:midi` does, within the noise (1–10 % apart in th
 - The lint rows of §7 in Phase 3's `library/lint`, from `reactions/reactions`, `reactions/listens-to` and `library/binds-role?`: "does nothing" (error, replacing "HIT has no cues to play"), "moves effects only (…)" (info), "listens to ACCENT, which has no key yet" (warn); tests `lint-effects-only-role-is-info-test`, `lint-reaction-on-an-unbound-role-test`.
 - UI: `laser-show.ui-test.vibes-test/tap-reaction-menu-adds-a-cell-to-the-vibe-test`.
 - At the merge: `add-to-vibe` switches the new cell on itself and records it in `[:vibe-runtime :fx-on]`; Phase 3's `engine/reconcile` may do that instead. 4a touched Phase 3's files only locally: `events/handlers/vibes.clj` (one `handle` case, `pad-holds?`), `events/handlers/history.clj` (two labels after `:vibe/clear-control`), `subs.clj` (one require, four private subs before `vibe-pad`, two keys in it), `css/vibes.clj` (three rules), `state/domains.clj` (`:pulses` in `playback`, not `[:ui]`), `vibes/engine.clj` (no new public fn).
+
+## 11. As built: 4b (2026-11-19)
+
+Committed as `f5a4f84` on top of `818cd82` (built as `8cb5688` on branch `vibe-phase4b` from `d298801`, then cherry-picked past two plan-only commits with no conflicts). The lines below are at `8cb5688`, and the same in `f5a4f84`. Phase 5 (the faders) was built at the same time on another branch; the files both change are listed at the end.
+
+**Where it is now** (paths under `src/laser_show/`)
+- `views/tabs/vibes.clj`, the section "Tap reactions" `:175-215`: `role-names` `:177`; `tap-menu` `:180`, a menu button "Tap reactions ▾" (`#vibe-tap-menu-<role>`) whose items (`#vibe-tap-<kind>`) are `reactions/templates` under a heading per role, each dispatching `:vibe/add-reaction {:vibe :kind}`; `role-reactions` `:202`, the menu and `#vibe-reactions-<role>`, the names of the vibe's cells that move on the role's press ("none yet" without). VIBE's is beside the name (`editor-header`, `:227`: Fade in); HIT's and ACCENT's under the pool options, and FLASH's under the solo box of the FLASH cue and FLASH effects slots (`slot-options` `:301`, `with-reactions` `:304`), each also offering Energy: size under "HIT, ACCENT or FLASH". The seventh rule of thumb (`rules` `:346`), which Phase 3 left to this phase.
+- `subs.clj`: `lint-world` `:1198` also hands on the effect chains (`:1204`); NEW `vibe-edited-reactions` `:1214`, the reactions of the vibe edited, by role.
+- `vibes/library.clj`: requires `vibes.reactions` (`:23`); NEW private `heard-roles` `:394` (`learned` `:400` counts it), `moves-only` `:428`, `source-names` `:435`, `unheard` `:438`; `vibe-problems` `:453` has the three rows (HIT `:472`, ACCENT `:475`, FLASH `:479`, `unheard` last); `lint` `:486` passes the controls a key is bound to (`:497`).
+- `vibes/reactions.clj`: no longer requires `vibes.library` (it reads `[:config :vibes :library]` itself), so the lint can require it; `add-to-vibe` `:95` makes the cell, off, and puts it in the vibe, nothing more; `roles-of` `:156` is public (the lint's); `reactions` `:176` takes `:own? true` (`:187`).
+- `events/handlers/vibes.clj`: NEW private `handle-add-reaction` `:139`, routed `:206`.
+- `events/handlers/input_mapper.clj`: `learning?` `:34` (its docstring); while a learn waits only a note-on or a trigger is held back (`:84`).
+
+**`add-to-vibe` or `engine/reconcile`: one path.** 4a's `add-to-vibe` switched the new cell on itself; Phase 3's `reconcile` does that for every other edit. Case by case they agree: a vibe that doesn't play, or none played yet (off); the vibe that plays (on, and in `[:vibe-runtime :fx-on]`, so leaving it switches it off); blackout (off until it ends, when the look is entered again); the Strobe (in the flash FX: off until FLASH is held). They differ after an undo took the vibe that played away (an undo runs no handler): every edit then leaves its look and enters the first of `:order` (03 §10 correction 4), and 4a's add left the runtime on the vibe that went, and the new cell off in the vibe the strip shows as playing. So `add-to-vibe` is the document edit only, and `handle-add-reaction` runs it through `reconcile` as `edit` (`:91`) runs the tab's other edits. Test `add-reaction-is-an-edit-like-the-others-test`; 4a's three `:vibe/add-reaction` tests pass unchanged.
+
+**Differences from the plan**
+
+| Plan | As built | Why |
+|---|---|---|
+| the role's list and the lint from `reactions/reactions`: the vibe's FX set and flash FX, the effects grid's cells that are on, its cues | the vibe's own cells (`:own? true`), not effect cells switched on by hand; the Perform pads count those, as in 4a | such a cell is no vibe's and can go off at any time. `:effects/new-reaction` makes one on, which would turn every empty HIT's error into "moves effects only" and be named under every vibe ("Lines · Scatter listens to ACCENT": the first mutant below) |
+| error "does nothing" for any role with no playable cue and no reaction | HIT's only (it replaces Phase 3's HIT row); ACCENT gets the info row only; FLASH keeps Phase 3's warn "FLASH does nothing in this vibe", now also needing no reaction, and gets the info row when its cue is missing or can't play | Phase 3 has no row for an empty ACCENT (every new vibe would get a second error), and flash effects are something to FLASH (Phase 3's row) |
+| warn: a reaction listens to a role with no key | per source (`reactions/listens-to`): one that follows HIT, ACCENT or FLASH only when none of the three has a key ("…, none of which has a key yet"); none while no key is learned at all | Energy: size moves on any of the three. Without the last rule a project with no controller showed a warning for every reaction (four on the headless screenshot) under "0 of 5 controls learned" |
+| a **Tap reactions ▸** menu in each role's section, one beside the name for Fade in | menu buttons ("Tap reactions ▾") with headings, as the effects cell's menu; Energy: size (role `:any`) in each role's menu, Fade in alone in the header's | the sections aren't menus; Energy: size follows all three, and its name shows in each of their lists |
+| the lint from `reactions/reactions`, `reactions/listens-to` and `library/binds-role?` | as planned; `reactions` no longer requires the library | the library's lint requires `reactions`, and the other way round would be a cycle |
+| — | `mapper-ignores-discrete-events-while-learning-test` expects the releases to go through; its name stays | the keyboard plan's Phase 5 names it |
+
+**Found, not done**
+- A key that holds a role and loses its binding meanwhile (a learn moves the role to another key, or the pad's Clear) sends its release to nothing: the role stays held until its next press or BLACKOUT.
+- A HIT with no cue but an effect cell switched on by hand reads "Effects only" on its pad (4a counts that cell) and "does nothing" in the lint (above).
+- `reactions` without `:own?`, for a vibe that doesn't play, also counts the cells the playing vibe's FX set switched on. Only the pads ask it that way, for the vibe that plays, whose own they are.
+
+**Tests**: 6 new unit tests (1,048 → 1,054) and 1 UI test
+- `laser-show.events.handlers.input-mapper-test` (+1): `a-key-held-when-a-learn-starts-still-lets-go-test` (HIT's key held, a learn for ACCENT starts, the key let go: the role, its pulse and its cue are let go, and the learn still waits). `mapper-ignores-discrete-events-while-learning-test` changed, as above.
+- `laser-show.vibes.library-test` (+2): `lint-effects-only-role-is-info-test`, `lint-reaction-on-an-unbound-role-test`; `lint-test`'s HIT row reads "does nothing".
+- `laser-show.vibes.reactions-test` (+1): `own-reactions-leave-the-grid-out-test`. `laser-show.events.handlers.vibes-test` (+1): `add-reaction-is-an-edit-like-the-others-test`. `laser-show.subs-test` (+1): `vibe-edited-reactions-sub-test`; `vibe-lint-sub-test` reads "does nothing" and sees an effect cell's info row.
+- UI `laser-show.ui-test.vibes-test` (+1): `tap-reaction-menu-adds-a-cell-to-the-vibe-test` (HIT's menu and its items; Punch: size into the first empty effect cell, on at once while Shapes plays, the undo label, HIT's list and the FX set's count; the Strobe from FLASH's menu, off; Fade in from the header's; the lint's row for HIT, ACCENT's key learned). Phase 2's and 3's learn tests (`learn-binds-a-role-to-a-note-test`, `a-learned-note-plays-through-the-mapper-test`, `learn-all-binds-five-roles-in-order-test`, the trigger editor's two and `input-test`'s) pass unchanged.
+
+**Red first**
+- `input-mapper-test` before the mapper change: 5 failures (after the release HIT was still held, its pulse held and its cue playing; the two releases were dropped, 5 events sent, not 7).
+- `library-test`, `reactions-test` and `events.handlers.vibes-test` before the rest: 17 failures and 1 error (the old HIT text; no info rows; no warn rows; the add after an undo left `:current` on the undone `:vibe-3` and the cell off, 3 failures; `reactions` took no options). `subs-test` didn't compile (`No such var: subs/vibe-edited-reactions`).
+- `tap-reaction-menu-adds-a-cell-to-the-vibe-test` against `d298801`'s `views/tabs/vibes.clj` (stashed): 1 error, timed out waiting for `#vibe-reactions-hit`.
+- Mutants, each against `library-test` and `subs-test`: the lint counting the grid's cells that are on (2 failures, one naming Scatter under Lines too); warn rows while no key is learned (1); Energy: size warned of as soon as one of the three has no key (1). All killed.
+
+**Verification, 2026-11-19, macOS arm64, JDK 25**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test vibes reactions library input-mapper input subs history` | 274 tests, 1,776 assertions, 0 failures (baseline at `d298801`: 268, 1,734) |
+| `clj -M:test-ui:mac-arm:test-ui-headless -n` vibes-test, perform-test, grid-test, trigger-editor-test | 38 tests, 270 assertions, 0 failures; `vibes-test` once more on its own: 10 tests, 92 assertions, 0 failures |
+| `clj -M:mac-arm:test` (full unit suite) | 1,054 tests, 33,973 assertions, 0 failures (baseline at `d298801`: 1,048, 33,931) |
+| `clj -M:kondo --lint` on the 12 touched files and `testfx.clj` | 0 errors, 0 warnings |
+| layout | headless screenshots at 1200×800: the header's menu fits beside the energy dots, a role's under its options, the lint's rows under the picker |
+| full UI suite | not run here: it runs after the merge |
+
+Phase 5's files that this branch changes, for the merge: `events/handlers/vibes.clj` (the `:vibe/add-reaction` line in `handle`, and `handle-add-reaction` after `handle-edit`), `vibes/library.clj` (its require, and `:394-512`, the lint), `subs.clj` (`lint-world`, and the sub after `vibe-lint`) and `events/handlers/input_mapper.clj` (the discrete branch, and two docstrings). A Morph cell that `:vibe/add-morph` puts in a vibe's FX set switches on the same way if it too goes through `engine/reconcile`.
