@@ -1,9 +1,14 @@
 (ns laser-show.routing.rig-test
   "The rig as data (plans/2026-11-19-zones/04 §4, spec 01 §3): the order of
    the projectors, the automatic groups folded from it, the refs that reach
-   each projector, stable identity and the scan's matching."
+   each projector, stable identity and the scan's matching; and the routing
+   each tick carries (05 §4, spec 01 §5): every ref's lasers, halves and
+   sides, each laser's scan rate, fit settings and the boxes its halves fit
+   into, worked out again only when the rig or a group changes."
   (:require [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]
+            [laser-show.animation.fit-guard :as fit-guard]
+            [laser-show.animation.safety :as safety]
             [laser-show.routing.rig :as rig]))
 
 (defn- pid [k] (keyword (str "p" k)))
@@ -357,3 +362,169 @@
             (is (every? empty? (map regions [left right center odd even])) "halves only for n = 1 and a split middle"))
           (is (every? #(in-order? e (ids-of %)) [left right center odd even]) "each in rig order")
           (is (= (pos? m) (boolean (seq center))) "Center is never empty when n ≥ 1"))))))
+
+
+;; The routing each tick carries (zones plan Z3, 05 §4)
+
+(defn- close-fits?
+  "Are two {:L [cx cy s] :R [cx cy s]} the same, to 1e-9?"
+  [a b]
+  (and (= (set (keys a)) (set (keys b)))
+       (every? (fn [k] (every? true? (map #(< (Math/abs (- (double %1) (double %2))) 1e-9) (get a k) (get b k))))
+               (keys a))))
+
+(defn- routing-of [state] (rig/routing (rig/routing-inputs state nil)))
+
+(deftest normalize-target-test
+  (is (nil? (rig/normalize-target nil)))
+  (is (= :auto/left (rig/normalize-target :auto/left)) "a keyword stays itself")
+  (is (= :graphics (rig/normalize-target [:graphics])) "one ref left: that ref")
+  (is (= :all (rig/normalize-target [:all :all])))
+  (is (nil? (rig/normalize-target [])) "none left: nil")
+  (is (= [:all :graphics :auto/left :auto/right :zone/a]
+         (rig/normalize-target [:zone/a :auto/right :graphics :all :auto/left :graphics]))
+      "distinct, sorted by namespace and name, the refs with none first")
+  (is (= (rig/normalize-target [:auto/right :auto/left]) (rig/normalize-target [:auto/left :auto/right]))
+      "written in another order: the same target, so the same frame key")
+  (is (= [:auto/left :auto/right] (rig/normalize-target #{:auto/right :auto/left})) "a set too")
+  (is (= :graphics (rig/normalize-target [:graphics "left" nil])) "only keywords count")
+  (testing "a key's refs"
+    (is (= [:all] (rig/key-refs :all)))
+    (is (= [:all :graphics] (rig/key-refs [:all :graphics])))))
+
+(deftest zone-index-test
+  (is (= [0 1 25 26 27 51 52] (mapv rig/zone-index [:zone/a :zone/b :zone/z :zone/aa :zone/ab :zone/az :zone/ba])))
+  (is (every? nil? (map rig/zone-index [:all :auto/left :graphics :zone/A :zone/a1 :zone.x/a nil "zone/a"]))
+      "nil for any other ref"))
+
+(deftest routing-has-every-ref-the-rig-knows-test
+  (testing "one laser: Left and Right, Odd and Even, are its halves"
+    (let [r (routing-of (rig-state 1))]
+      (is (= {:all [(w 1)] :auto/left [[:p1 :L nil]] :auto/right [[:p1 :R nil]] :auto/center [(w 1)]
+              :auto/odd [[:p1 :L nil]] :auto/even [[:p1 :R nil]] :auto.laser/p1 [(w 1)]}
+             (:refs r)))
+      (is (nil? (:map r)) "no map until Z4")))
+  (testing "three, the middle split"
+    (is (= {:auto/left [(w 1) [:p2 :L nil]] :auto/right [[:p2 :R nil] (w 3)] :auto/center [(w 2)]}
+           (select-keys (:refs (routing-of (rig-state 3))) [:auto/left :auto/right :auto/center]))))
+  (testing "three, the middle in both: whole, with its side"
+    (is (= {:auto/left [(w 1) [:p2 nil :left]] :auto/right [[:p2 nil :right] (w 3)]}
+           (select-keys (:refs (routing-of (rig-state 3 :middle :both))) [:auto/left :auto/right]))))
+  (testing "All leaves out a laser that is excluded or off; its own group is there while it is on"
+    (let [refs (:refs (routing-of (rig-state 4 :excluded #{2} :disabled #{4})))]
+      (is (= [(w 1) (w 3)] (:all refs)))
+      (is (= [(w 2)] (:auto.laser/p2 refs)))
+      (is (not (contains? refs :auto.laser/p4)))))
+  (testing "your groups: their members that are on, whole, in rig order; an empty one reaches nothing"
+    (let [refs (:refs (routing-of (-> (rig-state 3 :disabled #{3})
+                                      (assoc-in [:projectors :p3 :zone-groups] [:graphics])
+                                      (assoc-in [:projectors :p1 :zone-groups] [:graphics])
+                                      (assoc :zone-groups {:graphics {:name "Graphics"} :crowd {:name "Crowd"}}))))]
+      (is (= [(w 1)] (:graphics refs)))
+      (is (= [] (:crowd refs)))
+      (is (= [] (rig/resolve-ref {:refs refs} :nobody)) "a ref the rig doesn't know: nothing")
+      (is (= [(w 1)] (rig/resolve-ref {:refs refs} :graphics)))))
+  (testing "a stray :all in a laser's list never overrides All"
+    (let [refs (:refs (routing-of (-> (rig-state 2 :excluded #{2})
+                                      (assoc-in [:projectors :p1 :zone-groups] [:all :all])
+                                      (assoc-in [:projectors :p2 :zone-groups] [:all]))))]
+      (is (= [(w 1)] (:all refs)) "once, and never the excluded laser"))))
+
+(deftest outputs-carry-scan-rate-fit-and-region-fits-test
+  (let [state (-> (rig-state 4 :excluded #{3} :disabled #{4})
+                  (assoc-in [:projectors :p1 :scan-rate] 40000)
+                  (assoc-in [:projectors :p2 :scan-rate] 10)
+                  (assoc-in [:projectors :p2 :fit] {:min-fps 30 :dim? true})
+                  (assoc-in [:projectors :p1 :safety] {:limit [-0.8 -0.5 0.8 0.5] :blocked []}))
+        {:keys [outputs]} (routing-of state)]
+    (is (= #{:p1 :p2 :p3} (set (keys outputs))) "every laser that is on, an excluded one too, and none that is off")
+    (is (= [0 1 nil] (mapv #(get-in outputs [% :index]) [:p1 :p2 :p3])) "its place in E; an excluded laser has none")
+    (is (= [40000 1000 25000] (mapv #(get-in outputs [% :scan-rate]) [:p1 :p2 :p3]))
+        "clamped as the engine clamps it, 25,000 without one")
+    (is (= fit-guard/defaults (get-in outputs [:p1 :fit])))
+    (is (= (assoc fit-guard/defaults :min-fps 30 :dim? true) (get-in outputs [:p2 :fit])) "its own over the defaults")
+    (is (close-fits? {:L [-0.2 0.0 0.5] :R [0.2 0.0 0.5]} (get-in outputs [:p1 :regions])) "from its safety limit")
+    (is (close-fits? {:L [-0.25 0.0 0.75] :R [0.25 0.0 0.75]} (get-in outputs [:p3 :regions])) "the whole range without one")))
+
+(deftest region-fits-follow-the-safety-limit-test
+  (is (close-fits? {:L [-0.25 0.0 0.75] :R [0.25 0.0 0.75]} (rig/region-fits [-1.0 -1.0 1.0 1.0] 0.75))
+      "L is -1…0.5 and R -0.5…1, each scaled by min(1.5, 2)/2")
+  (is (close-fits? {:L [-0.2 0.0 0.5] :R [0.2 0.0 0.5]} (rig/region-fits [-0.8 -0.5 0.8 0.5] 0.75))
+      "min(1.2, 1.0)/2: the height limits it")
+  (is (close-fits? {:L [0.0 0.0 1.0] :R [0.0 0.0 1.0]} (rig/region-fits [-1.0 -1.0 1.0 1.0] 1.0))
+      "a split width of 1: each half is the whole width")
+  (is (nil? (rig/region-fits [0.0 -1.0 0.04 1.0] 0.75)) "under 0.05 wide: no halves (S-9)")
+  (is (nil? (rig/region-fits [-1.0 0.0 1.0 0.04] 0.75)) "or under 0.05 high")
+  (testing "a limit with its corners swapped: the box safety/normalize makes of it"
+    (let [regions #(get-in (routing-of (assoc-in (rig-state 1) [:projectors :p1 :safety] {:limit %})) [:outputs :p1 :regions])]
+      (is (some? (regions [0.8 0.5 -0.8 -0.5])))
+      (is (= (regions [-0.8 -0.5 0.8 0.5]) (regions [0.8 0.5 -0.8 -0.5]))))))
+
+(deftest unreadable-safety-zone-draws-no-halves-test
+  (let [state (rig-state 3)
+        unreadable {:limit [0.0 0.0]}
+        good (routing-of state)
+        r (routing-of (assoc-in state [:projectors :p2 :safety] unreadable))]
+    (is (thrown? clojure.lang.ExceptionInfo (safety/normalize unreadable)) "a zone safety/normalize can't read")
+    (is (contains? (:outputs r) :p2))
+    (is (nil? (get-in r [:outputs :p2 :regions])) "takes that laser's halves away (S-9)")
+    (is (= (dissoc (get-in good [:outputs :p2]) :regions) (dissoc (get-in r [:outputs :p2]) :regions))
+        "and nothing else of it")
+    (is (= (:refs good) (:refs r)) "every group is as it was")
+    (is (= (dissoc (:outputs good) :p2) (dissoc (:outputs r) :p2)) "and so is every other laser (D-29)")
+    (testing "so is a zone that isn't a map at all"
+      (is (nil? (get-in (routing-of (assoc-in state [:projectors :p2 :safety] "wide")) [:outputs :p2 :regions]))))))
+
+(deftest cached-routing-is-reused-while-inputs-are-identical-test
+  (let [state (rig-state 3)
+        [cache r] (rig/cached-routing nil (rig/routing-inputs state nil))
+        [cache' r'] (rig/cached-routing cache (rig/routing-inputs state nil))]
+    (is (= (routing-of state) r))
+    (is (identical? r r') "the same routing, not an equal one")
+    (is (identical? cache cache'))
+    (testing "nothing but the rig, the projectors, the groups, the maps and the map id counts"
+      (is (identical? r (second (rig/cached-routing cache (rig/routing-inputs (assoc state :chains {:cue-chains {}}
+                                                                                     :playback {:playing? true})
+                                                                              nil))))))))
+
+(deftest cached-routing-follows-an-edit-test
+  (let [state (rig-state 3)
+        [cache r] (rig/cached-routing nil (rig/routing-inputs state nil))]
+    (doseq [[what edited map-id] [["a reorder" (assoc-in state [:rig :order] [:p3 :p2 :p1]) nil]
+                                  ["the middle laser" (assoc-in state [:rig :middle] :both) nil]
+                                  ["the split width" (assoc-in state [:rig :split-width] 0.6) nil]
+                                  ["a laser turned off" (assoc-in state [:projectors :p2 :enabled?] false) nil]
+                                  ["a laser put in a group" (assoc-in state [:projectors :p1 :zone-groups] [:graphics]) nil]
+                                  ["a group defined" (assoc state :zone-groups {:graphics {:name "Graphics"}}) nil]
+                                  ["a fit setting" (assoc-in state [:projectors :p1 :fit :min-fps] 30) nil]
+                                  ["a safety limit" (assoc-in state [:projectors :p1 :safety :limit] [-0.5 -0.5 0.5 0.5]) nil]
+                                  ["the map" state :map/odd-even]]]
+      (testing what
+        (let [inputs (rig/routing-inputs edited map-id)
+              [cache' r'] (rig/cached-routing cache inputs)]
+          (is (not (identical? r r')))
+          (is (= (rig/routing inputs) r'))
+          (is (identical? r' (second (rig/cached-routing cache' inputs))) "and kept from then on"))))
+    (testing "an equal state that isn't identical is worked out again, to the same routing"
+      (let [[_ r'] (rig/cached-routing cache (rig/routing-inputs (update state :projectors #(into {} %)) nil))]
+        (is (not (identical? r r')))
+        (is (= r r'))))))
+
+(deftest routing-of-an-invented-rig-test
+  (testing "the resolver is pure: data no app holds gives the same routing every time (invariant 9)"
+    (let [inputs {:rig {:order [:x :y] :middle :both :split-width 0.6}
+                  :projectors {:x {:name "X" :host "a" :zone-groups [:wall]}
+                               :y {:name "Y" :host "b" :scan-rate 30000 :safety {:limit [-0.5 -0.5 0.5 0.5]}}}
+                  :zone-groups {:wall {:name "Wall"}}
+                  :zone-maps nil
+                  :map nil}
+          r (rig/routing inputs)]
+      (is (= r (rig/routing inputs) (rig/routing (into {} inputs))))
+      (is (= {:all [[:x nil nil] [:y nil nil]] :auto/left [[:x nil nil]] :auto/right [[:y nil nil]]
+              :auto/center [[:x nil nil] [:y nil nil]] :auto/odd [[:x nil nil]] :auto/even [[:y nil nil]]
+              :auto.laser/x [[:x nil nil]] :auto.laser/y [[:y nil nil]] :wall [[:x nil nil]]}
+             (:refs r)))
+      (is (= {:index 0 :scan-rate 25000 :fit fit-guard/defaults} (dissoc (get-in r [:outputs :x]) :regions)))
+      (is (close-fits? {:L [-0.4 0.0 0.6] :R [0.4 0.0 0.6]} (get-in r [:outputs :x :regions])))
+      (is (= {:index 1 :scan-rate 30000 :fit fit-guard/defaults} (dissoc (get-in r [:outputs :y]) :regions)))
+      (is (close-fits? {:L [-0.2 0.0 0.3] :R [0.2 0.0 0.3]} (get-in r [:outputs :y :regions]))))))

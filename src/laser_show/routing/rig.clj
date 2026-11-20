@@ -18,8 +18,17 @@
 
    Identity (D-23): a projector is known by its :stable-id, [:unit \"0A 1B …\"
    output] when the device reports a usable unit id, else [:host address
-   output]. The :projectors keys stay as they are (04 S-7)."
-  (:require [clojure.string :as str]))
+   output]. The :projectors keys stay as they are (04 S-7).
+
+   The routing (05 §4, spec 01 §5): routing works out, from the rig, the
+   projectors and the groups, every ref's entries and each laser's scan
+   rate, fit settings and the boxes its halves fit into. The show clock
+   keeps it (cached-routing) and puts it in each tick's snapshot; everything
+   reads a ref through resolve-ref."
+  (:require [clojure.string :as str]
+            [laser-show.animation.fit-guard :as fit-guard]
+            [laser-show.animation.safety :as safety]
+            [laser-show.idn.stream :as stream]))
 
 
 ;; Enabled, excluded, the stored groups
@@ -62,6 +71,41 @@
   [output]
   (cond->> (custom-refs output)
     (not (excluded? output)) (into [:all])))
+
+
+;; Targets and frame keys (spec 01 §1)
+
+(defn normalize-target
+  "A target in normal form: nil stays nil and a keyword stays itself; a
+   collection becomes its distinct keywords sorted by namespace and name (the
+   refs with no namespace first): one keyword when one is left, nil when none
+   is. Frame keys are targets in normal form, so two items with the same refs
+   in another order share a key."
+  [t]
+  (if (or (sequential? t) (set? t))
+    (let [refs (sort-by (juxt namespace name) (into [] (comp (filter keyword?) (distinct)) t))]
+      (case (count refs)
+        0 nil
+        1 (first refs)
+        (vec refs)))
+    t))
+
+(defn key-refs
+  "The refs a frame key names: [k] for a keyword, k itself for a vector."
+  [k]
+  (cond
+    (vector? k) k
+    (nil? k) []
+    :else [k]))
+
+(defn zone-index
+  "A zone ref's index: :zone/a 0 … :zone/z 25, :zone/aa 26 …; nil for any
+   other ref. It orders frame keys, and picks a zone's lane in Z4."
+  [ref]
+  (when (and (keyword? ref) (= "zone" (namespace ref)))
+    (let [letters (name ref)]
+      (when (re-matches #"[a-z]{1,12}" letters)
+        (dec (reduce (fn [acc c] (+ (* 26 acc) (- (int c) 96))) 0 letters))))))
 
 
 ;; Display data for the derived refs
@@ -291,6 +335,94 @@
     (-> (auto-groups inputs)
         (assoc :all (mapv whole (e-order inputs)))
         (into (map (fn [g] [g (members g)])) custom))))
+
+
+;; The routing each tick carries (zones plan Z3, spec 01 §5)
+
+(def ^:private min-box
+  "A safe box narrower or lower than this has no halves (05 S-9)."
+  0.05)
+
+(defn region-fits
+  "Spec 01 §7: where each half of a laser draws, from the bounding box of its
+   safety limit [x0 y0 x1 y1] and the split width w: {:L [cx cy s] :R [cx cy
+   s]}, a point (x, y) of a half's picture going to (cx + s·x, cy + s·y). :L
+   spans the box's left w of the width and :R its right w; s is half of the
+   smaller of a half's width and the box's height, so shapes keep their
+   aspect. nil for a box under 0.05 wide or high (S-9)."
+  [limit w]
+  (when (and (sequential? limit) (= 4 (count limit)) (every? number? limit))
+    (let [[a b c d] (map double limit)
+          x0 (min a c) x1 (max a c) y0 (min b d) y1 (max b d)
+          width (- x1 x0)
+          height (- y1 y0)]
+      (when (and (>= width min-box) (>= height min-box))
+        (let [half (* (double w) width)
+              s (/ (min half height) 2.0)
+              cy (/ (+ y0 y1) 2.0)]
+          {:L [(+ x0 (/ half 2.0)) cy s]
+           :R [(- x1 (/ half 2.0)) cy s]})))))
+
+(def ^:private routing-keys [:rig :projectors :zone-groups :zone-maps :map])
+
+(defn routing-inputs
+  "What the routing is worked out from, slices of one tick's app state:
+   {:rig :projectors :zone-groups :zone-maps (nil until Z4) :map (the
+   effective map id, nil until Z4)}. Their identity is cached-routing's key."
+  [state map-id]
+  {:rig (:rig state)
+   :projectors (:projectors state)
+   :zone-groups (:zone-groups state)
+   :zone-maps (:zone-maps state)
+   :map map-id})
+
+(defn- halves
+  "region-fits of a projector's safety limit as safety/normalize reads it,
+   or nil when it can't be read: that laser draws no halves, and the safety
+   stage sends it dark (D-29)."
+  [p w]
+  (try
+    (region-fits (:limit (safety/normalize (:safety p))) w)
+    (catch Exception _ nil)))
+
+(defn routing
+  "The routing (spec 01 §5): {:map map-id :refs {ref [[projector-id region
+   side] …]} :outputs {projector-id {:index :scan-rate :fit :regions}}}.
+   :refs is ref-entries: every ref the rig knows but the zones. :outputs has
+   every enabled laser, excluded ones too: :index its place in E (nil when
+   excluded from All), :scan-rate clamped as its engine clamps it, :fit its
+   fit-guard/settings, :regions the region-fits of its safety limit. Pure."
+  [{:keys [rig projectors zone-groups] map-id :map}]
+  (let [inputs (rig-inputs {:rig rig :projectors projectors :zone-groups zone-groups})
+        index (zipmap (e-order inputs) (range))
+        w (:split-width inputs)]
+    {:map map-id
+     :refs (ref-entries inputs)
+     :outputs (into {}
+                    (keep (fn [id]
+                            (when (contains? (:enabled inputs) id)
+                              (let [p (get projectors id)]
+                                [id {:index (get index id)
+                                     :scan-rate (or (stream/clamp-scan-rate (:scan-rate p)) stream/DEFAULT_SCAN_RATE)
+                                     :fit (fit-guard/settings (:fit p))
+                                     :regions (halves p w)}]))))
+                    (:order inputs))}))
+
+(defn resolve-ref
+  "ref's entries in routing, [] for a ref it doesn't know: the only way to
+   read them. Z4 resolves a zone here, through the effective map's lanes."
+  [routing ref]
+  (get (:refs routing) ref []))
+
+(defn cached-routing
+  "[cache routing] for inputs (routing-inputs): the cached routing while
+   every input is identical? to the cached one (every tick without an edit),
+   otherwise a new one, which the new cache keeps."
+  [cache inputs]
+  (if (and cache (every? #(identical? (get inputs %) (get-in cache [:inputs %])) routing-keys))
+    [cache (:routing cache)]
+    (let [r (routing inputs)]
+      [{:inputs inputs :routing r} r])))
 
 
 ;; The refs that reach a projector: the Z2 bridge to the engine
