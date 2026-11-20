@@ -49,6 +49,8 @@ The precise rules are in **`01-model-and-routing-spec.md`**. Every phase doc imp
 | `08-phase-z6-step-grid.md` | Z6: the drum-machine step grid |
 | `09-phase-zr-rig-file.md` | ZR: the rig in its own file (physical setup outside the show) |
 | `10-questions.md` | **Every open question in one place**, each with its context, the options and a recommendation, grouped by phase |
+| `11-vibe-phase8-zone-effects.md` | Vibe Phase 8 (zone chase, swap and shift on the effects grid), moved here from the vibe plan on 2026-11-20. Z5 builds its shared stage over refs; its 8b (reactions, the audience rule with V10 A, lint) comes after Z5 |
+| `probes/` | `vibe_probes_test.clj` (v19–v24, moved with Phase 8) and, from Z3, `zones_probes_test.clj` (z1–z4) |
 
 The phase docs were written against slightly different commits, then re-checked: 04 and 09 at `4fa9eee`, 05 and 06 at `6aaad7d` (both after vibe Phase 6); 07 and 08 at `f178f56`; 02 and 03 at `70f7db8` by an independent review. **02 (Z0) is built**, and its as-built note records where it landed. Vibe Phases 3–6 and UX Phase 3 landed in between, so **re-check each doc's citations at HEAD when its phase starts.**
 
@@ -122,9 +124,9 @@ There is still **one render per cue per tick** (spec invariant 8). Everything pe
 | **Z0** ✅ | **Done** (`0f9d6a1`..`e1d9693`, 02 §13). Fix-ups: deleting a group asks first and re-targets its cues; a real "used by N cues"; Axis Transform can be edited; pasting into a projector chain; removing a projector; "All" listed once; group ids that don't collide; a skipped calibration effect shows on the status line | ~1.5 d | – | 02 |
 | **Z1** ✅ | **Done in code** (`fa15044`..`1424955`, 03 §13); **the real-projector check is still owed** (03 §9). Draw a blocked box and nothing lights inside it: safety rectangles with live editing; the test pattern and Identify work | ~4–5 d | – | 03 |
 | **Z2** ✅ | **Done** (`4e97979`..`2eb5e82`, landed with `fee90ce`..`8c30108`, 04 §13). Drag your lasers into order and the groups appear: the rig strip on the Projectors tab, stable identity, automatic groups, implicit All with opt-out, the Zone Groups tab redone group-first and following the order | ~5 d | Z0 | 04 |
-| **Z3** | **One laser shows Left and Right halves.** Routing in the snapshot, de-duplication, regions and the middle policy, fit guard, a thumbnail per projector, low-fps badges, cue ⚠ | ~6 d | Z1, Z2 | 05 |
+| **Z3** | **In progress** (worktree `zones-z3`, from `6bedf25`, 2026-11-20). **One laser shows Left and Right halves.** Routing in the snapshot, de-duplication, regions and the middle policy, fit guard, a thumbnail per projector, low-fps badges, cue ⚠ | ~6 d | Z1, Z2 | 05 |
 | **Z4** | **A cue drawn into Zone A follows the zone map you switch live.** Zones and maps, one Target control, inheritance with "from …", grid badges, map pads with switch timing, migration | ~6 d | Z3 | 06 |
-| **ZR** | **New Project keeps your rig. Opening someone's show never touches your safety zones.** The rig file, and matching a show's groups onto it | ~3–4 d | Z2 (best after Z4) | 09 |
+| **ZR** | **In progress** (worktree `zones-zr`, from `6bedf25`, 2026-11-20, alongside Z3). **New Project keeps your rig. Opening someone's show never touches your safety zones.** The rig file, and matching a show's groups onto it | ~3–4 d | Z2 (best after Z4) | 09 |
 | **Z5** | **Alternate, chase, swap and shift between zones on the beat or on HIT; cycle maps.** Zone patterns on cues and on effect cells, shared with vibe Phase 8; pattern pads | ~4.5 d | Z4 (+ Phase 8a, if it landed) | 07 |
 | **Z6** | **Program a zone pattern on a drum-machine grid** | ~3 d | Z5 | 08 |
 

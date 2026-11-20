@@ -1,7 +1,7 @@
 # Phase 8: zone effects (chase, swap, shift)
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`; the files cited are the same at `67735d0`, and `state/domains.clj` and `events/handlers/effects.clj` are cited at `b1da0f2` because Phase 1 is editing both)
-**Status:** Proposed. 8a (the three effects, the render stage, the pickers) needs nothing. 8b (reactions, the audience rule, lint) needs Phases 1 and 4 and V10 (§11; it was the vibe overview's §7)   **Last verified against:** `b1da0f2` (probes v19–v24, §11; they were the vibe overview's §3)
+**Status:** Proposed. 8a (the three effects, the render stage, the pickers) needs nothing. 8b (reactions, the audience rule, lint) needs Phases 1 and 4, and V10, now answered A (§11; it was the vibe overview's §7)   **Last verified against:** `b1da0f2` (probes v19–v24, §11; they were the vibe overview's §3)
 **Supersedes / Superseded by:** none   **Related findings:** V6 and R-4 (a random pick must not scan the crowd), extended here to effects that move a picture. The effects-grid editor offering the zone selector, which does nothing there, is fixed on the way. The zones plan (`plans/2026-11-18-zones-ux/00-overview.md`, a draft written after this phase) asks for the same effects in its §4.5 and question 20; §9 says how the two fit
 
 > **Moved 2026-11-20.** This was Phase 8 of the vibe-mode plan, `plans/2026-11-18-vibe-mode/`, which was deleted when its Phases 1–7 were done (the folder is in git history at `8b4b7d7`). It lives here because the zones plan builds the same effects (Z5, `07-phase-z5-zone-patterns.md`). In this doc, `00-overview.md` and `01-…` to `07-…` mean that plan's docs, not this folder's: the parts it relies on are copied in §11 below (V10, still open, and probes v19–v24). The probes moved with it: `probes/vibe_probes_test.clj` in this folder.
@@ -265,9 +265,9 @@ Run: `clj -M:mac-arm:test zone-remap effects frame-service multi-engine show-clo
 
 The vibe overview (`plans/2026-11-18-vibe-mode/00-overview.md`, in git history at `8b4b7d7`) held this phase's open decision and its probe results. They are copied here as they were.
 
-### Decision V10 (open)
+### Decision V10 (answered A, 2026-11-20)
 
-> **DECISION V10: Zone effects and the audience** *(pending)*
+> **DECISION V10: Zone effects and the audience** *(answered: A)*
 >
 > V6 keeps a random pick from choosing a cue that can scan the crowd. A zone effect can send a picture there too: a chase that lists the crowd zone sweeps every cue through it, and a vibe switches its FX set on by itself (`08-phase8-zone-effects.md` §7, "The audience rule"). The crowd zone is `:crowd`, or any zone of a projector tagged `:crowd-scanning`; a zone only counts where the picture *goes* (`:zones`, `:zone-a`, `:zone-b`), not where it comes from (`:from`).
 >
@@ -277,7 +277,7 @@ The vibe overview (`plans/2026-11-18-vibe-mode/00-overview.md`, in git history a
 > | B | Warn only (the lint row, no block) | never blocks a vibe | at 1 am a missed warning sweeps the audience |
 > | C | The zone list can't hold an audience zone at all (the picker hides them) | nothing to remember | no audience chase, even by hand |
 >
-> **Your answer:** _pending_
+> **Your answer:** **A** (2026-11-20): a vibe doesn't switch on a zone effect that reaches the audience unless it allows the audience. The zones plan builds the shared stage in Z5 (`07-phase-z5-zone-patterns.md`), so 8b comes after Z5 and builds on it.
 
 ### Probes v19–v24 (the overview's §3)
 

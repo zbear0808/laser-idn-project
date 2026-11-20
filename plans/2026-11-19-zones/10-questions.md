@@ -80,7 +80,7 @@ Also tell me the layout: a line on a truss, sides + center, front and back, or w
 
 Either way, Escape during a drag puts the old zone back without asking.
 
-**Q-Z1-5 · Safety zone edits while the show lock is on** (vibe Phase 7's switch on the Perform tab; it refuses edits that change the show, and never BLACKOUT). **Built as ★ A** (`0002052`, 2026-11-20; not answered by the user, so it can still change).
+**Q-Z1-5 · Safety zone edits while the show lock is on** (vibe Phase 7's switch on the Perform tab; it refuses edits that change the show, and never BLACKOUT). **Answered A** (2026-11-20), as built in `0002052`.
 - **A ★** Making an area smaller always works; making it larger is refused while the lock is on. The lock never stands between you and a safer show, and nothing gets wider by accident during one.
 - **B** Refuse every safety edit while locked: unlock first (BLACKOUT is always there for an emergency).
 - **C** Leave safety edits alone, as now.
