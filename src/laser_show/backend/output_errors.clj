@@ -9,7 +9,8 @@
    Keys: [:engine id], [:provider projector-id], [:projector-effects
    projector-id], [:calibration projector-id] (a calibration effect was
    skipped: the message names it), [:item-effects item-id],
-   [:global-effects], [:effect instance-id], [:render cell], [:show-clock]."
+   [:global-effects], [:effect instance-id], [:render cell], [:routing] (the
+   show clock's resolver, routing.rig), [:show-clock]."
   (:require [clojure.tools.logging :as log]))
 
 (def ^:const LOG_INTERVAL_MS 10000)

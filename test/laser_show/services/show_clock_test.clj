@@ -22,6 +22,7 @@
             [laser-show.input.router :as router]
             [laser-show.input.store :as input-store]
             [laser-show.profiling.frame-profiler :as profiler]
+            [laser-show.routing.rig :as rig]
             [laser-show.services.frame-service :as fs]
             [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
@@ -248,6 +249,90 @@
       (is (= {[0 0] (:accumulated-beats r)} (:positions s)) "where each cue is, for the screen")
       (is (= (:accumulated-beats r) (show-time/cue-beats s [0 0])))
       (is (nil? (show-time/cue-beats s [1 0])) "not playing"))))
+
+
+;; Zones plan Z3: the routing, worked out once a tick before the render
+
+(defn- two-lasers! []
+  (state/swap-state! assoc :projectors {:p1 {:name "Laser L" :host "10.0.0.1" :enabled? true :zone-groups []}
+                                        :p2 {:name "Laser R" :host "10.0.0.2" :enabled? true :zone-groups []}}))
+
+(deftest snapshot-carries-routing-test
+  (init! {[0 0] (cue :circle)})
+  (two-lasers!)
+  (testing "nothing playing: the routing all the same, for the preview and the engines"
+    (let [s (show-clock/tick! 0)]
+      (is (= (rig/routing (rig/routing-inputs (state/get-raw-state) nil)) (:routing s)))))
+  (testing "playing"
+    (trigger! 0 0)
+    (let [s (show-clock/tick! 16666667)]
+      (is (= [[:p1 nil nil] [:p2 nil nil]] (rig/resolve-ref (:routing s) :all)))
+      (is (= [[:p1 nil nil]] (rig/resolve-ref (:routing s) :auto/left)))
+      (is (= {:index 1 :scan-rate 25000} (select-keys (get-in s [:routing :outputs :p2]) [:index :scan-rate])))
+      (is (nil? (get-in s [:routing :map])) "no map until Z4"))))
+
+(deftest routing-is-made-before-the-render-test
+  (testing "spec §5's order (Z5 S-3): the routing comes from the tick's state before the render, which finds it made"
+    (init! {[0 0] (cue :circle)})
+    (two-lasers!)
+    (trigger! 0 0)
+    (let [seen (atom [])
+          render fs/generate-frames-by-zone]
+      (with-redefs [fs/generate-frames-by-zone (fn [& args]
+                                                 (swap! seen conj (get-in @show-time/!runtime [:routing-cache :routing]))
+                                                 (apply render args))]
+        (let [s (show-clock/tick! 0)]
+          (is (= 1 (count @seen)))
+          (is (some? (first @seen)) "made before the render, the first tick after a reset too")
+          (is (identical? (:routing s) (first @seen)) "the one the snapshot carries"))))))
+
+(deftest routing-is-reused-while-nothing-changes-test
+  (init! {[0 0] (cue :circle)})
+  (two-lasers!)
+  (trigger! 0 0)
+  (let [a (show-clock/tick! 0)
+        b (show-clock/tick! 16666667)
+        built (atom 0)
+        routing rig/routing]
+    (is (some? (:routing a)))
+    (is (identical? (:routing a) (:routing b)) "the same object, tick after tick")
+    (with-redefs [rig/routing (fn [& args] (swap! built inc) (apply routing args))]
+      (ticks! 30 33333334))
+    (is (zero? @built) "never worked out again while nothing it reads changes")))
+
+(deftest routing-follows-a-group-edit-next-tick-test
+  (init! {[0 0] (cue :circle)})
+  (two-lasers!)
+  (trigger! 0 0)
+  (let [before (show-clock/tick! 0)]
+    (is (= [] (rig/resolve-ref (:routing before) :graphics)))
+    (events/event-handler {:event/type :projectors/toggle-zone-group :projector-id :p2 :zone-group-id :graphics})
+    (let [after (show-clock/tick! 16666667)]
+      (is (= [[:p2 nil nil]] (rig/resolve-ref (:routing after) :graphics)) "the next tick")
+      (is (not (identical? (:routing before) (:routing after)))))
+    (testing "and the order"
+      (events/event-handler {:event/type :rig/move-projector :projector-id :p2 :target :p1 :side :before})
+      (is (= [[:p2 nil nil]] (rig/resolve-ref (:routing (show-clock/tick! 33333334)) :auto/left))))))
+
+(deftest a-throwing-resolver-keeps-the-last-routing-test
+  (init! {[0 0] (cue :circle)})
+  (two-lasers!)
+  (trigger! 0 0)
+  (let [good (:routing (show-clock/tick! 0))]
+    (state/assoc-in-state! [:projectors :p2 :exclude-from-all?] true)
+    (with-redefs [rig/routing (fn [_] (throw (ex-info "test: resolver failed" {})))]
+      (let [s (show-clock/tick! 16666667)]
+        (is (identical? good (:routing s)) "the last routing")
+        (is (seq (get-in s [:cues 0 :zone-frames :all])) "and the clock renders on")
+        (is (re-find #"resolver failed" (get-in (output-errors/snapshot) [[:routing] :message])) "reported under [:routing]")))
+    (testing "it clears once the resolver works again, and the edit shows"
+      (let [s (show-clock/tick! 33333334)]
+        (is (= [[:p1 nil nil]] (rig/resolve-ref (:routing s) :all)))
+        (is (nil? (get (output-errors/snapshot) [:routing])))))
+    (testing "with no routing yet: an empty one"
+      (show-time/reset-runtime!)
+      (with-redefs [rig/routing (fn [_] (throw (ex-info "test: resolver failed" {})))]
+        (is (= {:map nil :refs {} :outputs {}} (:routing (show-clock/tick! 0))))))))
 
 (deftest failing-cue-renders-empty-test
   (init! {[0 0] (cue :circle) [1 0] (cue :square)})

@@ -5,21 +5,26 @@
    Each tick (tick!):
    1. steps show time from app state's intents and requests and the MIDI
       timecode (show-time/step);
-   2. renders every playing cue once (frame-service/generate-frames-by-zone),
+   2. works out the routing (routing.rig/cached-routing: which lasers each
+      group reaches, and each laser's halves, scan rate and fit settings),
+      from the tick's state and before the render (spec 01 §5), the cached
+      one while nothing it reads changed;
+   3. renders every playing cue once (frame-service/generate-frames-by-zone),
       each in its own try, at its timing context and with one render context
       for the whole tick: the tick's one read of app state and of the input
       store (every tick, playing or not), the faders as their bindings now
       give them (vibes.faders), the presses tap reactions follow
       (show-time/pulse-view; calibration gets none) and the global effects
       (frame-service/render-context);
-   3. publishes the result (show-time/publish!), which wakes every projector's
-      engine: each takes its zones and sends them on its own thread
-      (backend/multi_engine.clj). The snapshot also carries where each cue is,
+   4. publishes the result (show-time/publish!), which wakes every projector's
+      engine: each composes its laser's frame from the tick's cues and
+      routing and sends it on its own thread (backend/multi_engine.clj,
+      routing/compose.clj). The snapshot also carries where each cue is,
       the presses (the Perform pads' pulse bars), where the faders are (the
       Perform tab's meters), and the preview as a delay
       that the screen forces (views/components/clock_view.clj draws it on
       each screen refresh);
-   4. sends what it learned back as events: a timeline's end and a timecode
+   5. sends what it learned back as events: a timeline's end and a timecode
       chase (:show-clock/cue-ended, :show-clock/chase), auto-advance's arm and
       advance (:vibe/arm, :vibe/advance: laser-show.vibes.rotation/due, on
       the tick's read of app state), a key held too long (:vibe/release
@@ -39,6 +44,7 @@
             [laser-show.input.store :as input-store]
             [laser-show.profiling.frame-profiler :as profiler]
             [laser-show.profiling.jfr-profiler :as jfr]
+            [laser-show.routing.rig :as rig]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
             [laser-show.state.extractors :as ex]
@@ -150,6 +156,25 @@
 
 ;; A tick
 
+(def ^:private no-routing
+  "The routing before the resolver has worked one out: nothing reaches any
+   laser."
+  {:map nil :refs {} :outputs {}})
+
+(defn- routing-step
+  "[cache routing]: the tick's routing from its state (rig/cached-routing,
+   the cached one while nothing it reads changed). A resolver that throws is
+   reported under [:routing], and the tick keeps the cached routing, or none,
+   so a bad edit can't stop the clock."
+  [cache state]
+  (try
+    (let [result (rig/cached-routing cache (rig/routing-inputs state nil))]
+      (output-errors/ok! [:routing])
+      result)
+    (catch Throwable e
+      (output-errors/report! [:routing] e)
+      [cache (or (:routing cache) no-routing)])))
+
 (defn- vibe-step
   "[runtime reports]: vibe mode's reports, auto-advance's (vibes.rotation/due)
    and the stuck-key guard's (vibes.watchdog/due, with the tick's presses),
@@ -163,8 +188,10 @@
     [(assoc runtime :vibe-sent vibe-sent) reports]))
 
 (defn tick!
-  "One tick at now-ns (System/nanoTime): step show time, render every playing
-   cue, publish, then send the step's reports, vibe mode's (auto-advance and
+  "One tick at now-ns (System/nanoTime): step show time, work out the
+   routing (spec 01 §5: before the render, from the tick's state, and the
+   cached one while nothing it reads changes), render every playing cue,
+   publish, then send the step's reports, vibe mode's (auto-advance and
    stuck keys) and the status as events (events/dispatch!). now-ms, the
    step's time base, is fractional milliseconds since the first tick after a
    reset. Returns the snapshot."
@@ -176,10 +203,11 @@
         t0 (or (:t0-ns before) now-ns)
         now-ms (/ (- (long now-ns) (long t0)) 1e6)
         {:keys [runtime reports]} (show-time/step before state mtc-pos now-ms)
-        runtime (assoc runtime :t0-ns t0)
+        pulses (show-time/pulse-view runtime)
+        [routing-cache routing] (routing-step (:routing-cache runtime) state)
+        runtime (assoc runtime :t0-ns t0 :routing-cache routing-cache)
         _ (reset! show-time/!runtime runtime)
         playing? (boolean (get-in state [:playback :playing?]))
-        pulses (show-time/pulse-view runtime)
         {:keys [cues] :as rendered} (render state input-values (:global runtime)
                                             (when playing? (show-time/active-runs state runtime)) pulses)
         snapshot (show-time/publish! (assoc rendered
@@ -188,6 +216,7 @@
                                             :positions (show-time/positions runtime)
                                             :pulses pulses
                                             :faders (faders/fader-values input-values (get-in state [:config :input :macro-map]))
+                                            :routing routing
                                             :preview (delay (frame-service/preview-data cues))))
         ;; After publish!, so the engines never wait for them
         [runtime status] (status-step runtime state mtc-pos now-ms)

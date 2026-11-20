@@ -9,6 +9,7 @@
             [laser-show.backend.output-errors :as output-errors]
             [laser-show.animation.safety :as safety]
             [laser-show.events.core :as events]
+            [laser-show.routing.compose :as compose]
             [laser-show.routing.rig :as rig]
             [laser-show.services.frame-service :as fs]
             [laser-show.services.show-clock :as show-clock]
@@ -31,10 +32,12 @@
 (use-fixtures :each setup-test-state)
 
 (defn- snapshot
-  "A snapshot as the show clock publishes it."
+  "A snapshot as the show clock publishes it, its routing made from app state
+   as it is now (zones plan Z3)."
   [cues & {:keys [at-ns playing? projector-ctx] :or {playing? true}}]
   {:tick 1 :at-ns (or at-ns (System/nanoTime)) :playing? playing? :cues cues
-   :projector-ctx projector-ctx :preview (delay nil)})
+   :projector-ctx projector-ctx :preview (delay nil)
+   :routing (rig/routing (rig/routing-inputs (state/get-raw-state) nil))})
 
 
 ;; Validation Tests
@@ -187,91 +190,24 @@
       (is (= #{1 2 10} channel-ids) "Each engine should have unique channel-id from service-id"))))
 
 
-;; Zone-Specific Frame Routing Tests (Phase 3)
-;;
-;; These tests verify that projectors receive only frames for their assigned zone groups,
-;; properly concatenated with blanking points.
+;; Routing (zones plan Z3): each engine composes its laser's frame from the
+;; snapshot's routing (routing.compose), never from app state
 
 
-(deftest extract-frames-for-zones-test
-  (testing "Extracts frames for specified zone groups from zone-frames map"
-    (let [zone-frames {:left   [[0.0 0.0 1.0 0.0 0.0]
-                                [0.1 0.0 1.0 0.0 0.0]]
-                       :center [[0.5 0.5 0.0 1.0 0.0]
-                                [0.6 0.5 0.0 1.0 0.0]]
-                       :right  [[1.0 0.0 0.0 0.0 1.0]
-                                [1.0 0.1 0.0 0.0 1.0]]}]
-      
-      (testing "Single zone extraction"
-        (let [frames (#'me/extract-frames-for-zones zone-frames [:left])]
-          (is (= 1 (count frames)))
-          (is (= (:left zone-frames) (first frames)))))
-      
-      (testing "Multiple zone extraction preserves order"
-        (let [frames (#'me/extract-frames-for-zones zone-frames [:left :center])]
-          (is (= 2 (count frames)))
-          (is (= (:left zone-frames) (first frames)))
-          (is (= (:center zone-frames) (second frames)))))
-      
-      (testing "Missing zone returns nil in vector"
-        (let [frames (#'me/extract-frames-for-zones zone-frames [:back])]
-          (is (= 1 (count frames)))
-          (is (nil? (first frames)))))
-      
-      (testing "Empty zone-group-ids returns empty vector"
-        (let [frames (#'me/extract-frames-for-zones zone-frames [])]
-          (is (empty? frames)))))))
-
-(deftest combine-zone-frames-test
-  (testing "Combines multiple frames with blanking points between them"
-    (let [frame-left [[0.0 0.0 1.0 0.0 0.0]
-                      [0.1 0.0 1.0 0.0 0.0]]
-          frame-center [[0.5 0.5 0.0 1.0 0.0]
-                        [0.6 0.5 0.0 1.0 0.0]]]
-      
-      (testing "Single frame returns unchanged"
-        (let [result (#'me/combine-zone-frames [frame-left])]
-          (is (= 2 (count result)))
-          (is (= frame-left result))))
-      
-      (testing "Multiple frames concatenated with blanking"
-        (let [result (#'me/combine-zone-frames [frame-left frame-center])]
-          (is (> (count result) 4) "Should have blanking points between frames")
-          (is (= [0.0 0.0 1.0 0.0 0.0] (first result)) "First point from :left")
-          (is (= [0.6 0.5 0.0 1.0 0.0] (last result)) "Last point from :center")))
-      
-      (testing "Nil frames are filtered out"
-        (let [result (#'me/combine-zone-frames [nil frame-left nil])]
-          (is (= 2 (count result)))
-          (is (= frame-left result))))
-      
-      (testing "All nil returns nil"
-        (let [result (#'me/combine-zone-frames [nil nil])]
-          (is (nil? result))))
-      
-      (testing "Empty vector returns nil"
-        (let [result (#'me/combine-zone-frames [])]
-          (is (nil? result)))))))
-
-(deftest get-projector-zone-groups-test
-  (testing "The refs that reach each projector (routing.rig/refs-for): All, its own groups, the automatic ones it is in"
-    (state/reset-state!
-      {:projectors {:proj-1 {:zone-groups [:left :center]}
-                    :proj-2 {:zone-groups [:right]}
-                    :proj-3 {}}})
-    
-    (let [raw-state (state/get-raw-state)]
-      (testing "three lasers in id order (no hosts), the middle one split"
-        (is (= [:all :left :center :auto/left :auto/odd :auto.laser/proj-1]
-               (#'me/get-projector-zone-groups raw-state :proj-1)))
-        (is (= [:all :right :auto/left :auto/right :auto/center :auto/even :auto.laser/proj-2]
-               (#'me/get-projector-zone-groups raw-state :proj-2)))
-        (is (= [:all :auto/right :auto/odd :auto.laser/proj-3]
-               (#'me/get-projector-zone-groups raw-state :proj-3))
-            "with no groups of its own"))
-      
-      (testing "Returns nil for unknown projector"
-        (is (nil? (#'me/get-projector-zone-groups raw-state :unknown)))))))
+(deftest engine-routes-from-the-snapshot-not-app-state-test
+  (let [graphics [[0.0 0.5 0.0 1.0 0.0] [0.5 0.5 0.0 1.0 0.0]]
+        cues [{:cell [0 0] :zone-frames {:graphics graphics}}]]
+    (state/assoc-in-state! [:projectors :p] {:host "10.0.0.5" :enabled? true :zone-groups [:graphics]})
+    (let [snap (snapshot cues)]
+      (state/assoc-in-state! [:projectors :p :zone-groups] [])
+      (is (= graphics (#'me/projector-frame :p snap)) "the tick's routing, not an edit made since")
+      (is (nil? (#'me/projector-frame :p (snapshot cues))) "the next tick's follows the edit")
+      (testing "no engine reads the groups from app state"
+        (with-redefs [rig/refs-for (fn [& _] (throw (ex-info "test: read live" {})))
+                      rig/routing (fn [& _] (throw (ex-info "test: worked out by the engine" {})))]
+          (is (= graphics (#'me/projector-frame :p snap)))))
+      (testing "a snapshot with no routing reaches no laser"
+        (is (nil? (#'me/projector-frame :p (dissoc snap :routing))))))))
 
 (deftest projector-draws-all-without-listing-it-test
   (let [all-frame [[0.0 0.0 1.0 1.0 1.0] [0.5 0.0 1.0 1.0 1.0]]]
@@ -290,14 +226,6 @@
     (is (nil? (frame {:auto/left all-frame :auto/odd all-frame})) "nor Left's or Odd's (D-33)")
     (is (= graphics (frame {:all all-frame :graphics graphics})) "its own groups still are")
     (is (= graphics (frame {:auto.laser/p graphics})) "and the group of its own")))
-
-(deftest one-laser-draws-left-and-right-whole-test
-  (let [circle (vec (for [i (range 33)] [(Math/cos (* i 0.19)) (Math/sin (* i 0.19)) 0.0 0.0 1.0]))
-        wave (vec (for [i (range 50)] [(- (/ i 25.0) 1.0) (Math/sin (* i 0.3)) 1.0 0.0 0.0]))]
-    (state/assoc-in-state! [:projectors :p] {:host "10.0.0.5" :enabled? true :zone-groups []})
-    (is (= (#'me/combine-zone-frames [circle wave])
-           (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:auto/left circle :auto/right wave}}])))
-        "Z2: Left and Right of one laser are its halves, but each is drawn whole, joined by a blanking jump (Z3 fits them into the halves)")))
 
 (deftest reorder-reroutes-left-test
   (let [left-frame [[-0.5 0.0 1.0 1.0 1.0] [-0.4 0.0 1.0 1.0 1.0]]
@@ -331,9 +259,10 @@
           (is (not (some #{right-first-point} combined)))
           (is (not (some #{right-last-point} combined)))))
       
-      (testing ":left and :center content IS included"
-        (is (= [0.0 0.0 1.0 0.0 0.0] (first combined)))
-        (is (= [0.6 0.5 0.0 1.0 0.0] (last combined))))
+      (testing ":left and :center content IS included, in the spec's key order: Center before Left (S-4)"
+        (is (= [0.5 0.5 0.0 1.0 0.0] (first combined)))
+        (is (= [0.1 0.0 1.0 0.0 0.0] (last combined)))
+        (is (= (fs/concatenate-frames [(:center zone-frames) (:left zone-frames)]) combined)))
       
       (testing "Blanking points exist between zone frames"
         (let [has-blank? (fn [pt] (and (= 0.0 (nth pt 2))
@@ -363,22 +292,19 @@
 
 (defn- direct-frame
   "What the projector would send for the cues as they are now: each cue
-   rendered with generate-frames-by-zone at its own timing, the frames of
-   the refs that reach the projector (routing.rig/refs-for) taken and
-   joined, the cues joined, then the projector effects at the first cue's
-   timing and the global BPM."
+   rendered with generate-frames-by-zone at its own timing, composed for the
+   projector (routing.compose, on the routing app state gives now), then the
+   projector effects at the first cue's timing and the global BPM."
   [projector-id]
   (let [s (state/get-raw-state)
         bpm (get-in s [:timing :bpm])
-        zones (rig/refs-for s projector-id)
         runs (show-time/active-runs s)
-        per-cue (keep (fn [{:keys [cue-chain cue-timing]}]
-                        (let [cue-bpm (playback/cue-bpm cue-chain bpm)
-                              ctx (assoc (ct/get-cue-timing-context cue-timing cue-bpm) :input-values {})
-                              by-zone (fs/generate-frames-by-zone cue-chain ctx)]
-                          (#'me/combine-zone-frames (#'me/extract-frames-for-zones by-zone zones))))
-                      runs)
-        combined (#'me/combine-zone-frames (vec per-cue))
+        cues (mapv (fn [{:keys [cell cue-chain cue-timing]}]
+                     (let [cue-bpm (playback/cue-bpm cue-chain bpm)
+                           ctx (assoc (ct/get-cue-timing-context cue-timing cue-bpm) :input-values {})]
+                       {:cell cell :zone-frames (fs/generate-frames-by-zone cue-chain ctx)}))
+                   runs)
+        combined (:frame (compose/projector-frame cues (rig/routing (rig/routing-inputs s nil)) projector-id))
         ctx (assoc (ct/get-cue-timing-context (:cue-timing (first runs)) bpm) :input-values {})
         projector-effects (get-in s [:chains :projector-effects projector-id :items])]
     (when combined
@@ -435,6 +361,26 @@
     (let [[engine direct] (tick-and-compare :p)]
       (is (seq engine))
       (is (= direct engine)))))
+
+(deftest one-laser-draws-left-and-right-halves-test
+  (testing "spec §6.2 b through the clock: one laser, a circle to Left and a wave to Right, each in its half"
+    (state/swap-state! #(-> %
+                            (assoc-in [:chains :cue-chains [0 0]]
+                                      {:destination-zone {:zone-group-id :all}
+                                       :items [(assoc (preset :circle) :zone-group-id :auto/left)
+                                               (assoc (preset :wave) :zone-group-id :auto/right)]})
+                            (assoc :projectors {:p {:host "10.0.0.5" :enabled? true :zone-groups []}})))
+    (events/event-handler {:event/type :grid/trigger-cell :col 0 :row 0})
+    (let [s (show-clock/tick! (System/nanoTime))
+          {:auto/keys [left right]} (get-in s [:cues 0 :zone-frames])
+          {:keys [L R]} (get-in s [:routing :outputs :p :regions])
+          out (#'me/projector-frame :p s)]
+      (is (and (seq left) (seq right)))
+      (is (= (fs/concatenate-frames [(compose/fit-region left L) (compose/fit-region right R)]) out)
+          "the circle fitted in the left half, a blanking jump, the wave in the right")
+      (is (= (+ (count left) 2 (count right)) (count out)))
+      (is (every? (fn [[x]] (<= -1.0 x 0.5)) (compose/fit-region left L)) "Left is the left 75% of the width")
+      (is (every? (fn [[x]] (<= -0.5 x 1.0)) (compose/fit-region right R)) "Right the right 75%"))))
 
 (deftest stale-snapshot-sends-an-empty-frame-test
   (let [provider (#'me/create-projector-frame-provider :p)

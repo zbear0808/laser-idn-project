@@ -14,7 +14,7 @@
 
    An entry of a group is [projector-id region side]: region nil (the whole
    laser), :L or :R (a half); side nil, or :left/:right for a :both middle.
-   Z2's engine draws whole lasers (refs-for); Z3 reads the regions.
+   The engines compose from them (routing/compose.clj), halves and all.
 
    Identity (D-23): a projector is known by its :stable-id, [:unit \"0A 1B …\"
    output] when the device reports a usable unit id, else [:host address
@@ -425,7 +425,8 @@
       [{:inputs inputs :routing r} r])))
 
 
-;; The refs that reach a projector: the Z2 bridge to the engine
+;; The refs that reach a projector, for the vibes' audience rule (refs-reaching):
+;; no engine reads them, since the engines compose from the tick's routing
 
 (defn- compute-refs
   "{projector-id [ref …]} of every enabled projector, in join order."
@@ -452,7 +453,7 @@
   "The refs that reach projector id, in join order: :all unless it is
    excluded; its stored custom groups, in their order; the automatic groups
    it is in (Left, Right, Center, Odd, Even, then its own). A half counts as
-   the whole laser (Z2 draws whole). nil for an unknown or disabled
+   the whole laser. nil for an unknown or disabled
    projector. The same value (identical?) while [:projectors] and [:rig]
    are."
   [state id]

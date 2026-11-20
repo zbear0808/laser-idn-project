@@ -2,20 +2,25 @@
   "Multi-engine management for streaming to multiple projectors.
    
    Each projector gets its own streaming engine with a projector-specific
-   frame provider. The frame provider uses zone-based routing to determine
-   which frames each projector receives.
+   frame provider. The frame provider composes, from the tick's snapshot,
+   what that projector draws.
    
    ZONE-BASED ARCHITECTURE (v3):
    - One streaming engine per enabled projector
-   - The show clock renders every playing cue once per tick
-     (services/show_clock.clj) and publishes it (show-time/latest)
+   - The show clock renders every playing cue once per tick and works out the
+     tick's routing (services/show_clock.clj), and publishes both
+     (show-time/latest)
    - Each engine wakes on the tick (show-time/frame-signal) and its frame
      provider, on the engine's own thread:
-     1. Looks up projector's zone-groups from config
-     2. Takes those zones from each cue of the tick and joins them
-     3. Applies projector calibration effects (color curves + corner-pin)
+     1. Composes the projector's frame from the snapshot's cues and routing
+        (routing/compose.clj): each key and each picture once, Left and Right
+        fitted into its halves
+     2. Applies projector calibration effects (color curves + corner-pin)
+     3. Clips it to the projector's safety zone
    
-   Each projector receives only content routed to its assigned zones.
+   No engine reads the groups from app state: the routing comes with the
+   tick, so an engine's frame and the preview agree, and a group edit shows
+   on the next tick without a restart.
    
    This namespace builds engines and their frame providers. Starting, stopping
    and keeping them is the output runtime's job (backend/output_runtime.clj)."
@@ -33,7 +38,7 @@
             [laser-show.animation.test-pattern :as test-pattern]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.idn.output-config :as output-config]
-            [laser-show.routing.rig :as rig]))
+            [laser-show.routing.compose :as compose]))
 
 
 ;; Routing Debug Logging
@@ -43,54 +48,6 @@
 
 (def ^:private routing-log-counter (atom 0))
 (def ^:const ROUTING_LOG_INTERVAL 300) ;; Log routing info every N frames (~5 seconds at 60fps)
-
-
-;; Helper Functions for Zone-Based Frame Routing
-
-
-(defn- get-projector-zone-groups
-  "The refs whose frames a projector draws, in join order: All unless it is
-   excluded, its own groups, the automatic groups it is in and its own
-   (routing.rig/refs-for). Read live, so a reorder, an exclusion or a
-   membership change re-routes on the next frame. Z3 reads the snapshot's
-   :routing instead.
-   
-   Args:
-   - raw-state: The raw application state
-   - projector-id: The projector's ID keyword
-   
-   Returns: Vector of refs, or nil for an unknown or disabled projector."
-  [raw-state projector-id]
-  (rig/refs-for raw-state projector-id))
-
-(defn- extract-frames-for-zones
-  "Extract frames from a zone-frames map for the specified zone groups.
-   
-   Args:
-   - zone-frames-map: Map of {zone-group-id → frame}, one cue's render
-   - zone-group-ids: Vector of zone-group-ids to extract frames for
-   
-   Returns: Vector of frames (may contain nils for zones with no content).
-            Returns empty vector if zone-group-ids is empty."
-  [zone-frames-map zone-group-ids]
-  (if (empty? zone-group-ids)
-    []
-    (mapv #(get zone-frames-map %) zone-group-ids)))
-
-(defn- combine-zone-frames
-  "Combine multiple zone frames into a single frame with proper blanking.
-   
-   Uses the concatenate-frames utility from frame-service to join
-   frames with blanking points between them for safe galvo travel.
-   
-   Args:
-   - frames: Vector of frames (each frame is a vector of points)
-   
-   Returns: Combined frame or nil if all input frames are nil/empty."
-  [frames]
-  (let [non-nil-frames (filterv some? frames)]
-    (when (seq non-nil-frames)
-      (frame-service/concatenate-frames non-nil-frames))))
 
 
 ;; Frame Provider Creation
@@ -198,17 +155,17 @@
 (declare show-frame)
 
 (defn- projector-frame
-  "The projector's frame for the show clock's tick in snapshot: each cue's
-   frames for its zones, joined, then its projector effects at the first
-   cue's timing (show-frame). While it shows the test pattern (calibration or
-   Identify), the pattern instead, even with nothing playing; dark during
-   BLACKOUT and in Identify's dark halves. Nil before the first tick, while
-   nothing is playing and when none of the cues reach its zones. Its safety
-   zone comes last (guard-safety): it clips what the projector effects made,
-   and if it fails the projector sends an empty frame. A snapshot older than
-   show-time/STALE_MS throws \"Show clock stalled\". The frame carries the
-   snapshot's {:tick :at-ns} as metadata, so the engine knows which tick it
-   sends."
+  "The projector's frame for the show clock's tick in snapshot: what it
+   draws of the tick's cues, composed from the snapshot's routing, then its
+   projector effects at the first cue's timing (show-frame). While it shows
+   the test pattern (calibration or Identify), the pattern instead, even
+   with nothing playing; dark during BLACKOUT and in Identify's dark halves.
+   Nil before the first tick, while nothing is playing and when none of the
+   cues reach it. Its safety zone comes last (guard-safety): it clips what
+   the projector effects made, and if it fails the projector sends an empty
+   frame. A snapshot older than show-time/STALE_MS throws \"Show clock
+   stalled\". The frame carries the snapshot's {:tick :at-ns} as metadata,
+   so the engine knows which tick it sends."
   [projector-id snapshot]
   (when snapshot
     (let [now (System/nanoTime)]
@@ -226,34 +183,30 @@
         (:playing? snapshot) (show-frame raw-state projector-id snapshot)))))
 
 (defn- show-frame
-  "What the projector draws of the show: each cue's frames for its zones,
-   joined, then its projector effects and its safety zone. Nil when none of
-   the cues reach its zones."
+  "What the projector draws of the show: its frame composed from the tick's
+   cues and routing (routing.compose/projector-frame), then its projector
+   effects and its safety zone. Nil when none of the cues reach it."
   [raw-state projector-id snapshot]
-  (let [zone-groups (get-projector-zone-groups raw-state projector-id)
-        cues (:cues snapshot)
-        combined-frame (combine-zone-frames
-                        (into [] (keep #(combine-zone-frames (extract-frames-for-zones (:zone-frames %) zone-groups)))
-                              cues))
+  (let [{:keys [frame regions]} (compose/projector-frame (:cues snapshot) (:routing snapshot) projector-id)
         log-count (swap! routing-log-counter inc)]
     (when (and (dev-config/idn-stream-logging?)
                (zero? (mod log-count ROUTING_LOG_INTERVAL)))
-      (log/debug (format "Zone routing [%s]: zone-groups=%s, active-cues=%d, combined-points=%s"
+      (log/debug (format "Zone routing [%s]: active-cues=%d, composed-points=%s, regions=%s"
                          projector-id
-                         (pr-str zone-groups)
-                         (count cues)
-                         (if combined-frame (count combined-frame) "nil"))))
-    (when combined-frame
+                         (count (:cues snapshot))
+                         (if frame (count frame) "nil")
+                         regions)))
+    (when frame
       (guard-safety raw-state projector-id snapshot
-                    (fn [_] (apply-projector-effects combined-frame projector-id (:projector-ctx snapshot)))))))
+                    (fn [_] (apply-projector-effects frame projector-id (:projector-ctx snapshot)))))))
 
 (defn- create-projector-frame-provider
   "Create a frame provider function for a specific projector or virtual projector.
    
    The frame provider takes the show clock's newest tick (show-time/latest):
-   1. For each cue the clock rendered, takes this projector's zones
-   2. Concatenates them, and then every cue
-   3. Applies projector calibration effects (color curves + corner-pin)
+   1. Composes what this projector draws from the tick's cues and routing
+   2. Applies projector calibration effects (color curves + corner-pin)
+   3. Clips it to the projector's safety zone
    
    The preview is built from the same tick, so it shows what the engines send.
    

@@ -44,6 +44,7 @@
             [laser-show.input.events :as input-events]
             [laser-show.input.router :as router]
             [laser-show.input.store :as store]
+            [laser-show.routing.rig :as rig]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
@@ -575,9 +576,13 @@
   (init! (domains/build-initial-state))
   (state/assoc-in-state! [:projectors] zone-projectors))
 
-(defn- zone-snapshot [zone-frames]
+(defn- zone-snapshot
+  "A snapshot of one cue; since zones Z3 it carries the routing the engines
+   compose from, made from app state as the show clock makes it."
+  [zone-frames]
   {:tick 1 :at-ns (System/nanoTime) :playing? true :projector-ctx nil :preview (delay nil)
-   :cues [{:cell [0 0] :zone-frames zone-frames}]})
+   :cues [{:cell [0 0] :zone-frames zone-frames}]
+   :routing (rig/routing (rig/routing-inputs (state/get-raw-state) nil))})
 
 (defn- render-zones
   "generate-frames-by-zone for one cue at beats, through the same render context

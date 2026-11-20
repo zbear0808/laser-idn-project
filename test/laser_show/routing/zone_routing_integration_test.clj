@@ -14,9 +14,10 @@
    [clojure.test :refer [deftest is testing use-fixtures]]
    [laser-show.animation.effects.zone :as zone]
    [laser-show.animation.types :as t]
+   [laser-show.routing.compose :as compose]
+   [laser-show.routing.rig :as rig]
    [laser-show.routing.zone-effects :as ze]
    [laser-show.services.frame-service :as fs]
-   [laser-show.backend.multi-engine :as me]
    [laser-show.state.core :as state]
    [laser-show.state.domains :as domains]))
 
@@ -606,10 +607,9 @@
           left-frame (:left frames-by-zone)
           center-frame (:center frames-by-zone)
 
-          ;; Simulate projector frame extraction for projector in [:left :center]
-          projector-zone-groups [:left :center]
-          projector-frames (#'me/extract-frames-for-zones frames-by-zone projector-zone-groups)
-          combined-frame (#'me/combine-zone-frames projector-frames)]
+          ;; What a projector in [:left :center] draws of the cue (routing.compose)
+          routing (rig/routing (rig/routing-inputs {:projectors {:proj {:zone-groups [:left :center]}}} nil))
+          combined-frame (:frame (compose/projector-frame [{:cell [0 0] :zone-frames frames-by-zone}] routing :proj))]
 
       ;; Both zones should have content
       (is (some? left-frame))

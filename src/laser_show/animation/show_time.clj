@@ -56,8 +56,10 @@
 
 (defonce ^{:doc "Show time ({:tick :t0-ns :global :pulse-clock :pulses {source stamp}
                  :runs {run-id timing} :chase {cell timing} :applied {kind request-id}
-                 :sent {report now-ms} :vibe-sent {report now-ms} :status {…}}). Only
-                 the show clock thread writes it (show-clock/tick! in tests)."}
+                 :sent {report now-ms} :vibe-sent {report now-ms} :status {…}
+                 :routing-cache {:inputs :routing}}, the last routing and what it
+                 was worked out from, routing.rig/cached-routing). Only the show
+                 clock thread writes it (show-clock/tick! in tests)."}
   !runtime
   (atom initial-runtime))
 
@@ -336,7 +338,9 @@
 (defonce ^{:private true
            :doc "The newest tick's snapshot, nil before the first: {:tick :at-ns :playing? :cues
                  [{:cell :run :zone-frames}] :positions {cell beats} :pulses (pulse-view)
-                 :faders {slot value} (vibes.faders/fader-values) :projector-ctx :preview (delay …) :render-us}."}
+                 :faders {slot value} (vibes.faders/fader-values) :routing (routing.rig/routing:
+                 every ref's lasers and each laser's halves, scan rate and fit, which the
+                 engines compose from) :projector-ctx :preview (delay …) :render-us}."}
   !snapshot
   (atom nil))
 

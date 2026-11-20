@@ -7,7 +7,7 @@
    before, but for content aimed at an empty built-in (04 S-2)."
   (:require [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]
-            [laser-show.backend.multi-engine]
+            [laser-show.routing.compose :as compose]
             [laser-show.routing.rig :as rig]
             [laser-show.state.domains :as domains]
             [laser-show.state.migration :as migration]))
@@ -170,22 +170,36 @@
   (is (= migrated (migration/zones-z2 migrated (merge old-hardware (select-keys migrated [:projectors :virtual-projectors :zone-groups]))))
       "nor does converting what it wrote"))
 
+(defn- sub-frame?
+  "Is f a run of consecutive points of frame?"
+  [frame f]
+  (let [n (count f)]
+    (boolean (some #(= f (subvec frame % (+ % n))) (range (inc (- (count frame) n)))))))
+
 (deftest old-show-routes-as-before-test
-  (let [extract #'laser-show.backend.multi-engine/extract-frames-for-zones
-        renamed {:left :auto/left :center :auto/center}
+  (let [renamed {:left :auto/left :center :auto/center}
         old-keys [:all :left :right :center :graphics :crowd :group-balcony]
         frame-of (fn [k] [[0.0 0.0 1.0 1.0 1.0] [0.1 0.0 1.0 1.0 1.0] [(double (.indexOf ^java.util.List old-keys k)) 0.0 1.0 1.0 1.0]])
         old-frames (into {} (map (fn [k] [k (frame-of k)])) old-keys)
         new-frames (into {} (map (fn [k] [(get renamed k k) (frame-of k)])) old-keys)
-        draws (fn [frames ks] (set (remove nil? (extract frames ks))))]
+        ;; Before Z2 an engine drew the frames of the groups its projector listed
+        before-draws (fn [ks] (set (keep #(get old-frames %) ks)))
+        routing (rig/routing (rig/routing-inputs migrated nil))
+        composed #(:frame (compose/projector-frame [{:cell [0 0] :zone-frames new-frames}] routing %))
+        after-draws (fn [id] (if-let [out (composed id)]
+                               (set (filter #(sub-frame? out %) (vals new-frames)))
+                               #{}))]
     (doseq [[id p] (:projectors old-hardware)]
       (testing (name id)
-        (let [before (if (:enabled? p true) (draws old-frames (:zone-groups p)) #{})
-              after (draws new-frames (or (rig/refs-for migrated id) []))]
+        (let [before (if (:enabled? p true) (before-draws (:zone-groups p)) #{})
+              after (after-draws id)]
           (is (= (set/difference before (set (map frame-of (keys renamed))))
                  (set/difference after (set (map frame-of (keys renamed)))))
               "every frame it drew, and no other, but for the converted built-ins")
-          (is (set/subset? (set/intersection before (set (map frame-of (keys renamed)))) after)))))
+          (is (set/subset? (set/intersection before (set (map frame-of (keys renamed)))) after))
+          (when (seq after)
+            (is (= (+ (* 3 (count after)) (* 2 (dec (count after)))) (count (composed id)))
+                "each of them once, nothing else: the same points (S-4)")))))
     (testing "the one change (S-2): content aimed at the empty Left now reaches the left laser"
-      (is (contains? (draws new-frames (rig/refs-for migrated :projector-10-0-0-5-1)) (frame-of :left)))
-      (is (not (contains? (draws old-frames [:all :graphics]) (frame-of :left)))))))
+      (is (contains? (after-draws :projector-10-0-0-5-1) (frame-of :left)))
+      (is (not (contains? (before-draws [:all :graphics]) (frame-of :left)))))))
