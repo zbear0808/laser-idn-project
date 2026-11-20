@@ -1,7 +1,7 @@
 # Phase ZR: the rig in its own file
 
 **Written:** 2026-11-19   **Written for commit:** `4fa9eee` (`master`). First written at `90e35c7`. Re-checked at `4fa9eee`, after vibe Phases 3 (`38f92ad`), 4a and 4b (`6715fb4`, `f5a4f84`), 5 (`9f5d78a`, fixed in `0faa18c`) and 6 (`4a4a10a`), and UX Phase 3 (`b9b9d55`). Of the files cited here, vibe Phase 6 moved lines only in `events/core.clj` and `state/domains.clj`. Every line below is at `4fa9eee`. Z0–Z4 aren't on `master` yet (Z0 is being built in a worktree), so the Z0, Z1 and Z2 names used here are the ones `02`, `03` and `04` propose. Vibe Phase 7, in progress in a worktree, edits two files ZR edits (§11). **Re-check at HEAD before starting.**
-**Status:** Built on branch `zones-zr`, not merged (`987c05b`..`f46c7d3`, as built in §13). Built off `6bedf25` while Z3 was built in its own worktree.   **Needs:** Z2 (stable ids, `[:rig]`, the conversion of old hardware, `:zone-groups/show`), and through it Z0 (`routing.refs/replace-refs` and `cues-using`, the confirm dialog `views/dialogs/confirm.clj`, `:projectors/remove`). Best after Z4 (00 §4), when the show/rig split is final. Z1's `:safety` and Z3's `:fit` live inside each projector map, so they come along with no extra code. A show's copy of a safety zone is only ever read through Z1's `safety/normalize` (S-ZR-8).
+**Status:** **Done, on `master`** (`5ec8979`..`af7ba97`, as built in §13). Built off `6bedf25` while Z3 was built in its own worktree.   **Needs:** Z2 (stable ids, `[:rig]`, the conversion of old hardware, `:zone-groups/show`), and through it Z0 (`routing.refs/replace-refs` and `cues-using`, the confirm dialog `views/dialogs/confirm.clj`, `:projectors/remove`). Best after Z4 (00 §4), when the show/rig split is final. Z1's `:safety` and Z3's `:fit` live inside each projector map, so they come along with no extra code. A show's copy of a safety zone is only ever read through Z1's `safety/normalize` (S-ZR-8).
 **Implements:** D-30; spec §12 (the rig rows "after ZR: the rig file is saved automatically"); 00 §7 R-9.   **Size:** ~3–4 d
 
 After this phase you can:
@@ -410,22 +410,22 @@ Each step is one commit: the named tests first (run them and record them red), t
 - **A ★ (built)** Allowed while locked.
 - **B** Refused, as every other report button is.
 
-## 13. As built (2026-11-20, `987c05b`..`f46c7d3`, on branch `zones-zr`)
+## 13. As built (2026-11-20, `5ec8979`..`af7ba97`, on `master`)
 
-Built in worktree `zones-zr` off `6bedf25` (Z0, Z1, Z2 and vibe Phase 7 on `master`), while Z3 was built in its own worktree. Not merged. §1's lines were re-checked at `6bedf25`, where Z1 and Z2 had moved them; the code below is described as built.
+Built in worktree `zones-zr` off `6bedf25` (Z0, Z1, Z2 and vibe Phase 7 on `master`), while Z3 was built in its own worktree. Rebased onto `cd10149` (Q-Z1-5's show lock change and V10's answer, both after `6bedf25`) with no conflicts, and fast-forwarded onto `master` before Z3. §1's lines were re-checked at `6bedf25`, where Z1 and Z2 had moved them; the code below is described as built.
 
 ### Where it landed
 
 | # | Commit | Step (§10) |
 |---|---|---|
-| 1 | `987c05b` | each path spec of `persistent-state-mapping` gets `:owner` (`:show` or `:rig`); `persistent/owned-paths`; `replace-document` takes the owners to replace. NEW `state/rig_file.clj`: `version`, `rig-paths`, `group-copy`, `rig-document`, `valid-rig-document?`, `newer?`, `apply-rig-document` |
-| 2 | `ddd35a5` | NEW `state/rig_store.clj`: `read!` (`:missing :ok :recovered :reset :newer`), `write!`, `try-lock`/`release!`, `lock!`/`unlock!`, the `rig-writer` thread (`submit!`, `flush!`, `write-delay-ms` 500), `install-shutdown-hook!`. `persistent/default-rig-file`: the JVM property `laser-show.rig-file`, else `~/LaserShowProjects/rig.edn`. The test runner points the property at a temp folder |
-| 3 | `42ca8c6` | the history split (`show-content-changed?`, `rig-content-changed?`; the policy table's rig row); `(defstate rig-file …)`; `rig-file/rig-changed?`; NEW `events/handlers/rig_autosave.clj` (`wrap-rig-autosave`, `write-request`, `writable?`) beside the output sync; the `:rig/write` effect; `:rig/written`, `:rig/write-failed`, `:rig/retry-write`, `:rig/startup-notice`; `app/start!` (`load-rig`: lock, read, apply, the rig's groups joined into the starter show), `stop!` (flush, unlock), `start-test!` (a rig file only when the state names one); NEW `views/components/rig_file_status.clj`, one row in the Projectors tab |
-| 4 | `74eaaf2` | Open and New replace the `:show` paths only; `migration/zones-z2-show` (on Open, judged by the zip's hardware) and `zones-z2-rig` (before a set-up or an import); `rig-file/pin-map`, `rename-pins` before `mark-clean`; New brings `group-copy`; Z1's D-34 notice after Open goes |
-| 5 | `993e195` | `rig-file/set-up?`, `set-up-question`, `set-up-from-show`; `:rig/set-up-from-show`; Open keeps `[:ui :dialogs :rig-report]` and opens the question on a rig with no laser on; NEW `views/dialogs/rig_report.clj` (the question), mounted in `views/root.clj` under the shared confirm |
-| 6 | `67882a8` | `rig-file/match-report`, `warning-count`, `import-new-lasers`, `use-show-setup`, `adopt-group`, `add-groups-to-show`, `repin`; `:rig/open-report`, `:rig/choose-lasers`, `:rig/adopt-group`, `:rig/repin`, `:rig/add-groups-to-show`, `:rig/import-new-lasers`, `:rig/request-use-show-setup`, `:rig/use-show-setup`; the report view; What doesn't fit (n) (`#rig-report-link`) |
-| + | `5e6942e` | Exit after a failed rig write asks first (§4's `guard-needed?` item, which step 3 left out): the unsaved-changes dialog with `:reason :rig`, Try again (`:file/confirm-retry`, `#unsaved-retry`), Quit anyway, Cancel |
-| 7 | `f46c7d3` | `:rig/request-forget`, `:rig/forget-projector` (dispatches Z0's `:projectors/remove` with `:history/description "Forget Laser"`); Forget this laser… on a disabled card's menu (`#rig-card-forget-<id>`) |
+| 1 | `5ec8979` | each path spec of `persistent-state-mapping` gets `:owner` (`:show` or `:rig`); `persistent/owned-paths`; `replace-document` takes the owners to replace. NEW `state/rig_file.clj`: `version`, `rig-paths`, `group-copy`, `rig-document`, `valid-rig-document?`, `newer?`, `apply-rig-document` |
+| 2 | `f86e234` | NEW `state/rig_store.clj`: `read!` (`:missing :ok :recovered :reset :newer`), `write!`, `try-lock`/`release!`, `lock!`/`unlock!`, the `rig-writer` thread (`submit!`, `flush!`, `write-delay-ms` 500), `install-shutdown-hook!`. `persistent/default-rig-file`: the JVM property `laser-show.rig-file`, else `~/LaserShowProjects/rig.edn`. The test runner points the property at a temp folder |
+| 3 | `d55f24a` | the history split (`show-content-changed?`, `rig-content-changed?`; the policy table's rig row); `(defstate rig-file …)`; `rig-file/rig-changed?`; NEW `events/handlers/rig_autosave.clj` (`wrap-rig-autosave`, `write-request`, `writable?`) beside the output sync; the `:rig/write` effect; `:rig/written`, `:rig/write-failed`, `:rig/retry-write`, `:rig/startup-notice`; `app/start!` (`load-rig`: lock, read, apply, the rig's groups joined into the starter show), `stop!` (flush, unlock), `start-test!` (a rig file only when the state names one); NEW `views/components/rig_file_status.clj`, one row in the Projectors tab |
+| 4 | `39bde4d` | Open and New replace the `:show` paths only; `migration/zones-z2-show` (on Open, judged by the zip's hardware) and `zones-z2-rig` (before a set-up or an import); `rig-file/pin-map`, `rename-pins` before `mark-clean`; New brings `group-copy`; Z1's D-34 notice after Open goes |
+| 5 | `1a1e6a2` | `rig-file/set-up?`, `set-up-question`, `set-up-from-show`; `:rig/set-up-from-show`; Open keeps `[:ui :dialogs :rig-report]` and opens the question on a rig with no laser on; NEW `views/dialogs/rig_report.clj` (the question), mounted in `views/root.clj` under the shared confirm |
+| 6 | `26f091f` | `rig-file/match-report`, `warning-count`, `import-new-lasers`, `use-show-setup`, `adopt-group`, `add-groups-to-show`, `repin`; `:rig/open-report`, `:rig/choose-lasers`, `:rig/adopt-group`, `:rig/repin`, `:rig/add-groups-to-show`, `:rig/import-new-lasers`, `:rig/request-use-show-setup`, `:rig/use-show-setup`; the report view; What doesn't fit (n) (`#rig-report-link`) |
+| + | `ec45e91` | Exit after a failed rig write asks first (§4's `guard-needed?` item, which step 3 left out): the unsaved-changes dialog with `:reason :rig`, Try again (`:file/confirm-retry`, `#unsaved-retry`), Quit anyway, Cancel |
+| 7 | `af7ba97` | `:rig/request-forget`, `:rig/forget-projector` (dispatches Z0's `:projectors/remove` with `:history/description "Forget Laser"`); Forget this laser… on a disabled card's menu (`#rig-card-forget-<id>`) |
 | 8 | (this commit) | as built |
 
 ### Deviations from the plan
@@ -444,7 +444,7 @@ Built in worktree `zones-zr` off `6bedf25` (Z0, Z1, Z2 and vibe Phase 7 on `mast
 - **The report is worked out live** (`rig-report/report`, a sub over the dialog's `:hardware` and `:chains`), not stored at Open, so a row goes once it is fixed. `[:ui :dialogs :rig-report]` is `{:open? :mode :file :hardware :chains :pins}`; `:same-name` carries the rig group's `:name`.
 - **Events beyond §6:** `:rig/request-use-show-setup` (Use the show's… opens the Replace? confirm), `:rig/choose-lasers` (closes the report, then Z2's `:zone-groups/show`), `:file/confirm-retry`.
 - **Use the show's… changes the zone and the calibration only;** a show laser with no zone or chain gives none. The set-up also brings the show's virtual projectors on the lasers it brings, and asks Z1's question when a laser turned on since the question came up would get a larger area.
-- **Exit's rig question is the unsaved-changes dialog with its own text,** and landed as its own commit (`5e6942e`) between steps 6 and 7. With unsaved show changes too, the show's question comes first, then the rig's.
+- **Exit's rig question is the unsaved-changes dialog with its own text,** and landed as its own commit (`ec45e91`) between steps 6 and 7. With unsaved show changes too, the show's question comes first, then the rig's.
 - **Forget's notice, when cues were pinned, is Z0's** ("Removed 10.0.0.9 #1 · 2 cues now go to All").
 - **The show lock** (vibe Phase 7) refuses `:rig/set-up-from-show`, `:rig/import-new-lasers`, `:rig/request-use-show-setup`, `:rig/use-show-setup`, `:rig/adopt-group`, `:rig/repin`, `:rig/request-forget` and `:rig/forget-projector`; it lets through `:rig/add-groups-to-show` (definitions only, Q-ZR-10), `:rig/open-report`, `:rig/choose-lasers` and the rig file's own events.
 - **`migration/zones-z2` stays** for its tests; Open runs `zones-z2-show`, still only for a file with no `:rig`.
@@ -483,7 +483,8 @@ Green on their first run, **not run red**: `rig-changed-ignores-show-edits-test`
 | Where | Unit suite (`clj -M:mac-arm:test`) | UI suite (`clj -M:test-ui:mac-arm:test-ui-headless`) |
 |---|---|---|
 | `6bedf25` (the base: `8c30108`'s code, 04 §13) | 1,306 tests, 463,804 assertions, 0 failures | 173 tests, 806 assertions, 0 failures |
-| `f46c7d3` (step 7) | **1,365 tests, 464,242 assertions, 0 failures, 0 errors** | **180 tests, 837 assertions, 0 failures, 0 errors** |
+| `af7ba97` (step 7), on `6bedf25` | 1,365 tests, 464,242 assertions, 0 failures, 0 errors | 180 tests, 837 assertions, 0 failures, 0 errors |
+| **rebased onto `cd10149`, as landed** | **1,366 tests, 464,264 assertions, 0 failures, 0 errors** | **180 tests, 837 assertions, 0 failures, 0 errors** |
 
 Each step also ran its own namespaces and §9's run list, and from step 3 on the events, state, views, subs, vibes and routing namespaces (about 800 tests), and the UI namespaces it touches. `~/LaserShowProjects` doesn't exist on this machine, before or after both full suites: no test, probe or test start created anything under the home folder.
 

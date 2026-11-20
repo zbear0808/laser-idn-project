@@ -173,6 +173,24 @@ Either way, Escape during a drag puts the old zone back without asking.
 - **A ★** In ZR, on a disabled card (Z0's remove).
 - **B** Wait for discovery clean-up (needs/08 R-18).
 
+**Raised while building ZR** (2026-11-20; 09 §12 has the context; the build follows ★):
+
+**Q-ZR-7 · Which of a show's lasers the set-up and Import bring.**
+- **A ★ (built)** Only the lasers the show had on.
+- **B** All of them, the ones that were off coming in off.
+
+**Q-ZR-8 · An imported laser's On box.**
+- **A ★ (built)** As the show had it. While streaming, its engine starts at the show's address, which on this network may be another device.
+- **B** Off, as a scan finds a new laser, until you tick On on its card.
+
+**Q-ZR-9 · A pin to a laser this rig doesn't have, after Save.**
+- **A** Save also keeps the show's entries for those lasers, so the pin finds its unit again on the next rig.
+- **B ★ (built)** As is: the report says the pin is missing, and Pin them to… fixes it.
+
+**Q-ZR-10 · The show lock and "Add them to this show"** (it only adds group definitions).
+- **A ★ (built)** Allowed while locked.
+- **B** Refused, as every other report button is.
+
 ## Z5 · Zone patterns (`07-phase-z5-zone-patterns.md`)
 
 **Z5-Q1 · What a pattern pad switches.**

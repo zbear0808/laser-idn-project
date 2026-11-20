@@ -126,7 +126,7 @@ There is still **one render per cue per tick** (spec invariant 8). Everything pe
 | **Z2** ✅ | **Done** (`4e97979`..`2eb5e82`, landed with `fee90ce`..`8c30108`, 04 §13). Drag your lasers into order and the groups appear: the rig strip on the Projectors tab, stable identity, automatic groups, implicit All with opt-out, the Zone Groups tab redone group-first and following the order | ~5 d | Z0 | 04 |
 | **Z3** | **In progress** (worktree `zones-z3`, from `6bedf25`, 2026-11-20). **One laser shows Left and Right halves.** Routing in the snapshot, de-duplication, regions and the middle policy, fit guard, a thumbnail per projector, low-fps badges, cue ⚠ | ~6 d | Z1, Z2 | 05 |
 | **Z4** | **A cue drawn into Zone A follows the zone map you switch live.** Zones and maps, one Target control, inheritance with "from …", grid badges, map pads with switch timing, migration | ~6 d | Z3 | 06 |
-| **ZR** | **In progress** (worktree `zones-zr`, from `6bedf25`, 2026-11-20, alongside Z3). **New Project keeps your rig. Opening someone's show never touches your safety zones.** The rig file, and matching a show's groups onto it | ~3–4 d | Z2 (best after Z4) | 09 |
+| **ZR** ✅ | **Done** (`5ec8979`..`af7ba97`, 09 §13; built alongside Z3). **New Project keeps your rig. Opening someone's show never touches your safety zones.** The rig file, and matching a show's groups onto it | ~3–4 d | Z2 (best after Z4) | 09 |
 | **Z5** | **Alternate, chase, swap and shift between zones on the beat or on HIT; cycle maps.** Zone patterns on cues and on effect cells, shared with vibe Phase 8; pattern pads | ~4.5 d | Z4 (+ Phase 8a, if it landed) | 07 |
 | **Z6** | **Program a zone pattern on a drum-machine grid** | ~3 d | Z5 | 08 |
 
