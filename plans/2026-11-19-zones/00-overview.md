@@ -155,6 +155,23 @@ Z1 ─────────┘           │
 - **Vibe audience rule** (`vibes/library.clj` `audience-groups`): Z2's tag editor finally sets `:crowd-scanning`, and Z4 gives zones and maps to the audience checks.
 - **Vibe Phase 4a's reactions** (`vibes/reactions.clj` `listens-to`, `effect-sources`; landed in `6715fb4`): today they only see the sources named inside modulators. **Z5 extends `effect-sources`** so a zone pattern's Step on and Restart on count, which makes a pattern that steps on HIT one of HIT's reactions (named on its pad, and covered by 4b's lint). The vibe plan's owner should agree, since it changes 4a's code (07 S-10).
 - **Vibe Phase 5's faders** (`9f5d78a`): the Fader modulator can drive a pattern's rate, offset or style, and the Morph fader can scrub a step grid (07 §8, 08 §8). A new project's Master cell sits at `[0 3]` on the effects grid, outside the zone stage, so UI tests for pattern cells must use other cells.
+
+### Running alongside vibe Phases 6 and 7 (checked 2026-11-19, 18:20)
+
+Vibe Phase 6 (auto-advance and tap tempo) is in progress in its own worktree, and Phase 7 (safety and hardening) comes after it. Here are the files each side edits:
+
+| File | Vibe 6 | Vibe 7 | Z0 | Z1 | Risk |
+|---|---|---|---|---|---|
+| `events/core.clj` | ✓ | ✓ | ✓ (removes the dead `:clipboard/paste-projector-effects` effect, `:228-237`) | | low: separate parts. **Do Z0's removal last, or after both vibe phases merge** |
+| `state/domains.clj` | ✓ | ✓ | ✓ (one `:confirm` dialog default) | ✓ (`projector-ui :identify`) | low: one-line additions in separate maps |
+| `subs.clj` | | ✓ | ✓ (`zone-group-usage`) | ✓ | low: separate subs |
+| `state/persistent.clj` | ✓ | | | ✓ (`reset-session` clears the test pattern and Identify) | low |
+| `events/handlers/menu.clj` | | ✓ | | ✓ (the D-34 notice after Open) | low–medium: check what Phase 7 does to Open |
+| `services/show_clock.clj`, `animation/show_time.clj` | ✓ | ✓ | | (docstring only) | none for Z0 and Z1. **High for Z3 and Z4**, which change the tick |
+| everything else Z0/Z1 edit (zone groups, projector handlers, the Projectors and Zone Groups tabs, the engine's `projector-frame`, the output runtime, the clipboard, list paste) | | | ✓ | ✓ | none |
+
+- **Z0 and Z1 can run alongside vibe Phases 6 and 7** in their own worktree, as the vibe phases do. The overlaps are small additions in different parts of shared files, so merging is mechanical.
+- **Z3 and Z4 should wait until vibe Phase 6 is merged.** Both change the show clock's tick (the routing before the render, the effective map, the switch timing), and so does Phase 6.
 - **UX plan** (`plans/2026-11-18-ux-improvements/`, finished and deleted in `2d1f813`; it is in git history): all four of its phases are done. Z2 builds on what they left in the Projectors and Zone Groups tabs, for example the status line and "No projectors enabled" link from `92c191a` and the subtitle and row ids from `b9b9d55`.
 
 ## 7. Risks
