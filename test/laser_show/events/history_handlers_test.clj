@@ -468,3 +468,34 @@
         (is (true? (get-in s0 [:project :dirty?])))
         (is (= (undo-count s0) (undo-count s)))
         (is (true? (get-in s [:project :dirty?])))))))
+
+(deftest undo-that-grows-a-live-zone-asks-test
+  (let [live (-> (test-state)
+                 (assoc-in [:projectors :p1] {:name "Laser L" :host "10.0.0.5" :port 7255 :enabled? true
+                                              :zone-groups [:all] :safety {:limit [-0.5 -0.5 0.5 0.5] :blocked []}})
+                 (assoc-in [:backend :streaming :running?] true))
+        shrunk (run live {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-0.3 -0.5 0.5 0.5]}})
+        zone #(get-in % [:projectors :p1 :safety :limit])]
+    (is (= [-0.3 -0.5 0.5 0.5] (zone shrunk)) "shrinking applied at once")
+    (let [asked (pipeline {:event/type :edit/undo :state shrunk})]
+      (is (= [-0.3 -0.5 0.5 0.5] (zone (:state asked))) "Undo would grow it, so it asks and changes nothing")
+      (is (= "Allow light in a larger area?" (get-in asked [:state :ui :dialogs :confirm :title])))
+      (is (= "Undo gives Laser L a larger area while it is on."
+             (get-in asked [:state :ui :dialogs :confirm :message])))
+      (is (= "Undo" (get-in asked [:state :ui :dialogs :confirm :confirm-label])))
+      (testing "a confirmed Undo restores"
+        (let [undone (run (:state asked) {:event/type :ui/confirm})]
+          (is (= [-0.5 -0.5 0.5 0.5] (zone undone)))
+          (testing "and Redo, which shrinks it again, doesn't ask"
+            (is (= [-0.3 -0.5 0.5 0.5] (zone (run undone {:event/type :edit/redo}))))))))
+    (testing "a laser that isn't outputting just restores"
+      (let [off (assoc-in shrunk [:backend :streaming :running?] false)]
+        (is (= [-0.5 -0.5 0.5 0.5] (zone (run off {:event/type :edit/undo}))))))))
+
+(deftest safety-events-have-undo-labels-test
+  (doseq [[event-type label] [[:projectors/set-safety "Change Safety Zone"]
+                              [:projectors/add-blocked-area "Add Blocked Area"]
+                              [:projectors/remove-blocked-area "Remove Blocked Area"]
+                              [:projectors/copy-safety "Copy Safety Zone"]]]
+    (is (= label (get history-handlers/event-descriptions event-type)) (str event-type))))
+

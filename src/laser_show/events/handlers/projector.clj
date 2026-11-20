@@ -25,8 +25,9 @@
             [laser-show.events.helpers :as h]
             [laser-show.common.util :as u]
             [laser-show.idn.stream :as stream]
+            [laser-show.animation.safety :as safety]
             [laser-show.animation.test-pattern :as test-pattern]
-            [laser-show.backend.output-runtime :as output-runtime]))
+            [laser-show.events.safety-guard :as guard]))
 
 
 (def DEFAULT_PROJECTOR_EFFECTS
@@ -402,26 +403,12 @@
     {:state state}))
 
 
-;; Identify and outputting (zones plan Z1)
+;; Identify and safety zones (zones plan Z1)
 
-
-(defn outputting?
-  "Is projector-id's light going out: streaming on, and the projector one the
-   engines are built for (enabled, with a host: output-runtime/wanted)? The
-   operator's intent, not the engine's status, which lags and can recover."
-  [state projector-id]
-  (boolean (and (get-in state [:backend :streaming :running?])
-                (contains? (output-runtime/wanted {projector-id (get-in state [:projectors projector-id])})
-                           projector-id))))
 
 (defn- show-playing? [state]
   (boolean (and (get-in state [:playback :playing?])
                 (seq (get-in state [:playback :active-cues])))))
-
-(defn- parked
-  "event as plain data, to continue after a confirm: without the co-effects."
-  [event]
-  (dissoc event :state :time :fx/event))
 
 (defn- handle-projectors-identify
   "Flash projector-id's test pattern for 3 s (multi-engine shows it while
@@ -430,15 +417,13 @@
    the 3 s."
   [{:keys [projector-id time confirmed? state] :as event}]
   (cond
-    (not (outputting? state projector-id)) {:state state}
+    (not (guard/outputting? state projector-id)) {:state state}
 
     (and (show-playing? state) (not confirmed?))
-    {:state (assoc-in state [:ui :dialogs :confirm]
-                      {:open? true
-                       :title (str "Identify " (projector-label state projector-id) "?")
-                       :message "It shows the test pattern for 3 seconds instead of the show."
-                       :confirm-label "Identify"
-                       :confirm-event (assoc (parked event) :confirmed? true)})}
+    {:state (guard/ask state {:title (str "Identify " (guard/projector-name state projector-id) "?")
+                              :message "It shows the test pattern for 3 seconds instead of the show."
+                              :confirm-label "Identify"
+                              :event event})}
 
     :else
     (let [until (+ (long (or time 0)) test-pattern/identify-ms)]
@@ -452,6 +437,91 @@
   (if (= until (get-in state [:projector-ui :identify projector-id]))
     {:state (update-in state [:projector-ui :identify] dissoc projector-id)}
     {:state state}))
+
+
+(defn- write-zone
+  "state with projector-id's safety zone set to zone, asking first while its
+   light is going out and zone would let light somewhere new (D-28). zone
+   is normalized; one normalize can't read is refused. While the question is
+   open, another widening is dropped."
+  [state projector-id zone {:keys [confirmed?] :as event} message]
+  (let [old (get-in state [:projectors projector-id :safety])
+        new (try (safety/normalize zone) (catch clojure.lang.ExceptionInfo _ ::unreadable))]
+    (cond
+      (= ::unreadable new) {:state state}
+
+      (and (not confirmed?)
+           (guard/outputting? state projector-id)
+           (safety/widens? old new))
+      (if (guard/asking? state)
+        {:state state}
+        {:state (guard/ask state {:message message :event event})})
+
+      :else {:state (assoc-in state [:projectors projector-id :safety] new)})))
+
+(defn- live-message [state projector-id]
+  (str (guard/projector-name state projector-id) " is on. Light can reach places it couldn't before."))
+
+(defn- handle-projectors-set-safety
+  "Set a projector's safety zone (the safety editor, Reset)."
+  [{:keys [projector-id safety state] :as event}]
+  (if-not (contains? (:projectors state) projector-id)
+    {:state state}
+    (write-zone state projector-id safety event (live-message state projector-id))))
+
+(def ^:const max-blocked-areas 8)
+
+(defn- handle-projectors-add-blocked-area
+  "Add a 0.4 × 0.2 blocked area in the middle of the limit (it only shrinks
+   the allowed area, so it applies at once). Nothing at 8."
+  [{:keys [projector-id state]}]
+  (let [zone (try (safety/normalize (get-in state [:projectors projector-id :safety]))
+                  (catch clojure.lang.ExceptionInfo _ nil))]
+    (if (or (not (contains? (:projectors state) projector-id))
+            (nil? zone)
+            (>= (count (:blocked zone)) max-blocked-areas))
+      {:state state}
+      (let [[x0 y0 x1 y1] (:limit zone)
+            cx (/ (+ x0 x1) 2.0) cy (/ (+ y0 y1) 2.0)
+            area [(max x0 (- cx 0.2)) (max y0 (- cy 0.1)) (min x1 (+ cx 0.2)) (min y1 (+ cy 0.1))]]
+        {:state (assoc-in state [:projectors projector-id :safety] (update zone :blocked conj area))}))))
+
+(defn- handle-projectors-remove-blocked-area
+  "Remove a blocked area. That lets light into it again, so it asks first
+   while the projector's light is going out."
+  [{:keys [projector-id index state] :as event}]
+  (let [zone (try (safety/normalize (get-in state [:projectors projector-id :safety]))
+                  (catch clojure.lang.ExceptionInfo _ nil))]
+    (if (or (not (contains? (:projectors state) projector-id)) (nil? zone)
+            (not (< -1 (or index -1) (count (:blocked zone)))))
+      {:state state}
+      (write-zone state projector-id
+                  (update zone :blocked #(into (subvec % 0 index) (subvec % (inc index))))
+                  event
+                  (str (guard/projector-name state projector-id) " is on. Light can reach Blocked "
+                       (inc index) " again.")))))
+
+(defn- handle-projectors-copy-safety
+  "Copy (or mirror left to right) one projector's safety zone to others, in
+   one undo step. If it would give live projectors a larger area, one
+   question for all of them first."
+  [{:keys [from to mirror? confirmed? state] :as event}]
+  (let [zone (try (safety/normalize (get-in state [:projectors from :safety]))
+                  (catch clojure.lang.ExceptionInfo _ nil))
+        targets (filterv #(and (contains? (:projectors state) %) (not= from %)) to)]
+    (if (or (not (contains? (:projectors state) from)) (nil? zone) (empty? targets))
+      {:state state}
+      (let [new-zone (if mirror? (safety/mirror-x zone) zone)
+            after (reduce #(assoc-in %1 [:projectors %2 :safety] new-zone) state targets)
+            grown (guard/growing state after)]
+        (cond
+          (or confirmed? (empty? grown)) {:state after}
+          (guard/asking? state) {:state state}
+          :else {:state (guard/ask state {:title (str "Allow light in a larger area on "
+                                                      (guard/names-text (map #(guard/projector-name state %) grown))
+                                                      "?")
+                                          :message "They are on. Light can reach places it couldn't before."
+                                          :event event})})))))
 
 
 ;; Calibration Mode
@@ -521,6 +591,10 @@
     :projectors/remove (handle-projectors-remove event)
     :projectors/identify (handle-projectors-identify event)
     :projectors/identify-ended (handle-projectors-identify-ended event)
+    :projectors/set-safety (handle-projectors-set-safety event)
+    :projectors/add-blocked-area (handle-projectors-add-blocked-area event)
+    :projectors/remove-blocked-area (handle-projectors-remove-blocked-area event)
+    :projectors/copy-safety (handle-projectors-copy-safety event)
     
     ;; Calibration mode
     :projectors/toggle-calibration (handle-projectors-toggle-calibration event)

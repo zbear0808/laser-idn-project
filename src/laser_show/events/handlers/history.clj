@@ -14,6 +14,7 @@
    Events dispatched by triggers (:source-trigger set) are always skipped."
   (:require [clojure.tools.logging :as log]
             [clojure.string :as str]
+            [laser-show.events.safety-guard :as guard]
             [laser-show.state.history :as history]))
 
 (defn handle-begin-transaction
@@ -81,22 +82,44 @@
     (log/info verb "performed:" (:description snapshot))
     {:state restored-state}))
 
+(defn- ask-first-if-it-grows
+  "result (an Undo or Redo's restore), unless it would give a projector whose
+   light is going out a larger safety zone and event isn't :confirmed?: then
+   the shared confirm asks first, and nothing changes (zones plan Z1, D-28)."
+  [state event result verb]
+  (let [grown (guard/growing state (:state result))]
+    (cond
+      (or (:confirmed? event) (empty? grown)) result
+      (guard/asking? state) {:state state}
+      :else {:state (guard/ask state {:message (str verb " gives "
+                                                    (guard/names-text (map #(guard/projector-name state %) grown))
+                                                    " a larger area while "
+                                                    (if (= 1 (count grown)) "it is" "they are") " on.")
+                                      :confirm-label verb
+                                      :event event})})))
+
 (defn handle-undo
-  "Undo the last action."
-  [{:keys [state]}]
+  "Undo the last action. One that would give a live projector a larger
+   safety zone asks first."
+  [{:keys [state] :as event}]
   (let [current-history (get state :history {})]
     (if (history/can-undo? current-history)
-      (apply-restore state (history/pop-undo current-history state (ui-context state)) "Undo")
+      (ask-first-if-it-grows state event
+                             (apply-restore state (history/pop-undo current-history state (ui-context state)) "Undo")
+                             "Undo")
       (do
         (log/debug "Undo requested but stack is empty")
         {:state state}))))
 
 (defn handle-redo
-  "Redo the last undone action."
-  [{:keys [state]}]
+  "Redo the last undone action. One that would give a live projector a
+   larger safety zone asks first."
+  [{:keys [state] :as event}]
   (let [current-history (get state :history {})]
     (if (history/can-redo? current-history)
-      (apply-restore state (history/pop-redo current-history state (ui-context state)) "Redo")
+      (ask-first-if-it-grows state event
+                             (apply-restore state (history/pop-redo current-history state (ui-context state)) "Redo")
+                             "Redo")
       (do
         (log/debug "Redo requested but stack is empty")
         {:state state}))))
@@ -143,6 +166,10 @@
    :timeline/nudge-selection "Nudge Clip(s)"
    :projectors/add-manual "Add Projector"
    :projectors/remove "Remove Projector"
+   :projectors/set-safety "Change Safety Zone"
+   :projectors/add-blocked-area "Add Blocked Area"
+   :projectors/remove-blocked-area "Remove Blocked Area"
+   :projectors/copy-safety "Copy Safety Zone"
    :zone-groups/create-new "Add Zone Group"
    :zone-groups/save-edit "Edit Zone Group"
    :zone-groups/remove "Delete Zone Group"

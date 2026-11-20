@@ -84,6 +84,16 @@
     (testing label
       (is (nil? (refresh (run (streaming-state) event)))))))
 
+(deftest safety-change-requests-no-refresh-test
+  (doseq [[label event] [["a smaller zone" {:event/type :projectors/set-safety :projector-id :a
+                                           :safety {:limit [-0.5 -0.5 0.5 0.5]}}]
+                         ["a confirmed larger zone" {:event/type :projectors/set-safety :projector-id :a
+                                                     :safety {:limit [-1 -1 1 1]} :confirmed? true}]
+                         ["a blocked area" {:event/type :projectors/add-blocked-area :projector-id :a}]]]
+    (testing label
+      (is (nil? (refresh (run (streaming-state) event)))
+          "safety is read live by the frame provider; no engine restarts"))))
+
 (deftest undo-of-a-host-edit-requests-a-sync-test
   (let [edited (:state (run (streaming-state) {:event/type :projectors/update-settings
                                                :projector-id :a

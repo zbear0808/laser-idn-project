@@ -14,6 +14,7 @@
    [clojure.string :as str]
    [laser-show.events.core :as events]
    [laser-show.events.handlers.projector :as projectors]
+   [laser-show.events.safety-guard :as guard]
    [laser-show.state.domains :refer [build-initial-state]]))
 
 
@@ -518,11 +519,11 @@
       (assoc-in [:backend :streaming :running?] true)))
 
 (deftest outputting-is-streaming-and-wanted-test
-  (is (projectors/outputting? outputting-state :p1))
-  (is (not (projectors/outputting? outputting-state :p2)) "turned off")
-  (is (not (projectors/outputting? (assoc-in outputting-state [:backend :streaming :running?] false) :p1))
+  (is (guard/outputting? outputting-state :p1))
+  (is (not (guard/outputting? outputting-state :p2)) "turned off")
+  (is (not (guard/outputting? (assoc-in outputting-state [:backend :streaming :running?] false) :p1))
       "streaming is off")
-  (is (not (projectors/outputting? outputting-state :nope))))
+  (is (not (guard/outputting? outputting-state :nope))))
 
 (deftest identify-sets-its-end-time-test
   (let [result (projectors/handle {:event/type :projectors/identify :projector-id :p1 :time 1000
@@ -570,4 +571,121 @@
                                             :confirmed? true :state playing})
                         [:state :projector-ui :identify :p1]))
         "confirmed, it flashes")))
+
+
+;; Safety zone edits (zones plan Z1, D-28)
+
+
+(def ^:private small {:limit [-0.5 -0.5 0.5 0.5] :blocked []})
+
+(defn- with-zone [state id zone] (assoc-in state [:projectors id :safety] zone))
+
+(defn- set-safety [state id zone & {:as more}]
+  (projectors/handle (merge {:event/type :projectors/set-safety :projector-id id :safety zone :state state} more)))
+
+(deftest set-safety-normalizes-test
+  (let [result (set-safety base-state :p0 {:limit [0.5 0.5 -0.5 -0.5]})]
+    (is (identical? base-state (:state result)) "a missing projector changes nothing"))
+  (let [s (assoc-in base-state [:projectors :p1] {:name "Laser L"})
+        stored (get-in (set-safety s :p1 {:limit [0.5 0.5 -0.5 -0.5] :blocked [[0 0 1/2 1/4]]})
+                       [:state :projectors :p1 :safety])]
+    (is (= {:limit [-0.5 -0.5 0.5 0.5] :blocked [[0.0 0.0 0.5 0.25]]} stored)))
+  (testing "a zone normalize can't read is refused"
+    (let [s (assoc-in base-state [:projectors :p1] {:name "Laser L"})]
+      (is (identical? s (:state (set-safety s :p1 {:limit [0 0]})))))))
+
+(deftest shrinking-a-live-zone-applies-at-once-test
+  (let [live (with-zone outputting-state :p1 small)
+        result (set-safety live :p1 {:limit [-0.4 -0.5 0.5 0.5]})]
+    (is (= [-0.4 -0.5 0.5 0.5] (get-in result [:state :projectors :p1 :safety :limit])))
+    (is (not (get-in result [:state :ui :dialogs :confirm :open?])))))
+
+(deftest growing-a-live-zone-asks-first-test
+  (let [live (with-zone outputting-state :p1 small)
+        result (set-safety live :p1 {:limit [-0.6 -0.5 0.5 0.5]})]
+    (is (= small (get-in result [:state :projectors :p1 :safety])) "nothing changes yet")
+    (is (= "Allow light in a larger area?" (get-in result [:state :ui :dialogs :confirm :title])))
+    (is (= "Laser L is on. Light can reach places it couldn't before."
+           (get-in result [:state :ui :dialogs :confirm :message])))
+    (is (= "Allow" (get-in result [:state :ui :dialogs :confirm :confirm-label])))
+    (testing "while the question is open, another widening is dropped"
+      (let [again (set-safety (:state result) :p1 {:limit [-0.9 -0.9 0.9 0.9]})]
+        (is (= (get-in result [:state :ui :dialogs :confirm]) (get-in again [:state :ui :dialogs :confirm])))
+        (is (= small (get-in again [:state :projectors :p1 :safety])))))))
+
+(deftest parked-event-carries-no-state-test
+  (let [live (with-zone outputting-state :p1 small)
+        parked (get-in (set-safety live :p1 {:limit [-0.6 -0.5 0.5 0.5]} :time 123 :fx/event "x")
+                       [:state :ui :dialogs :confirm :confirm-event])]
+    (is (= {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-0.6 -0.5 0.5 0.5]}
+            :confirmed? true}
+           parked))))
+
+(deftest confirmed-growth-applies-test
+  (let [live (with-zone outputting-state :p1 small)]
+    (is (= [-0.6 -0.5 0.5 0.5]
+           (get-in (set-safety live :p1 {:limit [-0.6 -0.5 0.5 0.5]} :confirmed? true)
+                   [:state :projectors :p1 :safety :limit])))))
+
+(deftest growing-an-off-laser-applies-at-once-test
+  (let [off (with-zone (assoc-in outputting-state [:backend :streaming :running?] false) :p1 small)]
+    (is (= [-1.0 -1.0 1.0 1.0] (get-in (set-safety off :p1 {:limit [-1 -1 1 1]})
+                                       [:state :projectors :p1 :safety :limit])))))
+
+(deftest add-blocked-area-test
+  (let [live (with-zone outputting-state :p1 {:limit [-0.8 -0.6 0.8 1.0]})
+        added (:state (projectors/handle {:event/type :projectors/add-blocked-area :projector-id :p1 :state live}))]
+    (is (= [[-0.2 0.1 0.2 0.3]] (mapv (fn [r] (mapv #(/ (Math/round (* % 1e9)) 1e9) r))
+                                      (get-in added [:projectors :p1 :safety :blocked])))
+        "0.4 by 0.2 in the middle of the limit, at once: it only shrinks the area")
+    (testing "at 8 it does nothing"
+      (let [full (with-zone outputting-state :p1 {:blocked (vec (repeat 8 [0 0 0.1 0.1]))})]
+        (is (identical? full (:state (projectors/handle {:event/type :projectors/add-blocked-area
+                                                         :projector-id :p1 :state full}))))))))
+
+(deftest removing-a-blocked-area-asks-when-live-test
+  (let [zone {:limit [-0.9 -0.9 0.9 0.9] :blocked [[-0.2 -0.2 0.2 0.2] [0.5 0.5 0.6 0.6]]}
+        remove (fn [s] (projectors/handle {:event/type :projectors/remove-blocked-area :projector-id :p1 :index 1 :state s}))
+        live (remove (with-zone outputting-state :p1 zone))]
+    (is (= zone (get-in live [:state :projectors :p1 :safety])))
+    (is (= "Laser L is on. Light can reach Blocked 2 again." (get-in live [:state :ui :dialogs :confirm :message])))
+    (is (= {:event/type :projectors/remove-blocked-area :projector-id :p1 :index 1 :confirmed? true}
+           (get-in live [:state :ui :dialogs :confirm :confirm-event])))
+    (testing "off, it applies at once"
+      (is (= [[-0.2 -0.2 0.2 0.2]]
+             (get-in (remove (with-zone (assoc-in outputting-state [:backend :streaming :running?] false) :p1 zone))
+                     [:state :projectors :p1 :safety :blocked]))))))
+
+(deftest copy-and-mirror-safety-test
+  (let [zone {:limit [-0.7 -0.9 0.8 0.95] :blocked [[-0.9 -1.0 -0.5 -0.4]]}
+        s (-> outputting-state
+              (with-zone :p1 zone)
+              (assoc-in [:projectors :p3] {:name "Laser C" :host "10.0.0.7" :port 7255 :enabled? true})
+              (assoc-in [:backend :streaming :running?] false))
+        copied (:state (projectors/handle {:event/type :projectors/copy-safety :from :p1 :to [:p2 :p3] :state s}))
+        mirrored (:state (projectors/handle {:event/type :projectors/copy-safety :from :p1 :to [:p2] :mirror? true :state s}))]
+    (is (= zone (get-in copied [:projectors :p2 :safety])))
+    (is (= zone (get-in copied [:projectors :p3 :safety])))
+    (is (= {:limit [-0.8 -0.9 0.7 0.95] :blocked [[0.5 -1.0 0.9 -0.4]]} (get-in mirrored [:projectors :p2 :safety])))
+    (testing "to live lasers it would widen, one question for all of them"
+      (let [live (-> s
+                     (assoc-in [:backend :streaming :running?] true)
+                     (assoc-in [:projectors :p2 :enabled?] true)
+                     (with-zone :p2 small)
+                     (with-zone :p3 small))
+            asked (projectors/handle {:event/type :projectors/copy-safety :from :p1 :to [:p2 :p3] :state live})]
+        (is (= "Allow light in a larger area on Laser R and Laser C?"
+               (get-in asked [:state :ui :dialogs :confirm :title])))
+        (is (= small (get-in asked [:state :projectors :p2 :safety])))
+        (is (= zone (get-in (projectors/handle (assoc (get-in asked [:state :ui :dialogs :confirm :confirm-event])
+                                                      :state live))
+                            [:state :projectors :p3 :safety])))))))
+
+(deftest safety-events-on-a-missing-projector-change-nothing-test
+  (doseq [event [{:event/type :projectors/set-safety :projector-id :nope :safety small}
+                 {:event/type :projectors/add-blocked-area :projector-id :nope}
+                 {:event/type :projectors/remove-blocked-area :projector-id :nope :index 0}
+                 {:event/type :projectors/copy-safety :from :nope :to [:p1]}]]
+    (is (identical? outputting-state (:state (projectors/handle (assoc event :state outputting-state))))
+        (str (:event/type event)))))
 
