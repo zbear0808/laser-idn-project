@@ -119,7 +119,7 @@ There is still **one render per cue per tick** (spec invariant 8). Everything pe
 
 | Phase | Goal: what you can do after it | Size | Needs | Doc |
 |---|---|---|---|---|
-| **Z0** | Fix-ups: deleting a group asks first and re-targets its cues; a real "used by N cues"; Axis Transform can be edited; pasting into a projector chain; removing a projector; "All" listed once; group ids that don't collide. (The double toggle turned out to be already fine, and calibration failures stay as the output plan decided, now covered by Z1) | ~1.5 d | – | 02 |
+| **Z0** ✅ | **Done** (`0f9d6a1`..`e1d9693`, 02 §13). Fix-ups: deleting a group asks first and re-targets its cues; a real "used by N cues"; Axis Transform can be edited; pasting into a projector chain; removing a projector; "All" listed once; group ids that don't collide; a skipped calibration effect shows on the status line | ~1.5 d | – | 02 |
 | **Z1** | **Draw a blocked box and nothing lights inside it.** Safety rectangles with live editing; the test pattern and Identify work | ~4–5 d | – | 03 |
 | **Z2** | **Drag your lasers into order and the groups appear.** The rig strip on the Projectors tab, stable identity, automatic groups, implicit All with opt-out, the Zone Groups tab redone group-first and following the order | ~5 d | Z0 | 04 |
 | **Z3** | **One laser shows Left and Right halves.** Routing in the snapshot, de-duplication, regions and the middle policy, fit guard, a thumbnail per projector, low-fps badges, cue ⚠ | ~6 d | Z1, Z2 | 05 |

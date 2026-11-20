@@ -1,7 +1,7 @@
 # Phase Z0: fix-ups that every design needs
 
 **Written:** 2026-11-19 at `d298801`. **Reviewed and re-checked at `70f7db8`** (`master`, after vibe Phases 4b and 5 and the fader fix `0faa18c`): every line below is at `70f7db8`. **Re-check every path and line at HEAD before starting.**
-**Status:** Proposed. Not to be built yet (D-8).   **Needs:** nothing.   **Size:** ~1.5 d.
+**Status:** **Done** (`0f9d6a1`..`e1d9693`, on `master`; built in worktree `zones-z0` alongside vibe Phase 7). The as-built note is §13.   **Needs:** nothing.   **Size:** ~1.5 d.
 **Implements:** the baseline bugs B-5 to B-12 (`plans/2026-11-19-zones-needs/05-baseline.md`) that don't depend on the design, plus the names Z2, Z4 and ZR expect from Z0: the **reference walker** (`routing/refs.clj`; Z2's migration and ZR's pin renaming call its `replace-refs`), the **cue count**, **ids that can't collide**, and a **confirm dialog** that Z1 and ZR reuse.
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks anything that doesn't exist yet.
@@ -269,3 +269,83 @@ Write the failing tests first in each step.
 - **Q-Z0-1 · The default "send its cues to".** ★ **A** All, so the cues keep playing. **B** Nothing, so they inherit, which is usually All too, but follows a column or show default after Z4.
 - **Q-Z0-2 · Remove a projector while it's streaming?** ★ **A** Yes, after the confirm (its engine stops). **B** Only when it's turned off.
 - **Q-Z0-3 · A calibration effect that fails.** Today it is skipped (O2), and only the log says so (B-12). ★ **A** Keep the skip, and say it on the projector's status line: "Corner Pin skipped". **B** Fail closed for calibration: that laser goes dark with "Calibration error: output off" (the original B-12 fix, overriding O2 for projector chains). **C** Leave it to the log.
+
+## 13. As built (2026-11-19, `0f9d6a1`..`e1d9693`)
+
+Built in a worktree off `3d82fe7` while vibe Phases 6 and 7 ran in theirs, rebased onto `34a9c11` (vibe Phase 6 in), and fast-forwarded onto `master`.
+
+### Where it landed
+
+| # | Commit | Step (§10) |
+|---|---|---|
+| 1 | `0f9d6a1` | NEW `routing/refs.clj`: `ref-places`, `cue-refs`, `cues-using`, `replace-refs` |
+| 2 | `9dd0eea` | `subs/zone-group-usage` counts cues; the details read "Used by n cues" (`#zone-group-cue-usage`) |
+| 3 | `ac4cb91` | NEW `views/dialogs/confirm.clj`, `:ui/confirm`, `[:ui :dialogs :confirm]`, mounted in `views/root.clj` |
+| 4 | `7d39db6` | `:zone-groups/request-remove`, the new `:zone-groups/remove`, Delete... (`#zone-group-delete-button`), "All can't be deleted." (`#zone-group-cannot-delete`) |
+| 5 | `7033a0c` | `zone-groups/unique-group-id` |
+| 6 | `f044a31` | projector parameters through `:chain/update-param`, the full effect path, the chain's clipboard as `:item-effects`, the three stubs removed |
+| 7 | `a083c7a` | `[:calibration id]` and the status line's "· Corner Pin skipped" (Q-Z0-3 A) |
+| 8 | `0f5881c` | `:projectors/request-remove`, `:projectors/remove`, Remove... (`#projector-remove-button`), the "Remove Projector" undo label |
+| 9 | `e1d9693` | `zone-chips/zone-options` (All once), `#projectors-subtitle` |
+
+### Deviations from the plan
+
+- **The dead `:clipboard/paste-projector-effects` effect stays in `events/core.clj`** (`:212-221`). Removing it would edit the part of `events/core.clj` that vibe Phase 7 is changing. It is never called, and its event is gone. **Remove it after Phase 7 merges.**
+- **Found and fixed: the list editor's toolbar ignored the list's clipboard type** (`views/components/list.clj`). Its Copy and Paste buttons always used `:cue-chain-items`, and only ⌘C and ⌘V used the list's type. The list sidebar now gets `:clipboard-type` from `:on-change-params`. Only the projector chain sets a type, so no other list changes. `copy-an-effect-to-another-projector-test` caught it.
+- **"Nothing (they inherit)" is the value `:inherit` in the dialog**, because a JavaFX combo can't hold nil. `:zone-groups/remove` takes `:inherit` or an explicit nil to mean Nothing, and a missing `:retarget-to` to mean All.
+- **The re-target choice lists All first, then the other groups by name**, so the order is stable.
+- **Refusing `:all` or an unknown group returns `{:state state}`, not `{}`**, for both remove events. `history-labels-name-real-events-test` calls every labelled event with no group and expects a handler's answer.
+- **`output-errors/report!` takes a message string as well as a Throwable**, so the skip is reported as "Corner Pin skipped" with no exception class in front. Names come from the effect registry.
+- **The two pickers share `zone-chips/zone-options`.** The plan said to edit each renderer inline. It keeps the show's own All group (its colour), first, and still offers All when the show has none. `zone-selector-lists-all-once-test` became the pure `zone-options-list-all-once-test`.
+- **`zones/cue-usage-text`** is a small public function with its own unit test.
+- **B-6 needed nothing**, as §1 says. `click-a-projector-to-add-it-to-the-group-test` still passes.
+
+### Tests added
+
+- `laser-show.routing.refs-test` (NEW): 7 tests, 46 assertions.
+- `laser-show.events.zone-groups-handlers-test`: `request-remove-opens-the-confirm-test`, `remove-retargets-cues-test`, `remove-to-nothing-inherits-test`, `retarget-to-a-missing-group-is-all-test`, `remove-strips-membership-test`, `all-cannot-be-removed-test`, `remove-is-one-undo-step-test`, `create-new-ids-are-unique-test`, `create-new-never-takes-a-built-in-id-test`.
+- `laser-show.events.projector-handlers-test`: `request-remove-projector-asks-first-test`, `remove-projector-cleans-up-test`, `remove-unknown-projector-changes-nothing-test`, `remove-projector-stops-its-engine-test`.
+- `laser-show.events.ui-handlers-test`: `ui-confirm-continues-with-its-event-test`.
+- `laser-show.events.chain-params-handlers-test`: `projector-effect-bool-param-test`, `nested-projector-effect-param-test`.
+- `laser-show.state.clipboard-test`: `item-effects-paste-as-effects-test`.
+- `laser-show.events.list-handlers-test`: `paste-effects-into-an-item-effects-list-test`.
+- `laser-show.backend.multi-engine-test`: `skipped-calibration-effect-is-reported-test`.
+- `laser-show.backend.output-lifecycle-test`: `skipped-calibration-shows-as-a-warning-test`.
+- `laser-show.views.tabs.projectors-test`: `output-status-text-test` gains the warning case.
+- `laser-show.subs-test`: `zone-group-usage-counts-cues-test`.
+- `laser-show.views.tabs.zones-test` (NEW): `cue-usage-text-test`.
+- `laser-show.views.components.zone-chips-test` (NEW): `zone-options-list-all-once-test`.
+- UI, `laser-show.ui-test.setup-dialogs-test`: `delete-group-asks-and-retargets-test`, `all-has-no-delete-test`, `axis-transform-boxes-stick-test`, `copy-an-effect-to-another-projector-test`, `remove-projector-asks-first-test`, `subtitle-promises-no-safety-zones-test`.
+- UI, `laser-show.ui-test.main-window-test`: `confirm-dialog-uses-theme-classes-test`.
+
+### Red first
+
+| Step | Before the change |
+|---|---|
+| 1 | `refs-test` couldn't load: no namespace |
+| 2 | `zones-test`: no `cue-usage-text` |
+| 3 | `ui-confirm-continues-with-its-event-test`: 3 failures. `confirm-dialog-uses-theme-classes-test`: 1 error (no dialog) |
+| 4 | `zone-groups-handlers-test`: 23 failures, 1 error. The two UI tests, run against the old view: 2 errors |
+| 5 | no `unique-group-id` |
+| 6 | the clipboard and list tests against the old code: 2 failures. `copy-an-effect-to-another-projector-test`: timed out (the Paste button stayed off) until the list fix |
+| 7 | the calibration report and the status text: 2 failures |
+| 8 | the four projector remove tests: 8 failures |
+| 9 | no `zone-options` |
+
+These were green on the first run, after the change, and **were not run red**: `projector-effect-bool-param-test` and `nested-projector-effect-param-test` (the chain handler already worked, and the bug was in the view), `axis-transform-boxes-stick-test`, `remove-projector-asks-first-test`, `subtitle-promises-no-safety-zones-test` and `skipped-calibration-shows-as-a-warning-test`.
+
+### Verification
+
+| Where | Unit suite (`clj -M:mac-arm:test`) | UI suite (`clj -M:test-ui:mac-arm:test-ui-headless`) |
+|---|---|---|
+| the branch on `3d82fe7` | 1,119 tests, 34,409 assertions, 0 failures | 141 tests, 691 assertions, 0 failures |
+| rebased on `6b96246` (vibe Phase 6 in) | 1,153 tests, 34,605 assertions, 0 failures | 143 tests, 709 assertions, 0 failures |
+
+The last rebase, onto `34a9c11`, replayed the same nine commits over two plan-only commits, so the code is the one tested.
+
+### Found on the way
+
+- **The effects grid's chain and the cue editor's item effects have the projector chain's clipboard mix-up** (§11). With the list toolbar fixed, giving them `:clipboard-type :item-effects` is all they need.
+- **`:effects/insert-pasted` is still a stub** (`events/handlers/effects.clj`), for the effects grid.
+- **The unsaved-changes dialog uses `dialog-content`**, so its parts have no spacing between them. The new confirm dialog uses `container-primary`.
+
