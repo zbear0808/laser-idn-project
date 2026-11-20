@@ -2,7 +2,7 @@
 
 **Written:** 2026-11-19   **Written for commit:** `c556d71` (`master`). Other work is landing in parallel. **Re-check every path and line against HEAD before starting any phase.**
 **Status:** **Superseded** by `plans/2026-11-19-zones/` (`00-overview.md` and `01-model-and-routing-spec.md`), which add D-14 to D-32 and the phase docs. This doc is kept as the record of round 1. Where they differ, the new folder wins: for example, the middle laser now defaults to `:split` (D-17), zones are unlimited and wrap over a map's lanes (D-16, D-25), and both tabs stay (D-15).
-**Builds on:** `02-needs.md`, `03-conflicts.md`, `04-core-features.md`, `06-zone-patterns-and-split-zones.md`. **Future rig setup UX:** `08-rig-setup-ux-future.md`. **Must fit with:** vibe Phase 8 (`plans/2026-11-18-vibe-mode/08-phase8-zone-effects.md`: zone chase, swap and shift on the effects grid), see §7.
+**Builds on:** `02-needs.md`, `03-conflicts.md`, `04-core-features.md`, `06-zone-patterns-and-split-zones.md`. **Future rig setup UX:** `08-rig-setup-ux-future.md`. **Must fit with:** vibe Phase 8 (`plans/2026-11-19-zones/11-vibe-phase8-zone-effects.md`: zone chase, swap and shift on the effects grid), see §7.
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks anything that doesn't exist yet.
 

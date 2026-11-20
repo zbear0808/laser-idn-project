@@ -1,8 +1,11 @@
 # Phase 8: zone effects (chase, swap, shift)
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`; the files cited are the same at `67735d0`, and `state/domains.clj` and `events/handlers/effects.clj` are cited at `b1da0f2` because Phase 1 is editing both)
-**Status:** Proposed. 8a (the three effects, the render stage, the pickers) needs nothing. 8b (reactions, the audience rule, lint) needs Phases 1 and 4 and V10 (`00-overview.md` §7)   **Last verified against:** `b1da0f2` (probes v19–v24 in `00-overview.md` §3)
+**Status:** Proposed. 8a (the three effects, the render stage, the pickers) needs nothing. 8b (reactions, the audience rule, lint) needs Phases 1 and 4 and V10 (§11; it was the vibe overview's §7)   **Last verified against:** `b1da0f2` (probes v19–v24, §11; they were the vibe overview's §3)
 **Supersedes / Superseded by:** none   **Related findings:** V6 and R-4 (a random pick must not scan the crowd), extended here to effects that move a picture. The effects-grid editor offering the zone selector, which does nothing there, is fixed on the way. The zones plan (`plans/2026-11-18-zones-ux/00-overview.md`, a draft written after this phase) asks for the same effects in its §4.5 and question 20; §9 says how the two fit
+
+> **Moved 2026-11-20.** This was Phase 8 of the vibe-mode plan, `plans/2026-11-18-vibe-mode/`, which was deleted when its Phases 1–7 were done (the folder is in git history at `8b4b7d7`). It lives here because the zones plan builds the same effects (Z5, `07-phase-z5-zone-patterns.md`). In this doc, `00-overview.md` and `01-…` to `07-…` mean that plan's docs, not this folder's: the parts it relies on are copied in §11 below (V10, still open, and probes v19–v24). The probes moved with it: `probes/vibe_probes_test.clj` in this folder.
+
 
 A cue's picture goes to one zone, decided once per item before any effect or clock runs. This phase adds three effects that move a *finished* picture between zones:
 
@@ -257,3 +260,34 @@ Run: `clj -M:mac-arm:test zone-remap effects frame-service multi-engine show-clo
 - **Waiting for the zones plan's per-output weights** (`plans/2026-11-18-zones-ux/00-overview.md` §3, its Phase 2): not waited for. That plan is a draft with 25 open questions; this phase is a few days on today's model and needs none of its setup work. Nothing here blocks it. The effects' parameters (`:zones`, `:from`, `:offset`, `:rate`, `:path`, `:amount`) don't depend on how routing is done, so a weight model can adopt them: a chase becomes a one-hot weight over the list, a swap swaps two weights, a shift rotates them. What would change is invariant 1: a weight of 1 on two outputs is a copy, and the zones plan already names the price (a projector in two groups draws both, its §2 and §7). Its answer to question 20 is yes here: a HIT can step a chase.
 - **Making keyframed zone selectors route** (the zones plan's Option A, for "a basic zone chase"): a different mechanism that moves one item, and the plan removes the selector as a way to route (its §4.3). Phase 8 neither needs nor blocks it: `:scope #{:item}` only decides where the selector is offered.
 - **A "which zone is lit" readout on Perform**: later; the preview's zone cells already show it.
+
+## 11. Carried over from the vibe plan (2026-11-20)
+
+The vibe overview (`plans/2026-11-18-vibe-mode/00-overview.md`, in git history at `8b4b7d7`) held this phase's open decision and its probe results. They are copied here as they were.
+
+### Decision V10 (open)
+
+> **DECISION V10: Zone effects and the audience** *(pending)*
+>
+> V6 keeps a random pick from choosing a cue that can scan the crowd. A zone effect can send a picture there too: a chase that lists the crowd zone sweeps every cue through it, and a vibe switches its FX set on by itself (`08-phase8-zone-effects.md` §7, "The audience rule"). The crowd zone is `:crowd`, or any zone of a projector tagged `:crowd-scanning`; a zone only counts where the picture *goes* (`:zones`, `:zone-a`, `:zone-b`), not where it comes from (`:from`).
+>
+> | | What | For | Against |
+> |---|---|---|---|
+> | **A (recommended)** | A vibe doesn't switch such a cell on unless it has `:allow-audience? true`. The Vibes tab flags it (lint error), Perform says why. Clicking the cell on the effects grid is never blocked | the same rule as V6, so one thing to remember: a vibe never reaches the crowd by itself unless you said so | one checkbox when you do mean it |
+> | B | Warn only (the lint row, no block) | never blocks a vibe | at 1 am a missed warning sweeps the audience |
+> | C | The zone list can't hold an audience zone at all (the picker hides them) | nothing to remember | no audience chase, even by hand |
+>
+> **Your answer:** _pending_
+
+### Probes v19–v24 (the overview's §3)
+
+Run them from the repo root with `P=plans/2026-11-19-zones` in the command at the top of `probes/vibe_probes_test.clj`, and `v19 v20 v21 v22 v23 v24` as name patterns after `-n probes.vibe-probes-test`.
+
+| Probe | Question | Result | So |
+|---|---|---|---|
+| v19 (ran) | What are a cue's zone frames, and who draws them? | One item routed to each of left, right and center: `{:left 21 :center 10 :right 49}` points, and each side projector sends only its own zone. A cue routed to `:all`: `{:all 33}`, which all three side projectors (each in `[:all …]`) send; the crowd and graphics projectors send nothing. The project's zone groups: `:all :center :crowd :graphics :left :right` | a zone frame is the unit a zone effect moves. A projector that loses its zone goes dark (`backend/streaming_engine.clj:373`) |
+| v20 (ran) | Does a zone selector in an effects-grid cell do anything? | No: the zone frames are identical with and without an active cell holding one | the effects-grid editor offers an effect that does nothing; zone effects need a reader of their own (Phase 8) |
+| v21 (ran) | What do chase, shift and swap do to real zone frames? (prototypes in the probe file) | A chase of the `:all` cue over left, center, right on beats 0 to 3: left, center, right, left, with one projector sending each time. Bounce: 0 1 2 1 0 1. A shift by 1 turns 21/10/49 points into 49/21/10, by 3 the same as by 0. A swap trades left and right. A Sawtooth 0→3 over 4 beats **falls** 3.00, 2.25, 1.50, 0.75 | the tables of 08 §7. Waves start at their peak, so the effects carry their own `:rate` |
+| v22 (ran) | What if a picture were copied into two zones? | A projector in `[:all :left]`: the 33-point frame under `:left` alone sends 33 points, under `:all` and `:left` **68** | a remap moves and never copies (08 invariant 1) |
+| v23 (ran) | What does a remap cost? | 1,000-point frames, two runs (load 1.8 and 2.5): shift 0.7–0.8 µs, swap 0.2 µs, a chase that only re-keys 0.3 µs (about 1 KB of garbage each); a chase that joins two frames 11–12 µs (p99 12–50 µs, about 8 KB) | nothing next to a point chain (v17); 08 invariant 12 |
+| v24 (ran) | In what order do the effects grid's cells become one chain? | Six cells: the order they were put in. Twelve cells put in as 13 10 12 2 1 11 20 21 23 22 3 0 (row·10 + col) come out 22 0 1 11 3 20 2 13 12 21 23 10: hash order | zone effects don't commute, so they run in reading order (08 §7). The order of point effects is a separate finding (08 §9) |

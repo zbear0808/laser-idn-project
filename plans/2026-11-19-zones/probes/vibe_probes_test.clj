@@ -1,4 +1,7 @@
-;; EVIDENCE for plans/2026-11-18-vibe-mode/.
+;; EVIDENCE for plans/2026-11-18-vibe-mode/ (deleted 2026-11-20 when its Phases 1-7
+;; were done; in git history at 8b4b7d7). It moved here with that plan's
+;; Phase 8, 11-vibe-phase8-zone-effects.md, whose probes are v19-v24; v1-v18
+;; are the finished phases' evidence, kept because the probes share helpers.
 ;; Not part of the test suite and not on any classpath.
 ;;
 ;; Each deftest prints PROBE lines describing what today's trigger, timing and
@@ -18,7 +21,7 @@
 ;;
 ;;   export JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home
 ;;   export PATH="$JAVA_HOME/bin:$PATH"
-;;   P=plans/2026-11-18-vibe-mode
+;;   P=plans/2026-11-19-zones
 ;;   clj -Sdeps "{:aliases {:probe {:extra-paths [\"$P\"]}}}" \
 ;;       -M:mac-arm:test:probe -d "$P/probes" \
 ;;       -n probes.vibe-probes-test 2>&1 | grep PROBE
@@ -535,7 +538,7 @@
                        [0.0 0.25 0.5 0.75 1.0])))))
 
 
-;; Zone effects (08-phase8-zone-effects.md): zone chase, swap and shift.
+;; Zone effects (11-vibe-phase8-zone-effects.md, once the vibe plan's 08): zone chase, swap and shift.
 ;;
 ;; v19-v24 look at the zone path as it is today and run PROTOTYPES of the three
 ;; remaps (the defns marked "prototype" below are probe code, the executable
