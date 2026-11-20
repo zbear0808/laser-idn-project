@@ -262,3 +262,52 @@
         (doseq [type [:rig/adopt-group :rig/repin :rig/add-groups-to-show :rig/import-new-lasers :rig/use-show-setup
                       :rig/request-use-show-setup :rig/open-report :rig/choose-lasers]]
           (is (identical? bare (handle bare {:event/type type})) (str type)))))))
+
+
+;; Forget this laser… (09 §7, Q-ZR-6)
+
+(defn- run-through
+  "The pipeline's effects for event and for what it dispatches inline, the
+   last ones."
+  [state event]
+  (let [effects (pipeline state event)]
+    (if-let [next-event (:dispatch effects)]
+      (run-through (or (:state effects) state) next-event)
+      effects)))
+
+(deftest forget-is-z0s-remove-test
+  (let [s (-> (rig-state)
+              (assoc-in [:projectors :c :enabled?] false)
+              (assoc-in [:projectors :c :name] "10.0.0.3 #1")
+              (assoc-in [:chains :projector-effects :c] {:items [{:effect-id :rgb-curves}]})
+              (assoc-in [:rig :order] [:a :c :b])
+              (assoc-in [:rig-file :path] "/tmp/never-written/rig.edn")
+              (history/mark-clean))
+        asked (handle s {:event/type :rig/request-forget :projector-id :c})
+        forgotten (run-through s {:event/type :rig/forget-projector :projector-id :c})
+        removed (run-through s {:event/type :projectors/remove :projector-id :c})
+        without-history #(dissoc % :history)]
+    (is (= {:open? true :title "Forget 10.0.0.3 #1?"
+            :message "Its calibration and safety zone leave the rig. A scan that finds it again adds it as a new laser."
+            :confirm-label "Forget" :danger? true :confirm-event {:event/type :rig/forget-projector :projector-id :c}}
+           (get-in asked [:ui :dialogs :confirm]))
+        "a disabled card's menu asks first, in the rig's words")
+    (is (= (without-history (:state removed)) (without-history (:state forgotten))) "the same state as Z0's remove")
+    (is (not (contains? (get-in forgotten [:state :projectors]) :c)))
+    (is (= [:a :b] (get-in forgotten [:state :rig :order])) "its place in the order goes too")
+    (is (= ["Forget Laser"] (mapv :description (get-in forgotten [:state :history :undo-stack]))) "one undo step")
+    (is (false? (get-in forgotten [:state :project :dirty?])) "the rig's: not unsaved")
+    (is (some? (:rig/write forgotten)) "and the rig file follows")
+    (testing "with cues pinned to it, the same choice Z2's remove gives (04 S-13)"
+      (let [pinned (assoc-in s [:chains :cue-chains [0 0]] {:items [] :destination-zone {:zone-group-id :auto.laser/c}})
+            asked (get-in (handle pinned {:event/type :rig/request-forget :projector-id :c}) [:ui :dialogs :confirm])]
+        (is (= {:key :retarget-to :label "Send its cues to:"} (select-keys (:choice asked) [:key :label])))
+        (is (= :all (:choice-value asked)))
+        (is (= "Its calibration and safety zone leave the rig. A scan that finds it again adds it as a new laser. 1 cue is pinned to it."
+               (:message asked)))
+        (is (= :auto.laser/b (get-in (run-through pinned {:event/type :rig/forget-projector :projector-id :c :retarget-to :auto.laser/b})
+                                     [:state :chains :cue-chains [0 0] :destination-zone :zone-group-id])))))
+    (testing "called bare, or for a laser that isn't there: nothing"
+      (let [bare (rig-state)]
+        (is (identical? bare (handle bare {:event/type :rig/request-forget})))
+        (is (= {:state bare} (handlers/handle-event {:event/type :rig/forget-projector :state bare})))))))

@@ -218,3 +218,27 @@
       (ui/click! (ui/robot) "#unsaved-discard")
       (ui/wait-for! #(= 1 @exits))
       (finally (events/set-exit-fn! nil)))))
+
+
+;; Forget this laser… (Q-ZR-6)
+
+(deftest forget-a-laser-from-its-card-test
+  (let [robot (ui/robot)]
+    (start-on-laser-l!)
+    (events/dispatch! {:event/type :projectors/scan-complete
+                       :devices [{:address "10.0.0.9" :host-name "DAC" :unit-id "AA" :port 7255 :status {}
+                                  :services [{:service-id 1 :name "Head 1"}] :relays []}]})
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(some? (ui/query "#rig-card-projector-10-0-0-9-1")))
+    (testing "only a laser that is off can be forgotten from its card"
+      (ui/right-click-node! robot (ui/query "#rig-card-projector-10-0-0-5-1"))
+      (ui/wait-for! #(some? (ui/query "#rig-card-identify-projector-10-0-0-5-1")))
+      (is (nil? (ui/query "#rig-card-forget-projector-10-0-0-5-1")))
+      (ui/press! robot javafx.scene.input.KeyCode/ESCAPE))
+    (ui/right-click-node! robot (ui/query "#rig-card-projector-10-0-0-9-1"))
+    (ui/click! robot "#rig-card-forget-projector-10-0-0-9-1")
+    (ui/assert-text! "#confirm-title" "Forget Head 1?")
+    (ui/click! robot "#confirm-ok")
+    (ui/wait-for! #(not (contains? (:projectors (app-state)) :projector-10-0-0-9-1)))
+    (ui/wait-for! 5000 #(not (contains? (:projectors (:doc (rig-store/read! (rig-path)))) :projector-10-0-0-9-1)))
+    (is (= "Forget Laser" (get-in (app-state) [:history :undo-stack 0 :description])))))

@@ -183,6 +183,7 @@
    :rig/adopt-group "Use Rig's Group"
    :rig/repin "Re-pin Cues"
    :rig/add-groups-to-show "Add Rig's Groups"
+   :rig/forget-projector "Forget Laser"
    :zone-groups/create-new "Add Zone Group"
    :zone-groups/save-edit "Edit Zone Group"
    :zone-groups/remove "Delete Zone Group"

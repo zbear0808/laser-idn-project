@@ -197,7 +197,9 @@
 
 (defn- card-menu-items
   "Identify (Z1's event; off while the laser isn't outputting, as its button
-   is) and, on a device with more outputs, turning them all on."
+   is), on a device with more outputs, turning them all on, and on a card
+   that is off, Forget this laser… (zones plan ZR: New Project keeps the
+   rig, so a laser that's gone is forgotten here)."
   [{:keys [id host enabled? multi-output?]} outputting?]
   (cond-> [{:fx/type :menu-item
             :id (str "rig-card-identify-" (id-text id))
@@ -207,7 +209,11 @@
     multi-output? (conj {:fx/type :menu-item
                          :id (str "rig-card-enable-all-" (id-text id))
                          :text (str "Turn on every output of " host)
-                         :on-action {:event/type :projectors/enable-all-by-ip :address host}})))
+                         :on-action {:event/type :projectors/enable-all-by-ip :address host}})
+    (not enabled?) (conj {:fx/type :menu-item
+                          :id (str "rig-card-forget-" (id-text id))
+                          :text "Forget this laser…"
+                          :on-action {:event/type :rig/request-forget :projector-id id}})))
 
 
 ;; Dragging a card

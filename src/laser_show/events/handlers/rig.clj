@@ -12,6 +12,7 @@
             [laser-show.events.handlers.zone-groups :as zone-groups]
             [laser-show.events.helpers :as h]
             [laser-show.events.safety-guard :as guard]
+            [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
             [laser-show.state.rig-file :as rig-file]))
 
@@ -267,6 +268,49 @@
       (ask-if-it-grows state after event)
       {:state state})))
 
+
+;; Forget this laser… (09 §7, Q-ZR-6): New Project no longer clears the
+;; rig, so a laser that's gone for good is forgotten from its card
+
+(defn- handle-request-forget
+  "A disabled card's Forget this laser…: the shared confirm, in the rig's
+   words, with Z2's choice of where pinned cues go (04 S-13). Forget goes on
+   to :rig/forget-projector."
+  [{:keys [projector-id state]}]
+  (if-not (contains? (:projectors state) projector-id)
+    {:state state}
+    (let [pin (rig/laser-ref projector-id)
+          cues (refs/cues-using (get-in state [:chains :cue-chains]) pin)]
+      {:state (assoc-in state [:ui :dialogs :confirm]
+                        (cond-> {:open? true
+                                 :title (str "Forget " (rig/projector-name state projector-id) "?")
+                                 :message (str "Its calibration and safety zone leave the rig. A scan that finds it again adds it as a new laser."
+                                               (when (seq cues)
+                                                 (str " " (zone-groups/plural (count cues) "cue" "cues")
+                                                      (if (= 1 (count cues)) " is" " are") " pinned to it.")))
+                                 :confirm-label "Forget"
+                                 :danger? true
+                                 :confirm-event {:event/type :rig/forget-projector :projector-id projector-id}}
+                          (seq cues) (assoc :details (zone-groups/cue-list-text state cues)
+                                            :choice {:key :retarget-to
+                                                     :label "Send its cues to:"
+                                                     :options (zone-groups/retarget-options state pin)}
+                                            :choice-value :all)))})))
+
+(defn- handle-forget-projector
+  "Forget: Z0's :projectors/remove (the projector, its calibration, list and
+   selection state, virtual projectors, place in the order, pins sent to
+   :retarget-to), as one undo step named Forget Laser. The rig file follows
+   as for any rig edit."
+  [{:keys [projector-id state] :as event}]
+  (if (contains? (:projectors state) projector-id)
+    {:state state
+     :dispatch (cond-> {:event/type :projectors/remove
+                        :projector-id projector-id
+                        :history/description "Forget Laser"}
+                 (contains? event :retarget-to) (assoc :retarget-to (:retarget-to event)))}
+    {:state state}))
+
 (defn handle
   "Dispatch :rig/* events."
   [{:keys [event/type] :as event}]
@@ -292,4 +336,7 @@
     :rig/import-new-lasers (handle-import-new-lasers event)
     :rig/request-use-show-setup (handle-request-use-show-setup event)
     :rig/use-show-setup (handle-use-show-setup event)
+    ;; Forget this laser…
+    :rig/request-forget (handle-request-forget event)
+    :rig/forget-projector (handle-forget-projector event)
     {}))

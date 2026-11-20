@@ -78,7 +78,8 @@
    {:event/type :rig/import-new-lasers}
    {:event/type :rig/use-show-setup :projector-id :p1}
    {:event/type :rig/adopt-group :group-id :crowd :from :graphics}
-   {:event/type :rig/repin :from :auto.laser/p9 :to :all}])
+   {:event/type :rig/repin :from :auto.laser/p9 :to :all}
+   {:event/type :rig/forget-projector :projector-id :p2}])
 
 (def ^:private opened-show
   "What Open kept of friday.zip's rig (zones plan ZR): P1 with its own
