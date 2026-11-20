@@ -1,0 +1,49 @@
+;; A show saved before zones Z4, on this rig (its hardware has a :rig, so
+;; Z2's rows leave it alone): every cue routed by its
+;; [:destination-zone :zone-group-id], or by none. legacy-shows-test adds
+;; the rig's projectors to its hardware.edn.
+{"project-metadata.edn"
+ {:config {}
+  :timing {:bpm 120.0}
+  :grid {:size [8 4]}}
+
+ "hardware.edn"
+ {:rig {:order [:p1 :p2 :p3 :p4 :p5] :middle :split :split-width 0.75}
+  :zone-groups {:graphics {:id :graphics :name "Graphics" :description "Graphics-specific projectors" :color "#9B59B6"}
+                :crowd {:id :crowd :name "Crowd Scanning" :description "Audience scanning projectors" :color "#E67E22"}
+                :left {:id :left :name "Left (manual)" :description "Left side projectors" :color "#4A90D9"}
+                :group-balcony {:id :group-balcony :name "Balcony" :color "#123456"}}}
+
+ "content.edn"
+ {:chains
+  {:cue-chains
+   {[0 0] {:name "To All" :destination-zone {:zone-group-id :all}
+           :items [{:id "d00" :type :preset :preset-id :circle :enabled? true :params {:num-points 12}
+                    :effects [{:id "d00-fx" :effect-id :rotation :enabled? true
+                               :params {:angle {:type :sine :min 0.0 :max 360.0 :period 4.0}}}]}]}
+    [1 0] {:name "No destination"
+           :items [{:id "d10" :type :preset :preset-id :square :enabled? true :params {:num-points 8} :effects []}]}
+    [2 0] {:name "To Graphics" :destination-zone {:zone-group-id :graphics}
+           :items [{:id "d20" :type :preset :preset-id :triangle :enabled? true :params {:num-points 9} :effects []}]}
+    [3 0] {:name "To Left" :destination-zone {:zone-group-id :auto/left}
+           :items [{:id "d30" :type :preset :preset-id :star :enabled? true :params {:num-points 5}
+                    :effects [{:id "d30-fx" :effect-id :scale :enabled? true
+                               :params {:x-scale {:type :sine :min 0.5 :max 1.0 :period 2.0} :y-scale 1.0}}]}]}
+    [4 0] {:name "To Left (manual)" :destination-zone {:zone-group-id :left}
+           :items [{:id "d40" :type :preset :preset-id :wave :enabled? true :params {:num-points 10} :effects []}]}
+    [5 0] {:name "To the crowd" :destination-zone {:zone-group-id :crowd}
+           :items [{:id "d50" :type :preset :preset-id :horizontal-line :enabled? true :params {:num-points 6} :effects []}]}
+    [6 0] {:name "Pinned to Laser 3" :destination-zone {:zone-group-id :auto.laser/p3}
+           :items [{:id "d60" :type :preset :preset-id :beam-fan :enabled? true :params {:num-points 4} :effects []}]}
+    [7 0] {:name "To an empty group" :destination-zone {:zone-group-id :group-balcony}
+           :items [{:id "d70" :type :preset :preset-id :circle :enabled? true :params {:num-points 7} :effects []}]}
+    [0 1] {:name "Two items to Center" :destination-zone {:zone-group-id :auto/center}
+           :items [{:id "d01a" :type :preset :preset-id :circle :enabled? true :params {:num-points 10 :radius 0.3} :effects []}
+                   {:id "d01b" :type :preset :preset-id :square :enabled? true :params {:num-points 6}
+                    :effects [{:id "d01b-fx" :effect-id :translate :enabled? true
+                               :params {:x {:type :sine :min -0.2 :max 0.2 :period 3.0} :y 0.0}}]}]}
+    [1 1] {:name "To Odd" :destination-zone {:zone-group-id :auto/odd}
+           :items [{:id "d11" :type :preset :preset-id :triangle :enabled? true :params {:num-points 6} :effects []}]}
+    [2 1] {:name "To Right" :destination-zone {:zone-group-id :auto/right}
+           :items [{:id "d21" :type :preset :preset-id :star :enabled? true :params {:num-points 6} :effects []}]}}
+   :effect-chains {}}}}

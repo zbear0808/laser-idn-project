@@ -1,0 +1,65 @@
+;; The starter show as a build from before zones Z2 saved it: the six
+;; built-in groups, every cue on All by [:destination-zone], the starter
+;; vibes, the Master, the preview's old cells, and hardware with no :rig,
+;; its projectors listing their groups (All among them). So Z2's show rows
+;; run when it opens (Left is listed by Laser 3 and stays, as "Left
+;; (manual)"; Right and Center go), then Z4's. This machine's rig is
+;; legacy-shows-test's.
+{"project-metadata.edn"
+ {:config {:preview {:zone-group-filter :all
+                     :grid-layout [2 2]
+                     :grid-cells [{:zone-group-id nil} {:zone-group-id :left} {:zone-group-id :right} {:zone-group-id :center}]
+                     :show-labels? true}
+           :vibes {:order [:vibe-1 :vibe-2]
+                   :next-id 3
+                   :library {:vibe-1 {:id :vibe-1 :name "Shapes" :color "#4A90D9" :energy 2 :allow-audience? false
+                                      :hit {:cells [[0 0] [1 0] [2 0] [3 0]] :select :shuffle :mode :decay :beats 1.0}
+                                      :accent {:cells [[4 0]] :select :shuffle :mode :decay :beats 2.0}
+                                      :flash {:cue [6 0] :fx [] :solo? true}
+                                      :bed nil :fx []}
+                             :vibe-2 {:id :vibe-2 :name "Lines" :color "#9B59B6" :energy 3 :allow-audience? false
+                                      :hit {:cells [[5 0] [7 0]] :select :shuffle :mode :decay :beats 1.0}
+                                      :accent {:cells [[6 0]] :select :shuffle :mode :decay :beats 2.0}
+                                      :flash {:cue [4 0] :fx [] :solo? true}
+                                      :bed nil :fx []}}}}
+  :timing {:bpm 120.0}
+  :grid {:size [8 4]}}
+
+ "hardware.edn"
+ {:projectors {:p1 {:name "Laser 1" :host "10.0.0.1" :service-id 0 :enabled? true :zone-groups [:all]}
+               :p2 {:name "Laser 2" :host "10.0.0.2" :service-id 0 :enabled? true :zone-groups [:all :graphics]}
+               :p3 {:name "Laser 3" :host "10.0.0.3" :service-id 0 :enabled? true :zone-groups [:all :left]}
+               :p4 {:name "Laser 4" :host "10.0.0.4" :service-id 0 :enabled? false :zone-groups [:all :graphics]}
+               :p5 {:name "Crowd" :host "10.0.0.5" :service-id 0 :enabled? true :zone-groups [:crowd]
+                    :tags #{:crowd-scanning}}}
+  :virtual-projectors {}
+  :zone-groups {:all {:id :all :name "All" :description "All projectors" :color "#808080"}
+                :left {:id :left :name "Left" :description "Left side projectors" :color "#4A90D9"}
+                :right {:id :right :name "Right" :description "Right side projectors" :color "#D94A4A"}
+                :center {:id :center :name "Center" :description "Center projectors" :color "#4AD94A"}
+                :graphics {:id :graphics :name "Graphics" :description "Graphics-specific projectors" :color "#9B59B6"}
+                :crowd {:id :crowd :name "Crowd Scanning" :description "Audience scanning projectors" :color "#E67E22"}}}
+
+ "content.edn"
+ {:chains
+  {:cue-chains
+   {[0 0] {:items [{:type :preset :id #uuid "00000000-0000-4000-8000-000000000000" :preset-id :circle :params {} :effects [] :enabled? true}]
+           :destination-zone {:zone-group-id :all}}
+    [1 0] {:items [{:type :preset :id #uuid "00000000-0000-4000-8000-000000000001" :preset-id :square :params {} :effects [] :enabled? true}]
+           :destination-zone {:zone-group-id :all}}
+    [2 0] {:items [{:type :preset :id #uuid "00000000-0000-4000-8000-000000000002" :preset-id :triangle :params {} :effects [] :enabled? true}]
+           :destination-zone {:zone-group-id :all}}
+    [3 0] {:items [{:type :preset :id #uuid "00000000-0000-4000-8000-000000000003" :preset-id :star :params {} :effects [] :enabled? true}]
+           :destination-zone {:zone-group-id :all}}
+    [4 0] {:items [{:type :preset :id #uuid "00000000-0000-4000-8000-000000000004" :preset-id :spiral :params {} :effects [] :enabled? true}]
+           :destination-zone {:zone-group-id :all}}
+    [5 0] {:items [{:type :preset :id #uuid "00000000-0000-4000-8000-000000000005" :preset-id :wave :params {} :effects [] :enabled? true}]
+           :destination-zone {:zone-group-id :all}}
+    [6 0] {:items [{:type :preset :id #uuid "00000000-0000-4000-8000-000000000006" :preset-id :beam-fan :params {} :effects [] :enabled? true}]
+           :destination-zone {:zone-group-id :all}}
+    [7 0] {:items [{:type :preset :id #uuid "00000000-0000-4000-8000-000000000007" :preset-id :horizontal-line :params {} :effects [] :enabled? true}]
+           :destination-zone {:zone-group-id :all}}}
+   :effect-chains
+   {[0 3] {:name "Master" :active? true
+           :items [{:id #uuid "00000000-0000-4000-8000-000000000010" :effect-id :intensity :enabled? true
+                    :params {:amount {:type :macro :active? true :slot :slider-1 :min 0.0 :max 1.0 :default 1.0}}}]}}}}}

@@ -1,0 +1,40 @@
+;; A show saved before zones Z4, on this rig, whose preview cells are the old
+;; {:zone-group-id …} ones: the master view, groups, a laser's own group and
+;; the manual Left. legacy-shows-test adds the rig's projectors.
+{"project-metadata.edn"
+ {:config {:preview {:zone-group-filter :all
+                     :grid-layout [3 2]
+                     :grid-cells [{:zone-group-id nil}
+                                  {:zone-group-id :graphics}
+                                  {:zone-group-id :auto/left}
+                                  {:zone-group-id :auto.laser/p2}
+                                  {:zone-group-id :left}
+                                  {:zone-group-id :crowd}]
+                     :show-labels? true}}
+  :timing {:bpm 120.0}
+  :grid {:size [8 4]}}
+
+ "hardware.edn"
+ {:rig {:order [:p1 :p2 :p3 :p4 :p5] :middle :split :split-width 0.75}
+  :zone-groups {:graphics {:id :graphics :name "Graphics" :color "#9B59B6"}
+                :crowd {:id :crowd :name "Crowd Scanning" :color "#E67E22"}
+                :left {:id :left :name "Left (manual)" :color "#4A90D9"}}}
+
+ "content.edn"
+ {:chains
+  {:cue-chains
+   {[0 0] {:name "Three places"
+           :items [{:id "v00a" :type :preset :preset-id :circle :enabled? true :zone-group-id :auto/left
+                    :params {:num-points 8} :effects []}
+                   {:id "v00b" :type :preset :preset-id :square :enabled? true :params {:num-points 6}
+                    :effects [{:id "v00b-z" :effect-id :zone-selector :enabled? true :params {:target-zone :graphics}}]}
+                   {:id "v00c" :type :preset :preset-id :triangle :enabled? true :params {:num-points 6}
+                    :effects [{:id "v00c-fx" :effect-id :rotation :enabled? true
+                               :params {:angle {:type :sine :min 0.0 :max 120.0 :period 4.0}}}]}]}
+    [1 0] {:name "Pinned to Laser 2" :destination-zone {:zone-group-id :auto.laser/p2}
+           :items [{:id "v10" :type :preset :preset-id :star :enabled? true :params {:num-points 5} :effects []}]}
+    [2 0] {:name "Manual Left and the crowd" :destination-zone {:zone-group-id :crowd}
+           :items [{:id "v20a" :type :preset :preset-id :wave :enabled? true :zone-group-id :left
+                    :params {:num-points 8} :effects []}
+                   {:id "v20b" :type :preset :preset-id :circle :enabled? true :params {:num-points 6} :effects []}]}}
+   :effect-chains {}}}}
