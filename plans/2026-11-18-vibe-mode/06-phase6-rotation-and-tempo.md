@@ -237,4 +237,5 @@ And two in `due` against `due-allocates-nothing-when-idle-test`: a settings merg
 | that tree exported, the two resolved by keeping both (no branch touched) | full unit suite 1,123 tests, 34,467 assertions; perform, toolbar and vibes UI 37 tests, 273 assertions; 0 failures |
 | layout | headless screenshots at 1200×800 of the merged tree: the countdown and AUTO fit in the header's second row, with Phase 5's meters under the pads |
 | full UI suite | not run here: it runs after the merge |
+| after the merge, on `master` at `4fa9eee`: `clj -M:mac-arm:test`, then the full UI suite | 1,123 tests, 34,469 assertions, 0 failures; UI 136 tests, 693 assertions, 0 failures |
 | manual (unverified) | a real pad's taps against a click track; one auto-advance during a real set (Phase 7 hardware check) |
