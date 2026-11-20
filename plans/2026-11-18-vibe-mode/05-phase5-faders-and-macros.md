@@ -1,7 +1,7 @@
 # Phase 5: the faders (macros, CC learn, master intensity, Morph)
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`)
-**Status:** Proposed. Needs Phases 1 and 2; V5 (what the sliders mean); V9 (with V9 A the hue step is Phase 4's, so this phase has no palette and no `:macro/set`)   **Last verified against:** `b1da0f2` (probes v6, v9, v11 in `00-overview.md` §3)
+**Status:** Done in `9f5d78a` (2026-11-19; as built in §10). Needed Phases 1 and 2; V5 A (1 Intensity built in, 2 Morph per vibe, unwired by default); V9 A (the hue step is Phase 4's, so this phase has no palette and no `:macro/set`)   **Last verified against:** `9f5d78a` (§10; probes v6, v9, v11 in `00-overview.md` §3 before it)
 **Supersedes / Superseded by:** none   **Related findings:** review 05 F19 (channel numbering) is avoided, not fixed: the macro hides the channel; review 05 F18 (velocity is dropped) stays open
 
 Two faders that work the moment a controller is plugged in, and a master dimmer that needs no setup. The fader path stays off the event agent end to end.
@@ -155,3 +155,91 @@ Run: `clj -M:mac-arm:test modulation input-mapper input templates vibes`, then `
 - **Velocity → intensity** (review 05 F18): later, and it would use the same `:macro` slot mechanism.
 - **Fixing the 0/1 channel fallback** in `:midi` (review 05 F19): untouched; macros avoid channels entirely.
 - **A per-vibe `:palette` stepped by HIT through a `:hue` slot and a `:macro/set` effect** (this doc's first version; V9 B): replaced by Phase 4's Step modulator, which steps any parameter on any role with no engine code and no new effect key.
+
+## 10. As built (2026-11-19)
+
+Committed as `9f5d78a` on top of `eb20782` (built as `58834e6` on branch `vibe-phase5` from `d298801`, UX Phase 3 done and vibe Phases 1–3 and 4a in it; the cherry-pick past vibe Phase 4b conflicted only in three test files' docstrings and the new tests at their ends, resolved by keeping both). §1–9 cite `b1da0f2`; the lines below are at `58834e6`: the same in `9f5d78a` except in the files 4b also changed (events/handlers/input_mapper.clj, events/handlers/vibes.clj, subs.clj, vibes/reactions.clj, events/handlers/input_mapper_test.clj, events/handlers/vibes_test.clj, subs_test.clj, ui_test/vibes_test.clj), where they are shifted by its lines. Vibe Phase 4b was being built at the same time; in the files it changes this phase's edits are local: `events/handlers/vibes.clj` (`handle-clear-control` takes a `:slot`, NEW `handle-add-morph` after it, two `case` lines after `:vibe/clear-control`, a sentence at the end of the ns docstring), `events/handlers/history.clj` (two labels after `:vibe/clear-control`) and `events/handlers/input_mapper.clj` (two NEW fns before `update-input-value!`, its body, and the continuous branch; the ns docstring, the `learning?` filter and the discrete branch are as they were). `views/tabs/vibes.clj` and `vibes/library.clj` are untouched.
+
+**Where it is now** (paths under `src/laser_show/`)
+- `animation/modulator_evaluators.clj`: NEW `eval-macro` `:257`, in `modulator-evaluators` `:445`. `animation/modulators.clj`: `macro-params` `:133` (`:slot`, shown as "1: Intensity" and "2: Morph"; `:min`; `:max`; `:default`, "Until moved", 0..1, registry default 0.0), the registration `:352` ("Fader", `:external`, `:icon-name :sliders`). `animation/modulator_registry.clj:50`: the category's docstring.
+- `events/handlers/input_mapper.clj`: NEW public `store-keys` `:28`; NEW private `update-macro-value!` `:49` (the `[:config :input :macro-map]` lookup on the input's thread, and the `[:macro slot]` write), called by `update-input-value!` `:58`, so every store write the mapper makes can drive a slot; the continuous branch writes `store-keys` (`:84`).
+- `events/handlers/input.clj`: `learn-target` `:233` keeps `:slot`; NEW `fader-travel` `:255` (0.08) and `fader-catcher` `:260`; `handle-input-start-learn` `:276` takes `:capture :continuous` (`:288`); NEW `handle-fader-captured` `:369` ("Learn Fader", `:386`), routed for a `:macro` target at `:481`.
+- `vibes/faders.clj` (NEW, pure): `slots` `:18`, `master-cell` `:28`, `morph-templates` `:36`, `morph-cell` `:50`, `master-at` `:71`, `add-master` `:80`, `add-morph` `:90`, `slot-wired?` `:105`; private `fader` `:22`, `follows?` `:60`, `wires?` `:66`. `vibes/reactions.clj:124`: `effects-in` is public, the walker `slot-wired?` and `master-at` use.
+- `events/handlers/vibes.clj`: `handle-clear-control` `:86`, NEW `handle-add-morph` `:98`, routed `:192-193`. `events/handlers/history.clj:149-150`: "Add Master Intensity", "Add Morph"; a fader's Clear is "Clear Control".
+- `state/domains.clj:266`: `[:config :input]` defaults to `{:trigger-map {} :macro-map {}}`. `state/templates.clj`: NEW `create-starter-effects` `:105`, `apply-starter-effects` `:112`, applied by `persistent/new-project-state` (`state/persistent.clj:201`), `app/start!` and `app/start-test!` (`app.clj:147, 264`), never by a load.
+- `subs.clj`, a section of its own at the end (`:1239`): `vibe-fader-bindings` `:1247`, `vibe-fader-control` `:1259`, `vibe-meter` `:1268`, `vibe-fader-actions` `:1284`; private `fader-learning?` `:1256`, `fader-cells` `:1280`.
+- `views/components/slider_meters.clj` (NEW): `meter-text` `:17`, `redraw-meter!` `:24` (the `ext-clock-redraw` fn: it reads `[:macro slot]` from the store), private `meter` `:34`, `meter-row` `:59`; ids `#vibe-meter-slider-1`, `-text`, `-bar`. `views/tabs/perform.clj:141`: the meters between the pads and the status line.
+- `views/components/vibe_controls.clj`: NEW private `fader-row` `:95` (`#vibe-control-slider-1`, `-keys`, `-learn`, `-clear`) and `fader-buttons` `:135` (`#vibe-add-master`; `#vibe-add-morph` and its items `#vibe-add-morph-size`, `-spin`, `-colour`), under FADERS after Learn all in `controls-panel` `:163`. `views/components/trigger_bank.clj:49`: NEW `fader-label` ("MIDI Ch 1 CC 7", "OSC /fader/1", "Gamepad 1 trigger left"). `css/vibes.clj`: `.vibe-meter` `:143`, `.vibe-meter.vibe-meter-off` `:148`, `.vibe-meter-text` `:151`, `.vibe-meter-bar` `:155`, `#vibe-add-morph` `:306` (a menu button's label has padding of its own).
+
+**Differences from the plan**
+
+| Plan | As built | Why |
+|---|---|---|
+| `store-keys`: the one definition of what an event writes, shared with learn | the continuous branch writes `store-keys`; the discrete branch's unmapped-OSC write (`input_mapper.clj:92-96`) is as it was, `store-keys` names it too, and `store-keys-name-what-the-mapper-writes-test` dispatches fourteen events (CCs from MIDI, OSC, a gamepad and a keyboard source, unmapped OSC values, notes, buttons) and compares the store's keys with `store-keys` for each | Phase 4b edits the `learning?` filter on the next line (`:97`), and the brief keeps this file's edits apart from it |
+| "after writing a key, look it up" | in its own fn, `update-macro-value!`, beside the store write, `update-input-value!` calls it | the brief; so the unmapped OSC row of §7 needs nothing more |
+| learn "delivers when some key has moved" | the catcher delivers the event with the key that moved as `:store-key`, and `handle-fader-captured` binds it only if `store-keys` of that event names it | a note handed to a fader's learn binds nothing, even with a `:store-key` (invariant 8 at both ends). A mapped OSC fader writes `[:osc path]` and `[:osc 0 control]`; the first that moved is bound |
+| `:capture :continuous` | also implied by a `{:type :macro}` target; a `:continuous` capture for a role catches a CC that then binds nothing | a fader's learn can't fall back to waiting for a press |
+| — (not said) | `learn-target` keeps `:slot` | else every fader's learn is `{:type :macro}`, and a capture for slider 1 would bind while slider 2 is learned (Phase 2's role precedent) |
+| `vibes.library/slot-wired?`, over the vibe's FX set | `vibes.faders/slot-wired?`, over what plays in the vibe: its FX set, its flash effects, the effects-grid cells that are on, the cues of its pools, flash and bed; a modulator that's off or a disabled effect doesn't count | `library.clj` is 4b's (lint), and the walker it needs (`reactions/effects-in`) is in a namespace that requires `library`. "Not wired" has to mean "moving it changes nothing here" (invariant 6), which a Morph in a pool's cue or a grid cell that is always on contradicts |
+| "not wired" on slider 2 | on either: Intensity says so while its Master is off or deleted | it then does nothing |
+| NEW in §4: none for the templates | NEW `vibes.faders`: the templates, `add-master`, `add-morph`, `master-at`, `slot-wired?` | the handlers in 4b's `vibes.clj` stay a fn and two lines; `state.templates` and the subs share them |
+| Master item `{:type :effect :effect-id :intensity …}` | no `:type` | effect items have none (`events/handlers/effects.clj:150`, the reaction templates) |
+| Morph cells "Morph: Size" | "Groove · Morph: Size", as a tap reaction's (4a); "Morph: Size" without a vibe | the effects grid shows whose it is |
+| `:vibe/add-master`: the Master in the first empty cell | and nothing while a Master is there (`master-at`: an Intensity whose amount follows fader 1, on or off); the button is disabled then | two Masters square the fader (0.5 gives 0.25) |
+| `:vibe/add-morph` adds the cell to the FX set | through `engine/reconcile`, as Phase 3's FX-set edits: on at once in the vibe that plays, waiting during blackout | 4a's `add-to-vibe` switches on itself; reconcile is the one place that does it now |
+| the Controls rows "SLIDER 1 and 2" | "INTENSITY" and "MORPH" under a FADERS title, after Learn all; class `.vibe-fader`, so `.vibe-control` and Learn all stay the five; "Move a fader…" while learning; "Add Morph to Shapes" names the vibe edited | V5's names; brief note 3 |
+| the meters: a bar, a percentage, "–", "not wired" | "Intensity 45 %", "Morph –", "· not wired" after the value, the meter dimmed | |
+| the starter Master | at `[0 3]` in a new project, on; `effects-only-pad-says-so-test` now looks at `[1 3]` (at `[0 3]` it passed because the Master is on), `new-project-resets-document-only-test` expects the Master, and `hints-describe-the-clicks-test` empties the effects grid first | a new project's Effects tab has a cell, so UX Phase 3's empty-grid line shows only in a project with none: the original test fails (below) |
+
+**Found, not done**
+- A fader's slot outlives its control: `[:macro slot]` stays in the input store when Clear, a learn on another control (until that one moves), an undo of the learn, New or Open takes the binding away, so the Master stays where the old control left it, dark if at 0 (Perform then says "Intensity 0 %"), with nothing bound to move it, until a control learned for it moves or the app restarts. A pure handler can't touch the store, and an effect key that could is what V9 A ruled out. Two ways: a store effect on Clear and on load, or derive the slots from the macro map once per tick in `frame-service/render-context` (and in the meters) instead of storing them.
+- Right after a learn the slot has no value until the control moves again (the move that was learned came before the binding): the Master stays full and the meter says "–" for that moment.
+- While a fader's learn waits, the mapper's `learning?` filter (Phase 3, K-15) drops presses too: the pads and keys do nothing until the learn ends. 4b narrows the filter to presses only.
+- A new project no longer shows the Effects tab's empty-grid line (UX Phase 3): the Master is a cell. It still shows in a project without effect cells.
+
+**Tests**: 29 new unit tests (1,048 → 1,077) and 4 UI tests; 3 changed
+- `laser-show.animation.modulation-test` (+3): `macro-reads-its-slot-test` (§7's rows, through `resolve-param`; another slot's value, or the control's own key, isn't the slot's), `macro-default-when-unseen-test` (R-6: unseen is `:default`; none is 0.0, the evaluator alone too), `macro-is-registered-and-listed-test` (in `all-ui-modulators`, "Fader", `:external`, its params).
+- `laser-show.events.handlers.input-mapper-test` (+6): the five of §8, on real-shaped messages (`input/fixtures.clj` through `midi/midi-msg->event` and `osc/osc-msg->events`, the gamepad's `diff-controller-states`), each starting the mapper and stopping it after; `bound-cc-also-writes-its-macro-test` also checks nothing is dispatched (invariant 1); and `store-keys-name-what-the-mapper-writes-test`.
+- `laser-show.events.handlers.input-test` (+4): the four of §8. `learn-cc-needs-movement-test` has §7's example, MIDI steps (from 64, 74 and 54 are 10 of 127 either way: nothing; 75, 11 steps: caught), an OSC fader and a gamepad trigger; `learn-cc-binds-a-slot-and-replaces-its-old-source-test` has invariant 5 both ways, the same control again (no undo step), a capture for the other slot, the undo, and a fader's learn ending Learn all.
+- `laser-show.state.templates-test` (+4): `starter-effects-test`, and the three of §8, rendering the starter cues coloured (white hides a hue shift) through `frame-service/generate-frames-by-zone`: the Master at rest equal to no cell (`=`, and within 1e-9), also through the `render-context` a new project's state gives; a quarter up is a quarter as bright, 0 is dark; each Morph within 1e-9 at rest, and Size 1.5x at the top, Spin and Colour moving with fader 2 and not fader 1.
+- NEW `laser-show.vibes.faders-test` (3): `templates-are-valid-test` (registered effects and modulators, values in range), `master-at-test`, `slot-wired-test`.
+- `laser-show.events.handlers.vibes-test` (+4): `add-master-uses-the-first-empty-effect-cell-test` (one undo step; a second, or a full grid, adds nothing), `add-morph-puts-the-cell-in-the-fx-set-test` (the three kinds; on at once in the vibe that plays, off when it's left, waiting during blackout; undo), `clear-control-clears-a-fader-test`, and `starter-project-reactions-find-a-free-cell-test` (brief note 1: a new project's tap reaction goes to `[1 3]`, a Morph to `[2 3]`, and 29 more fill the grid around the Master; one more adds nothing).
+- `laser-show.state.persistent-test` (+3): `new-project-has-the-master-test`, `macro-map-survives-save-and-load-test`, `old-project-without-macro-map-loads-test` (invariant 7: nil, and no Master added). `laser-show.subs-test` (+1): `fader-subs-test` (a press changes no meter). `laser-show.views.components.trigger-bank-test` (+1): `fader-label-test`.
+- UI: `laser-show.ui-test.perform-test` (+1): `meters-follow-the-store-and-say-not-wired-test` (store values and a learned CC through the mapper, ticked by hand; "Intensity 0 %"; a Morph wires fader 2 in the vibe that plays, not in the other). `laser-show.ui-test.vibes-test` (+2): `learn-a-fader-binds-a-slot-test` (synthetic CCs and a note through `router/dispatch!` with `input-events/control-change`: a note and a wiggle bind nothing, CC 1 binds, its moves reach the slot through the mapper, CC 9 takes the slot, Clear), `fader-buttons-add-the-master-and-a-morph-test` (Add Morph's menu; the Master put back). `laser-show.ui-test.modulator-editor-test` (+1): `fader-type-follows-a-slot-test` (Fader in the dropdown, its slot labels).
+- Changed: `menu-file-handlers-test/new-project-resets-document-only-test`, `perform-test/effects-only-pad-says-so-test`, `grid-test/hints-describe-the-clicks-test` (the table above).
+
+**Red first**
+- Against `d298801`'s `src/` with the tests written: modulation, input, handlers vibes and menu-file loaded: 132 tests, 970 assertions, 65 failures, 3 errors (no `:macro` evaluator: the NPEs; the vibe events unrouted, returning `{}`; `:capture` ignored, so a CC never caught; no Master in a new project). The other five didn't compile: `input-mapper-test` (`No such var: input-mapper/store-keys`), `persistent-test` and `subs-test` (`templates/apply-starter-effects`), `templates-test` and `faders-test` (no `laser-show.vibes.faders`), `trigger-bank-test` (`trigger-bank/fader-label`).
+- UI, with the views set aside (`vibe_controls.clj`, `perform.clj` and `css/vibes.clj` as at `d298801`, no `slider_meters.clj`): the three new tests timed out waiting for the meter, the Add Morph button and the fader rows (5 tests, 20 assertions, 3 errors); the two changed ones passed. `hints-describe-the-clicks-test` as it was, against the new code: 1 failure (the empty-grid line doesn't show).
+
+**Cost** (the doc's Evidence): probe v11's loop (3,000 warm calls, 3,000 timed, garbage from `ThreadMXBean`) and the show clock plan's busy cue (4 presets with 3 modulated effects each, 346 points, rendered with `generate-frames-by-zone` and a `render-context` made once), in a scratch namespace under `$TMPDIR`; the committed probe files are untouched. Two JVMs, load average 2.9–3.9 (other sessions' tests running).
+
+| Render | Median | p99 | Garbage |
+|---|---|---|---|
+| v11, 1,000 points: Intensity at a static 1.0 | 41.2–41.9 µs | 49–73 µs | 248 KB |
+| the same, `:midi` (v11's stand-in) | 41.4–42.5 µs | 50–51 µs | 250 KB |
+| the Master, its fader never moved | 42.5–44.4 µs | 49–58 µs | 250 KB |
+| the Master, fader at 0.6 | 41.4–44.8 µs | 48–58 µs | 250 KB |
+| the Master and a Morph (Size), both moved | 64.3–67.3 µs | 78–87 µs | 447 KB |
+| busy cue, no effect cells | 121.0–124.7 µs | 202–386 µs | 496 KB |
+| busy cue, the Master at rest | 135.8–141.3 µs | 162–166 µs | 584 KB |
+| busy cue, the Master moved | 133.3–135.8 µs | 159–164 µs | 584 KB |
+| busy cue, the Master and the three Morphs, at rest | 177.9–180.7 µs | 205–272 µs | 889 KB |
+| busy cue, the same, moved | 182.9–183.1 µs | 219–286 µs | 889 KB |
+| the mapper, one CC no fader is learned on (router to store) | 0.7–0.8 µs | 1.6–1.8 µs | 0.7 KB |
+| the mapper, one CC learned for fader 1 (two store writes) | 0.8–1.0 µs | 0.9–1.3 µs | 0.9 KB |
+
+So the Master costs what one modulated Intensity does (`:macro` resolves once per chain, as `:midi`), within the noise of a static one, the same at rest as moved (nothing is skipped, R-5): about 9–20 µs and 88 KB on the busy cue, 7–16 % of its render. Four cues of 1,000 points in one zone: about 0.18 ms of the 16.7 ms tick and 1 MB of garbage a tick. 04 §10 measured the same four effect types (Intensity, Scale, Rotation, Hue Shift) at 172–184 µs on 1,000 points; on the busy cue's 346 points the Master and the three Morphs add 53–62 µs. A learned CC adds a map lookup and a store write on the controller's thread, about 0.1–0.2 µs.
+
+**Verification, 2026-11-19, macOS arm64, JDK 25**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test modulation input-mapper input templates vibes reactions subs persistent history` | 366 tests, 2,509 assertions, 0 failures |
+| the same with `trigger-bank menu-file faders` | 398 tests, 2,653 assertions, 0 failures |
+| `clj -M:test-ui:mac-arm:test-ui-headless -n` perform-test, vibes-test, grid-test, modulator-editor-test | 41 tests, 282 assertions, 0 failures |
+| `clj -M:mac-arm:test` (full unit suite) | 1,077 tests, 34,178 assertions, 0 failures (baseline at `d298801`: 1,048 tests, 33,931 assertions) |
+| `clj -M:kondo --lint` on every touched file, with `testfx.clj` | 0 errors; 1 warning, there before (the redundant `let` at `input.clj:423`, in `handle-input-update-cell-trigger-action`) |
+| full UI suite | not run here: it runs after the merge |
+| layout | headless screenshots at 1280×800 and 1200×800: the Controls panel's fader rows and buttons fit the 300 px column; the meters share the Perform tab's width under the pads |
+| manual (unverified) | a real MIDI controller, gamepad and OSC app; a visible (non-headless) run |
