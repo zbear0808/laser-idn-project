@@ -26,8 +26,9 @@
             [laser-show.views.components.effect-parameter-editor :as effect-param-editor]
             [laser-show.views.components.effect-bank :as effect-bank]
             [laser-show.views.components.load-warning :as load-warning]
-            [laser-show.views.components.zone-chips :as zone-chips]
+            [laser-show.views.components.target-control :as target-control]
             [laser-show.routing.targets :as targets]
+            [clojure.string :as str]
             [laser-show.common.util :as u])
   (:import [javafx.scene.input KeyCode KeyEvent]))
 
@@ -46,9 +47,7 @@
      :item-event-template {:event/type :cue-chain/add-effect-from-bank
                            :col col
                            :row row
-                           :parent-path effects-parent-path}
-     ;; Include zone effects tab for routing control
-     :include-zone? true}))
+                           :parent-path effects-parent-path}}))
 
 
 ;; Parameter Editor for Effects (using shared component)
@@ -91,50 +90,14 @@
                    :style-class "dialog-placeholder-text"}]})))
 
 
-;; The cue's and each item's target (zones plan Z4)
+;; The cue's and each item's target (zones plan Z4): the Target chip
 
 
-(defn- destination-zone-dropdown
-  "Dropdown for the cue's own target, a group (All for none). Renders as a
-   horizontal row: 'Default zone:' label (the timeline editor's) +
-   dropdown, neither ever narrower than its text.
-   
-   Props:
-   - :col, :row - Grid coordinates
-   - :target - The cue's :target
-   - :zone-groups - List of available zone groups"
-  [{:keys [col row target zone-groups]}]
-  (let [current-group (or (u/seek #(= (:id %) (or target :all)) zone-groups) (first zone-groups))]
-    {:fx/type :h-box
-     :spacing 8
-     :alignment :center-left
-     :children [{:fx/type :label
-                 :text "Default zone:"
-                 :min-width :use-pref-size
-                 :style-class "zone-picker-label"}
-                {:fx/type :combo-box
-                 :value current-group
-                 :pref-width 150
-                 :min-width :use-pref-size
-                 :items zone-groups
-                 :tooltip {:fx/type :tooltip
-                           :text "Where the cue's presets go, unless one names its own zone"}
-                 :button-cell (fn [group]
-                                (zone-chips/with-lock {:text (or (:name group) "All")} group))
-                 :cell-factory {:fx/cell-type :list-cell
-                                :describe (fn [group]
-                                            (zone-chips/with-lock {:text (or (:name group) "All")} group))}
-                 :on-value-changed {:event/type :cue-chain/set-target
-                                    :col col
-                                    :row row}}]}))
-
-(defn- target-name
-  "What a target is called in the editor's labels."
-  [names t]
-  (or (targets/target-text names nil t) "All"))
+(def ^:private cue-target-tooltip
+  "Where the cue's content goes, unless an item, a group or a track sets its own")
 
 (defn- inherited-res
-  "What the item with item-id would inherit (explain: targets/explain-cue):
+  "What the item with item-id would inherit (explain: subs/cue-target-explain):
    its group's resolution as the group's children see it, or the cue's."
   [explain items item-id]
   (let [path (chains/find-path-by-id items item-id)
@@ -143,105 +106,49 @@
       (targets/inherited (get-in explain [:items (:id group)]) (:id group))
       (:cue explain))))
 
-(defn- inherit-text [names res]
-  (str "Inherit (" (target-name names (:target res))
-       (when (= :group (:from res)) " (Group)")
-       ")"))
-
 (defn- routing-label
-  "base-name and where the item goes: \"Circle [Left]\", \"[Left (Group)]\"
-   when it comes from its group."
-  [names explain base-name item]
-  (let [res (get-in explain [:items (:id item)])]
-    (str base-name " [" (target-name names (:target res)) (when (= :group (:from res)) " (Group)") "]")))
+  "base-name and where the item goes (06 §7.2): \"Circle [A · Beams → Left ·
+   column 3]\", \"Star [Graphics, pinned]\", \"[All]\"."
+  [{:keys [names zone-map explain]} base-name item]
+  (let [res (get-in explain [:items (:id item)])
+        t (:target res)
+        text (cond
+               (or (nil? t) (= :all t)) "All"
+               (targets/has-zone? t) (targets/target-text names zone-map t)
+               :else (str (targets/target-text names zone-map t) ", pinned"))
+        from (some-> (targets/from-text res) (str/replace #"^from " ""))]
+    (str base-name " [" text (when from (str " · " from)) "]")))
 
 (defn- cue-chain-item-label
   "Custom list-editor label renderer for cue chain preset items: the
    preset's name and where it goes."
-  [names explain item]
+  [menu-ctx item]
   (let [preset-def (presets/presets-by-id (:preset-id item))]
-    (routing-label names explain (or (:name preset-def) (:name item) "Unknown Preset") item)))
+    (routing-label menu-ctx (or (:name preset-def) (:name item) "Unknown Preset") item)))
 
 (defn- cue-chain-group-label
   "Custom list-editor label renderer for cue chain groups: the group's name
    and where it goes."
-  [names explain group]
-  (routing-label names explain (or (:name group) "Group") group))
+  [menu-ctx group]
+  (routing-label menu-ctx (or (:name group) "Group") group))
 
 (defn- cue-chain-context-menu
-  "Builds a context menu for a cue chain item or group with its target."
-  [col row items names explain zone-groups item-or-group]
+  "An item's or group's menu: Target ▸, the Target menu."
+  [col row items {:keys [explain] :as menu-ctx} item-or-group]
   (let [item-id (:id item-or-group)
         item-path (chains/find-path-by-id items item-id)]
     (when item-path
-      (let [current (targets/normalize-target (:target item-or-group))
-            inherit-item [{:fx/type :check-menu-item
-                           :text (str (if (nil? current) "✓ " "   ") (inherit-text names (inherited-res explain items item-id)))
-                           :selected (nil? current)
-                           :on-action {:event/type :cue-chain/set-item-target
-                                       :col col
-                                       :row row
-                                       :item-path item-path
-                                       :target nil}}
-                          {:fx/type :separator-menu-item}]
-            zone-items (mapv
-                        (fn [zg]
-                          (let [zid (:id zg)
-                                active? (= zid current)]
-                            (zone-chips/with-lock
-                             {:fx/type :check-menu-item
-                              :text (str (if active? "✓ " "   ") (:name zg (name zid)))
-                              :selected active?
-                              :on-action {:event/type :cue-chain/set-item-target
-                                          :col col
-                                          :row row
-                                          :item-path item-path
-                                          :target zid}}
-                             zg)))
-                        zone-groups)]
+      (let [rows (target-control/menu-model (assoc menu-ctx
+                                                   :scope (if (chains/group? item-or-group) :group :item)
+                                                   :own (:target item-or-group)
+                                                   :inherited (inherited-res explain items item-id)))]
         {:fx/type :context-menu
          :items [{:fx/type :menu
-                  :text "Assign Zone"
-                  :items (into inherit-item zone-items)}]}))))
-
-(defn- item-zone-destination-picker
-  "Dropdown for a preset's or group's own target. Renders as a horizontal
-   row: 'Zone Destination:' label + dropdown.
-   
-   Props:
-   - :col, :row - Grid coordinates
-   - :item-path - Path vector to item in cue chain
-   - :item - The item or group map
-   - :inherit-label - Descriptive label for inheriting (e.g. 'Inherit (Front)')
-   - :zone-groups - List of available zone groups"
-  [{:keys [col row item-path item inherit-label zone-groups]}]
-  (let [current (targets/normalize-target (:target item))
-        inherit-option {:id :inherit
-                        :name inherit-label}
-        options (into [inherit-option] zone-groups)
-        current-option (if current
-                         (or (u/seek #(= (:id %) current) zone-groups)
-                             inherit-option)
-                         inherit-option)]
-    {:fx/type :h-box
-     :spacing 8
-     :alignment :center-left
-     :children [{:fx/type :label
-                 :text "Zone Destination:"
-                 :style-class "zone-picker-label"}
-                {:fx/type :combo-box
-                 :value current-option
-                 :pref-width 180
-                 :items options
-                 :button-cell (fn [opt]
-                                (zone-chips/with-lock {:text (or (:name opt) "All")} opt))
-                 :cell-factory {:fx/cell-type :list-cell
-                                :describe (fn [opt]
-                                            (zone-chips/with-lock {:text (or (:name opt) "All")} opt))}
-                 :on-value-changed {:event/type :cue-chain/set-item-target
-                                    :col col
-                                    :row row
-                                    :item-path item-path}}]}))
+                  :text "Target"
+                  :items (target-control/menu-items rows {:event/type :cue-chain/set-item-target
+                                                          :col col
+                                                          :row row
+                                                          :item-path item-path})}]}))))
 
 
 ;; Trigger Mode Picker
@@ -301,17 +208,25 @@
 
 (defn- middle-section
   "Middle section with preset bank and parameter editor."
-  [{:keys [fx/context col row active-preset-tab selected-item-path cue-chain zone-groups]}]
+  [{:keys [fx/context col row active-preset-tab selected-item-path cue-chain]}]
   (let [;; Get selected item instance if single selection
         items (:items cue-chain [])
         selected-item (when selected-item-path
                         (chains/get-item-at-path items selected-item-path))
         is-preset? (and selected-item (= :preset (:type selected-item)))
         is-group? (and selected-item (chains/group? selected-item))
-        names (targets/names zone-groups {})
-        explain (targets/explain-cue cue-chain nil nil)
-        inherit-label (when selected-item
-                        (inherit-text names (inherited-res explain items (:id selected-item))))]
+        explain (fx/sub-ctx context subs/cue-target-explain col row)
+        item-target (fn [scope]
+                      {:fx/type target-control/target-field
+                       :id "target-chip-item"
+                       :from-id "target-from-item"
+                       :scope scope
+                       :own (:target selected-item)
+                       :inherited (inherited-res explain items (:id selected-item))
+                       :on-set {:event/type :cue-chain/set-item-target :col col :row row :item-path selected-item-path}
+                       :tooltip (if (= :group scope)
+                                  "Where the group's content goes, unless an item in it sets its own"
+                                  "Where this preset goes")})]
     {:fx/type :v-box
      :spacing 0
      :children (filterv
@@ -330,13 +245,7 @@
                     :spacing 4
                     :children [{:fx/type :h-box
                                 :style-class "dialog-section"
-                                :children [{:fx/type item-zone-destination-picker
-                                            :col col
-                                            :row row
-                                            :item-path selected-item-path
-                                            :item selected-item
-                                            :inherit-label inherit-label
-                                            :zone-groups zone-groups}]}
+                                :children [(item-target :item)]}
                                {:fx/type preset-param-editor/preset-param-editor
                                 :v-box/vgrow :always
                                 :cell [col row]
@@ -356,15 +265,9 @@
                                  {:fx/type :label
                                   :text (str "Items: " (count (:items selected-item [])))
                                   :style-class "group-properties-label"}
-                                 {:fx/type item-zone-destination-picker
-                                  :col col
-                                  :row row
-                                  :item-path selected-item-path
-                                  :item selected-item
-                                  :inherit-label inherit-label
-                                  :zone-groups zone-groups}
+                                 (item-target :group)
                                  {:fx/type :label
-                                  :text "Items inside this group inherit this zone unless individually overridden."
+                                  :text "Items inside inherit this target unless they have their own."
                                   :style-class "dialog-placeholder-text"}]}))
 
                  (when (not selected-item)
@@ -437,11 +340,12 @@
         ;; Merge ui-modes and item-effects-ui together so effects can access both
         effect-dialog-data (merge dialog-data item-effects-ui {:item-effects-ui item-effects-ui})
 
-        ;; Where cues can go (All, the automatic groups, each laser, yours),
-        ;; for the destination picker in the footer and the routing labels
-        zone-groups (fx/sub-ctx context subs/target-groups)
-        names (targets/names zone-groups {})
-        explain (targets/explain-cue cue-chain nil nil)
+        ;; Where each item goes, for the labels and the Target menus
+        menu-ctx {:names (fx/sub-ctx context subs/names-ctx)
+                  :zone-map (fx/sub-ctx context subs/active-zone-map)
+                  :zones (fx/sub-ctx context subs/zones-in-use)
+                  :audience (fx/sub-ctx context subs/vibe-audience-groups)
+                  :explain (fx/sub-ctx context subs/cue-target-explain col row)}
 
         ;; Get chain name for header
         chain-name (:name cue-chain)
@@ -487,10 +391,10 @@
                                                      :item-id-key :preset-id
                                                      :item-registry-fn presets/presets-by-id
                                                      :fallback-label "Unknown Preset"
-                                                     :get-item-label (partial cue-chain-item-label names explain)
-                                                     :get-group-label (partial cue-chain-group-label names explain)
-                                                     :get-context-menu (partial cue-chain-context-menu col row (:items cue-chain) names explain zone-groups)
-                                                     :get-group-context-menu (partial cue-chain-context-menu col row (:items cue-chain) names explain zone-groups)
+                                                     :get-item-label (partial cue-chain-item-label menu-ctx)
+                                                     :get-group-label (partial cue-chain-group-label menu-ctx)
+                                                     :get-context-menu (partial cue-chain-context-menu col row (:items cue-chain) menu-ctx)
+                                                     :get-group-context-menu (partial cue-chain-context-menu col row (:items cue-chain) menu-ctx)
                                                      :on-change-event :chain/set-items
                                                      :on-change-params {:domain :cue-chains :entity-key [col row]}
                                                      :items-path [:chains :cue-chains [col row] :items]
@@ -550,8 +454,7 @@
                                                   :col col :row row
                                                   :active-preset-tab active-preset-tab
                                                   :selected-item-path first-selected-path
-                                                  :cue-chain cue-chain
-                                                  :zone-groups zone-groups}
+                                                  :cue-chain cue-chain}
 
                                                  ;; Effect bank (when item selected)
                                                  (when has-item?
@@ -576,17 +479,21 @@
                  :col col
                  :row row}
 
-                ;; Footer with destination zone dropdown, trigger mode, and close button;
+                ;; Footer with the cue's Target, trigger mode, and close button;
                 ;; nothing in it shrinks below its text
                 {:fx/type :h-box
                  :alignment :center-left
                  :spacing 12
                  :style-class "dialog-footer"
-                 :children [{:fx/type destination-zone-dropdown
-                             :col col
-                             :row row
-                             :target (:target cue-chain)
-                             :zone-groups zone-groups}
+                 :children [{:fx/type target-control/target-field
+                             :id "target-chip-cue"
+                             :from-id "target-from-cue"
+                             :scope :cue
+                             :own (:target cue-chain)
+                             :inherited (targets/cue-fallback nil (fx/sub-ctx context subs/column-target col)
+                                                              (fx/sub-ctx context subs/default-target) col)
+                             :on-set {:event/type :cue-chain/set-target :col col :row row}
+                             :tooltip cue-target-tooltip}
                             {:fx/type trigger-mode-dropdown
                              :col col
                              :row row

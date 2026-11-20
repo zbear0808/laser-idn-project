@@ -38,6 +38,8 @@
             [laser-show.animation.safety :as safety]
             [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
+            [laser-show.routing.targets :as targets]
+            [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.dev-config :as dev-config]))
 
 
@@ -823,6 +825,77 @@
   "target-groups as {id group}."
   [context]
   (into {} (map (juxt :id identity)) (fx/sub-ctx context target-groups)))
+
+
+;; Level 2: Zones, zone maps and targets (zones plan Z4)
+
+
+(defn zone-labels
+  "{zone \"text\"}: the zones' labels."
+  [context]
+  (fx/sub-val context get-in [:zones :labels] {}))
+
+(defn names-ctx
+  "What the Target texts read (routing.targets/names): the target groups
+   and the zones' labels."
+  [context]
+  (targets/names (fx/sub-ctx context target-groups) (fx/sub-ctx context zone-labels)))
+
+(defn zone-map-state
+  "[:zone-map]: {:active :pending}, the map in use and a switch waiting."
+  [context]
+  (fx/sub-val context :zone-map))
+
+(defn zone-maps-list
+  "Every map: the built-ins, then yours by name (routing.zone-maps/all-maps)."
+  [context]
+  (zone-maps/all-maps {:zone-maps (fx/sub-val context :zone-maps)}))
+
+(defn zone-map
+  "The map id names (a built-in or yours), or nil."
+  [context id]
+  (zone-maps/map-by-id {:zone-maps (fx/sub-val context :zone-maps)} id))
+
+(defn active-zone-map
+  "The map in use, as the UI shows it (06 SQ-7): [:zone-map :active], Left
+   / Right for an id that is no map."
+  [context]
+  (or (fx/sub-ctx context zone-map (fx/sub-val context get-in [:zone-map :active]))
+      (fx/sub-ctx context zone-map zone-maps/default-map-id)))
+
+(defn column-target
+  "Column col's default target, or nil."
+  [context col]
+  (fx/sub-val context get-in [:grid :column-targets col]))
+
+(defn default-target
+  "The show's default target, or nil (All)."
+  [context]
+  (fx/sub-val context get-in [:config :default-target]))
+
+(defn zones-in-use
+  "Every zone the show draws into (Z4-Q1): those a cue names anywhere, a
+   column's default and the show's, sorted."
+  [context]
+  (let [cues (fx/sub-val context get-in [:chains :cue-chains])
+        refs (concat (mapcat refs/cue-refs (remove nil? (vals cues)))
+                     (mapcat targets/target-refs (vals (fx/sub-val context get-in [:grid :column-targets])))
+                     (targets/target-refs (fx/sub-ctx context default-target)))]
+    (vec (sort-by targets/zone-index (into #{} (filter targets/zone-ref?) refs)))))
+
+(defn zones-in-use?
+  "Does the show draw into a zone anywhere (the map pads show, Z4-Q1 A)?"
+  [context]
+  (boolean (seq (fx/sub-ctx context zones-in-use))))
+
+(defn cue-target-explain
+  "How each level of the cue at [col row] resolves, its column's and the
+   show's defaults included (routing.targets/explain-cue)."
+  [context col row]
+  (targets/explain-cue (fx/sub-ctx context cue-cell-chain col row)
+                       (fx/sub-ctx context column-target col)
+                       (fx/sub-ctx context default-target)
+                       col))
 
 
 ;; Level 2: The rig strip (views/components/rig_strip.clj)

@@ -6,7 +6,7 @@
    
    Provides:
    - Timeline view for sequencing items with start/duration
-   - Destination zone picker
+   - The cue's Target (zones plan Z4)
    - Trigger mode picker
    - Editable chain name"
   (:require [cljfx.api :as fx]
@@ -16,35 +16,10 @@
             [laser-show.views.components.inline-edit :as inline-edit]
             [laser-show.views.components.visual-editors.timeline-editor :as timeline-editor]
             [laser-show.views.components.load-warning :as load-warning]
-            [laser-show.views.components.zone-chips :as zone-chips]
+            [laser-show.views.components.target-control :as target-control]
+            [laser-show.routing.targets :as targets]
             [laser-show.common.util :as u])
   (:import [javafx.scene.input KeyCode KeyEvent]))
-
-
-;; Destination Zone Picker (shared with cue-chain-editor)
-
-
-(defn- destination-zone-dropdown
-  [{:keys [col row target zone-groups]}]
-  (let [current-group (or (u/seek #(= (:id %) (or target :all)) zone-groups) (first zone-groups))]
-    {:fx/type :h-box
-     :spacing 8
-     :alignment :center-left
-     :children [{:fx/type :label
-                 :text "Default zone:"
-                 :style-class "zone-picker-label"}
-                {:fx/type :combo-box
-                 :value current-group
-                 :pref-width 150
-                 :items zone-groups
-                 :button-cell (fn [group]
-                                (zone-chips/with-lock {:text (or (:name group) "All")} group))
-                 :cell-factory {:fx/cell-type :list-cell
-                                :describe (fn [group]
-                                            (zone-chips/with-lock {:text (or (:name group) "All")} group))}
-                 :on-value-changed {:event/type :cue-chain/set-target
-                                    :col col
-                                    :row row}}]}))
 
 
 ;; Trigger Mode Picker (shared with cue-chain-editor)
@@ -94,8 +69,6 @@
         ;; Only this cell's chain: edits to other cues don't re-render the dialog
         cue-chain (fx/sub-ctx context subs/cue-cell-chain col row)
 
-        ;; Where cues can go: All, the automatic groups, each laser, yours
-        zone-groups (fx/sub-ctx context subs/target-groups)
         destination-zone-id (:target cue-chain)
 
         ;; Timeline UI state: this cue's view, plus editor-wide prefs
@@ -150,11 +123,15 @@
        :alignment :center-left
        :spacing 12
        :style-class "dialog-footer"
-       :children [{:fx/type destination-zone-dropdown
-                   :col col
-                   :row row
-                   :target (:target cue-chain)
-                   :zone-groups zone-groups}
+       :children [{:fx/type target-control/target-field
+                   :id "target-chip-cue"
+                   :from-id "target-from-cue"
+                   :scope :cue
+                   :own (:target cue-chain)
+                   :inherited (targets/cue-fallback nil (fx/sub-ctx context subs/column-target col)
+                                                    (fx/sub-ctx context subs/default-target) col)
+                   :on-set {:event/type :cue-chain/set-target :col col :row row}
+                   :tooltip "Where the cue's content goes, unless a clip, a group or a track sets its own"}
                   {:fx/type trigger-mode-dropdown
                    :col col
                    :row row

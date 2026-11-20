@@ -192,7 +192,7 @@
       (let [footer (ui/on-fx-thread #(.lookup (scene-root editor) ".dialog-footer"))
             labeled (filterv #(instance? Labeled %) (all-nodes footer))
             texts (set (map text-of labeled))]
-        (is (every? texts ["Default zone:" "Trigger:" "Open in Timeline Editor" "Close"])
+        (is (every? texts ["Target:" "Trigger:" "Open in Timeline Editor" "Close"])
             "the timeline editor's short labels")
         (ui/wait-for! #(every? (fn [l] (= (text-of l) (ui/shown-text l))) labeled))
         (doseq [l labeled]
@@ -205,10 +205,13 @@
         controls (filterv #(instance? Control %) (all-nodes footer))
         tip (fn [^Control c] (ui/on-fx-thread #(some-> c .getTooltip .getText)))
         by-text (into {} (keep (fn [c] (when (instance? Labeled c) [(text-of c) (tip c)]))) controls)
-        combos (filterv #(instance? ComboBox %) controls)]
-    (testing "the two choices say what they choose"
-      (is (= 2 (count combos)))
-      (is (every? #(seq (tip %)) combos)))
+        combos (filterv #(instance? ComboBox %) controls)
+        chip (some #(when (= "target-chip-cue" (.getId ^Control %)) %) controls)]
+    (testing "the choices say what they choose: Trigger, and the Target chip (zones plan Z4)"
+      (is (= 1 (count combos)))
+      (is (every? #(seq (tip %)) combos))
+      (is (some? chip))
+      (is (= "Where the cue's content goes, unless an item, a group or a track sets its own" (tip chip))))
     (testing "and the buttons what they do; Close says it"
       (is (seq (by-text "⚡ Triggers...")))
       (is (seq (by-text "Open in Timeline Editor")))

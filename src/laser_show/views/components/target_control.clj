@@ -6,8 +6,16 @@
    menu-model is the menu as data (pure): Inherit (what the level would
    inherit, and from where), All, the zones with their lanes in the map in
    use, the groups, then Combine (several refs as one target) and Pin (the
-   zones swapped for their lanes)."
-  (:require [laser-show.routing.targets :as targets]))
+   zones swapped for their lanes). menu-items makes it menu items, a click
+   continuing an event template with the row's :target; target-chip is the
+   chip that opens it, and target-field the chip with \"Target:\" before
+   it and where an inherited target comes from after it."
+  (:require [cljfx.api :as fx]
+            [clj-font-awesome.core :as fa]
+            [clj-font-awesome.fonts :as fa-fonts]
+            [clojure.string :as str]
+            [laser-show.routing.targets :as targets]
+            [laser-show.subs :as subs]))
 
 
 ;; The menu as data
@@ -97,3 +105,105 @@
          (when (targets/has-zone? effective)
            [{:kind :pin :text (str "Pin: " (targets/target-text (assoc names :labels {}) zone-map effective))
              :target (targets/pin zone-map effective)}])))))))
+
+
+;; The menu as menu items
+
+(defn- pin-graphic
+  "FontAwesome's thumbtack, never an emoji (06 §7.1)."
+  []
+  {:fx/type :text
+   :text (fa/unicode! :thumbtack :solid)
+   :font (fa-fonts/font :solid 9)
+   :fill "#B0B0B0"})
+
+(defn- check [checked? text]
+  (str (if checked? "✓ " "   ") text))
+
+(defn menu-items
+  "menu-model's rows as menu items; a click continues on-set (an event map)
+   with the row's :target. Combine is a submenu of check boxes that stays
+   open, so several refs can be ticked in a row."
+  [rows on-set]
+  (into []
+        (keep (fn [{:keys [kind text checked? target audience? rows]}]
+                (case kind
+                  :header {:fx/type :menu-item :text text :disable true :style-class ["menu-item" "target-menu-header"]}
+                  :separator {:fx/type :separator-menu-item}
+                  :combine {:fx/type :menu
+                            :text text
+                            :items (mapv (fn [{:keys [text checked? target]}]
+                                           {:fx/type :custom-menu-item
+                                            :hide-on-click false
+                                            :content {:fx/type :check-box
+                                                      :text text
+                                                      :selected (boolean checked?)
+                                                      :on-action (assoc on-set :target target)}})
+                                         rows)}
+                  :pin {:fx/type :menu-item
+                        :text text
+                        :graphic (pin-graphic)
+                        :on-action (assoc on-set :target target)}
+                  :group (cond-> {:fx/type :menu-item
+                                  :text (check checked? (cond-> text audience? (str " · audience")))
+                                  :graphic (pin-graphic)
+                                  :on-action (assoc on-set :target target)}
+                           audience? (assoc :style-class ["menu-item" "target-menu-audience"]))
+                  {:fx/type :menu-item
+                   :text (check checked? text)
+                   :on-action (assoc on-set :target target)})))
+        rows))
+
+
+;; The chip
+
+(defn chip-text
+  "What a chip says: the target the level ends up with (its own, else the
+   inherited one, in brackets); compact? (the timeline's rows) just the
+   zone letters or group names."
+  [names zone-map own inherited compact?]
+  (let [t (or (targets/normalize-target own) (:target inherited))
+        text (if compact?
+               (str/join " + " (map #(or (targets/zone-letter %) (targets/ref-name names %)) (targets/target-refs t)))
+               (targets/target-text names zone-map t))
+        text (if (str/blank? text) "All" text)]
+    (if (some? (targets/normalize-target own)) text (str "(" text ")"))))
+
+(defn target-chip
+  "The Target chip (06 §4.5): a menu button shaped like the timeline's zone
+   chip, saying what the target ends up as (dim, in brackets, when it is
+   inherited), its menu menu-items of the scope's rows. Props: :id :scope
+   :own (the level's own target) :inherited (what it would inherit, a
+   resolution) :on-set (an event map; a choice adds :target) :tooltip
+   :compact?."
+  [{:keys [fx/context id scope own inherited on-set tooltip compact?]}]
+  (let [names (fx/sub-ctx context subs/names-ctx)
+        zone-map (fx/sub-ctx context subs/active-zone-map)
+        rows (menu-model {:scope scope :own own :inherited inherited :names names :zone-map zone-map
+                          :zones (fx/sub-ctx context subs/zones-in-use)
+                          :audience (fx/sub-ctx context subs/vibe-audience-groups)})
+        own (targets/normalize-target own)
+        missing? (some :missing? rows)]
+    (cond-> {:fx/type :menu-button
+             :text (chip-text names zone-map own inherited compact?)
+             :style-class (cond-> ["menu-button" "target-chip"]
+                            (nil? own) (conj "target-chip-inherited")
+                            missing? (conj "target-chip-missing"))
+             :focus-traversable false
+             :min-width :use-pref-size
+             :items (menu-items rows on-set)}
+      id (assoc :id id)
+      tooltip (assoc :tooltip {:fx/type :tooltip :text tooltip}))))
+
+(defn target-field
+  "\"Target:\", the chip, then, dim, where an inherited target comes from
+   (\"from column 3\"). Props: target-chip's, and :from-id."
+  [{:keys [own inherited from-id] :as props}]
+  (let [from (when (nil? (targets/normalize-target own)) (targets/from-text inherited))]
+    {:fx/type :h-box
+     :spacing 6
+     :alignment :center-left
+     :children (cond-> [{:fx/type :label :text "Target:" :min-width :use-pref-size :style-class ["label" "target-field-label"]}
+                        (assoc props :fx/type target-chip)]
+                 from (conj (cond-> {:fx/type :label :text from :min-width :use-pref-size :style-class ["label" "target-from"]}
+                              from-id (assoc :id from-id))))}))

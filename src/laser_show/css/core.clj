@@ -26,7 +26,8 @@
             [laser-show.css.list :as list]
             [laser-show.css.visual-editors :as visual-editors]
             [laser-show.css.timeline :as timeline]
-            [laser-show.css.vibes :as vibes]))
+            [laser-show.css.vibes :as vibes]
+            [laser-show.css.zones :as zones]))
 
 
 
@@ -54,13 +55,14 @@
    (::css/url list/list)
    (::css/url visual-editors/visual-editors)
    (::css/url timeline/timeline)
-   (::css/url vibes/vibes)])
+   (::css/url vibes/vibes)
+   (::css/url zones/zones)])
 
 (defn dialog-stylesheet-urls
   "Returns stylesheet URLs appropriate for dialogs.
    Includes theme, typography, components, buttons, forms, grid-cells,
-   layout, menus, cue-chain-editor, list, visual-editors, timeline and
-   vibes.
+   layout, menus, cue-chain-editor, list, visual-editors, timeline, vibes
+   and zones.
    
    Example:
    {:fx/type :scene
@@ -79,7 +81,8 @@
    (::css/url list/list)
    (::css/url visual-editors/visual-editors)
    (::css/url timeline/timeline)
-   (::css/url vibes/vibes)])
+   (::css/url vibes/vibes)
+   (::css/url zones/zones)])
 
 
 
