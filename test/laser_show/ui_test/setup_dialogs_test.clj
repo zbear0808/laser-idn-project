@@ -175,10 +175,7 @@
         brightness #(get-in (app-state) [:projector-ui :calibration-brightness])]
     (with-projector!)
     (ui/click! robot "#projectors-tab")
-    ;; Below the strip, the inspector scrolls to its test pattern section
-    (ui/scroll-into-view! "#projector-calibration-button")
     (ui/click! robot "#projector-calibration-button")
-    (ui/scroll-into-view! "#calibration-brightness-slider")
     (ui/assert-visible! "#calibration-brightness-slider")
     (ui/assert-text! "#calibration-brightness-label" "10%")
     (ui/slide! robot "#calibration-brightness-slider" 0.4)
@@ -350,8 +347,6 @@
     (with-projector!)
     (ui/click! robot "#projectors-tab")
     (testing "in a laser's Add Effect menu"
-      ;; Below the strip, the inspector scrolls to its calibration chain
-      (ui/scroll-into-view! "#projector-add-effect-menu")
       (is (some #{"Decimate"} (menu-texts "#projector-add-effect-menu")))
       (ui/click! robot "#projector-add-effect-menu")
       (ui/click! robot "#projector-add-effect-decimate")

@@ -270,26 +270,22 @@
                      "Identity: IP 10.0.0.2 · output 1 (the device sends no unit id, so a new address makes it a new laser)")
     (is (nil? (ui/query "#projector-audience-in-all")))
     (testing "Scans the audience, while in All: an amber line offers to exclude it, and nothing happens by itself"
-      (ui/scroll-into-view! "#projector-tag-crowd-scanning")
       (ui/check! robot "#projector-tag-crowd-scanning")
       (ui/wait-for! #(= #{:crowd-scanning} (:tags (projector))))
       (ui/wait-for! #(some? (ui/query "#projector-audience-in-all")))
       (ui/assert-text! "#projector-audience-in-all" "This laser is in All, so that's every cue that plays on All.")
       (is (not (:exclude-from-all? (projector)))))
     (testing "Exclude from All, from the offer"
-      (ui/scroll-into-view! "#projector-audience-exclude-button")
       (ui/click! robot "#projector-audience-exclude-button")
       (ui/wait-for! #(true? (:exclude-from-all? (projector))))
       (ui/wait-for! #(nil? (ui/query "#projector-audience-in-all")))
       (ui/wait-for! #(ui/selected? "#projector-exclude-from-all"))
       (ui/wait-for! #(= "×" (mark "all" :b))))
     (testing "and back in All from its box: the offer comes back"
-      (ui/scroll-into-view! "#projector-exclude-from-all")
       (ui/uncheck! robot "#projector-exclude-from-all")
       (ui/wait-for! #(false? (:exclude-from-all? (projector))))
       (ui/wait-for! #(some? (ui/query "#projector-audience-in-all"))))
     (testing "Graphics is a tag too"
-      (ui/scroll-into-view! "#projector-tag-graphics")
       (ui/check! robot "#projector-tag-graphics")
       (ui/wait-for! #(= #{:crowd-scanning :graphics} (:tags (projector)))))))
 

@@ -160,7 +160,6 @@
                             (assoc-in [:projector-ui :active-projector] :a)))
     (play! (circle-cue 3000))
     (ui/click! robot "#projectors-tab")
-    (ui/scroll-into-view! "#projector-fit-guard")
     (ui/assert-text! "#projector-fit-min-fps" "20")
     (ui/assert-disabled! "#projector-fit-dim-floor")
     (fixtures/with-clock
@@ -181,7 +180,6 @@
           (ui/wait-for! #(= 60 (:min-fps (fit))))
           (ui/assert-text! "#projector-fit-min-fps" "60"))))
     (testing "fewer points off, then dim on, its floor in percent"
-      (ui/scroll-into-view! "#projector-fit-reduce")
       (ui/uncheck! robot "#projector-fit-reduce")
       (ui/wait-for! #(false? (:reduce-points? (fit))))
       (ui/assert-disabled! "#projector-fit-point-floor")
