@@ -153,7 +153,7 @@ A trial merge with `git merge-tree --write-tree`, which writes no branch and no 
 - **A ★ (built)** Keep warning: the cue is heavy, and the laser thins it. The warning already ignores the guard.
 - **B** Count each laser's calibration chain, which the warning would have to run for every laser.
 
-## 7. Follow-up (Q-D-1 B, Q-D-2 B) (2026-11-20, `5adfd4b`..`16a3e10`, on branch `decimate-b`, not merged)
+## 7. Follow-up (Q-D-1 B, Q-D-2 B) (2026-11-20, `9585cae`..`114e49e`, on `master`)
 
 The user answered both of §6's questions B (`10-questions.md` § Decimate). Built in worktree `wt-decimate-b` off `master` at `cc9e000`, after the commit that records the answers (`6484e62`). `master` has since moved to `4c5fcc8` (Z4 landed). "For the merge" has a trial merge with it.
 
@@ -161,8 +161,8 @@ The user answered both of §6's questions B (`10-questions.md` § Decimate). Bui
 
 | # | Commit | What |
 |---|---|---|
-| 1 | `5adfd4b` | Q-D-1 B, the meter: `fit-guard/recount` and `smooth`, `output-runtime/load-of`, `load-warning/load-percent` and `meter-tooltip`; docstrings in `output-runtime/status` and `subs/projector-load` |
-| 2 | `16a3e10` | Q-D-2 B, the ⚠: NEW `points/chain-budget`; `routing.rig`'s inputs, cache key and `:outputs`; `compose/cue-warnings` |
+| 1 | `9585cae` | Q-D-1 B, the meter: `fit-guard/recount` and `smooth`, `output-runtime/load-of`, `load-warning/load-percent` and `meter-tooltip`; docstrings in `output-runtime/status` and `subs/projector-load` |
+| 2 | `114e49e` | Q-D-2 B, the ⚠: NEW `points/chain-budget`; `routing.rig`'s inputs, cache key and `:outputs`; `compose/cue-warnings` |
 | 3 | this commit | this note |
 
 The two code commits share no file. Step 1 passes its tests on its own: they were run with step 2's files stashed.
@@ -235,7 +235,8 @@ The tests were written first and run against `6484e62`'s code (§6's), the 7 uni
 | Where | Unit suite (`clj -M:mac-arm:test`) | UI suite (`clj -M:test-ui:mac-arm:test-ui-headless`) |
 |---|---|---|
 | `d6fbb15` (the base's code: `cc9e000` and `6484e62` only add plans), §6's run | 1,447 tests, 541,789 assertions, 0 failures | 195 tests, 884 assertions, 0 failures |
-| **`16a3e10`, the branch's last code** | **1,453 tests, 541,840 assertions, 0 failures, 0 errors** | **196 tests, 888 assertions, 0 failures, 0 errors** |
+| `114e49e`, the branch's last code, on `cc9e000` | 1,453 tests, 541,840 assertions, 0 failures, 0 errors | 196 tests, 888 assertions, 0 failures, 0 errors |
+| **rebased onto `4c5fcc8` (Z4 in), as landed; `rig.clj`'s two docstrings resolved as "For the merge" says** | **1,528 tests, 542,906 assertions, 0 failures, 0 errors** | **212 tests, 1,019 assertions, 0 failures, 0 errors** |
 | the trial merge with `master` `4c5fcc8` (tree `d21ee47`, made before this note; its conflict resolved as below) | 1,528 tests, 542,907 assertions, 0 failures, 0 errors | 212 tests, 1,019 assertions, 0 failures, 0 errors |
 
 `master` itself, the same tree as 06's trial merge, has 1,522 tests and 542,856 assertions, and 211 UI tests and 1,015 assertions (06's numbers, not run again). This branch adds 6 unit tests (51 assertions) and 1 UI test (4 assertions) both on its own and on the merge.
