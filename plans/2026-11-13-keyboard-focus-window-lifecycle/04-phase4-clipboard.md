@@ -1,166 +1,427 @@
 # Phase 4 — One clipboard
 
-**Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)
-**Status:** Proposed. Needs D8–D9 answered   **Last verified against:** `cb32414` (probes p5–p7, `probes/keyboard_probes_test.clj`)
-**Supersedes / Superseded by:** replaces the clipboard parts of `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md` (§3.6, §3.7, §5.A.2)   **Related findings:** K-6…K-11 (`00-overview.md` §3); review 01 F7, Q6; 02 #15, M4 (clipboard part), "clipboard effect stubs" carry-over
+**Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)   **Updated:** 2026-11-20 at `3229c95`, re-checked at `cc9e000`: every citation re-checked, probes p5–p7 re-run and p9–p17 added, the phase split into Steps 4a–4c, D13 and D14 added
+**Status:** Proposed. Step 4a needs D8, D13 and D14; Steps 4b and 4c need D9   **Last verified against:** `cc9e000` (probes p5–p7 and p9–p17, `probes/keyboard_probes_test.clj`, run at `3229c95` and again at `cc9e000`; headless JavaFX 28-ea+11, JDK 25.0.5, macOS arm64)
+**Supersedes / Superseded by:** replaces the clipboard parts of `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md` (§3.6, §3.7, §5.A.2). Takes over review 02 #15, the clipboard bullets of 02 #2, M1 step 2 and M4, the "clipboard effect stubs" carry-over (`02-events-state.md:363`), review 01 F7 and Q6, and "Left: the clipboard helper" in the improvement review's overview (row 11). Zones Z0 already fixed the projector chain's part of K-8 (B-8b, `f044a31`), and `95a510d` removed `:clipboard/paste-projector-effects`   **Related findings:** K-6…K-11 (`00-overview.md` §4); review 01 F7, Q6; 02 #2, #15, M1, M4
+**Size:** ~2–2.5 days (4a ~1.25, 4b ~0.75, 4c ~0.25)   **Needs:** none of Phases 2–3 (§0)
 
-Copy and paste are implemented twice, with different type names and different read rules, and the list half is broken in ways you can see: the toolbar Paste button never enables, cue items can be pasted into an effects list, and cut is two separate actions. About 2 days.
+Copy and paste are written twice, with different type names and different read rules. The list half writes the clipboard behind the event pipeline's back, so the pipeline undoes the write (p9). Every copy and every list paste makes the event agent wait for the FX thread (p10). Two views read the OS clipboard while rendering (p11), and the Paste buttons disagree with ⌘V (p5, p11, p12). **Step 4a makes one clipboard and ships on its own.** 4b settles which list takes what and gives pasted things new ids; 4c makes Cut one step.
 
-## 1. Current behaviour (file:line)
+## 0. Steps and dependencies
 
-| Path | What happens | Evidence |
+| Step | What ships | Fixes | Needs | Size |
+|---|---|---|---|---|
+| **4a** One clipboard | `[:ui :clipboard]` is written only in the `:state` handlers return. Two NEW effects write and read the OS clipboard on the FX thread, and the event agent never waits for them. Nothing reads the OS clipboard while rendering. Paste buttons and menu items follow the clipboard. The dialog-local clipboards and the dead code go | the lost update (K-7, p9), the waits (p10), the OS reads in handlers and render (K-10, p11), Paste buttons that never light or light wrongly (p5, p11, p12), the data-loss half of K-6 (p16), K-11 | D8, D13, D14 | ~1.25 d |
+| 4b Types and ids | each list's type comes from its component id; a copied cell pastes into a list; pasted things get new ids at every depth; an empty cell copies nothing | K-8 (p7, p13), K-9 (p6, p14, p15) | D9 | ~0.75 d |
+| 4c Cut | Cut is one event and one undo step, with a Cut button | the rest of K-6 | D9 | ~0.25 d |
+
+**4a ships first and alone.** It keeps today's rules for which target takes which clip (§7, first table), so nothing that pastes today stops pasting and nothing pastes where it couldn't before. 4b and 4c use 4a's helpers and can follow in either order.
+
+**Keyboard Phases 2 and 3 have not landed.** `02-phase2-dialog-shell.md` and `03-phase3-key-handling.md` are Proposed with D4–D7 open, there is no `views/keys.clj`, and the list's key filter still asks `.isFocused` (`views/components/list.clj:747, 762`).
+
+**Phase 4 no longer depends on Phase 3.** D7 was about how the list's keys learn its `:clipboard-type`. Since `f044a31` (2026-11-19), `list-editor` reads it from `:on-change-params` and gives it both to the props atom the keys read (`views/components/list.clj:875`) and to `list-sidebar`'s toolbar (`:916`). 4b then derives the type from the component id in the handler, so it needs no props at all. What is left is a shared file:
+- Phase 3 rewrites the filter's focus test (`:747, 762`) and the props atom (`:58-78`).
+- 4a removes props (`:870-876`); 4c changes the ⌘X branch (`:775-779`).
+
+Whichever lands second rebases. Phase 2 isn't needed either: nothing here adds a stage listener (only D13 C would). `00-overview.md` §6 still lists Phase 3 as a dependency. That row is outside this update.
+
+**Sibling plans** (`plans/2026-11-20-state-integrity/`, written alongside this update):
+- 01 (engine snapshot) doesn't touch the clipboard.
+- 02 (direct state writes) leaves `set-internal-clipboard!` (`state/clipboard.clj:31-34`) to this phase; 4a removes it with every other clipboard write outside the pipeline. Both plans edit the "Writers outside the pipeline" sentence (`events/core.clj:36-41`) and the `effects` map (`:505-555`). Whichever lands second edits what the other left. Neither waits for the other.
+
+## 1. Current behaviour (file:line, at `3229c95`)
+
+"Run" means a probe in `probes/keyboard_probes_test.clj` printed it on 2026-11-20 at `3229c95`; "read" means it comes from reading the code.
+
+| # | What happens today | Evidence |
 |---|---|---|
-| **List copy** (Ctrl+C, Copy button) | `handlers/list.clj:234-248` deep-copies the selection and calls `clipboard/copy-cue-chain-items!` (or `-item-effects!`, `-timeline-tracks!`, chosen by `:clipboard-type`). That writes `[:ui :clipboard]` with `assoc-in-state!` (`state/clipboard.clj:31-34`) **and** the OS clipboard, **blocking the agent thread** until the FX thread has run it (`:57-73`, deref at `:64`). The handler then returns `{:state state}` (`:247-248`), the snapshot taken *before* the write, so the event's `reset-state!` (`events/core.clj:71-75`) **undoes the internal write**. | p5: `[:ui :clipboard]` is `nil` after a list copy; the OS clipboard starts with `{:type :cue-chain-items,` |
-| **List paste** | `handle-paste-items` (`handlers/list.clj:251-278`) reads `clipboard/get-clipboard` (`state/clipboard.clj:104-109`: OS clipboard first, then the internal slot), compares only `:type` (`:255-259`), deep-copies and inserts. | p5: Shortcut+V pastes (3 → 4 items) |
-| **Toolbar Paste button** | `list.clj:609` `can-paste? (boolean (seq clipboard-items))`. `clipboard-items` comes from dialog-local slots that only dead callbacks write (`cue_chain.clj:158-175`, `cue_chain_editor.clj:453-457`), or from an OS-clipboard read **during render** (`effect_chain_editor.clj:95`, `tabs/projectors.clj:613`) that only recognizes types nothing writes. | p5: Paste buttons stay disabled (`[true true]`) right after a copy |
-| **Cut** (Ctrl+X) | `list.clj:761-765`: `dispatch-copy-selected!` then `dispatch-delete-selected!`, two events. A failed copy is swallowed (`state/clipboard.clj:71-73`) and the delete still runs. | by reading |
-| **Which list pastes what** | `list-editor` puts `:clipboard-type` in its props (`list.clj:861`) but `list-sidebar` never receives it (`:892-901`) and no caller passes one, so **every** list copies and pastes `:cue-chain-items`. | p7: pasting cue items into effect chain `[0 0]` leaves a `{:preset-id :circle :type :preset}` item in the effect list |
-| **Cell copy / paste** (grid and effects tabs, Edit menu) | `grid.clj:171-185`, `effects.clj:78-92` → `events/helpers.clj:49-96`. The copy puts `{:type :cue-chain …}` or `{:type :effects-cell …}` in the returned state (`:72`) and on the OS clipboard (`:69-70`). Paste reads the **internal slot only** (`:91`) and regenerates no ids (`:90-95`). | p6: a cell copy pastes nothing into a list (1 → 1) |
-| **Type vocabulary** | `state/clipboard.clj:40-42` lists 11 types. Written by live code: `:cue-chain-items`, `:cue-chain`, `:effects-cell`. Reachable only if a caller passes it (none does): `:item-effects`, `:timeline-tracks`. Never written: `:effect-chain`, `:cue`, `:zone`, `:projector`, `:effect`, `:cell-assignment`. | survey |
-| **Dead code** | `:on-copy-fn` is destructured and passed along but never called (`list.clj:592, 862, 901`). Effects `:clipboard/copy-effects`, `:clipboard/paste-effects`, `:clipboard/paste-projector-effects` are registered (`events/core.clj:450-452`) but no handler emits them; their targets are TODO stubs (`effects.clj:172-176`, `projector.clj:345-348`). The `dispatch!` fallback emulates them (`core.clj:505-513`). | grep |
-| **Ids** | List copy/paste deep-copies items with fresh ids (`animation/chains.clj:217-239`), but a preset item's nested `:effects` keep their original ids. Cell paste regenerates nothing. | by reading |
-| **Tests** | `state/clipboard_test.clj` calls `clear-clipboard!` (`:14, 24, 30`) and so touches the real OS clipboard; so do several grid/menu copy tests. | survey |
+| 1 | **A list copy is undone.** ⌘C and Copy dispatch `:list/copy-selected` (`views/components/list.clj:136-143`, from `:694` and `:764-767`). `handle-copy-selected` (`events/handlers/list.clj:234-248`) calls `clipboard/copy-cue-chain-items!`, `-item-effects!` or `-timeline-tracks!` by `:clipboard-type` (`:243-246`). Each writes `[:ui :clipboard]` with `state/assoc-in-state!` (`state/clipboard.clj:31-34`, a `swap!` at `state/core.clj:152-162`) and writes the OS clipboard. The handler then returns `{:state state}` (`:247`), the snapshot from before the write, and `effect-state` (`events/core.clj:150-158`) writes that back | run p5: slot `nil`, OS text starts `{:type :cue-chain-items,`. Run p9: in dev mode the lost-update detector (`events/core.clj:124-148`) reports `[[:ui :clipboard]]` for `:list/copy-selected` |
+| 2 | **A cell copy writes twice.** `:grid/copy-cell` and `:effects/copy-cell` (`events/handlers/grid.clj:155-162`, `events/handlers/effects.clj:58-65`; from the cell menus `grid_cell.clj:279, 404` and Edit > Copy `events/handlers/menu.clj:283-303`) use `h/handle-copy-to-clipboard` (`events/helpers.clj:49-72`). It calls `clipboard/copy-cue-chain!` or `copy-effects-cell!`, which write the slot out of band (with `:copied-at`) and the OS clipboard (`:69-70`). Then it returns its own slot value, without `:copied-at` (`:72`), and that one wins | run p9: the detector reports `[[:ui :clipboard]]` for `:grid/copy-cell`; the slot ends with keys `[:data :type]` |
+| 3 | **Hidden OS reads in a handler.** `handle-paste-items` (`events/handlers/list.clj:251-281`) calls `clipboard/get-clipboard` (`:257`; the OS clipboard first, then the slot, `state/clipboard.clj:104-109`). For an `:item-effects` list it also calls `get-effects-to-paste` (`:260`, `state/clipboard.clj:228-239`), which reads the OS clipboard again. Cell paste reads only the slot (`events/helpers.clj:91`) | run p5: ⌘V pastes (3 → 4 items) from the OS text while the slot is empty |
+| 4 | **The event agent waits for the FX thread.** JavaFX's `Clipboard` works only on the FX thread: `getContent`, `hasContent` and `setContent`, which `getString`, `hasString` and `putString` go through, call `Toolkit.checkFxUserThread()` (javafx-graphics 28-ea+11 bytecode). The helpers wait from the agent with `@(fx/on-fx-thread …)` (`state/clipboard.clj:64, 82, 116`); cljfx's `on-fx-thread` is a `Platform/runLater` plus a promise (`cljfx/platform.clj:6-27`). Every event queued behind waits too: MIDI and OSC triggers, the vibe keys | run p10: `getString` off the FX thread throws `IllegalStateException: Not on FX application thread`. With the FX thread busy for 500 ms, a BPM change lands after 1–2 ms on its own, but after 514–535 ms behind a list copy and 503–579 ms behind a list paste (5 runs). With the FX thread idle, a copy plus a BPM change take a median of 4.7–18.5 ms (load average 5–23) |
+| 5 | **OS reads while rendering.** `projector-config-panel` (`views/tabs/projectors.clj:560`) and `effect-chain-editor-content` (`views/dialogs/effect_chain_editor.clj:95`) call `clipboard/get-effects-to-paste` inside the render function. The Paste button they light is stale, because nothing they subscribe to changes on a copy | run p11: the read happens on the JavaFX Application Thread inside `projector_config_panel`. After Copy, the same chain's Paste stays disabled, with no read, until selecting another effect re-renders the panel. Run p12: with effects (`:item-effects`) on the OS clipboard, the effects grid's chain editor enables Paste, and clicking it pastes nothing (1 → 1), because that list pastes as `:cue-chain-items` |
+| 6 | **The Cue Chain Editor's Paste never lights.** `list-sidebar` enables Paste from its `:clipboard-items` prop (`views/components/list.clj:615`). The editor passes dialog-local slots (`cue_chain_editor.clj:469, 472-473`). Only `:cue-chain/set-clipboard` and `:cue-chain/set-item-effects-clipboard` write those (`events/handlers/cue_chain.clj:158-174`), and both are dispatched only from `:on-copy-fn` callbacks (`cue_chain_editor.clj:536-538, 563-567`). `list-sidebar` takes that prop as `on-copy` (`:598`) and never calls it. Both handlers also call `clipboard/copy-*!` (`cue_chain.clj:164, 173`), which would make a third copy of the clip | run p5: both Paste buttons disabled (`[true true]`). The dead prop: read (`on-copy` appears only at `:598, 846, 876, 917`) |
+| 7 | **A view writes the clipboard.** The effects grid's chain editor gives its list `:on-copy-fn` calling `clipboard/copy-effect-chain!` (`effect_chain_editor.clj:144-145`): view code writing state outside the pipeline. It never runs (the same uncalled prop) | read |
+| 8 | **Which list takes what.** Since `f044a31`, `list-editor` takes `:clipboard-type` from `:on-change-params` (`views/components/list.clj:875, 916`). Only the projector chain passes one (`views/tabs/projectors.clj:426`, `:item-effects`). The effects grid's chain (`effect_chain_editor.clj:143`) and an item's effects (`cue_chain_editor.clj:559`) default to `:cue-chain-items`: they take a cue's presets, and give their effects to the cue list | run p7: a `:preset` lands in effect chain [0 0]. Run p13: a preset lands in item 0's effects, and a `:scale` effect among cue [0 0]'s items |
+| 9 | **Cut is two events.** ⌘X dispatches the copy, then the delete (`views/components/list.clj:775-779`). The copy's slot write is undone (row 1). If the OS write fails, `copy-to-system-clipboard!` logs and returns false (`state/clipboard.clj:71-73`), and the delete runs anyway | run p16, with the OS write failing: 3 → 2 items, slot `nil`, OS `""`, undo label "Delete Item(s)"; then ⌘V: 2 → 2 |
+| 10 | **Ids.** List paste copies items with fresh ids (`chains/deep-copy-items`, `animation/chains.clj:217-239`), but a preset's `:effects` keep their ids, inside a group too. Cell paste keeps every id: `handle-paste-from-clipboard`'s `transform-fn` (`events/helpers.clj:90-95`) is never passed (`grid.clj:167-169`, `effects.clj:70-72`). Some state is keyed by these ids, for example an effect's errors under `[:effect <instance id>]` (`backend/output_errors.clj:12`) | run p15 (effect ids kept); run p14 (A1 and B2 share item ids) |
+| 11 | **An empty cell's copy empties a cell.** Edit > Copy on an empty selected cell stores `{:type :cue-chain :data nil}` (`events/helpers.clj:66-72`; no OS write, `:69`). Edit > Paste of it sets the target cell to nil (`:95`) | run p14: the `:triangle` cue at [2 0] becomes `nil` (one undo step, labelled "Paste") |
+| 12 | **Menu items.** Edit > Paste is enabled whenever the slot holds anything (`views/components/title_bar.clj:105-106, 135`). Once list copies land in the slot, it would be enabled where nothing can be pasted. The cell menus' Paste items are always enabled (`grid_cell.clj:280-282, 296-298, 405-407`) | read |
+| 13 | **Dead code.** No handler emits `:clipboard/copy-effects` or `:clipboard/paste-effects` (`events/core.clj:212-229`, registered at `:552-553`, documented at `:527-528`); `test/laser_show/events/core_test.clj:44` lists them as registered. `:effects/insert-pasted` is a TODO stub (`events/handlers/effects.clj:167-174`, routed at `:205-206`), reached only from `:clipboard/paste-effects` (`events/core.clj:224`). `events/handlers/projector.clj` has no clipboard code left. Called only from tests: `clear-clipboard!`, `clipboard-has-type?`, `clipboard-empty?`, the cell-assignment trio (`state/clipboard.clj:111-165`), `get-clipboard-description` (`:326-347`) and `copy-timeline-tracks!` (`:294-304`). No view passes `:timeline-tracks`: the timeline's track sidebar is not a `list-editor`; only `list_handlers_test.clj:426-440` uses it | grep |
+| 14 | **Types.** `clipboard-types` (`state/clipboard.clj:40-42`) names 11 types. Live code writes four: `:cue-chain-items`, `:item-effects` (projector chains only), `:cue-chain` and `:effects-cell`. Nothing writes `:cue`, `:zone`, `:projector`, `:effect`, `:effect-chain`, `:cell-assignment` or `:timeline-tracks` | grep |
+| 15 | **Stale docs.** `state/clipboard.clj:21-24` ("uses database/dynamic.clj !ui atom", "state/!ui") and `:156` ("falls back to internal atom"). `events/core.clj:36-37` names "the clipboard helper (state/clipboard.clj)" among the writers outside the pipeline | read |
+| 16 | **Unit tests write the developer's clipboard.** The unit suite runs without the headless platform. `test/laser_show/state/clipboard_test.clj` (`clear-clipboard!` at `:14, 24, 30`), `grid_handlers_test.clj:187-196` and `menu_handlers_test.clj:38-63` run the real `copy-*!`, so they write the Mac's pasteboard | read (not run: it would overwrite the user's clipboard) |
+| 17 | **The slot survives Open and New, and a copy isn't an edit.** `reset-session` (`state/persistent.clj:181-202`, called at `:228` and `:249`) leaves `[:ui :clipboard]` alone, and `:ui` is not a document root (`state/history.clj:52-54`) | read |
+| 18 | **What the EDN costs.** `ser/serialize-for-clipboard` pretty-prints (`state/serialization.clj:204-211`, which calls `pprint` at `:38`), on the agent (`state/clipboard.clj:61`) | run p17 (pprint and read-back from three runs, `pr-str` from two; load average 9–23): 3 presets (671 chars): pprint 2.8–4.5 ms, `pr-str` 0.04–0.08 ms, read 0.07–0.10 ms. 50 presets × 3 effects (34 KB): 58–66 ms, 0.86–0.87 ms, 1.5–1.9 ms. A timeline cell with 300 clips × 2 effects (197 KB): 283–313 ms, 3.2–3.6 ms, 7.1–7.4 ms |
+
+p5–p7 print the same at `3229c95` as at `cb32414`. `master` moved to `cc9e000` (Decimate) while this was written. Of the files cited here, only `views/tabs/projectors.clj` changed: two lines added at `:441` and `:449`, and its citations after that are given at `cc9e000`. Every probe printed the same findings there.
 
 ## 2. Root cause
 
-Two clipboard systems share one state slot and the OS clipboard but not a vocabulary or a rule set. The list half writes the slot from outside the event pipeline, which the pipeline then reverts, and never tells the list which type it is. So the slot is empty, the Paste button has nothing to look at, and any list accepts any list's items.
+Two clipboards share one state slot. The state helper (`state/clipboard.clj`) writes the slot itself, from inside handlers, behind the pipeline's back, so the handler's own write-back undoes it. It also talks to the OS clipboard synchronously, so whoever calls it waits: a handler on the agent, or a render function on the FX thread. The views then each worked out "is there anything to paste?" for themselves: from dialog-local slots fed by callbacks nobody calls, or from an OS read while rendering. And a list's clipboard type is a prop that two of the four lists don't pass.
 
 ## 3. Reuse / extend
 
 | Existing thing (file:line) | How it's reused |
 |---|---|
-| `[:ui :clipboard]` (`domains.clj:131-132`), `subs/clipboard` (`subs.clj:96-97`), `ex/clipboard` | The single source of truth. |
-| `chains/deep-copy-items` (`chains.clj:217-239`) | Extended to regenerate nested ids. |
-| `helpers/normalize-selected-ids`, `collect-by-ids`, `remove-by-ids`, `insert-after-id` (list handlers) | Unchanged. |
-| `ser/serialize-for-clipboard`, `deserialize-from-clipboard` (`state/serialization.clj:204-238`) | The EDN text format for the OS clipboard. |
-| `:history/description` on handler results (`handlers/history.clj`) | "Cut Item(s)" as one undo label. |
-| The file-chooser effect's `Platform/runLater` pattern (`events/core.clj:272-329`) | Shape of `:clipboard/write` and `:clipboard/read`. |
+| `[:ui :clipboard]` (`state/domains.clj:153-154`), `ex/clipboard` (`state/extractors.clj:141-142`), `subs/clipboard` (`subs.clj:91-92`) | The one clipboard |
+| `h/current-time-ms` (`events/helpers.clj:11-18`) | `:copied-at` from the event's `:time` co-effect, so copy handlers stay pure |
+| `effect-show-file-chooser` (`events/core.clj:353-410`): `Platform/runLater`, then `dispatch` | The shape of `:clipboard/read`. Its callback is queued on the agent, as every "call back later" effect's is since output-runtime Phase 3 |
+| `safety-guard/parked` (`events/safety_guard.clj:34-37`) | Strips `:state`, `:time` and `:fx/event` from the paste the read continues with. Moves to `events/helpers.clj`; `safety-guard/ask` (`:53`) calls it there |
+| `h/show-notice` (`events/helpers.clj:109-123`) | "Nothing to paste here" |
+| `h/handle-copy-to-clipboard`, `h/handle-paste-from-clipboard` (`events/helpers.clj:49-96`), including the unused `transform-fn` (`:90`) | Cell copy and paste keep their shape; 4b passes `chains/fresh-ids` as `transform-fn` |
+| The pure parts of `state/clipboard.clj`: the envelope check in `read-from-system-clipboard` (`:85-95`), the type rule of `get-effects-to-paste` (`:234-239`), `serialize-effect-chain` (`:174-206`), the clip shapes built by the `copy-*!` fns (`:252-254, 268-270, 283-285, 317-319`) | They become the pure helpers in §4 |
+| `ser/serialize` (`state/serialization.clj:25-39`) and `ser/deserialize` (`:41-69`) | The clipboard text: one line of EDN (`pr-str`), read back silently |
+| `chains/deep-copy-item(s)` (`animation/chains.clj:217-239`) | Rebuilt on NEW `fresh-ids` with the same contract; now nested `:effects` get new ids too |
+| `cue-chains/timeline-cue?` (`animation/cue_chains.clj:58-74`) | 4b: a timeline cell isn't pasted into a list |
+| `normalize-selected-ids`, `collect-by-ids`, `remove-by-ids`, `insert-after-id` (`events/handlers/list/helpers.clj:56, 34, 122, 218`) | Unchanged. Cut uses what copy and delete use |
+| `:history/description` on the change event (`events/handlers/history.clj:250`; Delete sets it at `events/handlers/list.clj:227-230`) | "Cut Item(s)" |
+| The dev-mode lost-update detector (`events/core.clj:124-158`) | Shows 4a works: p9 reports nothing afterwards |
+| The headless platform's clipboard (`deps.edn:225-229`) | UI tests check the OS text without touching the Mac's pasteboard |
 
 ## 4. Changes per namespace
 
-- `laser-show.state.clipboard` (`clipboard.clj`) becomes pure helpers: `clipboard-types` (the five live types), `compatible? [clip target-type]`, `->system-text [clip]`, `<-system-text [text]` (nil unless the text is a valid envelope). Removed: `set-internal-clipboard!`, `get-internal-clipboard`, `get-clipboard`, every `copy-*!`, and the helpers that only tests used.
+Paths are under `src/laser_show/` unless they start with `test/`.
+
+### Step 4a: one clipboard
+
+- `laser-show.state.clipboard` (`state/clipboard.clj`) becomes pure: no `state.core`, no JavaFX, no `fx/on-fx-thread`. New ns doc: what a clip is, where it lives, and that only two effects in `events/core.clj` touch the OS clipboard.
+  - Kept: `clipboard-types` (`:40-42`), `serialize-effect-chain` (`:174-206`).
+  - NEW `list-clip [type items now]`: the shapes `copy-cue-chain-items!`, `copy-item-effects!` and `copy-timeline-tracks!` build today (§7), without writing anything.
+  - NEW `cell-clip [type cell now]`: `{:type type :data cell :copied-at now}`.
+  - NEW `->system-text [clip]`: `(ser/serialize clip)`, one line of EDN (§10 says why not pretty-printed).
+  - NEW `<-system-text [text]`: the clip, or nil. It returns nil unless the text is a map with a known `:type` (the checks at `:85-95`), and it doesn't parse a text over 5,000,000 characters (p17's largest clip is 196,761).
+  - NEW `accepts? [clip target]` and `payload [clip target]`: today's rules, unchanged (§7, first table).
+  - NEW `adopt [state clip]`: puts a clip read from the OS clipboard in the slot, but only while the slot is still empty.
+  - Removed: `get-internal-clipboard`, `set-internal-clipboard!`, `get-system-clipboard`, `copy-to-system-clipboard!`, `read-from-system-clipboard`, `get-clipboard`, `clear-clipboard!`, `clipboard-has-type?`, `clipboard-empty?`, `copy-cell-assignment!`, `paste-cell-assignment`, `can-paste-cell-assignment?`, `copy-effect-chain!`, `get-effects-to-paste`, `copy-cue-chain!`, `copy-effects-cell!`, `copy-cue-chain-items!`, `copy-timeline-tracks!`, `copy-item-effects!` and `get-clipboard-description`, with the stale comments (`:21-24`, `:156`).
 - `laser-show.events.core`:
-  - NEW effect `:clipboard/write` (the clip map): serializes and writes on the FX thread with `runLater`, never derefs, never blocks the agent.
-  - NEW effect `:clipboard/read` (`{:on-read event}`): reads and parses on the FX thread, then dispatches `(assoc on-read :system-clipboard parsed-or-nil)`.
-  - Remove `:clipboard/copy-effects`, `:clipboard/paste-effects`, `:clipboard/paste-projector-effects` (`:129-153`, `:450-452`) and their fallback handling in `dispatch!` (`:505-513`).
+  - NEW effect `:clipboard/write`. Its value is a clip. It serializes on the agent with `->system-text` (at most 3.6 ms for a 300-clip timeline cell, p17), then `Platform/runLater` puts the text on the OS clipboard through NEW private `put-system-clipboard-text!`. A failure logs a WARN. Nothing derefs it, and no event follows.
+  - NEW effect `:clipboard/read`. Its value is `{:then event}`. `Platform/runLater` reads the text through NEW private `system-clipboard-text` (`hasString`, then `getString`) and parses it with `<-system-text`, then calls `(dispatch (assoc then :clipboard/system clip))`, with `clip` possibly nil. This is a "call back later" effect: in production, the follow-up waits its turn on the agent.
+  - Remove `effect-clipboard-copy-effects` and `effect-clipboard-paste-effects` (`:212-229`), their rows (`:551-553`) and their docstring lines (`:527-528`). The `effects` docstring lists the two new effects with their class ("no follow-up"; "later, FX thread").
+  - Ns doc (`:36-37`): drop "the clipboard helper (state/clipboard.clj)" from the writers outside the pipeline.
+- `laser-show.events.helpers`:
+  - NEW `parked [event]`, moved from `events/safety_guard.clj:34-37`.
+  - NEW `with-clipboard [event f]`, the one place a paste looks at the clipboard:
+    - If the slot is empty and the event has no `:clipboard/system` key, it returns `{:clipboard/read {:then (parked event)}}`.
+    - Otherwise it calls `(f state' clip)`, where `state'` is `(clipboard/adopt state (:clipboard/system event))` and `clip` is `state'`'s slot.
+    - If `f` returns nil after a read, it returns `(show-notice state' "Nothing to paste here" :info)`. If `f` returns nil without a read (the slot holds a clip this target doesn't take), it returns `{:state state'}`.
+  - `handle-copy-to-clipboard` (`:49-72`) becomes `[state source-path clipboard-type now]`. It returns `{:state (assoc-in state [:ui :clipboard] clip) :clipboard/write clip}` with `clip` from `clipboard/cell-clip`. The `system-clipboard-fn` parameter goes.
+  - `handle-paste-from-clipboard` (`:74-96`) becomes `[event target-path expected-type & [transform-fn]]`, built on `with-clipboard`.
+- `laser-show.events.safety-guard`: `parked` (`:34-37`) goes; `ask` (`:53`) calls `h/parked`.
 - `laser-show.events.handlers.list`:
-  - `handle-copy-selected` (`:234`) returns `{:state (assoc-in state [:ui :clipboard] clip) :clipboard/write clip}`.
-  - NEW `handle-cut-selected` (`:list/cut-selected`): the clipboard write and the cleared selection are one `:state`; it then `:dispatch`es the list's change event with `:history/description "Cut Item(s)"`, so the document edit is one undo step and the copy cannot be lost.
-  - `handle-paste-items` (`:251`) reads `[:ui :clipboard]`, falls back to `:clipboard/read` when the slot is empty (D8), and ignores a clip whose type is not compatible with the list.
-  - NEW pure `list-clipboard-type [component-id]` (the table in §7). Views no longer pass a type.
-- `laser-show.events.helpers` (`helpers.clj:49-96`): cell copy/paste use the same slot and `:clipboard/write`; paste regenerates ids.
-- `laser-show.animation.chains` (`chains.clj:217-239`): `deep-copy-item` regenerates ids of nested `:effects` too.
-- `laser-show.views.components.list`: remove the `:on-copy` / `:on-copy-fn` / `:clipboard-items` props and the `:clipboard-type` defaulting (`:142`, `:153`, `:861`); Paste's `:disable` comes from NEW `subs/clipboard-accepts?`; add a Cut button if D9 says so.
-- `laser-show.subs`: NEW `clipboard-accepts? [context type]`.
-- `laser-show.views.dialogs.effect-chain-editor` (`:95`, `:144-146`) and `laser-show.views.tabs.projectors` (`:520`, `:613`): drop the render-time OS read and the dead `:on-copy-fn`.
-- `laser-show.events.handlers.cue-chain` (`:158-175`) and `cue_chain_editor.clj:453-457`: remove `:cue-chain/set-clipboard`, `:cue-chain/set-item-effects-clipboard` and the dialog-local clipboards; `domains.clj:145` loses `:clipboard nil`.
-- `effects.clj:172-176` + route `:207`, `projector.clj:345-348` + route `:430`: delete the two stubs.
-- Check before deleting: `copy-timeline-tracks!` and the `:timeline-tracks` type look dead since the timeline stopped using `list-editor` (only `list_handlers_test.clj:425-439` uses them).
+  - `handle-copy-selected` (`:234-248`) returns `{:state (assoc-in state [:ui :clipboard] clip) :clipboard/write clip}`. `clip` comes from `clipboard/list-clip`, with the event's `:clipboard-type` (default `:cue-chain-items`, as today) and `(h/current-time-ms event)`.
+  - `handle-paste-items` (`:251-281`) goes through `h/with-clipboard`, with the items from `clipboard/payload`. Lines `:264-280` are unchanged. Docstring `:252-255` updated.
+- `laser-show.events.handlers.grid` (`:155-169`) and `laser-show.events.handlers.effects` (`:58-72`): use the helpers' new signatures; the `clipboard` require goes where nothing uses it (`grid.clj:9`, `effects.clj:21`).
+- `laser-show.events.handlers.menu`: `handle-edit-copy` and `handle-edit-paste` (`:298-299`, `:318-319`) pass the event's `:time` into the events they build, so `:copied-at` comes from the co-effect.
+- `laser-show.events.handlers.cue-chain`: remove `handle-cue-chain-set-item-effects-clipboard` and `handle-cue-chain-set-clipboard` (`:158-174`), their routes (`:277-278`), `item-effects-ui-path` (`:37-42`, used only by the first), the `:clipboard nil` reset (`:61`), the require (`:25`) and the ns doc line (`:11`).
+- `laser-show.events.handlers.effects`: remove `handle-effects-insert-pasted` (`:167-174`) and its route (`:205-206`).
+- `laser-show.subs`: NEW `can-paste? [context target]`. Per D13 B, it is true when the slot is empty or `(clipboard/accepts? clip target)`.
+- `laser-show.views.components.list`:
+  - `list-sidebar`'s Paste is disabled when `(not (fx/sub-ctx context subs/can-paste? clipboard-type))` (`:615`).
+  - Remove `:clipboard-items`, `:on-copy` and `:on-copy-fn` (`:598, 771, 830-831, 846, 859, 874, 876, 907, 917`).
+- `laser-show.views.dialogs.cue-chain-editor`: remove `get-item-effects-clipboard` (`:424-427`), `clipboard` from the destructuring (`:442`), `clipboard-items` and `item-effects-clipboard` (`:469-473`), and both lists' `:on-copy-fn` and `:clipboard-items` (`:536-539`, `:563-568`). Update the ns doc line (`:12`).
+- `laser-show.views.dialogs.effect-chain-editor`: remove the render-time read (`:95`), `:on-copy-fn` (`:144-145`), `:clipboard-items` (`:146`) and the require (`:20`).
+- `laser-show.views.tabs.projectors`: remove the render-time read (`:560`), the `:clipboard-items` prop and its doc (`:409-410, 427, 605`) and the require (`:15`).
+- `laser-show.views.components.title-bar` (`:105-106, 132-136`): Edit > Paste is disabled unless `can-paste?` holds for the active tab's cell type (`:grid` → `:cue-chain`, `:effects` → `:effects-cell`). On other tabs it is disabled.
+- `laser-show.views.components.grid-cell` (`:280-282, 296-298, 405-407`): the cell menus' Paste items get the same `:disable`, for `:cue-chain` or `:effects-cell`.
+- `laser-show.state.domains`: drop `:clipboard nil` from the Cue Chain Editor's default (`:169`). The `:clipboard` doc (`:153-154`) says what a clip is and that only handlers write it.
+
+### Step 4b: types and ids
+
+- `laser-show.state.clipboard`:
+  - NEW `list-type [component-id]` (the table in §7).
+  - `accepts?` and `payload` become strict, with D9 A's two conversions (§7, second table).
+  - `clipboard-types` becomes the four written types; `<-system-text` returns nil for any other type.
+  - `list-clip` drops `:timeline-tracks`.
+- `laser-show.events.handlers.list`: copy and paste take the type from `(clipboard/list-type component-id)` and ignore an event's `:clipboard-type`.
+- `laser-show.views.components.list`: remove the `:clipboard-type` plumbing (`:22, 139-143, 148-154, 875, 916`). Paste's target is `(clipboard/list-type component-id)`.
+- `laser-show.views.tabs.projectors` (`:424-426`): `:on-change-params` loses `:clipboard-type`.
+- `laser-show.animation.chains`:
+  - NEW `fresh-ids [x]`: every uuid that is the `:id` of a map inside `x` is replaced by a new one, everywhere it appears in `x`. So `:track-id` follows its track, and a uuid not defined inside `x` stays.
+  - `deep-copy-item` (`:217-229`) becomes `fresh-ids`: same contract, and now nested `:effects` and every other inner `:id` too. Callers don't change: `events/handlers/list.clj:242, 266` and `timeline/model.clj:576` (a duplicated clip's effects get new ids too).
+- `laser-show.events.helpers`:
+  - `handle-copy-to-clipboard`: a cell that is nil, or has no `:items` and no `:tracks`, copies nothing (`{:state state}`, no write).
+  - Grid and effects paste pass `chains/fresh-ids` as `transform-fn`.
+
+### Step 4c: Cut
+
+- `laser-show.events.handlers.list`: NEW `handle-cut-selected` (`:list/cut-selected`). It normalizes the selection as copy and delete do (`:217-221`, `:237-241`), then returns:
+  ```clojure
+  {:state (-> state (assoc-in [:ui :clipboard] clip) (assoc-in [:list-ui component-id] cleared))
+   :clipboard/write clip
+   :dispatch (assoc on-change-params :event/type on-change-event :items new-items
+                    :history/description "Cut Item(s)")}
+  ```
+  It is routed next to `:list/copy-selected` (`:439`), and the `handle` docstring (`:407-410`) lists it.
+- `laser-show.views.components.list`:
+  - NEW `dispatch-cut-selected!`; ⌘X (`:775-779`) dispatches it.
+  - D9 A: a Cut button, `#chain-cut-selection`, between Copy and Paste (`:686-703`). It is disabled with nothing selected, and its tooltip reads "Cut the selected items (⌘X)" (`shortcuts/shortcut-text`, `views/components/shortcuts.clj:12-23`).
 
 ## 5. State placement
 
 | Key / path | Lives in | Written by | Undo / dirty? |
 |---|---|---|---|
-| `[:ui :clipboard]` `{:type … :items/:data … :copied-at ms}` | app state, UI | copy, cut and cell-copy **handlers only** (returned in `:state`) | No / no: not a document root, not saved. `reset-session` leaves it, so it survives Open/New (`persistent.clj:135-150`) |
-| OS clipboard text | the OS | `:clipboard/write` effect (FX thread) | n/a |
-| `[:ui :dialogs :cue-chain-editor :clipboard]`, `[… :item-effects-ui … :clipboard]` | removed | | |
+| `[:ui :clipboard]`: a clip (§7) or nil | app state, UI (`state/domains.clj:153-154`) | handlers only: copy and cut (in the `:state` they return), and a paste whose read found a clip while the slot was empty (`adopt`) | No and no: `:ui` is not a document root (`state/history.clj:52-54`). It isn't saved, and it survives Open and New (`state/persistent.clj:181-202`) |
+| The OS clipboard's text (one line of EDN) | the OS | the `:clipboard/write` effect, on the FX thread | n/a |
+| The paste a read continues with (`:then`) | the effect's closure, until the FX thread reads | the `:clipboard/read` effect | n/a |
+| `[:ui :dialogs :cue-chain-editor :clipboard]`, `[:ui :dialogs :cue-chain-editor :item-effects-ui <path> :clipboard]` | removed | | |
 
-Nothing writes the context from outside the event pipeline any more (the writers survey counted the clipboard helper among the out-of-pipeline writers).
+After 4a nothing writes `[:ui :clipboard]` from outside the pipeline, so the direct-writes plan (02) has no clipboard row left.
 
 ## 6. Events and effects
 
-| Event / effect | Exists? | Dispatched from | Pure? |
+| Event / effect | Exists? | Dispatched from (file:line) | Pure? |
 |---|---|---|---|
-| `:list/copy-selected` | changed (writes `[:ui :clipboard]`, requests the OS write) | Ctrl+C, Copy button | yes |
-| `:list/cut-selected` | NEW | Ctrl+X, Cut button (D9) | yes |
-| `:list/paste-items` (+ optional `:system-clipboard`) | changed | Ctrl+V, Paste button, `:clipboard/read` callback | yes |
-| `:grid/copy-cell`, `:grid/paste-cell`, `:effects/copy-cell`, `:effects/paste-cell` | changed (same slot, ids regenerated) | Edit menu, cell context menus | yes |
-| `:clipboard/write` | NEW effect | the copy/cut handlers | effect |
-| `:clipboard/read` | NEW effect | `:list/paste-items` when the slot is empty | effect |
-| `:clipboard/copy-effects`, `:clipboard/paste-effects`, `:clipboard/paste-projector-effects` | removed | – | – |
+| `:list/copy-selected` | changed. 4a: the slot in `:state` plus `:clipboard/write`. 4b: the type from the component id | Copy button `views/components/list.clj:694`, ⌘C `:764-767` (both through `dispatch-copy-selected!`, `:136-143`); ⌘X `:777` until 4c | yes |
+| `:list/paste-items` | changed. 4a: through `with-clipboard`. 4b: strict types, fresh ids | Paste button `:703`, ⌘V `:769-773` (through `dispatch-paste-items!`, `:145-154`); NEW: the `:clipboard/read` callback | yes |
+| `:list/cut-selected` | NEW (4c) | ⌘X `:775-779`; the Cut button (NEW) | yes |
+| `:list/delete-selected` | unchanged | Delete button `:711`, Delete key `:791-794`; ⌘X `:779` until 4c | yes |
+| `:grid/copy-cell`, `:effects/copy-cell` | changed (4a; in 4b an empty cell copies nothing) | the cell menus `grid_cell.clj:279, 404`; `:edit/copy` `events/handlers/menu.clj:298-299` | yes |
+| `:grid/paste-cell`, `:effects/paste-cell` | changed (4a; fresh ids in 4b) | the cell menus `grid_cell.clj:282, 298, 407`; `:edit/paste` `menu.clj:318-319`; NEW: the `:clipboard/read` callback | yes |
+| `:edit/copy`, `:edit/paste` | routing unchanged (`menu.clj:283-323`, routes `:463-464`); Paste's enablement changes (4a) | the Edit menu, ⌘C and ⌘V accelerators (`title_bar.clj:127-136`) | yes |
+| `:clipboard/write` | NEW effect | the copy and cut handlers | effect: serialize on the agent, set on the FX thread |
+| `:clipboard/read` | NEW effect | `h/with-clipboard` (a paste with an empty slot) | effect: read and parse on the FX thread, then dispatch |
+| `:cue-chain/set-clipboard`, `:cue-chain/set-item-effects-clipboard` | removed | only the dead `:on-copy-fn`s (`cue_chain_editor.clj:536-538, 563-567`) | – |
+| `:clipboard/copy-effects`, `:clipboard/paste-effects` (effects), `:effects/insert-pasted` | removed | nothing (`events/core.clj:552-553`; `:224`) | – |
+
+The show lock refuses `:grid/paste-cell`, `:effects/paste-cell` and `:edit/paste` (`events/show_lock.clj:28-30`) before the handler runs (`:97-107`). So a locked paste asks nothing of the OS clipboard, and a paste that resumes after a read is refused as well if the lock came on in between.
 
 ## 7. Data examples and invariants
 
-Clipboard envelope: `{:type :cue-chain-items :items [{:id #uuid "…" :type :preset :preset-id :circle …}] :copied-at 1731500000000}`.
+**Clips** (the slot's value; the OS text is the same map as one line of EDN):
 
-Which list uses which type (derived from the component id):
+```clojure
+{:type :cue-chain-items :items [{:id #uuid "…" :type :preset :preset-id :circle :params {…} :effects []}] :copied-at 1763650000000}
+{:type :item-effects :effects [{:id #uuid "…" :effect-id :axis-transform :enabled? true :params {…}}] :copied-at 1763650000000}
+{:type :cue-chain :data {:items […] :destination-zone {:zone-group-id :all}} :copied-at 1763650000000}
+{:type :effects-cell :data {:items […] :active? true} :copied-at 1763650000000}
+```
 
-| `component-id` | Clipboard type |
+**What each target takes in 4a: today's rules, unchanged.**
+
+| target ↓ \ clip type → | `:cue-chain-items` | `:item-effects` | `:effect-chain`, `:effect` | `:cue-chain` | `:effects-cell` |
+|---|---|---|---|---|---|
+| a list of type `:cue-chain-items` (every list but a projector chain) | its items | – | – | – | – |
+| a list of type `:item-effects` (a projector chain) | – | its effects | its effects | – | – |
+| a cue cell (`:cue-chain`) | – | – | – | the cell | – |
+| an effects cell (`:effects-cell`) | – | – | – | – | the cell |
+
+**4b (D9 A): each list's type comes from its id.**
+
+| `component-id` (built at) | List type |
 |---|---|
-| `[:cue-chain col row]` | `:cue-chain-items` |
-| `[:item-effects col row]` | `:item-effects` |
-| `[:effect-chain col row]` | `:item-effects` |
-| `[:projector-effects projector-id]` | `:item-effects` |
+| `[:cue-chain col row]` (`cue_chain_editor.clj:525`) | `:cue-chain-items` |
+| `[:item-effects col row]` (`cue_chain_editor.clj:554`) | `:item-effects` |
+| `[:effect-chain col row]` (`effect_chain_editor.clj:137`) | `:item-effects` |
+| `[:projector-effects projector-id]` (`projectors.clj:418`) | `:item-effects` |
+| anything else | nil: copy and paste do nothing |
 
-(Effect lists share a type because their items have the same shape, so effects can be copied between an item's effects, an effect cell and a projector chain.)
+| clip | into a cue list | into an effect list | onto a cue cell | onto an effects cell |
+|---|---|---|---|---|
+| `:cue-chain-items` | its items | – | – | – |
+| `:item-effects` | – | its effects | – | – |
+| `:cue-chain`, not a timeline cue | the cell's items (conversion) | – | the cell | – |
+| `:cue-chain`, a timeline cue (`cue-chains/timeline-cue?`) | – | – | the cell | – |
+| `:effects-cell` | – | the cell's effects (conversion) | – | the cell |
 
-| Clipboard holds | Target | Result |
+(Effect lists share one type because their items have the same shape: effects move between an item's effects, an effects cell's chain and a projector chain.)
+
+**A paste in 4a** (D8 A, D13 B, D14 A):
+
+| Slot | OS clipboard | Target takes it? | What happens | Paste enabled? |
+|---|---|---|---|---|
+| a clip | anything | yes | pasted, in one event | yes |
+| a clip | anything | no | nothing | no; ⌘V does nothing |
+| empty | a clip (another instance, an earlier run, EDN text) | yes | `:clipboard/read`; the slot gets the clip; pasted. Two events | yes |
+| empty | a clip | no | read; the slot gets the clip; the notice "Nothing to paste here" | yes before; no after |
+| empty | plain text, nothing, or an unknown type | – | read; the slot stays empty; the notice | yes |
+| empty, then a copy before the read comes back | anything | – | `adopt` keeps the copy; the paste uses it | yes |
+
+**The agent after 4a** (p10's setup: the FX thread busy for 500 ms):
+
+| A BPM change queued behind | Today (p10) | After 4a |
 |---|---|---|
-| `:cue-chain-items` | cue chain list | pasted after the last selected item, fresh ids for items, nested effects and group children |
-| `:cue-chain-items` | an effect list | **rejected**, no state change (p7 today pastes it) |
-| `:item-effects` | any effect list | pasted |
-| `:cue-chain` (a copied grid cell) | cue chain list | rejected, or the cell's items appended (D9) |
-| slot empty, OS text is a valid envelope | compatible list | `:clipboard/read`, then pasted |
-| slot empty, OS text is anything else | any | nothing happens |
+| nothing | 1–2 ms | the same |
+| a list copy | 514–535 ms | a few ms: the copy only queues a `runLater` |
+| a list paste, slot holding a clip | 503–579 ms | a few ms: no read |
+| a list paste, slot empty | 503–579 ms | a few ms. The paste itself lands once the FX thread is free; the agent doesn't wait for it |
 
-Invariants:
-1. Copy never touches the document: no undo entry, `[:project :dirty?]` unchanged.
-2. Cut is one undo step labelled "Cut Item(s)". Because the clip is in the same `:state` as the selection change, a failed OS write cannot lose the cut items.
-3. Paste always regenerates ids at every depth.
-4. A clip is pasted only into a compatible target; otherwise the paste is a no-op.
-5. `[:ui :clipboard]` is written only by handlers.
-6. No code path reads the OS clipboard during render.
+**`chains/fresh-ids` (4b):**
+
+```clojure
+(chains/fresh-ids {:editor-type :timeline
+                   :tracks [{:id t1 :type :track :name "Track 1"}]
+                   :items  [{:id c1 :track-id t1 :preset-id :circle :effects [{:id e1 :effect-id :scale}]}]
+                   :destination-zone {:zone-group-id :all}})
+;; => {:editor-type :timeline
+;;     :tracks [{:id T1 :type :track :name "Track 1"}]
+;;     :items  [{:id C1 :track-id T1 :preset-id :circle :effects [{:id E1 :effect-id :scale}]}]
+;;     :destination-zone {:zone-group-id :all}}       ; T1, C1, E1 new; :track-id follows its track
+
+(chains/fresh-ids {:id g :type :group :items [{:id a :effects [{:id e}]}]})
+;; => {:id G :type :group :items [{:id A :effects [{:id E}]}]}
+
+(chains/fresh-ids [{:id c :track-id t}])   ; a duplicated clip: its track isn't inside
+;; => [{:id C :track-id t}]
+```
+
+**Invariants**
+
+1. `[:ui :clipboard]` is written only through the `:state` a handler returns. No code under `state/` or `views/` writes it. p9's detector reports nothing for a copy.
+2. Only the `:clipboard/read` effect reads the OS clipboard, and only for a paste while the slot is empty. No render function reads it.
+3. The event agent never waits for the FX thread for the clipboard: no `fx/on-fx-thread` deref is left in the clipboard code.
+4. A copy never touches the document: no undo entry, and `[:project :dirty?]` is unchanged.
+5. The Paste buttons, the Paste menu items and ⌘V agree. When Paste is enabled, a paste either pastes or says "Nothing to paste here"; when it's disabled, ⌘V does nothing.
+6. With an empty slot, the slot takes a clip from the OS clipboard only if nothing was copied in the meantime (`adopt`).
+7. 4b: a clip is pasted only where the second table says; anywhere else the paste is a no-op.
+8. 4b: a paste gives every item, group, effect, track and clip a new id; references inside the pasted value follow, and references outside it stay.
+9. 4b: an empty cell copies nothing, so a paste can never empty a cell.
+10. 4a: the cut items are in the slot before the delete runs, so a failed OS write can't lose them. 4c: a cut is one event and one undo step, "Cut Item(s)".
+11. The slot survives File > Open and File > New.
 
 ## 8. Tests (named test vars + fixtures)
 
-Pure, in `laser-show.events.list-handlers-test` (extend; plain state maps, no OS clipboard):
-- `copy-selected-writes-the-internal-clipboard-test`, `copy-selected-requests-an-os-write-test`
-- `cut-selected-is-one-state-update-test`, `cut-selected-has-one-undo-label-test` (through `events/handle-event-pipeline`, like `history_handlers_test.clj:30-39`)
-- `paste-rejects-an-incompatible-type-test`, `paste-regenerates-ids-at-every-depth-test`
-- `paste-with-empty-slot-asks-for-the-system-clipboard-test`, `paste-with-system-clipboard-payload-test`
-- `list-clipboard-type-test` (the table above)
+**Unit tests**, pure: plain state maps or `domains/build-initial-state`, no FX toolkit and no OS clipboard. Run them with the effect maps their handlers return; nothing runs `:clipboard/write` or `:clipboard/read`.
 
-Elsewhere:
-- `laser-show.animation.chains-test` (extend): `deep-copy-item-regenerates-nested-effect-ids-test`.
-- `laser-show.events.grid-handlers-test` (extend): `paste-cell-regenerates-ids-test`, `cell-copy-writes-the-shared-clipboard-test`.
-- `laser-show.state.clipboard-test` (rewrite): `round-trip-text-test`, `parse-rejects-foreign-text-test`. Pure; the unit suite no longer touches the OS clipboard.
-- `laser-show.subs-test` (extend): `clipboard-accepts-test`.
+4a:
+- `laser-show.state.clipboard-test` (rewritten; no `init-state!`):
+  - `list-clip-shapes-test`, `cell-clip-shapes-test` (`:copied-at` from the argument)
+  - `system-text-round-trip-test`: `->system-text`, then `<-system-text`, gives the clip back, uuids included.
+  - `system-text-ignores-foreign-text-test`: `"hello"`, `""`, `"{:a 1}"` (no `:type`), an unknown type, `"[1 2]"`, broken EDN `"{:type"`, and a text of 5,000,001 characters starting with `{`.
+  - `accepts-keeps-todays-rules-test` (the first table).
+  - `adopt-fills-only-an-empty-slot-test`.
+- `laser-show.events.list-handlers-test` (extend):
+  - `copy-selected-writes-the-slot-and-asks-for-an-os-write-test`: the slot in `:state` equals the `:clipboard/write` value, and `:copied-at` is the event's `:time`.
+  - `copy-selected-with-nothing-selected-does-nothing-test`.
+  - `paste-with-a-clip-reads-only-the-slot-test`: no `:clipboard/read` in the result.
+  - `paste-with-an-empty-slot-asks-for-the-system-clipboard-test`: exactly `{:clipboard/read {:then e}}`, where `e` has no `:state`, `:time` or `:fx/event`.
+  - `paste-after-the-read-adopts-and-pastes-test`.
+  - `paste-after-a-read-that-found-nothing-says-so-test`.
+  - `paste-keeps-a-clip-copied-during-the-read-test`.
+  - Rewritten on state, without `with-redefs` of OS functions: `timeline-track-copy-uses-own-clipboard-type-test` (`:426-440`) and `paste-effects-into-an-item-effects-list-test` (`:446-468`).
+- `laser-show.events.grid-handlers-test`: `handle-grid-copy-cell-test` (`:187-196`) also checks `:clipboard/write`. NEW: `paste-cell-with-an-empty-slot-asks-for-the-system-clipboard-test`.
+- `laser-show.events.menu-handlers-test`: the Edit > Copy tests (`:38-63`) also check `:clipboard/write` and no longer touch the OS. NEW: `edit-paste-with-an-empty-slot-asks-for-the-system-clipboard-test`.
+- `laser-show.events.show-lock-test`: NEW `locked-paste-asks-nothing-of-the-system-clipboard-test`. `:grid/paste-cell`, `:effects/paste-cell` and `:edit/paste`, with an empty slot and the lock on, give only `#{:state :dispatch-later}` (the lock's notice), through `handle` (`:33-36`).
+- `laser-show.events.core-test`: `effects-and-co-effects-are-shared-maps-test` (`:37-48`) finds `:clipboard/write` and `:clipboard/read`, and no `:clipboard/copy-effects` or `:clipboard/paste-effects`.
+- `laser-show.subs-test` (a real cljfx context, `context` at `:33-34`): NEW `can-paste-test`. With an empty slot it is true for every target; with a clip, only for the targets that take it.
 
-UI, `laser-show.ui-test.cue-chain-list-test` (extend; uses the real OS clipboard through the headless platform):
-- `copy-enables-the-paste-button-test` (p5; fails today)
-- `cross-list-paste-is-rejected-test` (p7)
-- `cut-then-paste-restores-the-items-test`
+4b:
+- `laser-show.state.clipboard-test`: `list-type-test` (the id table), `accepts-strict-types-and-conversions-test` (the second table, the timeline cell included).
+- `laser-show.events.list-handlers-test`:
+  - `paste-refuses-another-lists-kind-test`: cue items into `[:effect-chain 0 0]` and into `[:item-effects 0 0]` give no `:dispatch`.
+  - `paste-a-copied-cell-into-a-cue-list-test`, `paste-a-copied-effects-cell-into-an-effect-list-test`, `paste-a-timeline-cell-into-a-list-does-nothing-test`.
+  - `paste-regenerates-ids-at-every-depth-test`.
+- `laser-show.animation.chains-test`: NEW `fresh-ids-renames-every-inner-id-test`, `fresh-ids-keeps-inner-references-test` (`:track-id`), `fresh-ids-leaves-outside-references-test`, `deep-copy-item-regenerates-nested-effect-ids-test`. `deep-copy-item-test` and `deep-copy-items-test` (`:67-116`) pass unchanged.
+- `laser-show.events.grid-handlers-test`: `paste-cell-regenerates-ids-test`, `copy-an-empty-cell-copies-nothing-test`.
+- `laser-show.events.menu-handlers-test`: `edit-copy-on-an-empty-cell-keeps-the-clipboard-test`.
+- `laser-show.events.timeline-handlers-test`: the duplicate-clips tests pass unchanged.
 
-Run: `clj -M:mac-arm:test list-handlers clipboard chains grid-handlers subs`, then `clj -M:test-ui:mac-arm:test-ui-headless -n laser-show.ui-test.cue-chain-list-test`, then both full suites.
+4c:
+- `laser-show.events.list-handlers-test`:
+  - `cut-selected-is-one-state-update-test`: the clip and the cleared selection in one `:state`, `:clipboard/write`, and a `:dispatch` labelled "Cut Item(s)".
+  - `cut-selected-is-one-undo-step-test`: through `events/handle-event-pipeline` and its `:dispatch`, as `history_handlers_test.clj:32-39` runs them. One undo entry, "Cut Item(s)"; the write effect isn't run.
 
-## 9. Out of scope / alternatives considered
+**UI tests** (TestFX; `(use-fixtures :once fixtures/with-toolkit)` and `(use-fixtures :each fixtures/with-app)`; always the headless platform's clipboard, never the Mac's):
+- NEW `laser-show.ui-test.clipboard-test`, because these behaviours span the main window and two dialogs. Each test notes the probe it comes from and what it gave today:
+  - 4a:
+    - `list-copy-lands-in-the-clipboard-test` (p5, p9; today the slot stays `nil`)
+    - `copy-puts-edn-on-the-system-clipboard-test` (the headless clipboard's text reads back as the slot's clip)
+    - `copy-and-paste-do-not-hold-up-other-events-test` (p10). With the FX thread busy for 500 ms, a BPM change behind a copy, and behind a paste with a full slot, lands within 250 ms. Today: 503–579 ms.
+    - `nothing-reads-the-system-clipboard-while-rendering-test` (p11). `with-redefs` counts calls to `events/system-clipboard-text`. Mount the Projectors tab with a chain, open the effects grid's chain editor and change selections: 0 calls.
+    - `copy-lights-the-same-chains-paste-test` (p11; red today)
+    - `cue-editor-paste-lights-after-a-copy-test` (p5; red today: `[true true]`)
+    - `paste-button-and-shortcut-agree-test` (p12). In the projector chain and in the effects grid's chain editor, with a given slot, Paste is enabled exactly when ⌘V changes the items. Red today.
+    - `cut-with-a-failing-os-write-keeps-the-items-test` (p16). `with-redefs` makes `events/put-system-clipboard-text!` throw. ⌘X, then ⌘V, gets the items back. Today: 2 → 2.
+    - `fresh-app-pastes-from-the-system-clipboard-test` (D8 A). With a clip's EDN on the headless clipboard and an empty slot, ⌘V in the cue list pastes it, and the slot then holds it.
+  - 4b: `lists-refuse-each-others-items-test` (p7, p13), `cell-copy-pastes-into-a-list-test` (p6).
+  - 4c: `cut-then-paste-restores-the-items-test`, `cut-is-one-undo-step-test`.
+- `laser-show.ui-test.setup-dialogs-test`: `copy-an-effect-to-another-projector-test` (`:280-295`) waits on `[:ui :clipboard :type]` instead of `clipboard/get-clipboard` (`:287`).
+- `laser-show.ui-test.cue-chain-list-test` (4c): `list-buttons-say-what-they-do-test` (`:107-135`) adds `"#chain-cut-selection" "Cut the selected items (⌘X)"` and still checks Delete isn't cut short. The projector panel's chain column is 280 px (`projectors.clj:591`).
+- `laser-show.ui-test.grid-test`: the menu-text test (`:210-216`) passes unchanged.
 
-- **Undo for copy.** Copy is not an edit.
-- **Several clipboard slots or a history.** Not requested.
-- **Drag-and-drop payloads** use their own `ClipboardContent` (`list_dnd.clj:22,126-127`, `drag_drop_cell.clj:24,78-79`); untouched.
-- **Cut for grid cells** (Edit menu): possible once the shared slot exists, not required.
-- **An unrelated line to watch:** a cell copy of an empty cell stores `{:type … :data nil}` (`helpers.clj:66-72`), and pasting it later does `assoc-in` with nil (`:93-95`). Fix it while touching `helpers.clj`.
+Run, for each step:
+1. `clj -M:mac-arm:test clipboard list-handlers grid-handlers menu-handlers show-lock core-test subs chains timeline-handlers`
+2. `clj -M:test-ui:mac-arm:test-ui-headless -n laser-show.ui-test.clipboard-test`, then `-n laser-show.ui-test.setup-dialogs-test` and `-n laser-show.ui-test.cue-chain-list-test`
+3. both full suites.
+
+Re-run the probes before and after each step (§1 has the before numbers). The unit suite stops writing the Mac's clipboard in 4a (§1 row 16).
+
+## 9. Commit plan
+
+Write the failing tests first in each step.
+
+| # | Step | Commit | Tests |
+|---|---|---|---|
+| 1 | 4a | `feat(events): :clipboard/write and :clipboard/read put a clip's EDN on the system clipboard and read it back on the FX thread, without the event agent waiting` (pure helpers and the two effects, not used yet) | `clipboard-test` (the new tests), `core-test` |
+| 2 | 4a | `fix(clipboard): a copy writes the clipboard in its own handler's state, so a list copy is no longer undone; a paste reads it, and looks at the system clipboard only while it is empty` | the 4a handler tests, `locked-paste-…`; UI `list-copy-lands-…`, `copy-puts-edn-…`, `copy-and-paste-do-not-hold-up-…`, `cut-with-a-failing-os-write-…`, `fresh-app-pastes-…` |
+| 3 | 4a | `fix(ui): Paste buttons and menu items follow the clipboard and agree with ⌘V; nothing reads the system clipboard while rendering; the dialog-local clipboards and their callbacks go` | `can-paste-test`; UI `nothing-reads-…`, `copy-lights-…`, `cue-editor-paste-…`, `paste-button-and-shortcut-agree-test`; the changed `copy-an-effect-to-another-projector-test` |
+| 4 | 4a | `chore(clipboard): remove the unused clipboard effects, the insert-pasted stub and the helpers only tests used; the docs say where the clipboard lives` | `core-test` |
+| 5 | 4b | `fix(lists): each list copies and pastes its own kind, from its id: a cue's presets never land among effects, nor effects among a cue's presets` | `list-type-test`, `paste-refuses-…`; UI `lists-refuse-…` |
+| 6 | 4b | `feat(lists): a copied grid cell pastes into a cue list as its items, a copied effects cell into an effect list` | the conversion tests; UI `cell-copy-pastes-…` |
+| 7 | 4b | `fix(paste): every pasted item, effect, track and clip gets a new id, references kept; copying an empty cell copies nothing` | the `fresh-ids` tests, `paste-…-regenerates-ids-…`, `copy-an-empty-cell-…` |
+| 8 | 4c | `feat(lists): Cut is one step, "Cut Item(s)", with a Cut button next to Copy` | the cut tests; `list-buttons-say-what-they-do-test` |
+
+## 10. Out of scope / alternatives considered
+
+- **Pretty-printed EDN on the OS clipboard** (today: `pprint` on the agent, `state/clipboard.clj:61`). p17: up to 313 ms for a 300-clip timeline cell, against 3.2–3.6 ms for `pr-str`. The alternative is to pretty-print on a single writer thread, as the rig writer does (`state/rig_store.clj`), and then `runLater`. Not done: one line of EDN pastes just as well, and a text editor can reformat it. If it's wanted later, only the effect changes; no handler does.
+- **A co-effect for the OS read, or a read in the view's callback:** D14 B and C.
+- **Looking at the OS clipboard on the first paste after an app window lost focus.** It would extend D8 A, so a newer clip from another instance or edited EDN text wins once you come back. It needs one more predicate in `with-clipboard` and a focus event per stage. `:on-focused-changed` exists on `:stage`, and the main window already sends `:vibe/window-focus` (`views/root.clj:208`). Later, if cross-instance paste matters.
+- **Telling our clips apart without reading them** (a custom `DataFormat`, or macOS's pasteboard "detect" calls). JavaFX doesn't expose the macOS calls, and a format alone wouldn't give the clip's type. Unverified; not pursued.
+- **Undo for copy:** a copy is not an edit.
+- **Several clipboard slots or a history:** not requested.
+- **Drag-and-drop payloads** use their own `ClipboardContent` (`views/components/list_dnd.clj:22, 127`; `views/components/drag_drop_cell.clj:27, 79-81`) and are untouched.
+- **Cut for grid cells** (the Edit menu): possible on the shared slot, not required.
+- **Noticed, not changed:**
+  - Edit > Paste's undo label is "Paste", not "Paste Cell" (p14): `:edit/paste` has no entry in `event-descriptions` (`events/handlers/history.clj:148-206`).
+  - An incompatible ⌘V says nothing. A notice ("The clipboard holds cue items") could come later.
 
 ---
 
 ## Decisions
 
-> **DECISION D8 — What is the clipboard's source of truth, and when is the OS clipboard read?** *(open · needed before Phase 4 · recommended: A)*
+> **DECISION D8 — What is the clipboard's source of truth, and when is the OS clipboard read?** *(open · needed before Step 4a · recommended: A ★)*
 >
 > | | What | For | Against |
 > |---|---|---|---|
-> | **A (recommended)** | `[:ui :clipboard]` is the truth. Copy and cut write it and push the text to the OS clipboard (effect, non-blocking). Paste reads the slot first and only asks the OS clipboard when the slot is empty (a fresh instance, or something copied from another app) | Paste never blocks; the Paste button can look at state; copying between two running instances still works | If you copy in instance B after instance A, A still pastes its own slot (today the OS clipboard wins) |
-> | B | Keep "OS first", but as the two-step effect: every paste asks the OS clipboard, then pastes | Same rule as today | Every paste is two events; the button state can't know what the OS holds |
-> | C | Internal only; write the OS clipboard for other apps but never read it | Simplest | Drops cross-instance paste |
+> | **A ★** | `[:ui :clipboard]` is the clipboard. Copy and cut write it in the handler's state and put its EDN on the OS clipboard (`:clipboard/write`, no wait). Paste reads the slot. Only while the slot is empty (this instance hasn't copied anything since it started) does a paste look at the OS clipboard, once, through `:clipboard/read` (D14), and take a clip that another instance, an earlier run or an EDN text left there | One source of truth. No OS read while you work in the app: no FX waits, and nothing for macOS's pasteboard-privacy alert to catch. The slot survives Open and New, so copying between shows doesn't need the OS clipboard. Copy, quit, start, paste still works | Once this instance has copied something, it doesn't pick up a newer clip from another instance, or EDN text you edited elsewhere (today's list paste prefers the OS clipboard). If that matters later, add the look after a focus loss (§10) |
+> | B | The OS clipboard first, on every paste, through `:clipboard/read`; the slot only when the OS holds no clip. Today's list rule, without the wait | A clip from another instance or edited EDN text always wins, as in today's list paste | Every paste is two events and reads the OS clipboard. Paste buttons can't know what the OS holds, so a button and ⌘V can disagree. Two sources of truth with a precedence rule |
+> | C | Internal only: write the OS clipboard, for other apps, but never read it | Simplest: no read effect, no import | Drops copy-quit-paste, pasting between instances, and pasting EDN text |
 >
 > **Your answer:** _pending_
 
-> **DECISION D9 — Types, conversions and a Cut button** *(open · needed before Phase 4 · recommended: A)*
+> **DECISION D13 — How do the Paste buttons and menu items decide whether they are enabled, now that nothing reads the OS clipboard while rendering?** *(new · needed before Step 4a · recommended: B ★ with D8 A; A with D8 C)*
+>
+> Today the list buttons look at dialog-local slots that nothing writes, or read the OS clipboard while rendering (rows 5–6); Edit > Paste is on for any clip, and the cell menus' Paste is always on (row 12).
 >
 > | | What | For | Against |
 > |---|---|---|---|
-> | **A (recommended)** | Strict types per list (table in §7). Add one conversion: pasting a copied grid cell (`:cue-chain`) into a cue chain list appends the cell's items; the same for `:effects-cell` into an effect list. Add a Cut button next to Copy | Fixes the visible confusion (a cell copy does nothing in a list today); Cut already exists on the keyboard | Two small conversion fns to write and test |
-> | B | Strict types, no conversions, no Cut button | Smallest | Cell copy and list paste stay unrelated |
-> | C | Strict types plus conversions in both directions (paste a list copy onto a cell) | Most flexible | Overwrites a cell; needs a confirmation story |
+> | A | From the slot alone: enabled when the slot holds a clip this target takes (`clipboard/accepts?`), disabled otherwise, an empty slot included | Exact; no read | With D8 A, a fresh instance's Paste buttons are off while ⌘V in a list would import from the OS clipboard. The main window's ⌘V is a menu accelerator, and a disabled item's accelerator doesn't fire, so a cell can't import at all |
+> | **B ★** | A, but an empty slot counts as "maybe": until this instance copies something, Paste is enabled, and a paste that finds nothing usable on the OS clipboard says "Nothing to paste here" | Buttons, menu items and ⌘V always agree (invariant 5). Exact from the first copy on. No read just to decide enablement | A fresh instance shows Paste enabled until its first copy |
+> | C | From the slot, refreshed from the OS clipboard whenever an app window gains focus | Lights for another instance's clip as soon as you come back | Reads the OS clipboard without a paste. That is what macOS's pasteboard-privacy work targets (an API since macOS 15.4; Apple calls the alert "upcoming"; web sources, November 2026, not checked with this app). It also means a read on every window switch and a focus listener on every stage (Phase 2's shell) |
+> | D | Always enabled; a paste that can't do anything says "Nothing to paste here" | Simplest; no sub | The buttons tell you nothing about the clipboard |
+>
+> **Your answer:** _pending_
+
+> **DECISION D14 — How is the OS clipboard read?** *(new · needed before Step 4a if D8 is A or B · recommended: A ★)*
+>
+> JavaFX's `Clipboard` works only on the FX thread (p10: `getString` elsewhere throws "Not on FX application thread"). Handlers run on the event agent, and an agent that waits for the FX thread holds up every event behind it (p10: about 500 ms behind a busy FX thread; review 02 #15).
+>
+> | | What | For | Against |
+> |---|---|---|---|
+> | **A ★** | An effect, `:clipboard/read {:then event}`. `Platform/runLater` reads and parses on the FX thread, then `dispatch`es `(assoc then :clipboard/system clip)`, which the agent runs later | The agent never waits, and the handler stays pure: the clip arrives as event data. It has the file chooser effect's shape (`events/core.clj:353-410`) and is what review 02 M4 prescribed | A paste with an empty slot takes two events. Another event can run in between, and the second hop pastes at the selection as it is then |
+> | B | A co-effect, `:clipboard/system` | One event | cljfx runs every co-effect for every event (`cljfx/event_handler.clj:8-13`), so every event would wait for the FX thread. Made lazy (a `delay` that only paste handlers force), it is still a wait on the agent, now hidden in the handler. It would also deadlock if the FX thread ever waited for the agent (`:fx/sync`, `cljfx/event_handler.clj:40-49`; unused in `src` today) |
+> | C | Read on the FX thread where the paste starts (the key filter, the button's `:on-action`) and put the text in the event | One event, and the read happens inside the user's gesture | The reads spread over views. The Edit menu and the cell menus send map events, which would need a wrapper in the app's wiring. And the view decides when to read |
+>
+> **Your answer:** _pending_
+
+> **DECISION D9 — Types, conversions and a Cut button** *(open · needed before Steps 4b and 4c · recommended: A ★)*
+>
+> Since `f044a31`, the projector chain copies and pastes as effects. The effects grid's chain and an item's effects still copy and paste as cue items (p7, p13).
+>
+> | | What | For | Against |
+> |---|---|---|---|
+> | **A ★** | Strict types per list, from the list's component id (§7). Two conversions: a copied grid cell (`:cue-chain`, not a timeline cue) pasted into a cue list adds the cell's items, and a copied effects cell (`:effects-cell`) pasted into an effect list adds its effects. Cut becomes one event, with a Cut button next to Copy | Fixes the visible confusion: today a cell copy does nothing in a list (p6). Cut is already on the keyboard | Two small conversion rules to test. A fourth toolbar button, and the projector panel's chain column is 280 px wide |
+> | B | Strict types, no conversions, no Cut button (⌘X becomes one event either way) | Smallest | Cell copy and list paste stay unrelated |
+> | C | A, plus the reverse: list items pasted onto a cell replace it | Most flexible | Overwrites a cell; needs a confirmation (Z0's confirm dialog) and an undo story |
 >
 > **Your answer:** _pending_

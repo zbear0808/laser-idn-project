@@ -16,7 +16,7 @@ The CI fix (§1) is in `e87b272`.
 | `01-phase1-unsaved-guard.md` | Unsaved-changes guard and an exit path | ~1 day | D1, D2, D3 (answered A). Done, `93c638a` |
 | `02-phase2-dialog-shell.md` | One dialog shell | ~1.5 days | D4 |
 | `03-phase3-key-handling.md` | Keys reach the right place | ~0.5–1 day | D5, D6, D7 |
-| `04-phase4-clipboard.md` | One clipboard | ~2 days | D8, D9 |
+| `04-phase4-clipboard.md` | One clipboard, in three steps; Step 4a (the one clipboard) ships on its own | ~2–2.5 days | 4a: D8, D13, D14; 4b–4c: D9. No longer waits for Phase 3 (04 §0) |
 | `05-phase5-keyboard-triggers.md` | Keyboard as a cue-trigger source | ~1–1.5 days | D10, D11, D12 (and Phases 2–3) |
 
 About 6–7 days in total, against roughly two weeks for the 2026-10-07 plan as written. Each phase ships on its own.
@@ -100,12 +100,12 @@ Run by `probes/keyboard_probes_test.clj` (headless TestFX, JavaFX 28-ea+11, mast
 | K-3 | Exit stops no engines, no preview timer, no Carabiner; no IDN close is sent | L | `app.clj:186-199`; `link/disconnect-carabiner!` has no callers | 1 (done, `93c638a`) |
 | K-4 | List shortcuts die when focus moves to a toolbar button or checkbox inside the list | M | `list.clj:733,748`; p4 | 3 |
 | K-5 | Global props atom: two writers, never cleaned, `:ordered-ids` can be missing | L | `list.clj:57,603,865` | 3 |
-| K-6 | Cut is two events; a failed copy is swallowed and the delete still runs | M | `list.clj:761-765`, `clipboard.clj:71-73` | 4 |
-| K-7 | List copy never reaches `[:ui :clipboard]`; toolbar Paste is permanently disabled | M | p5; `clipboard.clj:34` vs `list.clj:247-248` | 4 |
-| K-8 | Any list pastes any list's items (cue items into an effect list) | H (data) | p7; `list.clj:861` never reaches the sidebar | 4 |
-| K-9 | Cell copy and list paste don't interoperate; cell paste keeps ids | L | p6; `helpers.clj:90-95` | 4 |
-| K-10 | Two views read the OS clipboard during render | M | `effect_chain_editor.clj:95`, `projectors.clj:613` | 4 |
-| K-11 | Dead clipboard code (callbacks, effects, two TODO stubs, dialog-local slots) | L | `list.clj:592,862,901`; `core.clj:450-452` | 4 |
+| K-6 | Cut is two events; if the OS write fails, the items are deleted and nothing can be pasted | M | p16; `views/components/list.clj:775-779`, `state/clipboard.clj:71-73` | 4a (no loss), 4c (one event) |
+| K-7 | A list copy never reaches `[:ui :clipboard]`: the helper writes it behind the pipeline, and the handler's write-back undoes it. The Cue Chain Editor's Paste buttons never enable; the projector chain's enables only after a re-render | M | p5, p9, p11; `state/clipboard.clj:34` vs `events/handlers/list.clj:247` | 4a |
+| K-8 | Lists paste each other's items: the effects grid's chain and an item's effects take a cue's presets and give effects to the cue list. Projector chains were fixed in `f044a31` (zones Z0, B-8b) | H (data) | p7, p13; `views/components/list.clj:875`; `effect_chain_editor.clj:143`, `cue_chain_editor.clj:559` | 4b |
+| K-9 | Cell copy and list paste don't interoperate. A paste keeps ids (a cell's all, a list item's effects). An empty cell's copy empties the cell it is pasted on | M | p6, p14, p15; `events/helpers.clj:66-72, 90-95`; `animation/chains.clj:217-229` | 4b |
+| K-10 | The OS clipboard is read while rendering (two views) and inside paste handlers, and every copy and list paste makes the event agent wait for the FX thread (about 500 ms behind a busy FX thread) | M | p10–p12; `projectors.clj:560`, `effect_chain_editor.clj:95`, `events/handlers/list.clj:257-260`, `state/clipboard.clj:64,82` | 4a |
+| K-11 | Dead clipboard code: `:on-copy-fn` callbacks nobody calls, two unused effects and a TODO stub, dialog-local slots, never-written types. `:clipboard/paste-projector-effects` and the projector stubs are already gone (Z0, `95a510d`) | L | `views/components/list.clj:598, 876, 917`; `events/core.clj:212-229, 552-553`; `events/handlers/effects.clj:167-174`; `cue_chain.clj:158-174` | 4a |
 | K-12 | Six dialogs copy their shell; add-projector never closes; `:editing-name?` never reset; two dialogs lack defaults | M | `02-…` §1 | 2 |
 | K-13 | Keyboard is advertised as an input source but nothing produces keyboard events | M | `README.md:3,51`; survey | 5 |
 | K-14 | Menu items that do nothing: About, Export, Toggle Preview, Fullscreen, Check for Updates | L | `menu.clj:122,220,227,253`; `251` | 2 |
@@ -136,10 +136,10 @@ No focus context in app state, no `:command/*` router, no shortcut registry. Eve
 | 1 | Never lose work; one exit path | CI fixed (§1) |
 | 2 | One dialog shell; fix the dialog bugs | none. Phase 1's confirm dialog can use it, or a plain stage first |
 | 3 | List shortcuts survive focus moves; one typing guard; main-window focus hygiene | Phase 2 for the shared scene handler |
-| 4 | One clipboard; atomic cut; Paste button works; type safety | Phase 3 (D7 decides how `:clipboard-type` reaches the list) |
+| 4 | One clipboard; atomic cut; Paste button works; type safety | None since `f044a31` (04 §0): it shares `views/components/list.clj` with Phase 3, so whichever lands second rebases |
 | 5 | Keyboard cue triggers | Phases 2 and 3 |
 
-Phases 1 and 2 are independent and can run in parallel; 3 follows 2; 4 and 5 can run in parallel after 3. If the app is used live before both are done, do 4 first: today a copy or paste blocks the event agent until the FX thread has run it (`state/clipboard.clj:64,82,116`), and every trigger waits behind it (audit, `plans/2026-11-17-show-clock/00-overview.md` §9).
+Phases 1 and 2 are independent and can run in parallel; 3 follows 2; 5 follows 3. Phase 4 needs none of them (04 §0, updated 2026-11-20), and its Step 4a can go first: today a copy or list paste blocks the event agent until the FX thread has run it (`state/clipboard.clj:64,82`; p10: 503–579 ms behind a busy FX thread), and every trigger waits behind it (audit, `plans/2026-11-17-show-clock/00-overview.md` §9).
 
 ## 7. Decisions
 
@@ -155,8 +155,8 @@ Each decision is written out in full, with options and a recommendation, in the 
 | D5 | Focus model | 03 | Phase 3 | A: JavaFX event flow, no new state |
 | D6 | Main-window buttons vs single-key shortcuts | 03 | Phase 3 | A: toolbar and tab buttons not focus-traversable |
 | D7 | Where list keyboard commands get their props | 03 | Phase 3 | A: keep the atom, make it correct |
-| D8 | Clipboard source of truth and OS reads | 04 | Phase 4 | A: internal slot first, OS read only when empty |
-| D9 | Clipboard types, conversions, Cut button | 04 | Phase 4 | A: strict types + cell→list conversion + Cut |
+| D8 | Clipboard source of truth and OS reads (04 also asks D13: what enables Paste, and D14: how the OS clipboard is read) | 04 | Step 4a | A: the slot; the OS clipboard read only while the slot is empty (with D13 B, D14 A) |
+| D9 | Clipboard types, conversions, Cut button | 04 | Steps 4b–4c | A: strict types from the list's id + cell→list conversion + Cut |
 | D10 | Trigger vs built-in shortcut collisions | 05 | Phase 5 | A: user binding wins, Escape reserved |
 | D11 | Where keyboard triggers work; master switch | 05 | Phase 5 | A: main window + editor dialogs, switch in Settings |
 | D12 | Key identity | 05 | Phase 5 | A: bare `KeyCode` name, Shift ignored |
