@@ -5,7 +5,10 @@
    and how it folds onto this rig) and a Map cycle's (map-cycle-visual).
    The effect parameter editor shows the two for their :zone-pattern and
    :map-cycle renderers, on a cue's pattern (the :cue-zone-patterns domain,
-   the pattern window) and in an effects cell.
+   the pattern window) and in an effects cell. A step grid (zones plan Z6)
+   shows a small read-only grid and Edit grid…; any other pattern Step
+   grid…, and the chip's menu has it too: the grid's own window
+   (views/dialogs/step_grid_editor.clj).
 
    What they say is worked out by pure functions (chip-text, chip-tooltip,
    cell-tooltip, rows, fold-text, now-text), tested without a window."
@@ -15,6 +18,7 @@
             [laser-show.animation.show-time :as show-time]
             [laser-show.events.core :as events]
             [laser-show.routing.rig :as rig]
+            [laser-show.routing.step-grid :as step-grid]
             [laser-show.routing.targets :as targets]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.routing.zone-remap :as zone-remap]
@@ -173,11 +177,15 @@
   "The rows the pattern window shows for style (nil while a modulator picks
    it: every row) stepping on step-on: Moves for the styles that light
    places, Count from and Restart on while it steps on the beat, Path for
-   Chase, Width for Chase, Ping-pong and Random, Seed for Random."
+   Chase, Width for Chase, Ping-pong and Random, Seed for Random. A step
+   grid (zones plan Z6) shows its small grid in place of Zones: its rows
+   are the grid's, edited in its window."
   [style step-on]
   (let [any? (not (some #{style} zone-patterns/styles))
         lit? (or any? (contains? zone-remap/lit-styles style))]
-    (vec (concat [:style :follow-pads? :zones]
+    (vec (concat [:style :follow-pads?]
+                 (when-not (= :steps style) [:zones])
+                 (when (or any? (= :steps style)) [:steps])
                  (when lit? [:source])
                  [:rate :step-on]
                  (when (= :clock step-on) [:clock :restart-on])
@@ -288,6 +296,54 @@
   [effect-keys]
   (select-keys effect-keys [:domain :entity-key :effect-path]))
 
+(def ^:private mini-cell 9.0)
+
+(defn mini-grid
+  "A step grid, small and read-only (zones plan Z6): a cell a row and a
+   step, #zone-pattern-mini-cell-<row>-<step>, lit where the step lights
+   the row."
+  [{:keys [params]}]
+  (let [{:keys [zones steps]} (step-grid/normalize params)
+        w (* (count steps) mini-cell)
+        h (* (count zones) mini-cell)]
+    {:fx/type :pane
+     :id "zone-pattern-mini-grid"
+     :min-width w :pref-width w :max-width w
+     :min-height h :pref-height h :max-height h
+     :children (vec (for [[r ref] (map-indexed vector zones)
+                          [k step] (map-indexed vector steps)]
+                      {:fx/type :region
+                       :id (str "zone-pattern-mini-cell-" r "-" k)
+                       :layout-x (* k mini-cell)
+                       :layout-y (* r mini-cell)
+                       :min-width mini-cell :pref-width mini-cell :max-width mini-cell
+                       :min-height mini-cell :pref-height mini-cell :max-height mini-cell
+                       :style-class (cond-> ["step-cell" "step-cell-mini"] (some #{ref} step) (conj "step-cell-on"))}))}))
+
+(defn- mini-grid-row
+  "A step grid's row (zones plan Z6): its small grid, its rows and length
+   in words, and Edit grid… (its own window, Z6-Q5 A)."
+  [params effect-keys names]
+  (let [n (count (zone-remap/grid-steps params))]
+    (row :steps
+         {:fx/type :label :text "Grid" :pref-width label-width :min-height line-height :style-class ["label-secondary"]}
+         {:fx/type :v-box
+          :spacing 4
+          :children [{:fx/type mini-grid :params params}
+                     {:fx/type :label
+                      :id "zone-pattern-grid-text"
+                      :text (if (pos? n)
+                              (str n (if (= 1 n) " step" " steps") " over " (zone-patterns/lane-text :steps (:zones params) names))
+                              "No steps yet")
+                      :style-class ["label" "label-hint" "zone-pattern-hint"]}]}
+         {:fx/type :button
+          :id "zone-pattern-step-grid"
+          :text "Edit grid…"
+          :focus-traversable false
+          :style-class ["button-secondary"]
+          :tooltip {:fx/type :tooltip :text "Draw this pattern on its grid, in its own window"}
+          :on-action {:event/type :step-grid/open :target (grid-target effect-keys)}})))
+
 (defn- step-grid-row
   "Step grid…: the pattern's grid in its own window (zones plan Z6,
    Z6-Q5 A); a pattern of another style becomes one, its first 8 steps."
@@ -351,7 +407,8 @@
      :id "zone-pattern-visual"
      :spacing 8
      :children
-     (vec
+     (filterv
+      some?
       (concat
        [(row :style
              (control props :style)
@@ -362,11 +419,14 @@
               :focus-traversable false
               :selected (not (false? (:follow-pads? params)))
               :on-selected-changed (assoc (:on-change-event props) :param-key :follow-pads?)})
-        (row :zones
-             (assoc (control props :zones)
-                    :fx/type param-controls/param-ref-list
-                    :pair? (= :pair (lane-mode style))))
-        (step-grid-row effect-keys)]
+        (when (show? :zones)
+          (row :zones
+               (assoc (control props :zones)
+                      :fx/type param-controls/param-ref-list
+                      :pair? (= :pair (lane-mode style)))))
+        (if (show? :steps)
+          (mini-grid-row params effect-keys names)
+          (step-grid-row effect-keys))]
        (when (show? :source)
          [(row :source (if (reg/modulated? (:source params)) (control props :source) (moves-radios props)))])
        [(row :rate (control props :rate) (hint (rate-words params)))

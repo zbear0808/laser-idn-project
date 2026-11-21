@@ -281,6 +281,11 @@
         :-fx-background-radius 3}
        ".step-cell.step-cell-on"
        {:-fx-background-color blue}
+       ".step-cell.step-cell-mini"
+       {:-fx-background-insets 1
+        :-fx-background-radius 1}
+       ".step-cell.step-cell-mini.step-cell-on"
+       {:-fx-background-color blue}
        ".step-cell.step-cell-cursor"
        {:-fx-border-color text-primary
         :-fx-border-width 2

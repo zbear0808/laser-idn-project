@@ -1010,3 +1010,35 @@
         (is (= {:p1 1} (:zone-steps next-tick)) "the next tick steps it")
         (is (= #{:zone/b} (drawn-keys next-tick)))
         (is (= 1 (get-in next-tick [:pulses :zone-step :count])) "the clock stamped it as any source")))))
+
+
+;; Zones plan Z6: a step grid on the clock (08 §8)
+
+(deftest zone-steps-follow-a-grid-test
+  (let [grid (-> (zone-patterns/preset-instance :steps :cue)
+                 (assoc :id :g1)
+                 (assoc-in [:params :steps] [[:zone/a] [] [:zone/b] [:zone/a :zone/b]]))]
+    (init! {[0 0] (assoc (cue :circle) :zone-patterns [grid])})
+    (two-lasers!)
+    (trigger! 0 0)
+    (with-redefs [events/dispatch! (fn [_])]
+      (let [first-tick (show-clock/tick! 0)
+            [half n1] (ticks-to! 100000000 0.5)
+            [one n2] (ticks-to! (+ n1 100000000) 1.0)
+            [one-half n3] (ticks-to! (+ n2 100000000) 1.5)
+            [two n4] (ticks-to! (+ n3 100000000) 2.0)]
+        (testing "the snapshot has the grid's step, 2 a beat from the cue's start (Z6-Q1 A)"
+          (is (= {:g1 0} (:zone-steps first-tick)))
+          (is (= [1 2 3 4] (mapv #(get-in % [:zone-steps :g1]) [half one one-half two]))
+              "the step goes on: the playhead is step mod 4"))
+        (testing "each step lights its own zones; a rest lights none"
+          (is (= #{:zone/a} (drawn-keys first-tick)))
+          (is (= #{} (drawn-keys half)) "step 1, a rest: nothing drawn")
+          (is (= #{:zone/b} (drawn-keys one)))
+          (is (= #{[:zone/a :zone/b]} (drawn-keys one-half)) "A and B: one frame under both")
+          (is (= #{:zone/a} (drawn-keys two)) "step 4 is step 0 again"))
+        (testing "a grid edited while it plays shows from the next tick (08 invariant 8)"
+          (events/event-handler {:event/type :step-grid/toggle
+                                 :target {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]}
+                                 :row :zone/b :step 0})
+          (is (= #{[:zone/a :zone/b]} (drawn-keys (show-clock/tick! (+ n4 16666667))))))))))

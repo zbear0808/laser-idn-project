@@ -4,6 +4,7 @@
    click, drag or type a pattern, with each row's zone and where it goes."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.animation.show-time :as show-time]
             [laser-show.events.core :as events]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
@@ -388,3 +389,68 @@
     (state/swap-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :keyframe-modulator] {:enabled? true :keyframes []})
     (ui/assert-text! "#step-grid-guard" "This pattern's keyframes are on. Switch them off to edit its grid.")
     (is (ui/on-fx-thread #(.isDisabled (body))))))
+
+
+;; The playhead and the pattern window's small grid (08 §7)
+
+(def ^:private grid-id #uuid "00000000-0000-0000-0000-00000000a6a1")
+
+(defn- playhead-columns
+  "The columns the playhead canvas lights: those whose middle isn't the
+   snapshot's white."
+  []
+  (let [w (long (ui/on-fx-thread #(.getWidth ^javafx.scene.canvas.Canvas (ui/query "#step-grid-playhead"))))
+        px (ui/node-pixels "#step-grid-playhead")
+        y (long (/ step-grid/cell-h 2))]
+    (vec (keep (fn [k]
+                 (let [x (long (+ (* k step-grid/cell-w) (/ step-grid/cell-w 2)))]
+                   (when (not= (unchecked-int 0xFFFFFFFF) (nth px (+ (* y w) x))) k)))
+               (range (quot w (long step-grid/cell-w)))))))
+
+(deftest playhead-follows-the-clock-test
+  (state/swap-state! assoc-in [:timing :bpm] 120.0)
+  (grid-on-a1!)
+  (open-grid! cue-target)
+  (ui/assert-text! "#step-grid-now" "Not playing")
+  (is (= [] (playhead-columns)) "no playhead while the cue doesn't play")
+  (events/dispatch! {:event/type :transport/play})
+  (events/dispatch! {:event/type :grid/trigger-cell :col 0 :row 0})
+  (ui/wait-for! #(some? (get-in (app-state) [:playback :active-cues [0 0]])))
+  (ui/wait-for! #(true? (get-in (app-state) [:playback :playing?])))
+  (fixtures/with-clock 1000000000
+    (fn [at-ms]
+      (let [step #(get-in (show-time/latest) [:zone-steps grid-id])]
+        (ui/wait-for! #(some? (step)))
+        (testing "the playhead lights the column of the step the pattern is on (:zone-steps, step mod L)"
+          (let [s0 (step)]
+            (ui/wait-for! #(= (str "Step " (inc (mod s0 8)) " of 8") (ui/node-text "#step-grid-now")))
+            (ui/wait-for! #(= [(mod s0 8)] (playhead-columns)))))
+        (testing "and follows the clock"
+          ;; 0.75 s on (the clock skips a jump of more than 1 s): 1.5 beats
+          (reset! at-ms 750)
+          (ui/wait-for! #(and (step) (pos? (mod (step) 8))))
+          (let [s1 (step)]
+            (ui/wait-for! #(= (str "Step " (inc (mod s1 8)) " of 8") (ui/node-text "#step-grid-now")))
+            (ui/wait-for! #(= [(mod s1 8)] (playhead-columns)))))
+        (testing "it reads the snapshot only: the clock writes no app state (08 invariant 7)"
+          (is (nil? (get-in (app-state) [:ui :dialogs :step-grid-editor :playhead]))))
+        (testing "stopped: no playhead, and it says so"
+          (state/swap-state! assoc-in [:playback :active-cues] {})
+          (ui/wait-for! #(nil? (step)))
+          (ui/assert-text! "#step-grid-now" "Not playing")
+          (ui/wait-for! #(= [] (playhead-columns))))))))
+
+(deftest pattern-window-shows-a-small-grid-test
+  (grid-on-a1! {:zones [A B C] :steps [[A] [] [B C] []]})
+  (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
+  (ui/wait-for! #(some? (ui/query "#zone-pattern-mini-grid")))
+  (testing "a small read-only grid in place of Zones, with Edit grid…"
+    (is (nil? (ui/query "#zone-pattern-row-zones")) "the rows are the grid's")
+    (is (= ["0-0" "1-2" "2-2"]
+           (ui/on-fx-thread #(vec (sort (keep (fn [^Node n] (when (.contains (.getStyleClass n) "step-cell-on")
+                                                              (subs (.getId n) (count "zone-pattern-mini-cell-"))))
+                                              (ui/query-all "#zone-pattern-mini-grid .step-cell")))))))
+    (ui/assert-text! "#zone-pattern-step-grid" "Edit grid…"))
+  (ui/click! (ui/robot) "#zone-pattern-step-grid")
+  (ui/wait-for! #(window-open? cue-title))
+  (ui/wait-for! #(lit-cell? 2 2)))

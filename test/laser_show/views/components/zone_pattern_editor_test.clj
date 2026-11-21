@@ -21,6 +21,12 @@
   (is (= "Chase · every laser" (zpe/chip-text (preset :chase :cue) names)))
   (is (= "Shift · A → B → C → D" (zpe/chip-text (preset :shift :cue) names)))
   (is (= "None" (zpe/chip-text (assoc (preset :swap :cue) :enabled? false) names)) "a disabled one is none")
+  (testing "a step grid: its length and rows (zones plan Z6)"
+    (is (= "Steps · 8 · A B" (zpe/chip-text (preset :steps :cue) names)))
+    (is (= "Zone pattern: Steps. Moves the All picture on 8 steps over A B, 2 steps a beat, from the cue's start."
+           (zpe/chip-tooltip (preset :steps :cue) names)))
+    (is (= "Zone pattern: Steps on 8 steps over A B, 2 steps a beat (show beats)"
+           (zpe/cell-tooltip (:params (preset :steps :cell)) names))))
   (testing "its tooltip says what it does, in the doc's words"
     (is (= "Zone pattern: Alternate. Moves the All picture A ⇄ B, 1 step a beat, from the cue's start."
            (zpe/chip-tooltip (preset :alternate :cue) names)))
@@ -48,6 +54,9 @@
     (is (= (into base [:source :rate :step-on :clock :restart-on :offset :width :seed]) (zpe/rows :random :clock)) "Random: Width and Seed")
     (is (= (into base [:rate :step-on :clock :restart-on :offset]) (zpe/rows :shift :clock)) "Shift moves what's in the zones: no Moves")
     (is (= (into base [:rate :step-on :offset]) (zpe/rows :swap :hit)) "on a press: no Count from, no Restart on")
+    (is (= [:style :follow-pads? :steps :source :rate :step-on :clock :restart-on :offset] (zpe/rows :steps :clock))
+        "a step grid (zones plan Z6): its small grid in place of Zones, whose rows are the grid's")
+    (is (some #{:steps} (zpe/rows nil :clock)) "a style a modulator picks: the grid's row too")
     (is (= :pair (zpe/lane-mode :swap)) "Swap's zones are two pickers")
     (is (= :list (zpe/lane-mode :chase))))
   (testing "a Map cycle's"

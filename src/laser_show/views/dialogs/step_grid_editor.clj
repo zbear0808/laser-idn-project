@@ -7,7 +7,9 @@
    and a column per step: click or drag to paint, the keys move the cursor
    and toggle, and ⌘Z / ⇧⌘Z / ⌘Y (Ctrl too) undo and redo as the chain
    editors do. While the pattern's keyframes are on, or the show lock is,
-   the grid is greyed out and says why."
+   the grid is greyed out and says why. The playhead and the Now line
+   (\"Step 5 of 8\", \"Not playing\") come from the show clock's newest
+   tick, never from app state."
   (:require [cljfx.api :as fx]
             [laser-show.css.core :as css]
             [laser-show.events.core :as events]
@@ -93,13 +95,15 @@
        :alignment :center-left
        :spacing 12
        :style-class "dialog-footer"
-       :children [{:fx/type :region :h-box/hgrow :always}
-                  {:fx/type :button
-                   :id "step-grid-close"
-                   :text "Close"
-                   :min-width :use-pref-size
-                   :style-class "button-primary"
-                   :on-action close}]}]}))
+       :children (cond-> []
+                   grid (conj {:fx/type step-grid/now-line :grid grid})
+                   :always (into [{:fx/type :region :h-box/hgrow :always}
+                                  {:fx/type :button
+                                   :id "step-grid-close"
+                                   :text "Close"
+                                   :min-width :use-pref-size
+                                   :style-class "button-primary"
+                                   :on-action close}]))}]}))
 
 (defn- handle-scene-key-pressed
   "Undo and redo, as in the other editors: ⌘Z (Ctrl+Z, and Ctrl on macOS

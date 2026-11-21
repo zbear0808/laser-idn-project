@@ -6,13 +6,18 @@
    labels (each row's zone and where it goes, with its menu), the step
    numbers (with theirs) and + Row; the toolbar: length, Rate, Step on,
    Restart on (while Step on is the beat), Offset, Start from, Copy, Paste,
-   Clear. What a key does on the grid is key-event, a pure function."
+   Clear; the playhead over the cells and the window's Now line, drawn from
+   the show clock's newest tick (clock-view/ext-clock-redraw on the
+   snapshot's :zone-steps), never from app state. What a key does on the
+   grid is key-event, a pure function."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
+            [laser-show.animation.show-time :as show-time]
             [laser-show.events.core :as events]
             [laser-show.routing.step-grid :as step-grid]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.subs :as subs]
+            [laser-show.views.components.clock-view :as clock-view]
             [laser-show.views.components.commit-field :as commit-field]
             [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.views.components.shortcuts :as shortcuts]
@@ -20,7 +25,10 @@
             [laser-show.views.components.zone-pattern-editor :as zone-pattern-editor])
   (:import [javafx.application Platform]
            [javafx.scene Node]
-           [javafx.scene.input KeyCode KeyEvent MouseEvent]))
+           [javafx.scene.canvas Canvas GraphicsContext]
+           [javafx.scene.control Labeled]
+           [javafx.scene.input KeyCode KeyEvent MouseEvent]
+           [javafx.scene.paint Color]))
 
 (def cell-w "A cell's width, px: 32 steps fit the window." 22.0)
 (def cell-h "A cell's height, px." 26.0)
@@ -150,6 +158,80 @@
                      (for [r (range n)
                            k (range length)]
                        (cell r k (contains? (nth lit k) (:ref (nth rows r))) (and (= r cr) (= k cs)))))}}))
+
+
+;; The playhead (08 §7, invariant 7): from the snapshot only
+
+(defn- playing-step
+  "The step the pattern id is on in the newest tick, while it is fresh;
+   nil while it doesn't play (its cue stopped, its cell off)."
+  [snapshot id]
+  (when (and snapshot (not (show-time/stale? snapshot (System/nanoTime))))
+    (get-in snapshot [:zone-steps id])))
+
+(defn now-text
+  "The window's Now line: \"Step 5 of 8\" for step (mod length), or \"Not
+   playing\"."
+  [step length]
+  (if (and (number? step) (pos? (long length)))
+    (str "Step " (inc (mod (long step) (long length))) " of " length)
+    "Not playing"))
+
+(def ^:private playhead-fill (Color/web "#4C9AFF" 0.35))
+(def ^:private playhead-edge (Color/web "#FFFFFF" 0.9))
+
+(defn redraw-playhead!
+  "The playhead from the show clock's newest tick: the column of the step
+   the pattern is on, step mod L; nothing while it doesn't play."
+  [^Canvas canvas snapshot {:keys [id length]}]
+  (let [^GraphicsContext gc (.getGraphicsContext2D canvas)
+        w (.getWidth canvas)
+        h (.getHeight canvas)
+        step (playing-step snapshot id)]
+    (.clearRect gc 0 0 w h)
+    (when (and (number? step) (pos? (long length)))
+      (let [x (* (double (mod (long step) (long length))) cell-w)]
+        (.setFill gc playhead-fill)
+        (.fillRect gc x 0 cell-w h)
+        (.setStroke gc playhead-edge)
+        (.setLineWidth gc 2.0)
+        (.strokeRect gc (+ x 1.0) 1.0 (- cell-w 2.0) (- h 2.0))))))
+
+(defn playhead
+  "A canvas over the cells (#step-grid-playhead) that the mouse goes
+   through. Props: :grid (subs/step-grid)."
+  [{:keys [grid]}]
+  (let [{:keys [id length rows]} grid]
+    {:fx/type clock-view/ext-clock-redraw
+     :redraw! #'redraw-playhead!
+     :desc {:fx/type :canvas
+            :id "step-grid-playhead"
+            :width (* length cell-w)
+            :height (max 1.0 (* (count rows) cell-h))
+            :mouse-transparent true
+            :style-class ["step-playhead"]
+            :user-data {:id id :length length}}}))
+
+(defn redraw-now!
+  "The Now line from the newest tick (now-text)."
+  [^Labeled node snapshot {:keys [id length]}]
+  (let [text (now-text (playing-step snapshot id) length)]
+    (when (not= text (.getText node))
+      (.setText node text))))
+
+(defn now-line
+  "\"Step 5 of 8\" while the pattern plays, \"Not playing\" while it
+   doesn't (#step-grid-now). Props: :grid."
+  [{:keys [grid]}]
+  (let [{:keys [id length]} grid]
+    {:fx/type clock-view/ext-clock-redraw
+     :redraw! #'redraw-now!
+     :desc {:fx/type :label
+            :id "step-grid-now"
+            :text (now-text nil length)
+            :min-width :use-pref-size
+            :user-data {:id id :length length}
+            :style-class ["label" "zone-pattern-now"]}}))
 
 
 ;; The rows and the step numbers
@@ -353,10 +435,10 @@
                  :on-selected-changed (assoc on-change :param-key :follow-pads?)}]}))
 
 (defn grid-view
-  "The row labels and the grid (its numbers over its cells), side by side;
-   past 32 steps the grid scrolls sideways. Props: :target :grid, and
-   :overlay (a node drawn over the cells, the playhead)."
-  [{:keys [target grid overlay]}]
+  "The row labels and the grid (its numbers over its cells, the playhead
+   over them), side by side; past 32 steps the grid scrolls sideways.
+   Props: :target :grid."
+  [{:keys [target grid]}]
   {:fx/type :h-box
    :spacing 6
    :children [{:fx/type row-labels :target target :grid grid}
@@ -372,5 +454,5 @@
                          :children [{:fx/type step-numbers :target target :grid grid}
                                     {:fx/type :stack-pane
                                      :alignment :top-left
-                                     :children (cond-> [{:fx/type grid-body :target target :grid grid}]
-                                                 overlay (conj overlay))}]}}]})
+                                     :children [{:fx/type grid-body :target target :grid grid}
+                                                {:fx/type playhead :grid grid}]}]}}]})
