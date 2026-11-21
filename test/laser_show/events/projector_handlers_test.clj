@@ -737,12 +737,12 @@
 
 (deftest remove-retargets-the-lasers-pins-test
   (let [pinned (-> removable-state
-                   (assoc-in [:chains :cue-chains [0 0]] {:name "Intro" :destination-zone {:zone-group-id :auto.laser/p1}
+                   (assoc-in [:chains :cue-chains [0 0]] {:name "Intro" :target :auto.laser/p1
                                                           :items []})
                    (assoc-in [:chains :cue-chains [1 0]] {:name "Drop" :items [{:id "i" :type :preset :preset-id :circle
-                                                                               :zone-group-id :auto.laser/p1}]})
+                                                                               :target :auto.laser/p1}]})
                    (assoc-in [:chains :cue-chains [2 0]] {:name "Other" :items [{:id "j" :type :preset :preset-id :circle
-                                                                                :zone-group-id :auto.laser/p2}]}))
+                                                                                :target :auto.laser/p2}]}))
         removed (fn [& {:as opts}] (:state (projectors/handle (merge {:event/type :projectors/remove :projector-id :p1
                                                                      :state pinned}
                                                                     opts))))]
@@ -763,17 +763,17 @@
         (is (= {:event/type :projectors/remove :projector-id :p1} (:confirm-event dialog)))))
     (testing "removed, its cues go where you chose"
       (let [state (removed :retarget-to :auto/left)]
-        (is (= :auto/left (get-in state [:chains :cue-chains [0 0] :destination-zone :zone-group-id])))
-        (is (= :auto/left (get-in state [:chains :cue-chains [1 0] :items 0 :zone-group-id])))
-        (is (= :auto.laser/p2 (get-in state [:chains :cue-chains [2 0] :items 0 :zone-group-id])) "another laser's stay")
+        (is (= :auto/left (get-in state [:chains :cue-chains [0 0] :target])))
+        (is (= :auto/left (get-in state [:chains :cue-chains [1 0] :items 0 :target])))
+        (is (= :auto.laser/p2 (get-in state [:chains :cue-chains [2 0] :items 0 :target])) "another laser's stay")
         (is (empty? (refs/cues-using (get-in state [:chains :cue-chains]) :auto.laser/p1))
             "and nothing names it any more (invariant 12)")
         (is (= "Removed Laser L · 2 cues now go to Left" (get-in state [:ui :notice :text])))))
     (testing "with no choice made, to All; Nothing lets them inherit"
-      (is (= :all (get-in (removed) [:chains :cue-chains [0 0] :destination-zone :zone-group-id])))
-      (is (= :all (get-in (removed :retarget-to :auto.laser/p1) [:chains :cue-chains [1 0] :items 0 :zone-group-id]))
+      (is (= :all (get-in (removed) [:chains :cue-chains [0 0] :target])))
+      (is (= :all (get-in (removed :retarget-to :auto.laser/p1) [:chains :cue-chains [1 0] :items 0 :target]))
           "not to itself")
-      (is (not (contains? (get-in (removed :retarget-to :inherit) [:chains :cue-chains [1 0] :items 0]) :zone-group-id))))
+      (is (not (contains? (get-in (removed :retarget-to :inherit) [:chains :cue-chains [1 0] :items 0]) :target))))
     (testing "a laser no cue is pinned to asks as before, and removes as before"
       (is (nil? (get-in (projectors/handle {:event/type :projectors/request-remove :projector-id :p1 :state removable-state})
                         [:state :ui :dialogs :confirm :choice])))

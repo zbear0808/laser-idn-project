@@ -231,18 +231,18 @@
 
 
 (def ^:private balcony-state
-  "Balcony is named by cue [0 0]'s item and cue [1 2]'s destination, and by the
-   preview's second cell; the projector is in it."
+  "Balcony is named by cue [0 0]'s item and cue [1 2]'s own target, and by
+   the preview's second cell; the projector is in it."
   (-> base-state
       (assoc-in [:zone-groups :group-balcony] {:id :group-balcony :name "Balcony" :description "" :color "#FF0000"})
       (assoc-in [:projectors test-projector-id :zone-groups] [:all :group-balcony])
       (assoc-in [:chains :cue-chains [0 0]] {:name "Intro"
                                              :items [{:id "p" :type :preset :preset-id :circle
-                                                      :zone-group-id :group-balcony}]})
+                                                      :target :group-balcony}]})
       (assoc-in [:chains :cue-chains [1 2]] {:name "Drop"
-                                             :destination-zone {:zone-group-id :group-balcony}
+                                             :target :group-balcony
                                              :items []})
-      (assoc-in [:config :preview :grid-cells] [{:zone-group-id nil} {:zone-group-id :group-balcony}])
+      (assoc-in [:config :preview :grid-cells] [{:target nil} {:target :group-balcony}])
       (assoc-in [:zone-group-ui :selected-group] :group-balcony)))
 
 (deftest request-remove-opens-the-confirm-test
@@ -298,7 +298,7 @@
       (is (nil? (:choice dialog)))))
   (testing "more than six cues: the first six, then how many more"
     (let [many (reduce (fn [s col] (assoc-in s [:chains :cue-chains [col 0]]
-                                             {:name (str "Cue " col) :destination-zone {:zone-group-id :graphics} :items []}))
+                                             {:name (str "Cue " col) :target :graphics :items []}))
                        balcony-state (range 8))
           details (get-in (zone-groups/handle {:event/type :zone-groups/request-remove :group-id :graphics :state many})
                           [:state :ui :dialogs :confirm :details])]
@@ -309,9 +309,9 @@
                                     :retarget-to :graphics :state balcony-state})
         state (:state result)]
     (is (nil? (get-in state [:zone-groups :group-balcony])))
-    (is (= :graphics (get-in state [:chains :cue-chains [0 0] :items 0 :zone-group-id])))
-    (is (= :graphics (get-in state [:chains :cue-chains [1 2] :destination-zone :zone-group-id])))
-    (is (= {:zone-group-id :graphics} (get-in state [:config :preview :grid-cells 1])))
+    (is (= :graphics (get-in state [:chains :cue-chains [0 0] :items 0 :target])))
+    (is (= :graphics (get-in state [:chains :cue-chains [1 2] :target])))
+    (is (= {:target :graphics} (get-in state [:config :preview :grid-cells 1])))
     (is (= #{} (refs/cues-using (get-in state [:chains :cue-chains]) :group-balcony)))
     (is (nil? (get-in state [:zone-group-ui :selected-group])))
     (is (= "Deleted Balcony · 2 cues now go to Graphics" (get-in state [:ui :notice :text])))
@@ -324,35 +324,35 @@
   (doseq [[target text] [[:auto/left "Left"] [:auto/even "Even"] [:auto.laser/proj-1 "Test Projector"]]]
     (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
                                              :retarget-to target :state balcony-state}))]
-      (is (= target (get-in state [:chains :cue-chains [0 0] :items 0 :zone-group-id])) (str target))
-      (is (= target (get-in state [:chains :cue-chains [1 2] :destination-zone :zone-group-id])))
+      (is (= target (get-in state [:chains :cue-chains [0 0] :items 0 :target])) (str target))
+      (is (= target (get-in state [:chains :cue-chains [1 2] :target])))
       (is (= (str "Deleted Balcony · 2 cues now go to " text) (get-in state [:ui :notice :text]))
           "named as the pickers name it")))
   (testing "a laser that isn't there is no target: All"
     (is (= :all (get-in (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
                                              :retarget-to :auto.laser/gone :state balcony-state})
-                        [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))))
+                        [:state :chains :cue-chains [0 0] :items 0 :target])))))
 
 (deftest remove-to-nothing-inherits-test
   (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
                                            :retarget-to :inherit :state balcony-state}))]
-    (is (not (contains? (get-in state [:chains :cue-chains [0 0] :items 0]) :zone-group-id)))
-    (is (not (contains? (get-in state [:chains :cue-chains [1 2]]) :destination-zone)))
+    (is (not (contains? (get-in state [:chains :cue-chains [0 0] :items 0]) :target)))
+    (is (not (contains? (get-in state [:chains :cue-chains [1 2]]) :target)))
     (is (= "Deleted Balcony · 2 cues now inherit" (get-in state [:ui :notice :text]))))
   (testing "nil means Nothing too"
     (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
                                              :retarget-to nil :state balcony-state}))]
-      (is (not (contains? (get-in state [:chains :cue-chains [0 0] :items 0]) :zone-group-id))))))
+      (is (not (contains? (get-in state [:chains :cue-chains [0 0] :items 0]) :target))))))
 
 (deftest retarget-to-a-missing-group-is-all-test
   (doseq [target [:no-such-group :group-balcony]]
     (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
                                              :retarget-to target :state balcony-state}))]
-      (is (= :all (get-in state [:chains :cue-chains [0 0] :items 0 :zone-group-id])) (str target))))
+      (is (= :all (get-in state [:chains :cue-chains [0 0] :items 0 :target])) (str target))))
   (testing "no :retarget-to at all is All"
     (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
                                              :state balcony-state}))]
-      (is (= :all (get-in state [:chains :cue-chains [0 0] :items 0 :zone-group-id]))))))
+      (is (= :all (get-in state [:chains :cue-chains [0 0] :items 0 :target]))))))
 
 (deftest remove-strips-membership-test
   (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
@@ -373,7 +373,7 @@
         undo-depth #(count (get-in % [:history :undo-stack]))
         after (:state (events/handle-event-pipeline (assoc (:dispatch confirmed) :state (:state confirmed))))]
     (is (nil? (get-in after [:zone-groups :group-balcony])))
-    (is (= :all (get-in after [:chains :cue-chains [0 0] :items 0 :zone-group-id])))
+    (is (= :all (get-in after [:chains :cue-chains [0 0] :items 0 :target])))
     (is (= (inc (undo-depth balcony-state)) (undo-depth after)) "one undo step")))
 \n
 

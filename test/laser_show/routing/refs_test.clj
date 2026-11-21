@@ -2,43 +2,27 @@
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.routing.refs :as refs]))
 
-(defn- selector
-  ([zone] (selector zone true))
-  ([zone enabled?]
-   {:effect-id :zone-selector :enabled? enabled? :params {:target-zone zone}}))
-
 (defn- preset [id & {:as fields}]
   (merge {:id id :type :preset :preset-id :circle :enabled? true :params {} :effects []} fields))
 
 (def ^:private one-per-place
-  "One cue per place a zone group can be named, each naming :balcony there only."
-  {[0 0] {:destination-zone {:zone-group-id :balcony} :items [(preset "p")]}
-   [1 0] {:items [(preset "p" :zone-group-id :balcony)]}
-   [2 0] {:items [{:id "g" :type :group :zone-group-id :balcony :items [(preset "p")]}]}
-   [3 0] {:items [{:id "g" :type :group :items [(preset "p" :zone-group-id :balcony)]}]}
-   [4 0] {:items [(preset "p" :effects [(selector :balcony)])]}
-   [5 0] {:items [(preset "p" :effects [(selector :balcony false)])]}
-   [6 0] {:items [(preset "p" :effects [{:effect-id :zone-selector :enabled? true
-                                         :params {:target-zone :left}
-                                         :keyframe-modulator {:enabled? true
-                                                              :keyframes [{:position 0.0 :params {:target-zone :left}}
-                                                                          {:position 0.5 :params {:target-zone :balcony}}]}}])]}
-   [7 0] {:items [(preset "p" :effects [{:id "fx-group" :type :group
-                                         :items [(selector :balcony)]}])]}
+  "One cue per place a zone group can be named, each naming :balcony there
+   only, in Z4's form (:target)."
+  {[0 0] {:target :balcony :items [(preset "p")]}
+   [1 0] {:items [(preset "p" :target :balcony)]}
+   [2 0] {:items [{:id "g" :type :group :target :balcony :items [(preset "p")]}]}
+   [3 0] {:items [{:id "g" :type :group :items [(preset "p" :target :balcony)]}]}
    [0 1] {:editor-type :timeline
-          :tracks [{:id "t1" :type :track :zone-group-id :balcony}]
+          :tracks [{:id "t1" :type :track :target :balcony}]
           :items [(preset "clip" :track-id "t1")]}
    [1 1] {:editor-type :timeline
-          :tracks [{:id "f1" :type :group :zone-group-id :balcony
+          :tracks [{:id "f1" :type :group :target :balcony
                     :items [{:id "t1" :type :track}]}]
-          :items [(preset "clip" :track-id "t1")]}
-   [2 1] {:editor-type :timeline
-          :tracks [{:id "t1" :type :track :effects [(selector :balcony)]}]
           :items [(preset "clip" :track-id "t1")]}
    [3 1] {:editor-type :timeline
           :tracks [{:id "t1" :type :track}]
           :items [{:id "gclip" :type :group :track-id "t1"
-                   :items [(preset "p" :zone-group-id :balcony)]}]}})
+                   :items [(preset "p" :target :balcony)]}]}})
 
 (defn- names?
   "Does x name kw anywhere?"
@@ -46,12 +30,11 @@
   (boolean (some #{kw} (tree-seq coll? seq x))))
 
 (defn- show-state []
-  {:chains {:cue-chains (assoc one-per-place [9 9] {:destination-zone {:zone-group-id :left}
-                                                    :items [(preset "other" :zone-group-id :right)]})
-            :effect-chains {[0 0] {:items [(selector :balcony)]}
-                            [1 0] {:items [(selector :left)]}}}
+  {:chains {:cue-chains (assoc one-per-place [9 9] {:target :left
+                                                    :items [(preset "other" :target :right)]})
+            :effect-chains {[0 0] {:items [{:effect-id :scale :params {}}]}}}
    :config {:preview {:zone-group-filter :balcony
-                      :grid-cells [{:zone-group-id nil} {:zone-group-id :balcony} {:zone-group-id :right}]}}
+                      :grid-cells [{:target nil} {:target :balcony} {:target :right}]}}
    :projectors {:p1 {:zone-groups [:all :balcony]}}
    :virtual-projectors {:vp {:zone-groups [:balcony]}}})
 
@@ -63,10 +46,9 @@
     (doseq [[cell cue] one-per-place]
       (is (contains? (refs/cue-refs cue) :balcony) (str cell)))))
 
-(deftest cue-without-destination-names-all-test
+(deftest cue-without-target-names-all-test
   (is (contains? (refs/cue-refs {:items []}) :all))
-  (is (contains? (refs/cue-refs {:destination-zone {} :items []}) :all))
-  (is (not (contains? (refs/cue-refs {:destination-zone {:zone-group-id :left} :items []}) :all)))
+  (is (not (contains? (refs/cue-refs {:target :left :items []}) :all)))
   (is (= #{[0 0]} (refs/cues-using {[0 0] {:items []} [1 0] nil} :all))))
 
 (deftest replace-refs-rewrites-every-place-test
@@ -76,33 +58,26 @@
     (is (= (conj (set (keys one-per-place)) [9 9])
            (refs/cues-using (get-in state [:chains :cue-chains]) :left))
         "every cue that named :balcony now names :left, beside [9 9], which already did")
-    (is (= :left (get-in state [:chains :cue-chains [0 0] :destination-zone :zone-group-id])))
-    (is (= :left (get-in state [:chains :cue-chains [6 0] :items 0 :effects 0
-                                :keyframe-modulator :keyframes 1 :params :target-zone])))
-    (is (= :left (get-in state [:chains :cue-chains [7 0] :items 0 :effects 0 :items 0 :params :target-zone])))
-    (is (= :left (get-in state [:chains :effect-chains [0 0] :items 0 :params :target-zone])))
-    (is (= [{:zone-group-id nil} {:zone-group-id :left} {:zone-group-id :right}]
-           (get-in state [:config :preview :grid-cells])))
+    (is (= :left (get-in state [:chains :cue-chains [0 0] :target])))
+    (is (= :left (get-in state [:chains :cue-chains [3 1] :items 0 :items 0 :target])) "a clip in a group clip")
+    (is (= [{:target nil} {:target :left} {:target :right}] (get-in state [:config :preview :grid-cells])))
     (is (= :left (get-in state [:config :preview :zone-group-filter])))))
 
 (deftest replace-refs-to-nil-inherits-test
   (let [state (refs/replace-refs (show-state) {:balcony nil})
         cues (get-in state [:chains :cue-chains])]
     (is (not (names? (:chains state) :balcony)))
-    (testing "the cue falls back to All"
-      (is (not (contains? (get cues [0 0]) :destination-zone))))
+    (testing "the cue falls back to its column's, the show's, or All"
+      (is (not (contains? (get cues [0 0]) :target))))
     (testing "items, groups, tracks and folders inherit"
-      (is (not (contains? (get-in cues [[1 0] :items 0]) :zone-group-id)))
-      (is (not (contains? (get-in cues [[2 0] :items 0]) :zone-group-id)))
-      (is (not (contains? (get-in cues [[3 0] :items 0 :items 0]) :zone-group-id)))
-      (is (not (contains? (get-in cues [[0 1] :tracks 0]) :zone-group-id)))
-      (is (not (contains? (get-in cues [[1 1] :tracks 0]) :zone-group-id)))
-      (is (not (contains? (get-in cues [[3 1] :items 0 :items 0]) :zone-group-id))))
-    (testing "a Zone Selector says All"
-      (is (= :all (get-in cues [[4 0] :items 0 :effects 0 :params :target-zone])))
-      (is (= :all (get-in cues [[6 0] :items 0 :effects 0 :keyframe-modulator :keyframes 1 :params :target-zone]))))
+      (is (not (contains? (get-in cues [[1 0] :items 0]) :target)))
+      (is (not (contains? (get-in cues [[2 0] :items 0]) :target)))
+      (is (not (contains? (get-in cues [[3 0] :items 0 :items 0]) :target)))
+      (is (not (contains? (get-in cues [[0 1] :tracks 0]) :target)))
+      (is (not (contains? (get-in cues [[1 1] :tracks 0]) :target)))
+      (is (not (contains? (get-in cues [[3 1] :items 0 :items 0]) :target))))
     (testing "the preview cell shows the master view, the filter All"
-      (is (= {:zone-group-id nil} (get-in state [:config :preview :grid-cells 1])))
+      (is (= {:target nil} (get-in state [:config :preview :grid-cells 1])))
       (is (= :all (get-in state [:config :preview :zone-group-filter]))))))
 
 (deftest replace-refs-leaves-membership-alone-test
@@ -118,32 +93,36 @@
       (let [after (refs/replace-refs state {:balcony :left})]
         (is (identical? (get-in state [:chains :cue-chains [9 9]])
                         (get-in after [:chains :cue-chains [9 9]])))
-        (is (identical? (get-in state [:chains :effect-chains [1 0]])
-                        (get-in after [:chains :effect-chains [1 0]])))))))
+        (is (identical? (get-in state [:chains :effect-chains]) (get-in after [:chains :effect-chains])))))))
 
 (deftest effects-grid-and-preview-dont-count-as-cues-test
   (let [state (show-state)
         cues (dissoc (get-in state [:chains :cue-chains]) [0 0])]
     (is (not (contains? (refs/cues-using cues :balcony) [0 0])))
     (is (= #{} (refs/cues-using {[9 9] (get-in state [:chains :cue-chains [9 9]])} :balcony))
-        "the effects grid and the preview name :balcony, but no cue does")))
+        "the preview names :balcony, but no cue does")))
 
 (deftest replace-refs-rewrites-a-cells-target-test
-  (testing "a preview cell written since zones Z3 names its group under :target"
-    (let [state (assoc-in (show-state) [:config :preview :grid-cells]
-                          [{:target nil} {:target :balcony} {:zone-group-id :balcony} {:target :right}])]
-      (is (= [{:target nil} {:target :left} {:zone-group-id :left} {:target :right}]
-             (get-in (refs/replace-refs state {:balcony :left}) [:config :preview :grid-cells])))
-      (is (= {:target nil} (get-in (refs/replace-refs state {:balcony nil}) [:config :preview :grid-cells 1]))
-          "cleared: the master view")))
-  (testing "a cell with both keys (an old :zone-group-id written into a default cell) has each re-pointed"
-    (let [state (assoc-in (show-state) [:config :preview :grid-cells] [{:target :auto/left :zone-group-id :balcony}])]
-      (is (= [{:target :auto/left :zone-group-id :left}]
-             (get-in (refs/replace-refs state {:balcony :left}) [:config :preview :grid-cells])))
-      (is (= [{:target :left :zone-group-id :left}]
-             (get-in (refs/replace-refs (assoc-in state [:config :preview :grid-cells 0 :target] :balcony) {:balcony :left})
-                     [:config :preview :grid-cells])))
-      (is (identical? state (refs/replace-refs state {:graphics :left})) "nothing it names: the same state"))))
+  (let [state (assoc-in (show-state) [:config :preview :grid-cells] [{:target nil} {:target :balcony} {:target :right}])]
+    (is (= [{:target nil} {:target :left} {:target :right}]
+           (get-in (refs/replace-refs state {:balcony :left}) [:config :preview :grid-cells])))
+    (is (= {:target nil} (get-in (refs/replace-refs state {:balcony nil}) [:config :preview :grid-cells 1]))
+        "cleared: the master view")
+    (is (identical? state (refs/replace-refs state {:graphics :left})) "nothing it names: the same state")))
+
+(deftest old-keys-are-no-places-test
+  (testing "Z0's keys are neither read nor re-pointed (zones plan Z5, Z4-Q7 A): loading converts them, and an
+            old show's Z2 rows re-point them there (state.migration)"
+    (let [old {[0 0] {:destination-zone {:zone-group-id :balcony}
+                      :items [(preset "p" :zone-group-id :balcony
+                                      :effects [{:effect-id :zone-selector :enabled? true :params {:target-zone :balcony}}])]
+                      :tracks [{:id "t1" :type :track :zone-group-id :balcony}]}}
+          state {:chains {:cue-chains old
+                          :effect-chains {[0 0] {:items [{:effect-id :zone-selector :params {:target-zone :balcony}}]}}}
+                 :config {:preview {:grid-cells [{:zone-group-id :balcony}]}}}]
+      (is (= #{} (refs/cues-using old :balcony)))
+      (is (= #{:all} (refs/cue-refs (get old [0 0]))) "no target of its own: All")
+      (is (identical? state (refs/replace-refs state {:balcony :left}))))))
 
 
 ;; Zones plan Z4: :target everywhere, the grid's columns, the show default,

@@ -103,7 +103,7 @@
 (defn- pinned
   "A cue cell that plays on ref."
   [ref]
-  {:items [{:id (str "i-" (name ref)) :type :preset :preset-id :circle}] :destination-zone {:zone-group-id ref}})
+  {:items [{:id (str "i-" (name ref)) :type :preset :preset-id :circle}] :target ref})
 
 (deftest rename-pins-by-stable-id-test
   (let [;; This rig: unit L found at .57, unit R at .7, and another unit at .5
@@ -117,8 +117,8 @@
                                                   [3 0] (pinned :auto.laser/projector-10-0-0-6-1)
                                                   [4 0] (pinned :graphics)})
                  (assoc-in [:chains :cue-chains [5 0]] {:items [{:id "i5" :type :preset :preset-id :wave
-                                                                 :zone-group-id :auto.laser/projector-10-0-0-5-1}]})
-                 (assoc-in [:config :preview :grid-cells 1 :zone-group-id] :auto.laser/projector-10-0-0-5-1))
+                                                                 :target :auto.laser/projector-10-0-0-5-1}]})
+                 (assoc-in [:config :preview :grid-cells 1 :target] :auto.laser/projector-10-0-0-5-1))
         ;; friday.zip's hardware: unit L at .5, unit R at .7, a host-only laser at .9, and one at .6 whose
         ;; unit isn't here
         hardware {:rig {:order []}
@@ -127,10 +127,10 @@
                                :projector-10-0-0-9-1 {:name "SR Beam" :host "10.0.0.9" :service-id 1 :stable-id [:host "10.0.0.9" 1]}
                                :projector-10-0-0-6-1 {:name "Gone" :host "10.0.0.5" :service-id 2 :stable-id [:unit "77 77" 2]}}}
         renamed (rig-file/rename-pins here hardware)
-        target (fn [s cell] (get-in s [:chains :cue-chains cell :destination-zone :zone-group-id]))]
+        target (fn [s cell] (get-in s [:chains :cue-chains cell :target]))]
     (is (= :auto.laser/projector-10-0-0-57-1 (target renamed [0 0])) "Laser L's pin follows the unit to .57")
-    (is (= :auto.laser/projector-10-0-0-57-1 (get-in renamed [:chains :cue-chains [5 0] :items 0 :zone-group-id])) "an item's too")
-    (is (= :auto.laser/projector-10-0-0-57-1 (get-in renamed [:config :preview :grid-cells 1 :zone-group-id])) "and a preview cell")
+    (is (= :auto.laser/projector-10-0-0-57-1 (get-in renamed [:chains :cue-chains [5 0] :items 0 :target])) "an item's too")
+    (is (= :auto.laser/projector-10-0-0-57-1 (get-in renamed [:config :preview :grid-cells 1 :target])) "and a preview cell")
     (is (= :auto.laser/projector-10-0-0-7-1 (target renamed [1 0])) "Laser R has the same id here")
     (is (= :auto.laser/projector-10-0-0-9-1 (target renamed [2 0])) "a laser that isn't here keeps its id, which reaches nothing")
     (is (= :graphics (target renamed [4 0])) "groups are left alone")
@@ -231,7 +231,7 @@
                       (assoc-in [:projectors :projector-10-0-0-90-1] {:name "Found" :host "10.0.0.90" :service-id 1
                                                                       :stable-id [:host "10.0.0.9" 1] :enabled? false}))
             set-up (rig-file/set-up-from-show later friday-hardware friday-chains pins-then)]
-        (is (= :auto.laser/projector-10-0-0-90-1 (get-in set-up [:chains :cue-chains [1 0] :destination-zone :zone-group-id])))
+        (is (= :auto.laser/projector-10-0-0-90-1 (get-in set-up [:chains :cue-chains [1 0] :target])))
         (is (not (contains? (:projectors set-up) :projector-10-0-0-9-1)) "no second laser for the same unit")))))
 
 (deftest set-up-converts-old-hardware-first-test
@@ -288,7 +288,7 @@
       (assoc :zone-groups {:graphics {:id :graphics :name "Graphics" :color "#9B59B6"}
                            :crowd {:id :crowd :name "Crowd Scanning" :color "#E67E22"}})
       (assoc-in [:chains :cue-chains] {[0 0] (pinned :graphics)
-                                       [1 0] {:items [{:id "g" :type :preset :preset-id :wave :zone-group-id :graphics}]}
+                                       [1 0] {:items [{:id "g" :type :preset :preset-id :wave :target :graphics}]}
                                        [2 0] (pinned :auto.laser/projector-10-0-0-9-1)
                                        [3 0] (pinned :auto.laser/projector-10-0-0-9-1)
                                        [4 0] (pinned :auto.laser/projector-10-0-0-57-1)
@@ -422,9 +422,9 @@
       (is (= {:id :group-beams :name "Beams" :color "#111111"} (get-in (rig-file/add-groups-to-show s [:group-beams]) [:zone-groups :group-beams])))
       (is (= (:zone-groups s) (:zone-groups (rig-file/add-groups-to-show s [:group-unknown]))) "only the rig's copy's groups")
       (let [repinned (rig-file/repin s :auto.laser/projector-10-0-0-9-1 :auto.laser/projector-10-0-0-7-1)]
-        (is (= :auto.laser/projector-10-0-0-7-1 (get-in repinned [:chains :cue-chains [2 0] :destination-zone :zone-group-id])))
-        (is (= :auto.laser/projector-10-0-0-7-1 (get-in repinned [:chains :cue-chains [3 0] :destination-zone :zone-group-id]))))
-      (is (= :all (get-in (rig-file/repin s :auto.laser/projector-10-0-0-9-1 :all) [:chains :cue-chains [2 0] :destination-zone :zone-group-id])))
+        (is (= :auto.laser/projector-10-0-0-7-1 (get-in repinned [:chains :cue-chains [2 0] :target])))
+        (is (= :auto.laser/projector-10-0-0-7-1 (get-in repinned [:chains :cue-chains [3 0] :target]))))
+      (is (= :all (get-in (rig-file/repin s :auto.laser/projector-10-0-0-9-1 :all) [:chains :cue-chains [2 0] :target])))
       (is (identical? s (rig-file/repin s :auto.laser/projector-10-0-0-9-1 :auto.laser/projector-10-0-0-404-1))
           "never to a laser that isn't here either"))))
 

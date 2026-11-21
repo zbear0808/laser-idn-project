@@ -20,6 +20,39 @@
             [laser-show.routing.targets :as targets]))
 
 
+;; Identity-keeping updates
+
+(defn- mapv-same
+  "mapv f over v, but v itself when f changes no element."
+  [f v]
+  (if (empty? v)
+    v
+    (let [v' (mapv f v)]
+      (if (every? true? (map identical? v v')) v v'))))
+
+(defn- update-same
+  "update m k f when m has k, keeping m when f returns the identical value."
+  [m k f]
+  (if (contains? m k)
+    (let [old (get m k)
+          new (f old)]
+      (if (identical? old new) m (assoc m k new)))
+    m))
+
+(defn- zone-selector? [fx]
+  (= :zone-selector (:effect-id fx)))
+
+(defn- update-vals-same
+  "m with f on each value, m itself when nothing changes."
+  [m f]
+  (if (map? m)
+    (reduce-kv (fn [acc k v]
+                 (let [v' (f v)]
+                   (if (identical? v v') acc (assoc acc k v'))))
+               m m)
+    m))
+
+
 ;; Rig rows: the projectors and virtual projectors
 
 (defn- all-membership
@@ -54,6 +87,69 @@
 
 ;; Show rows: the group definitions and what names them
 
+(defn- old-ref
+  "ref re-pointed by smap {old new}."
+  [smap ref]
+  (if (and (some? ref) (contains? smap ref)) (get smap ref) ref))
+
+(defn- old-effect
+  "A Zone Selector's :target-zone, and its keyframes', re-pointed; inside
+   effect groups too."
+  [fx smap]
+  (cond
+    (chains/group? fx) (update-same fx :items (fn [fxs] (mapv-same #(old-effect % smap) fxs)))
+    (zone-selector? fx)
+    (-> fx
+        (update-same :params (fn [p] (update-same p :target-zone #(old-ref smap %))))
+        (update-same :keyframe-modulator
+                     (fn [km]
+                       (update-same km :keyframes
+                                    (fn [kfs]
+                                      (mapv-same (fn [kf] (update-same kf :params (fn [p] (update-same p :target-zone #(old-ref smap %)))))
+                                                 kfs))))))
+    :else fx))
+
+(defn- old-node
+  "An item, group, clip, track or folder: its :zone-group-id, its effects'
+   and its children's re-pointed."
+  [node smap]
+  (if (map? node)
+    (-> node
+        (update-same :zone-group-id #(old-ref smap %))
+        (update-same :effects (fn [fxs] (mapv-same #(old-effect % smap) fxs)))
+        (update-same :items (fn [nodes] (mapv-same #(old-node % smap) nodes))))
+    node))
+
+(defn- old-keys
+  "state with the groups smap names re-pointed where shows before zones
+   plan Z4 named them, which routing.refs no longer reads (Z4-Q7 A): a cue's
+   [:destination-zone :zone-group-id], an item's, group's, clip's, track's or
+   folder's :zone-group-id, a Zone Selector's :target-zone (in cues and in
+   the effects grid), a preview cell's :zone-group-id. Z4's rows then make
+   them targets. The same state when nothing names them."
+  [state smap]
+  (let [cue (fn [c]
+              (if (map? c)
+                (-> c
+                    (update-same :destination-zone (fn [d] (update-same d :zone-group-id #(old-ref smap %))))
+                    (update-same :items (fn [nodes] (mapv-same #(old-node % smap) nodes)))
+                    (update-same :tracks (fn [nodes] (mapv-same #(old-node % smap) nodes))))
+                c))
+        cell (fn [c] (if (map? c) (update-same c :items (fn [fxs] (mapv-same #(old-effect % smap) fxs))) c))]
+    (-> state
+        (update-same :chains (fn [chains]
+                               (-> chains
+                                   (update-same :cue-chains #(update-vals-same % cue))
+                                   (update-same :effect-chains #(update-vals-same % cell)))))
+        (update-same :config (fn [config]
+                               (update-same config :preview
+                                            (fn [preview]
+                                              (update-same preview :grid-cells
+                                                           (fn [cells]
+                                                             (if (vector? cells)
+                                                               (mapv-same #(if (map? %) (update-same % :zone-group-id (fn [z] (old-ref smap z))) %) cells)
+                                                               cells))))))))))
+
 (def ^:private built-ins
   "The built-in groups that became automatic ones, and their names."
   [[:left :auto/left "Left"] [:right :auto/right "Right"] [:center :auto/center "Center"]])
@@ -61,10 +157,11 @@
 (defn show-rows
   "state with the built-in :left, :right and :center converted: one no
    projector or virtual projector of the loaded hardware lists (on or off)
-   goes, and every reference to it (routing.refs) names the automatic group
-   instead; one that is listed stays, as \"Left (manual)\" while it is still
-   called \"Left\". A built-in deleted before is left alone, and so is what
-   names it (04 S-12). All's definition goes: All is built in (04 S-9)."
+   goes, and every reference to it (routing.refs, and an old show's own
+   keys, old-keys) names the automatic group instead; one that is listed
+   stays, as \"Left (manual)\" while it is still called \"Left\". A built-in
+   deleted before is left alone, and so is what names it (04 S-12). All's
+   definition goes: All is built in (04 S-9)."
   [state hardware]
   (let [outputs (concat (vals (:projectors hardware)) (vals (:virtual-projectors hardware)))
         listed? (fn [group] (some #(some #{group} (:zone-groups %)) outputs))]
@@ -76,6 +173,7 @@
                                 (assoc-in [:zone-groups old :name] (str label " (manual)")))
                 :else (-> s
                           (update :zone-groups dissoc old)
+                          (old-keys {old auto})
                           (refs/replace-refs {old auto}))))
             (cond-> state
               (contains? (:zone-groups state) :all) (update :zone-groups dissoc :all))
@@ -118,25 +216,6 @@
 
 ;; Z4's rows: targets (06 §8.3)
 
-(defn- mapv-same
-  "mapv f over v, but v itself when f changes no element."
-  [f v]
-  (if (empty? v)
-    v
-    (let [v' (mapv f v)]
-      (if (every? true? (map identical? v v')) v v'))))
-
-(defn- update-same
-  "update m k f when m has k, keeping m when f returns the identical value."
-  [m k f]
-  (if (contains? m k)
-    (let [old (get m k)
-          new (f old)]
-      (if (identical? old new) m (assoc m k new)))
-    m))
-
-(defn- zone-selector? [fx]
-  (= :zone-selector (:effect-id fx)))
 
 (defn effects-z4
   "effects without a Zone Selector, inside effect groups too: routing reads
@@ -212,15 +291,6 @@
     (contains? cell :zone-group-id) (-> cell (assoc :target (:zone-group-id cell)) (dissoc :zone-group-id))
     :else cell))
 
-(defn- update-vals-same
-  "m with f on each value, m itself when nothing changes."
-  [m f]
-  (if (map? m)
-    (reduce-kv (fn [acc k v]
-                 (let [v' (f v)]
-                   (if (identical? v v') acc (assoc acc k v'))))
-               m m)
-    m))
 
 (defn zones-z4
   "Z4's rows on a loaded show (06 §8.3): every cue in Z4's form (cue-z4),

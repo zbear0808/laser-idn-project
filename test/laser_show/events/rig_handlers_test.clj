@@ -203,8 +203,8 @@
       (assoc-in [:projectors :a :zone-groups] [:group-gfx])
       (assoc-in [:projectors :a :safety] {:limit [-0.5 -0.5 0.5 0.5] :blocked []})
       (assoc-in [:rig-file :group-copy] {:group-gfx {:id :group-gfx :name "Graphics" :color "#000000"}})
-      (assoc-in [:chains :cue-chains] {[0 0] {:items [] :destination-zone {:zone-group-id :graphics}}
-                                       [1 0] {:items [] :destination-zone {:zone-group-id :auto.laser/d}}})
+      (assoc-in [:chains :cue-chains] {[0 0] {:items [] :target :graphics}
+                                       [1 0] {:items [] :target :auto.laser/d}})
       (assoc-in [:ui :dialogs :rig-report] {:open? true :mode :report :file "friday.zip"
                                             :hardware show-hardware :chains {} :pins {:a :a :d :d}})
       (history/mark-clean)))
@@ -253,11 +253,11 @@
         (is (false? (get-in adopted [:project :dirty?])))))
     (testing "Pin them to… and Send them to All: the show's, unsaved"
       (let [repinned (run s {:event/type :rig/repin :from :auto.laser/d :to :auto.laser/b})]
-        (is (= :auto.laser/b (get-in repinned [:chains :cue-chains [1 0] :destination-zone :zone-group-id])))
+        (is (= :auto.laser/b (get-in repinned [:chains :cue-chains [1 0] :target])))
         (is (= "Re-pin Cues" (last-label repinned)))
         (is (true? (get-in repinned [:project :dirty?]))))
       (is (= :all (get-in (run s {:event/type :rig/repin :from :auto.laser/d :to :all})
-                          [:chains :cue-chains [1 0] :destination-zone :zone-group-id]))))
+                          [:chains :cue-chains [1 0] :target]))))
     (testing "Add them to this show"
       (let [added (run s {:event/type :rig/add-groups-to-show :group-ids [:group-gfx]})]
         (is (= "Graphics" (get-in added [:zone-groups :group-gfx :name])))
@@ -320,14 +320,14 @@
     (is (false? (get-in forgotten [:state :project :dirty?])) "the rig's: not unsaved")
     (is (some? (:rig/write forgotten)) "and the rig file follows")
     (testing "with cues pinned to it, the same choice Z2's remove gives (04 S-13)"
-      (let [pinned (assoc-in s [:chains :cue-chains [0 0]] {:items [] :destination-zone {:zone-group-id :auto.laser/c}})
+      (let [pinned (assoc-in s [:chains :cue-chains [0 0]] {:items [] :target :auto.laser/c})
             asked (get-in (handle pinned {:event/type :rig/request-forget :projector-id :c}) [:ui :dialogs :confirm])]
         (is (= {:key :retarget-to :label "Send its cues to:"} (select-keys (:choice asked) [:key :label])))
         (is (= :all (:choice-value asked)))
         (is (= "Its calibration and safety zone leave the rig. A scan that finds it again adds it as a new laser. 1 cue is pinned to it."
                (:message asked)))
         (is (= :auto.laser/b (get-in (run-through pinned {:event/type :rig/forget-projector :projector-id :c :retarget-to :auto.laser/b})
-                                     [:state :chains :cue-chains [0 0] :destination-zone :zone-group-id])))))
+                                     [:state :chains :cue-chains [0 0] :target])))))
     (testing "called bare, or for a laser that isn't there: nothing"
       (let [bare (rig-state)]
         (is (identical? bare (handle bare {:event/type :rig/request-forget})))

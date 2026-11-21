@@ -3,17 +3,12 @@
    group, and re-pointing or clearing every reference at once.
 
    The places (ref-places):
-   - a cue's :target (zones plan Z4), and before Z4 its
-     [:destination-zone :zone-group-id];
+   - a cue's :target (zones plan Z4);
    - the :target of every item and group, recursively (cue chain items,
      timeline clips and group clips), and of every timeline track and folder,
-     a ref inside a union too; before Z4 their :zone-group-id;
-   - every Zone Selector's [:params :target-zone] and its keyframes'
-     [:keyframe-modulator :keyframes i :params :target-zone], on or off, in the
-     :effects of items, groups, clips, tracks and folders, inside effect
-     groups too, in cue chains and effect chains;
-   - the preview's [:config :preview :grid-cells i :target] (and an old
-     cell's :zone-group-id) and [:config :preview :zone-group-filter];
+     a ref inside a union too;
+   - the preview's [:config :preview :grid-cells i :target] and
+     [:config :preview :zone-group-filter];
    - the grid's column defaults, [:grid :column-targets col], and the
      show's, [:config :default-target] (Z4);
    - every zone map's lanes and overrides, [:zone-maps id :lanes i] and
@@ -25,10 +20,15 @@
    not places: they say which lasers are in a group, not where content goes.
    Nothing here touches them.
 
+   Z0's keys (a cue's [:destination-zone :zone-group-id], an item's,
+   group's, clip's or track's :zone-group-id, a Zone Selector's
+   :target-zone, a preview cell's :zone-group-id) are no places since zones
+   plan Z5 (Z4-Q7 A): loading and pasting turn them into targets
+   (state.migration), and an old show's Z2 rows re-point them there first.
+
    Rewrites keep the identity of everything they don't change, so a state
    where nothing names the old id comes back identical?."
-  (:require [laser-show.animation.chains :as chains]
-            [laser-show.routing.targets :as targets]))
+  (:require [laser-show.routing.targets :as targets]))
 
 
 ;; Identity-keeping updates
@@ -62,19 +62,9 @@
     [true (get smap id)]
     [false id]))
 
-(defn- rewrite-inheriting
-  "m's k (an item's, group's or track's :zone-group-id): re-pointed, or
-   removed when its new value is nil, so it inherits."
-  [m k smap]
-  (let [[found? new] (replaced smap (get m k))]
-    (cond
-      (not found?) m
-      (nil? new) (dissoc m k)
-      :else (assoc m k new))))
-
 (defn- rewrite-value
-  "A value that can't be absent (a Zone Selector's zone, the preview filter):
-   re-pointed, or else-value when its new value is nil."
+  "A value that can't be absent (the preview filter): re-pointed, or
+   else-value when its new value is nil."
   [id smap else-value]
   (let [[found? new] (replaced smap id)]
     (cond
@@ -110,62 +100,16 @@
     m))
 
 
-;; Effects
-
-
-(defn- zone-selector? [fx]
-  (= :zone-selector (:effect-id fx)))
-
-(declare rewrite-effects)
-
-(defn- rewrite-effect
-  [fx smap]
-  (cond
-    (chains/group? fx) (update-same fx :items #(rewrite-effects % smap))
-
-    (zone-selector? fx)
-    (-> fx
-        (update-same :params #(update-same % :target-zone (fn [z] (rewrite-value z smap :all))))
-        (update-same :keyframe-modulator
-                     (fn [km]
-                       (update-same km :keyframes
-                                    (fn [kfs]
-                                      (mapv-same (fn [kf]
-                                                   (update-same kf :params
-                                                                #(update-same % :target-zone
-                                                                              (fn [z] (rewrite-value z smap :all)))))
-                                                 kfs))))))
-
-    :else fx))
-
-(defn- rewrite-effects [effects smap]
-  (mapv-same #(rewrite-effect % smap) effects))
-
-(defn- effect-refs
-  "The zones fx names: a Zone Selector's zone and its keyframes' zones,
-   inside effect groups too."
-  [fx]
-  (cond
-    (chains/group? fx) (mapcat effect-refs (:items fx))
-    (zone-selector? fx) (cons (get-in fx [:params :target-zone])
-                              (map #(get-in % [:params :target-zone])
-                                   (get-in fx [:keyframe-modulator :keyframes])))
-    :else nil))
-
-
 ;; Items, groups, clips, tracks and folders
 
 
 (declare rewrite-nodes)
 
 (defn- rewrite-node
-  "An item, group, clip, track or folder: its :target (and an old
-   :zone-group-id), its effects and its children."
+  "An item, group, clip, track or folder: its :target and its children."
   [node smap]
   (-> node
       (rewrite-target-key :target smap)
-      (rewrite-inheriting :zone-group-id smap)
-      (update-same :effects #(rewrite-effects % smap))
       (update-same :items #(rewrite-nodes % smap))))
 
 (defn- rewrite-nodes [nodes smap]
@@ -173,8 +117,6 @@
 
 (defn- node-refs [node]
   (concat (targets/target-refs (:target node))
-          (when-let [z (:zone-group-id node)] [z])
-          (mapcat effect-refs (:effects node))
           (mapcat node-refs (:items node))))
 
 
@@ -183,13 +125,11 @@
 
 (defn cue-refs
   "The set of refs cue's own data names in any place. A cue with no target
-   of its own (and before Z4 no destination) names :all, as the routing
-   falls back to it when its column and the show set none. (What a cue can
-   draw to, its column's and the show's defaults included, is
-   routing.targets/cue-refs.)"
+   of its own names :all, as the routing falls back to it when its column
+   and the show set none. (What a cue can draw to, its column's and the
+   show's defaults included, is routing.targets/cue-refs.)"
   [cue]
-  (let [own (concat (targets/target-refs (:target cue))
-                    (keep identity [(get-in cue [:destination-zone :zone-group-id])]))]
+  (let [own (targets/target-refs (:target cue))]
     (into (if (seq own) (set own) #{:all})
           (remove nil?)
           (concat (mapcat node-refs (:items cue))
@@ -206,14 +146,10 @@
         cue-chains))
 
 (defn- rewrite-cue [cue smap]
-  (let [[found? new] (replaced smap (get-in cue [:destination-zone :zone-group-id]))]
-    (-> (cond
-          (not found?) cue
-          (nil? new) (dissoc cue :destination-zone)
-          :else (assoc-in cue [:destination-zone :zone-group-id] new))
-        (rewrite-target-key :target smap)
-        (update-same :items #(rewrite-nodes % smap))
-        (update-same :tracks #(rewrite-nodes % smap)))))
+  (-> cue
+      (rewrite-target-key :target smap)
+      (update-same :items #(rewrite-nodes % smap))
+      (update-same :tracks #(rewrite-nodes % smap))))
 
 
 ;; The places
@@ -240,22 +176,13 @@
     :replace (fn [state smap]
                (update-in-same state [:chains :cue-chains]
                                #(update-vals-same % (fn [cue] (when cue (rewrite-cue cue smap))))))}
-   {:kind :effect-chains
-    :replace (fn [state smap]
-               (update-in-same state [:chains :effect-chains]
-                               #(update-vals-same % (fn [chain] (update-same chain :items (fn [fx] (rewrite-effects fx smap)))))))}
    {:kind :preview-cells
     :replace (fn [state smap]
                (update-in-same state [:config :preview :grid-cells]
                                (fn [cells]
                                  (mapv-same (fn [cell]
-                                              ;; :target since zones Z3, :zone-group-id before:
-                                              ;; each of them the cell has
-                                              (reduce (fn [cell k]
-                                                        (let [[found? new] (replaced smap (get cell k))]
-                                                          (if (and found? (contains? cell k)) (assoc cell k new) cell)))
-                                                      cell
-                                                      [:target :zone-group-id]))
+                                              (let [[found? new] (replaced smap (get cell :target))]
+                                                (if (and found? (contains? cell :target)) (assoc cell :target new) cell)))
                                             cells))))}
    {:kind :preview-filter
     :replace (fn [state smap]
@@ -284,12 +211,9 @@
    A nil new clears it: the ref leaves a target (a union keeps its other
    refs; with none left the key goes and the level inherits), a column
    default goes, the show default is none (All), a map lane is left empty
-   and an override goes; before Z4's conversion, an item's, group's, clip's
-   or track's :zone-group-id is removed (it inherits), a cue's
-   :destination-zone is removed (it falls back to :all) and a Zone Selector
-   says :all; a preview cell shows the master view (nil) and the preview
-   filter :all. Membership lists are left alone. Returns state itself
-   (identical?) when nothing names an old id."
+   and an override goes; a preview cell shows the master view (nil) and
+   the preview filter :all. Membership lists are left alone. Returns state
+   itself (identical?) when nothing names an old id."
   [state smap]
   (if (empty? smap)
     state

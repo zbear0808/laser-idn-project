@@ -129,7 +129,7 @@
                (assoc-in [:ui :dialogs :rig-report] opened-show)
                ;; a laser in Graphics, and a cue pinned to a laser that isn't here
                (assoc-in [:projectors :p1 :zone-groups] [:graphics])
-               (assoc-in [:chains :cue-chains [7 3]] {:items [] :destination-zone {:zone-group-id :auto.laser/p9}})
+               (assoc-in [:chains :cue-chains [7 3]] {:items [] :target :auto.laser/p9})
                (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 50}] {:type :zone-map :target :map/odd-even})
                ;; a pattern pad's key (zones plan Z5)
                (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 51}] {:type :pattern-pad :target :chase})
