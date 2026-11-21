@@ -1,7 +1,7 @@
 # Phase Z6: the step grid
 
 **Written:** 2026-11-19   **Written for commit:** `f178f56` (`master`; first written at `739bd74`, then re-verified here: `src/` is as vibe Phase 5 left it in `9f5d78a`, after vibe Phase 4b (`f5a4f84`), 4a (`6715fb4`) and UX Phase 3 (`b9b9d55`), and `test/` as `43fa00d` left it; every line below is at that source). Z2–Z5 change several of these files first, so **re-check every path and line at HEAD before starting.**
-**Status:** **Built on branch `zones-z6`, not merged** (`67f2718`..`265c2ad`, 2026-11-20; as built in §13). Still owed: seeing it on a real projector.   **Needs:** Z5 (`07`): the zone stage (`routing/zone_remap.clj`), the `:zone-pattern` effect, a cue's `:zone-patterns`, the pattern window, and `:zone-steps` in the snapshot. Vibe **Phase 4 has landed** (4a `6715fb4`, 4b `f5a4f84`), so a grid steps on HIT, ACCENT, FLASH, a vibe change or any cue start from the start, and can restart on one, through Z5's `:step-on` and `:restart-on` (`07` §4.2). Vibe **Phase 5 has landed** (`9f5d78a`): its Fader modulator can scrub a grid (§8).
+**Status:** **Done in code, on `master`** (`e31d24b`..`372e00a`, 2026-11-20; as built in §13). Still owed: seeing it on a real projector.   **Needs:** Z5 (`07`): the zone stage (`routing/zone_remap.clj`), the `:zone-pattern` effect, a cue's `:zone-patterns`, the pattern window, and `:zone-steps` in the snapshot. Vibe **Phase 4 has landed** (4a `6715fb4`, 4b `f5a4f84`), so a grid steps on HIT, ACCENT, FLASH, a vibe change or any cue start from the start, and can restart on one, through Z5's `:step-on` and `:restart-on` (`07` §4.2). Vibe **Phase 5 has landed** (`9f5d78a`): its Fader modulator can scrub a grid (§8).
 **Implements:** D-6; overview "Start here" 4 ("a drum-machine step grid comes later"); needs `06`'s "Custom step grid". Spec §6 steps 1–3, for a step that lights several zones (spec §6.1's pattern copies, from Z5's S-1).   **Size:** ~3 d
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks what doesn't exist yet. Z5's names are the ones `07` proposes.
@@ -297,7 +297,7 @@ About 2.75 days.
 > - **A ★ (built)** 0 to 6, Steps last, so an old show's modulator from 0 to 5 keeps its six styles.
 > - **B** A new one spans the six rule styles only; Steps is picked by hand.
 
-## 13. As built (2026-11-20, `67f2718`..`265c2ad`, on branch `zones-z6`, not merged)
+## 13. As built (2026-11-20, `e31d24b`..`372e00a`, on `master`)
 
 Built in worktree `zones-z6` off `ea4d153` (Z5 on `master`), while vibe Phase 8's zone reactions (`6544efb`..`cdf1d57`) landed on `master` (`734e411` at the end). The ★ answers are built: Z6-Q1 A (a new grid is 8 steps at 2 a beat), Z6-Q2 A (a grid doesn't follow the pattern pads until it is ticked), Z6-Q3 A (the first cell of a drag decides), Z6-Q4 A (1 to 64 steps, 8, 16 and 32 one click away) and Z6-Q5 A (its own window); and Z5's Z5-Q1 to Z5-Q10 A as Z5 built them (the pads switch a grid that follows them to their style; As set gives it its steps back). The build raised Z6-Q6 to Z6-Q9 (§12), each built as its ★. `legacy-shows` ran in every step. **Not done: seeing it on a real projector** (00 R-1): §8's grid on one laser's halves and on four lasers, and a grid stepped by HIT.
 
@@ -307,10 +307,10 @@ The worktree's folder was emptied once, before step 1's first edit, by something
 
 | # | Commit | Step (§10) |
 |---|---|---|
-| 1 | `67f2718` | `:steps` a lit style of `routing.zone-remap` (NEW `grid-steps`, `grid-step`; `lit-set` is step k mod L of the steps, those in the lane; no steps is the identity); `routing.zone-patterns`: NEW `rule-styles` (the six), `styles` with `:steps` last, the `:steps` parameter (`:step-list`), the grid's preset, `describe`, `lane-text`, `warnings` (a grid needs one row), pads from the rules only; the pattern chip and New zone pattern ▸ list the rules; the numeric list's `:step-list` control; the coverage exemption |
-| 2 | `dcc1449` | NEW `routing/step_grid.clj` (the edits, `as-grid`, `from-style`, `center-out`, `grid-rows`, `copy`, `paste`, `cell-at`, `line-cells`, `normalize`); NEW `events/handlers/step_grid.clj` routed for `"step-grid"`; the labels; the show lock's refused events |
-| 3 | `5f6cc2b` | NEW `views/components/step_grid.clj` (the body, the rows and numbers, + Row, the toolbar, Moves and Follows, `key-event`), NEW `views/dialogs/step_grid_editor.clj` (mounted in `root.clj`); `subs/step-grid`, `step-grid-clipboard`; Step grid… on the chip and in the pattern renderer, Edit grid… in the numeric list; `css/zones.clj`; `as-grid` brings a former grid's steps back (Z6-Q6) |
-| 4 | `265c2ad` | the playhead and the Now line (`ext-clock-redraw` on `:zone-steps`); the pattern window's small grid and Edit grid… for Steps, in place of Zones |
+| 1 | `e31d24b` | `:steps` a lit style of `routing.zone-remap` (NEW `grid-steps`, `grid-step`; `lit-set` is step k mod L of the steps, those in the lane; no steps is the identity); `routing.zone-patterns`: NEW `rule-styles` (the six), `styles` with `:steps` last, the `:steps` parameter (`:step-list`), the grid's preset, `describe`, `lane-text`, `warnings` (a grid needs one row), pads from the rules only; the pattern chip and New zone pattern ▸ list the rules; the numeric list's `:step-list` control; the coverage exemption |
+| 2 | `879cca3` | NEW `routing/step_grid.clj` (the edits, `as-grid`, `from-style`, `center-out`, `grid-rows`, `copy`, `paste`, `cell-at`, `line-cells`, `normalize`); NEW `events/handlers/step_grid.clj` routed for `"step-grid"`; the labels; the show lock's refused events |
+| 3 | `b5a3f7e` | NEW `views/components/step_grid.clj` (the body, the rows and numbers, + Row, the toolbar, Moves and Follows, `key-event`), NEW `views/dialogs/step_grid_editor.clj` (mounted in `root.clj`); `subs/step-grid`, `step-grid-clipboard`; Step grid… on the chip and in the pattern renderer, Edit grid… in the numeric list; `css/zones.clj`; `as-grid` brings a former grid's steps back (Z6-Q6) |
+| 4 | `372e00a` | the playhead and the Now line (`ext-clock-redraw` on `:zone-steps`); the pattern window's small grid and Edit grid… for Steps, in place of Zones |
 | 5 | this commit | this note and §12's new questions |
 
 ### Deviations from the plan
@@ -375,8 +375,9 @@ Where the new code didn't exist yet, the run was first made to compile with stub
 | Where | Unit suite (`clj -M:mac-arm:test`) | UI suite (`clj -M:test-ui:mac-arm:test-ui-headless`) |
 |---|---|---|
 | `ea4d153` (the base: Z5 as landed; 07 §13's rebase row, not re-run) | 1,766 tests, 569,486 assertions, 0 failures | 254 tests, 1,370 assertions, 0 failures |
-| **`265c2ad`, the branch's last code** | **1,808 tests, 569,949 assertions, 0 failures, 0 errors** | **267 tests, 1,424 assertions, 0 failures, 0 errors** |
+| **`372e00a`, the branch's last code** | **1,808 tests, 569,949 assertions, 0 failures, 0 errors** | **267 tests, 1,424 assertions, 0 failures, 0 errors** |
 | the trial merge onto `master` `734e411` (vibe Phase 8's zone reactions in), tree `8aaabe8` | 1,819 tests, 570,197 assertions, 0 failures, 0 errors | 268 tests, 1,436 assertions, 0 failures, 0 errors |
+| **rebased onto `734e411`, as landed** | **the same `src/`, `test/`, `deps.edn`, README and QUICKSTART trees as the trial merge (`8aaabe8`), so its run above stands** | **the same** |
 
 Each step also ran its targeted namespaces (§9's run list) and the UI namespaces whose views it changed (`step-grid-test`, Z5's `zone-patterns-test`), and `legacy-shows` every time. Screenshots were checked with the window at 940 × 640: 8 steps over three rows, 32 steps (they fit), the show lock's greyed grid, the playhead while the cue plays, and the pattern window at 800 × 640 with a grid's small grid. `~/LaserShowProjects` didn't exist before the work and doesn't after it: no test wrote under the home folder.
 
