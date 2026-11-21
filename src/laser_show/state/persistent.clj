@@ -185,8 +185,8 @@
 (defn- reset-session
   "Reset state that refers to the previous document (playback, what vibe
    mode is doing, selection, list UI, dialogs, the status bar's notice, the
-   Vibes tab's selection, a pending zone map switch, undo history, project
-   metadata).
+   Vibes tab's selection, a pending zone map switch and the Map cycle's
+   pause, the pattern pads' style, undo history, project metadata).
    Backend/runtime state (streaming, Link, MIDI/OSC, discovered devices) is kept."
   [state initial]
   (-> state
@@ -200,8 +200,12 @@
       (assoc-in [:ui :notice] (get-in initial [:ui :notice]))
       (assoc-in [:ui :vibes] (get-in initial [:ui :vibes]))
       (assoc-in [:grid :selected-cell] nil)
-      ;; A switch waiting for a beat of the show that was open
+      ;; A switch waiting for a beat of the show that was open, the Map
+      ;; cycle's pause and the pattern pads' style (zones plan Z5): a show
+      ;; opens As set
       (assoc-in [:zone-map :pending] nil)
+      (assoc-in [:zone-map :cycle-paused?] false)
+      (assoc :pattern-pads (:pattern-pads initial))
       ;; The test pattern and Identify belong to the show that was open
       (update :projector-ui merge (select-keys (:projector-ui initial)
                                                [:active-projector :active-virtual-projector

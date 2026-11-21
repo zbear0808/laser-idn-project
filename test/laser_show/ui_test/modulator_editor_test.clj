@@ -85,7 +85,8 @@
   (open-amount-editor! {:type :envelope :active? true :source :hit :min 1.0 :max 1.25
                         :attack 0.0 :release 0.5 :curve :exp :hold? false})
   (ui/wait-for! #(= "HIT" (shown "#modulator-amount-source")))
-  (is (= [:hit :accent :flash :vibe :any :cue] (items "#modulator-amount-source")))
+  (is (= [:hit :accent :flash :vibe :any :cue :zone-step] (items "#modulator-amount-source"))
+      "zones plan Z5's Zone step key is one more source")
   (choose! "#modulator-amount-source" :vibe)
   (ui/wait-for! #(= :vibe (:source (amount))))
   (ui/wait-for! #(= "Vibe change" (shown "#modulator-amount-source")))

@@ -25,6 +25,8 @@
    |   item fields in live-item-paths                  |       |          |
    | live, own domain: [:zone-map :active] (saved by   | no    | no       |
    |   persistent-state-mapping, zones plan Z4)        |       |          |
+   | live, own domain: [:pattern-pads] (not saved,     | no    | no       |
+   |   zones plan Z5), and [:zone-map :cycle-paused?]  |       |          |
    Everything above is still written when the project is saved; the rig
    also has a file of its own, saved by itself (zones plan ZR, state.rig-file)."
   (:require [clojure.walk :as walk]

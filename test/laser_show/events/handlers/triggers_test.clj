@@ -167,3 +167,24 @@
     (is (nil? (:dispatch (pad state :note-off 1090))) "its release taps nothing")
     (is (not (contains? (:trigger-runtime (:state (pad state :note-on 1000))) :tap-history))
         "the trigger runtime keeps no taps of its own")))
+
+(deftest pattern-pad-action-presses-test
+  (let [state (pad-state {:type :pattern-pad :target :chase})
+        press (pad state :note-on 1000)]
+    (is (= {:event/type :pattern-pads/press :pad :chase :src :input :input-time 1000}
+           (select-keys (:dispatch press) [:event/type :pad :src :input-time]))
+        "zones plan Z5: a learned key presses the pattern pad, timed by the input")
+    (is (nil? (:dispatch (pad state :note-off 1090))) "its release does nothing")
+    (is (identical? state (:state press)) "no bookkeeping, as for a vibe key")
+    (is (= :as-set (get-in (pad (pad-state {:type :pattern-pad :target :as-set}) :note-on 1000) [:dispatch :pad])))))
+
+(deftest zone-step-action-steps-test
+  (let [state (pad-state {:type :zone-step})
+        press (pad state :note-on 1000)]
+    (is (= {:event/type :pattern-pads/step :src :input :input-time 1000}
+           (select-keys (:dispatch press) [:event/type :src :input-time]))
+        "the Zone step key steps the patterns that step on it")
+    (is (nil? (:dispatch (pad state :note-off 1090))))
+    (is (identical? state (:state press)))
+    (testing "the CYCLE pad's key presses CYCLE"
+      (is (= :cycle (get-in (pad (pad-state {:type :zone-map :target :cycle}) :note-on 1000) [:dispatch :map]))))))

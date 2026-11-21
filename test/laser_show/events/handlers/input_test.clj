@@ -455,6 +455,37 @@
     (finally
       (stop-learning!))))
 
+(deftest relearning-a-pattern-pad-moves-its-key-test
+  (try
+    (let [chase {:type :pattern-pad :target :chase}
+          off {:type :pattern-pad :target :off}
+          step {:type :zone-step}
+          s0 (assoc-in (initial-state) [:config :input :trigger-map]
+                       {(note-key 36) chase (note-key 37) off (note-key 38) step})]
+      (is (= chase (get-in (learning s0 chase) [:backend :input :learning-target])) "learn aims at the pad")
+      (is (= {(note-key 50) chase (note-key 37) off (note-key 38) step} (trigger-map (captured (learning s0 chase) chase (note 50))))
+          "zones plan Z5: one key a pad, so learning it again moves it; the other pads keep theirs")
+      (is (= {(note-key 36) chase (note-key 37) off (note-key 51) step} (trigger-map (captured (learning s0 step) step (note 51))))
+          "the Zone step key moves too")
+      (testing "the label names a pad over another one's key"
+        (let [s (-> (assoc-in (initial-state) [:config :input :trigger-map] {(note-key 37) off (note-key 38) step})
+                    (history/mark-clean)
+                    (learning chase))
+              label (fn [k] (history/undo-label (:history (:state (events/handle-event-pipeline
+                                                                    {:event/type :input/learn-captured :target-action chase
+                                                                     :input-event (note k) :state s :time 1})))))]
+          (is (= "Learn Trigger (replaces pattern pad Off)" (label 37)))
+          (is (= "Learn Trigger (replaces zone step)" (label 38)))
+          (is (= "Learn Trigger (replaces zone map CYCLE)"
+                 (history/undo-label (:history (:state (events/handle-event-pipeline
+                                                        {:event/type :input/learn-captured :target-action chase :input-event (note 39) :time 1
+                                                         :state (-> (assoc-in (initial-state) [:config :input :trigger-map]
+                                                                              {(note-key 39) {:type :zone-map :target :cycle}})
+                                                                    (history/mark-clean)
+                                                                    (learning chase))})))))))))
+    (finally
+      (stop-learning!))))
+
 (deftest map-pad-learn-ignores-a-cc-test
   (try
     (let [odd-even {:type :zone-map :target :map/odd-even}

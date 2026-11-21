@@ -330,6 +330,19 @@
   [style]
   (or style :as-set))
 
+(defn pad-name
+  "A pad's name: \"As set\", \"Off\", a style's (\"Ping-pong\")."
+  [pad-id]
+  (case pad-id
+    :as-set "As set"
+    :off "Off"
+    (get style-names pad-id (some-> pad-id name))))
+
+(def zone-stage-ids
+  "The zone-stage effects' ids: a zone pattern and a Map cycle (what the
+   show lock counts as a pattern edit, events.show-lock)."
+  #{:zone-pattern :zone-map-cycle})
+
 (defn live-style
   "The pattern pads' style at the global beats: the waiting switch's once
    due, else [:pattern-pads :style]; nil As set, :off, or a style."

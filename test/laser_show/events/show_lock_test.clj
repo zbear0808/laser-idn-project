@@ -11,6 +11,7 @@
             [laser-show.events.handlers.history :as history-handlers]
             [laser-show.events.show-lock :as show-lock]
             [laser-show.output.driver :as driver]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
             [laser-show.state.persistent :as persistent]
@@ -104,7 +105,14 @@
    {:event/type :cue-chain/set-target :col 0 :row 0 :target :zone/a}
    {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-path [0] :target :zone/b}
    {:event/type :timeline/set-track-target :col 6 :row 3 :track-id :t1 :target :zone/a}
-   {:event/type :timeline/set-clip-target :col 6 :row 3 :item-id :c1 :target :graphics}])
+   {:event/type :timeline/set-clip-target :col 6 :row 3 :item-id :c1 :target :graphics}
+   ;; A cue's zone pattern and a new pattern cell move pictures between
+   ;; places, as a target does; a pattern pad's setting and its key, as a
+   ;; map pad's (zones plan Z5)
+   {:event/type :zone-patterns/set-cue-pattern :col 0 :row 0 :style :chase}
+   {:event/type :zone-patterns/new-cell :col 5 :row 2 :style :alternate}
+   {:event/type :pattern-pads/set-pad-bar :pad :chase :bar? true}
+   {:event/type :pattern-pads/clear-control :pad :chase}])
 
 (def ^:private opened-show
   "What Open kept of friday.zip's rig (zones plan ZR): P1 with its own
@@ -123,6 +131,8 @@
                (assoc-in [:projectors :p1 :zone-groups] [:graphics])
                (assoc-in [:chains :cue-chains [7 3]] {:items [] :destination-zone {:zone-group-id :auto.laser/p9}})
                (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 50}] {:type :zone-map :target :map/odd-even})
+               ;; a pattern pad's key (zones plan Z5)
+               (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 51}] {:type :pattern-pad :target :chase})
                ;; a map of yours, and a timeline cue (zones plan Z4)
                (assoc-in [:zone-maps :map/custom-1] {:name "Sweep" :lanes [:auto/left :graphics] :overrides {:zone/c :auto/center}})
                (assoc-in [:chains :cue-chains [6 3]] {:editor-type :timeline
@@ -187,7 +197,13 @@
                    ;; A zone map switch is a performer's (zones plan Z4)
                    {:event/type :zone-map/press :map :map/odd-even}
                    {:event/type :zone-map/schedule :map :map/unison :clock {:beats 3.0 :running? false :now-ms 0}}
-                   {:event/type :zone-maps/use-now :map :map/unison}]]
+                   {:event/type :zone-maps/use-now :map :map/unison}
+                   ;; The pattern pads, STEP and CYCLE are a performer's (zones plan Z5)
+                   {:event/type :pattern-pads/press :pad :chase}
+                   {:event/type :pattern-pads/schedule :pad :off :clock {:beats 3.0 :running? false :now-ms 0}}
+                   {:event/type :pattern-pads/step :src :pad}
+                   {:event/type :show-clock/pattern-due :id :x :style :off}
+                   {:event/type :zone-map/press :map :cycle}]]
       (is (same? event) (str (:event/type event) " is the same locked or not")))
     (testing "a grid click starts its cue (its run id is random)"
       (is (some? (get-in (run (lock s0) {:event/type :grid/trigger-cell :col 0 :row 0}) [:playback :active-cues [0 0]]))))
@@ -323,3 +339,34 @@
       (is (= (lock s0) (without-notices s)) "locked, the only change is the notice")
       (is (= {:text "Change Output Settings refused" :event :projectors/update-driver-config}
              (get-in s [:ui :show-lock-notice]))))))
+
+(deftest locked-zone-pattern-edits-are-refused-test
+  ;; Zones plan Z5: a pattern's or a Map cycle's edits are structure, as a
+  ;; target's are (Z4-Q4 A): where the pictures go. The pattern window edits
+  ;; a cue's through the chain events on :cue-zone-patterns, the effects
+  ;; grid's editor a cell's on :effect-chains
+  (let [pattern (assoc (zone-patterns/preset-instance :chase :cue) :id :p1)
+        s0 (-> (starter)
+               (assoc-in [:chains :cue-chains [0 0] :zone-patterns] [pattern])
+               (assoc-in [:chains :effect-chains [4 2]] {:active? false :items [(assoc (zone-patterns/preset-instance :swap :cell) :id :p2)]})
+               (assoc-in [:chains :effect-chains [5 2]] {:active? false :items [(assoc (zone-patterns/cycle-instance) :id :c1)]})
+               (history/mark-clean))
+        refused [{:event/type :chain/update-param :domain :cue-zone-patterns :entity-key [0 0] :effect-path [0] :param-key :rate :value 2.0}
+                 {:event/type :chain/set-items :domain :cue-zone-patterns :entity-key [0 0] :items []}
+                 {:event/type :chain/update-param :domain :effect-chains :entity-key [4 2] :effect-path [0] :param-key :zones :value [:zone/a]}
+                 {:event/type :chain/update-param :domain :effect-chains :entity-key [5 2] :effect-path [0] :param-key :rate :value 1.0}
+                 {:event/type :modulator/toggle :domain :cue-zone-patterns :entity-key [0 0] :effect-path [0] :param-key :offset
+                  :param-spec {:min -64.0 :max 64.0} :current-value 0.0 :fx/event true}]]
+    (doseq [event refused]
+      (testing (pr-str (select-keys event [:event/type :domain :entity-key]))
+        (is (not= (history/extract-document-state s0) (history/extract-document-state (run s0 event))) "unlocked, a real edit")
+        (let [s (run (lock s0) event)]
+          (is (= (lock s0) (without-notices s)) "locked, only the notice")
+          (is (= {:text "Zone pattern edit refused" :event (:event/type event)} (get-in s [:ui :show-lock-notice]))))))
+    (testing "a point effect's edit in a cell goes through, as before"
+      (let [s (run (lock s0) {:event/type :chain/update-param :domain :effect-chains :entity-key [0 3] :effect-path [0]
+                              :param-key :amount :value 0.5})]
+        (is (nil? (get-in s [:ui :show-lock-notice])))
+        (is (= 0.5 (get-in s [:chains :effect-chains [0 3] :items 0 :params :amount])))))
+    (testing "switching a pattern cell on is a performer's"
+      (is (true? (get-in (run (lock s0) {:event/type :effects/toggle-cell :col 4 :row 2}) [:chains :effect-chains [4 2] :active?]))))))

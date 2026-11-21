@@ -212,14 +212,18 @@
    a decay after its beats) while their intent is still there, chasing
    cells where app state and the chase disagree, and a zone map switch whose
    beat the global clock has reached (zones plan Z4: the tick routes by it
-   already, and the report lands it in app state)."
+   already, and the report lands it in app state), and a pattern pads'
+   switch likewise (zones plan Z5)."
   [runtime state]
   (let [intents (or (get-in state [:playback :active-cues]) {})
-        pending (get-in state [:zone-map :pending])]
+        pending (get-in state [:zone-map :pending])
+        style-pending (get-in state [:pattern-pads :pending])
+        beats (effective-beats (:global runtime))]
     (concat
-     (when (and pending (number? (:at-beat pending))
-                (zone-maps/due? (:at-beat pending) (effective-beats (:global runtime))))
+     (when (and pending (number? (:at-beat pending)) (zone-maps/due? (:at-beat pending) beats))
        [{:event/type :show-clock/zone-map-due :id (:id pending) :map (:map pending)}])
+     (when (and style-pending (number? (:at-beat style-pending)) (zone-maps/due? (:at-beat style-pending) beats))
+       [{:event/type :show-clock/pattern-due :id (:id style-pending) :style (:style style-pending)}])
      (for [[run-id run] (:runs runtime)
            :when (and (:ended? run) (= run-id (get-in intents [(:cell run) :run])))]
        {:event/type :show-clock/cue-ended :cell (:cell run) :run run-id})

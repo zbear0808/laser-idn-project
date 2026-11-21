@@ -3,8 +3,9 @@
 
    App state counts presses at [:playback :pulses] {source {:id n :held?}}:
    each HIT, ACCENT and FLASH press, held until its release (the vibe
-   engine), each vibe change (:vibe) and each cue start (:cue,
-   grid/start-cue). The show clock stamps them (stamp) on a clock of its own,
+   engine), each vibe change (:vibe), each cue start (:cue,
+   grid/start-cue) and each press of the Zone step key (:zone-step, zones
+   plan Z5, :pattern-pads/step). The show clock stamps them (stamp) on a clock of its own,
    the pulse clock, which Stop, Retrigger, a tap's beat alignment and a Link
    shift never move (show-time), and every cue's and the effects grid's
    render sees their ages (view). Calibration never does.
@@ -23,8 +24,11 @@
 
 (def sources
   "What a reaction can follow: a role's press (:hit :accent :flash), one of
-   the three (:any), a vibe change (:vibe), or any cue start (:cue)."
-  [:hit :accent :flash :vibe :any :cue])
+   the three (:any), a vibe change (:vibe), any cue start (:cue), or a press
+   of the Zone step key (:zone-step, zones plan Z5: the STEP pad and its
+   learned key, which do nothing else). :zone-step has no release, as :vibe
+   and :cue, and isn't one of :any's."
+  [:hit :accent :flash :vibe :any :cue :zone-step])
 
 (def ^:private any-of
   "The roles :any is made of."

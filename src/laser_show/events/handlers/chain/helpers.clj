@@ -23,15 +23,20 @@
    (chain-config :projector-effects projector-id)
    
    Parameters:
-   - domain: One of :effect-chains, :cue-chains, :projector-effects, or the
+   - domain: One of :effect-chains, :cue-chains, :projector-effects, the
      timeline editor's :timeline-items (a timeline cue's clips) and
-     :timeline-tracks (its tracks and folders, for track effects)
+     :timeline-tracks (its tracks and folders, for track effects), or
+     :cue-zone-patterns (a cue's zone patterns, zones plan Z5: the pattern
+     window edits them as a chain)
    - entity-key: The key within the domain ([col row] or projector-id)
    
    Returns: Configuration map with :items-path, :ui-path, :domain, :entity-key"
   [domain entity-key]
-  (let [base-path [:chains (case domain (:timeline-items :timeline-tracks) :cue-chains domain) entity-key]]
-    {:items-path (conj base-path (if (= domain :timeline-tracks) :tracks :items))
+  (let [base-path [:chains (case domain (:timeline-items :timeline-tracks :cue-zone-patterns) :cue-chains domain) entity-key]]
+    {:items-path (conj base-path (case domain
+                                   :timeline-tracks :tracks
+                                   :cue-zone-patterns :zone-patterns
+                                   :items))
      :metadata-path base-path
      ;; FLATTENED: Dialog fields live alongside :open?, not under :data
      :ui-path (case domain
@@ -39,6 +44,7 @@
                 :cue-chains [:ui :dialogs :cue-chain-editor]
                 :projector-effects [:ui :projector-effect-ui-state entity-key]
                 :timeline-items [:ui :dialogs :timeline-cue-editor :effect-ui :items]
-                :timeline-tracks [:ui :dialogs :timeline-cue-editor :effect-ui :tracks])
+                :timeline-tracks [:ui :dialogs :timeline-cue-editor :effect-ui :tracks]
+                :cue-zone-patterns [:ui :dialogs :zone-pattern-editor])
      :domain domain
      :entity-key entity-key}))

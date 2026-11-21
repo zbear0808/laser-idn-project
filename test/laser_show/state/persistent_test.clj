@@ -618,3 +618,48 @@
     (is (nil? (get-in (persistent/apply-loaded-project busy (persistent/project-files busy) "x.zip") [:zone-map :pending]))
         "Open: the pending beat belongs to the old show")
     (is (nil? (get-in (persistent/new-project-state busy) [:zone-map :pending])) "New")))
+
+
+;; Zones plan Z5: a cue's patterns are show content; the pads' style and the
+;; cycle's pause are the session's (Z5-Q3 A)
+
+(deftest cue-patterns-survive-save-and-load-test
+  (let [pattern {:id #uuid "00000000-0000-0000-0000-0000000000a1" :effect-id :zone-pattern :enabled? true
+                 :params {:style :alternate :zones [:zone/a :zone/b] :source :auto :from :all :rate 1.0 :offset 0.0
+                          :step-on :hit :clock :cue :follow-pads? true :restart-on :own :path :loop :width 1 :seed 0}}
+        cycle {:id #uuid "00000000-0000-0000-0000-0000000000c1" :effect-id :zone-map-cycle :enabled? true
+               :params {:maps [:map/left-right :map/odd-even] :rate 0.25 :offset 0.0 :path :loop :step-on :clock}}
+        show (-> (domains/build-initial-state)
+                 (templates/apply-starter-cue-chains)
+                 (assoc-in [:chains :cue-chains [0 0] :zone-patterns] [pattern])
+                 (assoc-in [:chains :effect-chains [2 1]] {:active? false :items [cycle]})
+                 (assoc-in [:config :pattern-pads] {:random {:bar? true}}))
+        files (persistent/project-files show)
+        loaded (persistent/apply-loaded-project (domains/build-initial-state) files "z5.zip")]
+    (is (= [pattern] (get-in loaded [:chains :cue-chains [0 0] :zone-patterns])) "with the cue, through Z4's migration")
+    (is (= [cycle] (get-in loaded [:chains :effect-chains [2 1] :items])))
+    (is (= {:random {:bar? true}} (get-in loaded [:config :pattern-pads])) "a pad's setting is the show's")
+    (is (false? (get-in loaded [:project :dirty?])))))
+
+(deftest pattern-pads-are-not-saved-test
+  (let [show (-> (domains/build-initial-state)
+                 (assoc :pattern-pads {:style :chase :pending {:id 1 :style :off :at-beat 9.0 :bar? false}})
+                 (assoc-in [:zone-map :cycle-paused?] true)
+                 (assoc-in [:playback :pulses :zone-step] {:id 7}))
+        files (persistent/project-files show)]
+    (is (not-any? #{:pattern-pads} (keys (apply merge (vals files)))) "the pads' live style isn't saved: a show opens As set")
+    (is (= {:active :map/left-right} (get-in files ["project-metadata.edn" :zone-map])) "nor the cycle's pause")
+    (is (not-any? #(= :zone-step %) (tree-seq coll? seq files)) "nor the Zone step key's presses")
+    (is (= {:style nil :pending nil} (:pattern-pads (persistent/apply-loaded-project show files "x.zip"))))))
+
+(deftest session-reset-clears-pads-and-pause-test
+  (let [busy (-> (domains/build-initial-state)
+                 (assoc :pattern-pads {:style :chase :pending {:id 1 :style :off :at-beat 9.0 :bar? false}})
+                 (assoc-in [:zone-map :cycle-paused?] true)
+                 (assoc-in [:playback :pulses :zone-step] {:id 7}))]
+    (doseq [[label s] [["Open" (persistent/apply-loaded-project busy (persistent/project-files busy) "x.zip")]
+                       ["New" (persistent/new-project-state busy)]]]
+      (testing label
+        (is (= {:style nil :pending nil} (:pattern-pads s)) "As set again")
+        (is (false? (get-in s [:zone-map :cycle-paused?])))
+        (is (nil? (get-in s [:playback :pulses :zone-step])) "the Zone step key's count starts again")))))

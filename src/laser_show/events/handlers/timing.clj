@@ -21,6 +21,7 @@
             [laser-show.input.link :as link]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.routing.zone-maps :as zone-maps]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.timeline.playback :as playback]
             [laser-show.triggers.tap-tempo :as tap]
             [clojure.tools.logging :as log]))
@@ -80,23 +81,33 @@
     (zone-maps/commit state (:map pending))
     state))
 
+(defn- commit-pending-style
+  "state with a pattern pads' switch that waits landed now (zones plan Z5),
+   for the same reason."
+  [state]
+  (if-let [pending (get-in state [:pattern-pads :pending])]
+    (zone-patterns/commit-style state (:style pending))
+    state))
+
 (defn- handle-transport-stop
   "Stop playback and restart every clock (the global one and each cue's); a
-   pending zone map switch lands now."
+   pending zone map switch, and a pattern pads' one, land now."
   [{:keys [state]}]
   {:state (-> state
               (assoc-in [:playback :playing?] false)
               (assoc-in [:playback :active-cue] nil)
               (request :restart)
-              (commit-pending-switch))})
+              (commit-pending-switch)
+              (commit-pending-style))})
 
 (defn- handle-transport-retrigger
   "Retrigger the current animation: restart every clock; a pending zone map
-   switch lands now."
+   switch, and a pattern pads' one, land now."
   [{:keys [state]}]
   {:state (-> state
               (request :restart)
-              (commit-pending-switch))})
+              (commit-pending-switch)
+              (commit-pending-style))})
 
 
 ;; Link Events
@@ -167,6 +178,15 @@
   [{:keys [id state]}]
   {:state (if (and (some? id) (= id (get-in state [:zone-map :pending :id])))
             (zone-maps/commit state (get-in state [:zone-map :pending :map]))
+            state)})
+
+(defn- handle-show-clock-pattern-due
+  "The show clock reached the beat a pattern pads' switch waits for (zones
+   plan Z5): it lands, if :id is still the one waiting. The clock already
+   played it from that beat."
+  [{:keys [id state]}]
+  {:state (if (and (some? id) (= id (get-in state [:pattern-pads :pending :id])))
+            (zone-patterns/commit-style state (get-in state [:pattern-pads :pending :style]))
             state)})
 
 (defn- handle-show-clock-status
@@ -275,6 +295,7 @@
     :show-clock/chase (handle-show-clock-chase event)
     :show-clock/status (handle-show-clock-status event)
     :show-clock/zone-map-due (handle-show-clock-zone-map-due event)
+    :show-clock/pattern-due (handle-show-clock-pattern-due event)
     
     ;; Link sync events
     :timing/toggle-link-sync (handle-timing-toggle-link-sync event)

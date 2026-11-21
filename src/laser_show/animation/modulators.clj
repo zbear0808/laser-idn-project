@@ -19,27 +19,30 @@
 
 
 (def source-labels
-  "How the editor names what a reaction follows (a :choice param's :labels)."
+  "How the editor names what a reaction follows (a :choice param's :labels);
+   a zone pattern's Step on and Restart on take the same words (zones plan
+   Z5)."
   {:own "Its cue's start"
    :hit "HIT"
    :accent "ACCENT"
    :flash "FLASH"
    :vibe "Vibe change"
    :any "HIT, ACCENT or FLASH"
-   :cue "Any cue start"})
+   :cue "Any cue start"
+   :zone-step "Zone step key"})
 
 (def restart-on-param
   "Restart on: count from the newest press of a source (pulses/rebase)
    instead of from the cue's start. :own is today's behaviour. Time-driven
    keyframe animations offer the same (keyframe-modulator-panel)."
   {:key :restart-on :label "Restart on" :type :choice
-   :choices [:own :hit :accent :flash :vibe :any :cue] :labels source-labels :default :own})
+   :choices [:own :hit :accent :flash :vibe :any :cue :zone-step] :labels source-labels :default :own})
 
 (defn- source-param
   "The source a pulse modulator follows."
   [default]
   {:key :source :label "Follows" :type :choice
-   :choices [:hit :accent :flash :vibe :any :cue] :labels source-labels :default default})
+   :choices [:hit :accent :flash :vibe :any :cue :zone-step] :labels source-labels :default default})
 
 (def ^:private wave-params
   "Common wave modulator parameters."

@@ -267,3 +267,25 @@
     (is (close? 1.4 (pulses/energy cfg (taps 12 0.25 0.0))) "and later: full")
     (testing "a press after a long pause starts again from rest, as the first did"
       (is (close? 1.1 (pulses/energy cfg (pulse 0.0 :count 2 :recent [0.0 8.0])))))))
+
+
+;; The Zone step key (zones plan Z5, 07 §4.2): one more source
+
+(deftest zone-step-is-stamped-and-viewed-test
+  (is (= [:hit :accent :flash :vibe :any :cue :zone-step] pulses/sources))
+  (let [s (stamps-at [{:zone-step {:id 1}} 10.0] [{:zone-step {:id 3}} 11.0])
+        view (pulses/view s (clock 11.5))]
+    (is (= {:id 3 :count 3 :press-beat 11.0 :press-ms 5500.0 :held? false :release-beat nil :recent [11.0 11.0 10.0]}
+           (:zone-step s))
+        "stamped as any source: two presses since the last tick count twice")
+    (is (= 3 (get-in view [:zone-step :count])))
+    (is (close? 0.5 (get-in view [:zone-step :beats])) "its age on the pulse clock")
+    (is (nil? (get-in view [:zone-step :since-release])) "no release, as a vibe change or a cue start")
+    (testing "a restarted clock seeds it, so it isn't pressed again"
+      (is (= {:zone-step {:id 7}} (pulses/seed {:zone-step {:id 7}}))))))
+
+(deftest zone-step-is-not-in-any-test
+  (let [view (pulses/view (stamps-at [{:hit {:id 2 :held? false} :zone-step {:id 5}} 4.0]) (clock 4.0))]
+    (is (= 2 (get-in view [:any :count])) ":any is HIT, ACCENT and FLASH, not the Zone step key")
+    (is (= 5 (get-in view [:zone-step :count])))
+    (is (nil? (:any (pulses/view (stamps-at [{:zone-step {:id 5}} 4.0]) (clock 4.0)))) "the Zone step key alone makes no :any")))

@@ -1196,3 +1196,19 @@
     (is (= :slider-1 (get-in params [:slot :default])))
     (is (= [0.0 1.0 0.0] ((juxt :min :max :default) (:default params))) "where it sits until moved, on the fader's 0..1")
     (is (= [:slot :min :max :default] (mapv :key (mod-reg/get-params :macro))))))
+
+
+;; Zones plan Z5: the Zone step key is a source like the others
+
+(deftest zone-step-is-a-source-test
+  (doseq [type [:envelope :step :energy]]
+    (let [{:keys [choices labels]} (some #(when (= :source (:key %)) %) (mod-reg/get-params type))]
+      (is (= [:hit :accent :flash :vibe :any :cue :zone-step] choices) (str type "'s Follows"))
+      (is (= "Zone step key" (get labels :zone-step)))))
+  (doseq [type [:sine :square :triangle :sawtooth :random :decay]]
+    (let [{:keys [choices labels]} (some #(when (= :restart-on (:key %)) %) (mod-reg/get-params type))]
+      (is (= [:own :hit :accent :flash :vibe :any :cue :zone-step] choices) (str type "'s Restart on"))
+      (is (= "Zone step key" (get labels :zone-step)))))
+  (testing "a Step following it steps on each of its presses"
+    (is (= 2.0 (mod/resolve-param {:type :step :active? true :source :zone-step :min 0.0 :max 3.0 :steps 4}
+                                  (mod/make-context {:time-ms 0.0 :bpm 120.0 :pulses {:zone-step {:count 2 :beats 0.1}}}))))))

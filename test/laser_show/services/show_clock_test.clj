@@ -946,3 +946,67 @@
     (show-time/reset-runtime!)
     (state/swap-state! assoc-in [:playback :active-cues] {})
     (is (= {} (:zone-steps (show-clock/tick! 0))))))
+
+
+;; Zones plan Z5: the pattern pads' switch from the tick that reaches its
+;; beat, and the Zone step key's presses
+
+(defn- alternate-cue
+  "A cue whose All picture alternates A ⇄ B on the show's beats."
+  []
+  (assoc (cue :circle) :zone-patterns [(assoc (zone-patterns/preset-instance :alternate :cell) :id :p1)]))
+
+(defn- drawn-keys [snapshot] (set (mapcat (comp keys :zone-frames) (:cues snapshot))))
+
+(deftest pending-pattern-switch-is-effective-once-due-test
+  (testing "spec §9: a pad's switch is the patterns' style from the tick whose global beats reach it, before the commit"
+    (init! {[0 0] (alternate-cue)})
+    (two-lasers!)
+    (trigger! 0 0)
+    (state/assoc-in-state! [:pattern-pads :pending] {:id :p :style :off :at-beat 1.0 :bar? false})
+    (with-redefs [events/dispatch! (fn [_])]
+      (let [before (show-clock/tick! 0)
+            [just-before n] (ticks-to! 100000000 0.9)
+            [on-the-beat _] (ticks-to! (+ n 100000000) 1.0)]
+        (is (= #{:zone/a} (drawn-keys before)) "As set: Alternate, step 0")
+        (is (= #{:zone/a} (drawn-keys just-before)) "0.9 beats: not yet")
+        (is (= #{:all} (drawn-keys on-the-beat)) "beat 1: Off, the picture where it was drawn")
+        (is (nil? (get-in (state/get-raw-state) [:pattern-pads :style])) "app state is the commit's to change")))))
+
+(deftest pattern-due-is-reported-test
+  (init! {[0 0] (alternate-cue)})
+  (trigger! 0 0)
+  (state/assoc-in-state! [:pattern-pads :pending] {:id :p1 :style :chase :at-beat 1.0 :bar? false})
+  (let [sent (atom [])
+        due #(filterv (comp #{:show-clock/pattern-due} :event/type) @sent)]
+    (with-redefs [events/dispatch! #(swap! sent conj %)]
+      (show-clock/tick! 0)
+      (show-clock/tick! 450000000)
+      (is (= [] (due)) "not due yet")
+      (show-clock/tick! 500000000)
+      (is (= [{:event/type :show-clock/pattern-due :id :p1 :style :chase}] (due)) "on the beat")
+      (show-clock/tick! 600000000)
+      (is (= 1 (count (due))) "100 ms on: not again")
+      (show-clock/tick! 760000000)
+      (is (= 2 (count (due))) "260 ms on, still waiting in app state: again"))
+    (testing "handled: the pads' style is it, and nothing more is due"
+      (run! events/event-handler (due))
+      (is (= {:style :chase :pending nil} (select-keys (:pattern-pads (state/get-raw-state)) [:style :pending])))
+      (reset! sent [])
+      (with-redefs [events/dispatch! #(swap! sent conj %)]
+        (show-clock/tick! 900000000))
+      (is (= [] (due))))))
+
+(deftest zone-step-press-steps-at-the-next-tick-test
+  (init! {[0 0] (assoc (cue :circle) :zone-patterns [(assoc (zone-patterns/preset-instance :alternate :cue) :id :p1 :params
+                                                            (assoc (:params (zone-patterns/preset-instance :alternate :cue)) :step-on :zone-step))])})
+  (trigger! 0 0)
+  (with-redefs [events/dispatch! (fn [_])]
+    (let [first-tick (show-clock/tick! 0)]
+      (is (= {:p1 0} (:zone-steps first-tick)) "no press yet: step 0")
+      (events/event-handler {:event/type :pattern-pads/step :src :pad})
+      (is (= {:id 1} (get-in (state/get-raw-state) [:playback :pulses :zone-step])) "the press is in app state")
+      (let [next-tick (show-clock/tick! 16666667)]
+        (is (= {:p1 1} (:zone-steps next-tick)) "the next tick steps it")
+        (is (= #{:zone/b} (drawn-keys next-tick)))
+        (is (= 1 (get-in next-tick [:pulses :zone-step :count])) "the clock stamped it as any source")))))

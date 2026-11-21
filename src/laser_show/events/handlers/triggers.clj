@@ -4,7 +4,9 @@
    Trigger inputs are resolved here and then translated into the existing
    domain events so all input sources share the same playback behavior.
    Vibe mode's role bindings become :vibe/* events (handlers/vibes.clj), a
-   zone map pad's a :zone-map/press (handlers/zone_maps.clj)."
+   zone map pad's a :zone-map/press (handlers/zone_maps.clj), a pattern
+   pad's a :pattern-pads/press and the Zone step key's a :pattern-pads/step
+   (handlers/zone_patterns.clj)."
   (:require [clojure.tools.logging :as log]
             [laser-show.input.events :as input-events]
             [laser-show.triggers.matcher :as matcher]))
@@ -64,8 +66,9 @@
 
 (def ^:private quiet-action?
   "The bindings that leave the trigger runtime alone: vibe mode's, which
-   keep their own holds, and a zone map pad's (zones plan Z4)."
-  #{:vibe :vibe-select :zone-map})
+   keep their own holds, a zone map pad's (zones plan Z4), and a pattern
+   pad's and the Zone step key's (Z5)."
+  #{:vibe :vibe-select :zone-map :pattern-pad :zone-step})
 
 (defn- vibe-event
   "A role hears its press and its release, timed by the input (the
@@ -94,6 +97,16 @@
       (= :zone-map type)
       (when (pressed? input-event)
         {:event/type :zone-map/press :map target :src :input :input-time (:timestamp input-event)})
+
+      ;; A pattern pad's key presses the pad, the Zone step key steps the
+      ;; patterns that step on it; their releases do nothing (zones plan Z5)
+      (= :pattern-pad type)
+      (when (pressed? input-event)
+        {:event/type :pattern-pads/press :pad target :src :input :input-time (:timestamp input-event)})
+
+      (= :zone-step type)
+      (when (pressed? input-event)
+        {:event/type :pattern-pads/step :src :input :input-time (:timestamp input-event)})
 
       (and (= :momentary (:behavior action))
            (#{:trigger-cue :trigger-effect} type))

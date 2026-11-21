@@ -15,6 +15,7 @@
             [laser-show.input.router :as router]
             [laser-show.input.events :as input-events]
             [laser-show.routing.zone-maps :as zone-maps]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
             [laser-show.vibes.engine :as engine]
             [laser-show.vibes.library :as library]))
@@ -323,22 +324,26 @@
 
 (defn- action-name
   "What a binding did, for an undo label: \"cue A1\", \"effect A1\", \"HIT\",
-   \"zone map Odd / Even\" (a custom map by its name in state), or its type
-   (\"tap tempo\")."
+   \"zone map Odd / Even\" (a custom map by its name in state; \"zone map
+   CYCLE\"), \"pattern pad Chase\", or its type (\"tap tempo\", \"zone
+   step\")."
   [state {:keys [type target role]}]
   (let [cell (fn [[col row]] (str (char (+ 65 row)) (inc col)))]
     (cond
       (and (= :trigger-cue type) (vector? target)) (str "cue " (cell target))
       (and (= :trigger-effect type) (vector? target)) (str "effect " (cell target))
       (and (= :vibe type) role) (str/upper-case (name role))
-      (= :zone-map type) (str "zone map " (or (:name (zone-maps/map-by-id state target)) (some-> target name)))
+      (= :zone-map type) (str "zone map " (if (= :cycle target)
+                                            "CYCLE"
+                                            (or (:name (zone-maps/map-by-id state target)) (some-> target name))))
+      (= :pattern-pad type) (str "pattern pad " (zone-patterns/pad-name target))
       :else (str/replace (name (or type :binding)) "-" " "))))
 
 (def ^:private one-key-types
   "The targets that keep one key, so learning one again moves it: a vibe
-   role (vibe Phase 2) and a zone map pad (zones plan Z4-Q2 A). A cell keeps
-   every key it is given."
-  #{:vibe :zone-map})
+   role (vibe Phase 2), a zone map pad (zones plan Z4-Q2 A), a pattern pad
+   and the Zone step key (Z5). A cell keeps every key it is given."
+  #{:vibe :zone-map :pattern-pad :zone-step})
 
 (defn- handle-input-learn-captured
   "Bind the captured input to the target action, :behavior included (ignored

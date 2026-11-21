@@ -11,7 +11,9 @@
    the tempo, streaming, learning a key, switching the zone map (a pad, its
    key, Use now), and Exit, which still asks about unsaved changes. Where
    content goes is structure (zones plan Z4): the targets, the zones' labels
-   and the maps are refused too. A safety zone edit goes through while it
+   and the maps are refused too, and so are the zone patterns' and Map
+   cycles' edits (Z5, pattern-edit?); the pattern pads, STEP and CYCLE are
+   a performer's. A safety zone edit goes through while it
    makes no zone larger, so the lock never stands between you and a safer
    show, and is refused when it would let light somewhere new (zones plan
    Q-Z1-5 A).
@@ -22,7 +24,8 @@
    refused too: each goes through the pipeline."
   (:require [laser-show.animation.safety :as safety]
             [laser-show.events.handlers.history :as history]
-            [laser-show.events.helpers :as h]))
+            [laser-show.events.helpers :as h]
+            [laser-show.routing.zone-patterns :as zone-patterns]))
 
 (def blocked-events
   "The events the show lock refuses, each a routed event
@@ -72,7 +75,38 @@
     ;; Where a cue, an item, a track or a clip goes (zones plan Z4): as a
     ;; column's default, it re-routes the cue and can make it reach the
     ;; audience
-    :cue-chain/set-target :cue-chain/set-item-target :timeline/set-track-target :timeline/set-clip-target})
+    :cue-chain/set-target :cue-chain/set-item-target :timeline/set-track-target :timeline/set-clip-target
+    ;; A cue's zone pattern and a new pattern or Map cycle cell (zones plan
+    ;; Z5): they move pictures between places, as a target does; a pattern
+    ;; pad's setting and its key, as a map pad's. A pad's press, STEP, CYCLE,
+    ;; their keys and a due switch are a performer's, and go through
+    :zone-patterns/set-cue-pattern :zone-patterns/new-cell
+    :pattern-pads/set-pad-bar :pattern-pads/clear-control})
+
+(def ^:private chain-edit-namespaces
+  "The events that edit an effect's parameters, modulators and keyframes
+   through chain-config's domains."
+  #{"chain" "modulator" "keyframe"})
+
+(defn pattern-edit?
+  "Is event an edit of a zone pattern or a Map cycle (zones plan Z5): a
+   chain, modulator or keyframe event on a cue's patterns (the domain
+   :cue-zone-patterns, the pattern window's), or on a zone pattern or Map
+   cycle in an effects cell (the item at :effect-path)? Where the pictures
+   go is structure, as a target is (Z4-Q4 A); a point effect's edit in a
+   cell goes through, as before."
+  [{:keys [event/type domain entity-key effect-path state]}]
+  (boolean
+   (and (keyword? type)
+        (contains? chain-edit-namespaces (namespace type))
+        (case domain
+          :cue-zone-patterns true
+          :effect-chains (and (sequential? effect-path)
+                              (contains? zone-patterns/zone-stage-ids
+                                         (:effect-id (get-in state (into [:chains :effect-chains entity-key :items] effect-path)))))
+          false))))
+
+(def ^:private pattern-edit-refused "Zone pattern edit refused")
 
 (def safety-edits
   "The safety zone edits (zones plan Z1). The lock refuses one only when it
@@ -125,5 +159,6 @@
     (cond
       (not (locked? state)) (handler event)
       (contains? blocked-events type) (refuse state type (refused-text type))
+      (pattern-edit? event) (refuse state type pattern-edit-refused)
       (and (contains? safety-edits type) (widens-a-zone? handler event)) (refuse state type larger-zone-refused)
       :else (handler event))))

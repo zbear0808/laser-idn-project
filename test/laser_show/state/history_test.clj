@@ -386,3 +386,19 @@
         (is (= {} (:zone-maps (history/restore-document edited (doc clean)))))
         (is (= {:labels {}} (:zones (history/restore-document edited (doc clean)))))
         (is (= maps (:zone-maps (history/restore-document clean (doc edited)))))))))
+
+(deftest pattern-switch-is-not-undoable-test
+  (testing "zones plan Z5: the pattern pads' style, the cycle's pause and the Zone step key's presses are live"
+    (let [clean (history/mark-clean sample-state)
+          edits [["a pad's switch" (assoc clean :pattern-pads {:style :chase :pending nil})]
+                 ["a waiting one" (assoc clean :pattern-pads {:style nil :pending {:id 1 :style :off :at-beat 4.0 :bar? false}})]
+                 ["the cycle paused" (assoc-in clean [:zone-map :cycle-paused?] true)]
+                 ["a STEP press" (assoc-in clean [:playback :pulses :zone-step] {:id 3})]]]
+      (doseq [[label edit] edits]
+        (testing label
+          (is (true? (history/document-roots-identical? clean edit)))
+          (is (false? (history/derive-dirty clean edit)))))
+      (testing "a pad's Switch on the bar is the show's: undoable, unsaved"
+        (let [edit (assoc-in clean [:config :pattern-pads :random :bar?] true)]
+          (is (true? (history/undoable-changed? (doc clean) (doc edit))))
+          (is (true? (history/derive-dirty clean edit))))))))

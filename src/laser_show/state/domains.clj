@@ -84,7 +84,7 @@
    :requests {:default {}
               :doc "{:restart {:id} :align {:id} :shift {:id :offset}}: the show clock applies each id once (Stop and Retrigger, tap tempo, Link)"}
    :pulses {:default {}
-            :doc "source -> {:id n :held? bool :src}: the presses tap reactions follow (laser-show.animation.pulses). The vibe engine counts each HIT, ACCENT and FLASH press, held until its release (:src while held), and each vibe change ({:id n}, :vibe); grid/start-cue each cue start (:cue). The show clock stamps them on its pulse clock (show-time/step); their ages never come back here."}
+            :doc "source -> {:id n :held? bool :src}: the presses tap reactions follow (laser-show.animation.pulses). The vibe engine counts each HIT, ACCENT and FLASH press, held until its release (:src while held), and each vibe change ({:id n}, :vibe); grid/start-cue each cue start (:cue); the STEP pad and its key each press of the Zone step key ({:id n}, :zone-step, zones plan Z5). The show clock stamps them on its pulse clock (show-time/step); their ages never come back here."}
 
    ;; Shared timing settings
    :resync-rate {:default 4.0
@@ -278,6 +278,8 @@
          :doc "Cue playback settings. :trigger-mode can be :default (use per-cue setting), :toggle (click ON/OFF), or :retrigger (always restart)"}
    :zone-map-pads {:default {}
                    :doc "{map-id {:bar? true}}: a zone map pad's setting (zones plan Z4): with :bar?, its presses (and its learned keys') wait for the next bar. Show content"}
+   :pattern-pads {:default {}
+                  :doc "{pad-id {:bar? true}}: a pattern pad's setting (zones plan Z5): with :bar?, its presses (and its learned keys') wait for the next bar. Show content"}
    :default-target {:default nil
                     :doc "The show's default target (zones plan Z4, routing.targets): what a cue without one of its own, in a column without one, draws to; nil is All. Show content"}
    :vibes {:default {:order []
@@ -433,6 +435,16 @@
              :doc "{:id :map :at-beat :bar?}: a switch waiting for its beat (routing.zone-maps/schedule); the show clock routes by it from that beat until :show-clock/zone-map-due commits it. :map :cycle is the CYCLE pad's (zones plan Z5): it resumes the Map cycle. Never saved, cleared by Open and New"}
    :cycle-paused? {:default false
                    :doc "A map switch that landed while a Map cycle ran paused it (zones plan Z5 S-2, Z5-Q2 A): the effective map is :active until CYCLE lands or a Map cycle cell is switched on (routing.zone-maps/commit, resume-cycle). Runtime: never saved, cleared by Open and New"}})
+
+(defstate pattern-pads
+  "The pattern pads (zones plan Z5, 07 §7.3): the style every zone pattern
+   that follows them plays. Not a document root: a switch is live, never an
+   undo step and never unsaved, and it isn't saved (Z5-Q3 A: a show opens As
+   set); Open and New reset it."
+  {:style {:default nil
+           :doc "nil As set (every pattern its own style), :off (those that follow the pads don't move), or a style (routing.zone-patterns/styles)"}
+   :pending {:default nil
+             :doc "{:id :style :at-beat :bar?}: a switch waiting for its beat (routing.zone-patterns/schedule-style); the show clock plays it from that beat until :show-clock/pattern-due commits it"}})
 
 (defstate zone-group-ui
   "UI state for zone group selection.
