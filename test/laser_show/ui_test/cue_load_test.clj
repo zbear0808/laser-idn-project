@@ -98,3 +98,21 @@
       (ui/wait-for! #(ui/visible? "#cue-load-warning"))
       (ui/wait-for! #(str/ends-with? (str (ui/node-text "#cue-load-warning")) line-end))
       (is (= (str "⚠ ~3,000 points: about 8 fps " line-end) (ui/node-text "#cue-load-warning"))))))
+
+(deftest decimate-that-keeps-the-count-is-named-test
+  (testing "Q-D-4 B: Decimate at its 25 kpps in a 12 kpps laser's calibration chain keeps the cue at 833 points, 14 fps"
+    (laser!)
+    (state/swap-state! #(-> %
+                            (assoc-in [:projectors :a :scan-rate] 12000)
+                            (assoc-in [:chains :projector-effects :a :items]
+                                      [{:id (random-uuid) :effect-id :decimate :enabled? true :params {:kpps 25 :fps 30}}])))
+    (play! [7 3] {:destination-zone {:zone-group-id :all} :items [ring]})
+    (fixtures/with-clock
+      (fn [_]
+        (let [advice "Laser A's Decimate keeps ~830 points: set its scan rate to Laser A's 12 kpps, or lower Laser A's minimum."]
+          (ui/wait-for! #(ui/visible? "#grid-cell-warning-7-3"))
+          (is (= (str "Too heavy for Laser A: about 14 fps (minimum 20)\n" advice) (cell-tooltip 7 3)) "the cell's tooltip")
+          (events/dispatch! {:event/type :cue-chain/open-editor :col 7 :row 3})
+          (ui/wait-for! #(ui/visible? "#cue-load-warning"))
+          (is (= (str "⚠ ~830 points: about 14 fps on Laser A (12 kpps). " advice) (ui/node-text "#cue-load-warning"))
+              "the editor's line"))))))

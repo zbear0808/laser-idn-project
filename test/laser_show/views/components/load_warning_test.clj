@@ -56,4 +56,22 @@
     (is (= "⚠ ~2,010 points: about 12 fps on Laser C (27.5 kpps). Simplify it, or lower Laser C's minimum."
            (lw/cue-line-text (assoc w :scan-rate 27500))))
     (is (nil? (lw/cue-warning-text nil)))
-    (is (nil? (lw/cue-line-text nil)))))
+    (is (nil? (lw/cue-line-text nil))))
+  (testing "Q-D-4 B: when the laser's Decimate keeps the cue's count, the advice names it, in both places"
+    (let [w {:laser "Laser C" :projector :p2 :points 830 :fps 14 :min-fps 20 :scan-rate 12000 :decimate #{:scan-rate}
+             :item {:id :x :points 2000} :item-name "Circle"}
+          advice "Laser C's Decimate keeps ~830 points: set its scan rate to Laser C's 12 kpps, or lower Laser C's minimum."]
+      (is (= (str "Too heavy for Laser C: about 14 fps (minimum 20)\n" advice) (lw/cue-warning-text w)) "the cell's tooltip")
+      (is (= (str "⚠ ~830 points: about 14 fps on Laser C (12 kpps). " advice) (lw/cue-line-text w))
+          "the editor's line, without Most points: the cue's items aren't what to change")
+      (is (= "⚠ ~1,670 points: about 15 fps on Laser C (25 kpps). Laser C's Decimate keeps ~1,670 points: raise its target fps to 20, or lower Laser C's minimum."
+             (lw/cue-line-text (assoc w :points 1670 :fps 15 :scan-rate 25000 :decimate #{:fps})))
+          "its target under the laser's minimum")
+      (is (= "⚠ ~1,670 points: about 7 fps on Laser C (12 kpps). Laser C's Decimate keeps ~1,670 points: set its scan rate to Laser C's 12 kpps and raise its target fps to 20, or lower Laser C's minimum."
+             (lw/cue-line-text (assoc w :points 1670 :fps 7 :decimate #{:scan-rate :fps})))
+          "both")
+      (is (= "⚠ ~830 points: about 33 fps on Laser C (27.5 kpps). Laser C's Decimate keeps ~830 points: set its scan rate to Laser C's 27.5 kpps, or lower Laser C's minimum."
+             (lw/cue-line-text (assoc w :fps 33 :min-fps 40 :scan-rate 27500)))
+          "kpps as the line has them")
+      (is (= "Too heavy for Laser C: about 14 fps (minimum 20)" (lw/cue-warning-text (dissoc w :decimate)))
+          "without :decimate, as before"))))

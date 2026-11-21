@@ -447,9 +447,10 @@
 (defn cue-warning
   "The warning of the cue at col, row while it is too heavy for a laser (the
    show clock's [:backend :streaming :cue-warnings], zones plan Z3): {:projector
-   :points :fps :min-fps :scan-rate :item {:id :points}} with :laser, its name,
-   and while its editor is open :item-name, the name of its item with the most
-   points; nil when it has none."
+   :points :fps :min-fps :scan-rate :item {:id :points} :decimate} with :laser,
+   its name, and while its editor is open :item-name, the name of its item
+   with the most points; nil when it has none. :decimate is there when the
+   laser's Decimate keeps the cue's count (routing.compose/cue-warnings)."
   [context col row]
   (when-let [w (fx/sub-val context get-in [:backend :streaming :cue-warnings [col row]])]
     (let [chain (fx/sub-val context get-in [:chains :cue-chains [col row]])

@@ -458,7 +458,9 @@
                     (assoc-in [:chains :projector-effects :p4 :items] 5))
           {:keys [outputs]} (routing-of state)]
       (is (= [833 416] (mapv #(get-in outputs [% :decimate-budget]) [:p1 :p2])))
-      (is (not-any? #(contains? (get outputs %) :decimate-budget) [:p3 :p4 :p5])
+      (is (= [[25.0 30.0] [25.0 60.0]] (mapv #((juxt :decimate-kpps :decimate-fps) (get outputs %)) [:p1 :p2]))
+          "and that Decimate's scan rate and target, for the cue warnings' advice (Q-D-4 B)")
+      (is (not-any? #(some (partial contains? (get outputs %)) [:decimate-budget :decimate-kpps :decimate-fps]) [:p3 :p4 :p5])
           "none for a disabled one, for a chain that can't be read (the routing is worked out all the same), or without one")
       (is (= (dissoc (:outputs (routing-of (rig-state 5))) :p1 :p2) (dissoc outputs :p1 :p2)) "and nothing else changes"))))
 

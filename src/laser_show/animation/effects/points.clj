@@ -16,8 +16,9 @@
    modulator after it reads the count from before. Best last in its chain:
    fewer points, keeping blanking, corners and line ends.
 
-   chain-budget reads the budget of the Decimate in a laser's calibration
-   chain from its params, for the cue warnings (routing.rig/routing)."
+   chain-decimate reads the Decimate in a laser's calibration chain from its
+   params, its budget, scan rate and target, for the cue warnings
+   (routing.rig/routing)."
   (:require [laser-show.animation.chains :as chains]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.fit-guard :as fit-guard]))
@@ -77,23 +78,32 @@
            (vswap! points conj! point)
            result))))))
 
-(defn chain-budget
-  "The budget of the Decimate in a calibration chain's items, read from its
-   params without running the chain (Q-D-2 B): ⌊kpps · 1000 / fps⌋, each
-   clamped as decimate-xf clamps it, a modulated one (a modulator, or the
-   keyframes of an enabled keyframe modulator) at its default; the smallest
-   when the chain has several. nil without an enabled one
+(defn chain-decimate
+  "The Decimate of a calibration chain's items whose budget is the chain's,
+   read from its params without running the chain (Q-D-2 B, Q-D-4 B):
+   {:budget ⌊kpps · 1000 / fps⌋ :kpps :fps}, each clamped as decimate-xf
+   clamps it, a modulated one (a modulator, or the keyframes of an enabled
+   keyframe modulator) at its default. The smallest budget when the chain
+   has several, the first of those that share it. nil without an enabled one
    (chains/flatten-chain: a disabled group's are off)."
   [items]
-  (let [budgets (into []
-                      (comp (filter #(= :decimate (:effect-id %)))
-                            (map (fn [{:keys [params keyframe-modulator]}]
-                                   (let [params (if (:enabled? keyframe-modulator) {} params)]
-                                     (fit-guard/budget (* 1000.0 (in-range (:kpps params) kpps-param))
-                                                       (in-range (:fps params) fps-param))))))
-                      (chains/flatten-chain items))]
-    (when (seq budgets)
-      (reduce min budgets))))
+  (reduce (fn [best {:keys [params keyframe-modulator]}]
+            (let [params (if (:enabled? keyframe-modulator) {} params)
+                  kpps (in-range (:kpps params) kpps-param)
+                  fps (in-range (:fps params) fps-param)
+                  budget (long (fit-guard/budget (* 1000.0 kpps) fps))]
+              (if (or (nil? best) (< budget (long (:budget best))))
+                {:budget budget :kpps kpps :fps fps}
+                best)))
+          nil
+          (filter #(= :decimate (:effect-id %)) (chains/flatten-chain items))))
+
+(defn chain-budget
+  "The budget of the Decimate in a calibration chain's items (chain-decimate):
+   ⌊kpps · 1000 / fps⌋, the smallest when the chain has several; nil without
+   an enabled one."
+  [items]
+  (:budget (chain-decimate items)))
 
 (effects/register-effect!
  {:id :decimate

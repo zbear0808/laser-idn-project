@@ -400,9 +400,9 @@
              (compose/cue-warnings [heavy] (on {:p1 [(decimate)]})))
           "p1 decimates it to its target, 833 points at 30 fps: only p2 warns")
       (is (= {} (compose/cue-warnings [heavy] (on {:p1 [(decimate)] :p2 [(decimate)]}))) "both do: no ⚠")
-      (is (= {[0 0] {:projector :p1 :points 1666 :fps (/ 25000.0 1666) :min-fps 20 :scan-rate 25000}}
+      (is (= {[0 0] {:projector :p1 :points 1666 :fps (/ 25000.0 1666) :min-fps 20 :scan-rate 25000 :decimate #{:fps}}}
              (compose/cue-warnings [heavy] (on {:p1 [(decimate :fps 15)] :p2 [(decimate)]})))
-          "a target under the laser's minimum: counted at its 1,666 points, still too heavy")
+          "a target under the laser's minimum: counted at its 1,666 points, still too heavy, and Decimate's fps is why (Q-D-4 B)")
       (is (= :p1 (get-in (compose/cue-warnings [heavy] (on {:p1 [(assoc (decimate) :enabled? false)]})) [[0 0] :projector]))
           "a disabled Decimate counts for nothing")
       (testing "a cue under the budget counts as it is"
@@ -412,3 +412,28 @@
               "900 points: 27.8 fps, under its 30")
           (is (= {} (compose/cue-warnings [light] (routing (assoc-in state [:chains :projector-effects :p1 :items] [(decimate)]))))
               "Decimate takes it to 833, its 30 fps"))))))
+
+(deftest cue-warnings-say-which-decimate-setting-to-change-test
+  (testing "Q-D-4 B: when a laser's Decimate is what keeps the cue's count, :decimate names the settings that keep it under the minimum"
+    (let [decimate (fn [kpps fps] {:id (random-uuid) :effect-id :decimate :enabled? true :params {:kpps kpps :fps fps}})
+          warning (fn [scan-rate chain n]
+                    (get (compose/cue-warnings [(cue {:all (circle n)})]
+                                               (routing (-> (rig-state 1)
+                                                            (assoc-in [:projectors :p1 :scan-rate] scan-rate)
+                                                            (assoc-in [:chains :projector-effects :p1 :items] chain))))
+                         [0 0]))]
+      (is (= {:projector :p1 :points 833 :fps (/ 12000.0 833) :min-fps 20 :scan-rate 12000 :decimate #{:scan-rate}}
+             (warning 12000 [(decimate 25 30)] 2000))
+          "its 25 kpps on a 12 kpps laser: 833 points, 14 fps; its scan rate set to the laser's would give 30")
+      (is (= #{:fps} (:decimate (warning 25000 [(decimate 25 15)] 2000))) "the laser's scan rate, a target of 15 fps: its target")
+      (is (= #{:fps} (:decimate (warning 30000 [(decimate 25 15)] 2000)))
+          "a scan rate under the laser's never makes it slower: only its target")
+      (is (= #{:scan-rate :fps} (:decimate (warning 12000 [(decimate 25 15)] 2000))) "both")
+      (is (= #{:fps} (:decimate (warning 12000 [(decimate 25 30) (decimate 12 15)] 2000)))
+          "of several, the one with the smallest budget, which keeps the count: 800 points at its 12 kpps and 15 fps")
+      (testing "as for any cue when Decimate doesn't keep the count"
+        (is (= {:projector :p1 :points 700 :fps (/ 12000.0 700) :min-fps 20 :scan-rate 12000}
+               (warning 12000 [(decimate 25 30)] 700))
+            "700 points, under its 833: Decimate cuts none, so the cue's own points are why")
+        (is (not (contains? (warning 12000 [(assoc (decimate 25 30) :enabled? false)] 2000) :decimate)) "a disabled one")
+        (is (not (contains? (warning 12000 [] 2000) :decimate)) "none")))))

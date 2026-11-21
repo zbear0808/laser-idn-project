@@ -376,28 +376,31 @@
     (region-fits (:limit (safety/normalize (:safety p))) w)
     (catch Exception _ nil)))
 
-(defn- decimate-budget
-  "points/chain-budget of a laser's calibration chain, or nil when the chain
-   can't be read: the cue warnings count its cues as they are."
+(defn- decimate-of
+  "points/chain-decimate of a laser's calibration chain, or nil when the
+   chain can't be read: the cue warnings count its cues as they are."
   [projector-effects id]
   (try
-    (points/chain-budget (get-in projector-effects [id :items]))
+    (points/chain-decimate (get-in projector-effects [id :items]))
     (catch Exception _ nil)))
 
 (defn routing
   "The routing (spec 01 §5): {:map map-id :lanes [ref …] :overrides {zone
    ref} :refs {ref [[projector-id region side] …]} :outputs {projector-id
-   {:index :scan-rate :fit :regions :decimate-budget}}}. :lanes and
-   :overrides are the effective map's (zones plan Z4: routing.zone-maps/map-by-id;
-   Left / Right's for an id that is no map, or none), which resolve-ref
-   sends a zone through. :refs is ref-entries: every ref the rig knows but
-   the zones. :outputs has every enabled laser, excluded ones too: :index
-   its place in E (nil when excluded from All), :scan-rate clamped as its
-   engine clamps it, :fit its fit-guard/settings, :regions the region-fits
-   of its safety limit, and :decimate-budget, only while its calibration
-   chain has an enabled Decimate: that Decimate's budget
-   (points/chain-budget), the most points the cue warnings count a cue at on
-   it (zones plan 12, Q-D-2 B). Pure."
+   {:index :scan-rate :fit :regions :decimate-budget :decimate-kpps
+   :decimate-fps}}}. :lanes and :overrides are the effective map's (zones
+   plan Z4: routing.zone-maps/map-by-id; Left / Right's for an id that is no
+   map, or none), which resolve-ref sends a zone through. :refs is
+   ref-entries: every ref the rig knows but the zones. :outputs has every
+   enabled laser, excluded ones too: :index its place in E (nil when
+   excluded from All), :scan-rate clamped as its engine clamps it, :fit its
+   fit-guard/settings, :regions the region-fits of its safety limit, and,
+   only while its calibration chain has an enabled Decimate, that
+   Decimate's (points/chain-decimate): :decimate-budget, the most points the
+   cue warnings count a cue at on it (zones plan 12, Q-D-2 B), which also
+   has the load meter count what the laser draws (Q-D-3 B); and its scan
+   rate and target fps, :decimate-kpps and :decimate-fps, which the
+   warnings' advice reads (Q-D-4 B). Pure."
   [{:keys [rig projectors zone-groups zone-maps projector-effects] map-id :map}]
   (let [inputs (rig-inputs {:rig rig :projectors projectors :zone-groups zone-groups})
         index (zipmap (e-order inputs) (range))
@@ -412,12 +415,14 @@
                     (keep (fn [id]
                             (when (contains? (:enabled inputs) id)
                               (let [p (get projectors id)
-                                    budget (decimate-budget projector-effects id)]
+                                    decimate (decimate-of projector-effects id)]
                                 [id (cond-> {:index (get index id)
                                              :scan-rate (or (stream/clamp-scan-rate (:scan-rate p)) stream/DEFAULT_SCAN_RATE)
                                              :fit (fit-guard/settings (:fit p))
                                              :regions (halves p w)}
-                                      budget (assoc :decimate-budget budget))]))))
+                                      decimate (assoc :decimate-budget (:budget decimate)
+                                                      :decimate-kpps (:kpps decimate)
+                                                      :decimate-fps (:fps decimate)))]))))
                     (:order inputs))}))
 
 (defn resolve-ref

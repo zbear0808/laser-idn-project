@@ -224,3 +224,19 @@
     (is (nil? (points/chain-budget [{:type :group :enabled? false :items [(decimate :fps 60)]}]))))
   (is (nil? (points/chain-budget [(scale 0.5)])) "no Decimate: nil")
   (is (nil? (points/chain-budget nil))))
+
+(deftest chain-decimate-is-the-one-that-keeps-the-count-test
+  (testing "Q-D-4 B: the cue warnings' advice reads the scan rate and target of the Decimate whose budget is the chain's"
+    (is (= {:budget 833 :kpps 25.0 :fps 30.0} (points/chain-decimate [(decimate)])))
+    (is (= {:budget 400 :kpps 12.0 :fps 30.0} (points/chain-decimate [(decimate) (scale 0.5) (decimate :kpps 12)]))
+        "of several, the smallest budget's")
+    (is (= {:budget 833 :kpps 25.0 :fps 30.0} (points/chain-decimate [(decimate) (decimate :kpps 50 :fps 60)]))
+        "the first of those with the same budget")
+    (is (= {:budget 208 :kpps 25.0 :fps 120.0} (points/chain-decimate [(decimate :fps 500)])) "clamped")
+    (is (= {:budget 1333 :kpps 40.0 :fps 30.0}
+           (points/chain-decimate [(decimate :kpps 40 :fps {:type :sine :min 30.0 :max 60.0 :period 1.0})]))
+        "a modulated one at its default")
+    (is (= (:budget (points/chain-decimate [(decimate :kpps 30 :fps 45)])) (points/chain-budget [(decimate :kpps 30 :fps 45)]))
+        "its budget is chain-budget's")
+    (is (nil? (points/chain-decimate [(assoc (decimate) :enabled? false)])))
+    (is (nil? (points/chain-decimate nil)))))

@@ -99,23 +99,43 @@
   (let [k (/ (double scan-rate) 1000.0)]
     (if (== k (Math/rint k)) (str (long k)) (str k))))
 
+(defn- decimate-advice
+  "What the line and the tooltip say when the laser's Decimate keeps the
+   cue's count (:decimate, Q-D-4 B): \"Laser C's Decimate keeps ~830 points:
+   set its scan rate to Laser C's 12 kpps, or lower Laser C's minimum.\",
+   \"raise its target fps to 20\" when its target is under the minimum, and
+   both joined by \"and\"."
+  [{:keys [laser points scan-rate min-fps decimate]}]
+  (str laser "'s Decimate keeps ~" (grouped points) " points: "
+       (str/join " and " (cond-> []
+                           (contains? decimate :scan-rate) (conj (str "set its scan rate to " laser "'s " (kpps scan-rate) " kpps"))
+                           (contains? decimate :fps) (conj (str "raise its target fps to " min-fps))))
+       ", or lower " laser "'s minimum."))
+
 (defn cue-warning-text
   "A cue cell's tooltip: \"Too heavy for Laser C: about 12 fps (minimum
-   20)\"; nil for no warning."
-  [{:keys [laser fps min-fps] :as w}]
+   20)\", and under it, when the laser's Decimate keeps the cue's count,
+   what to change of it (decimate-advice); nil for no warning."
+  [{:keys [laser fps min-fps decimate] :as w}]
   (when w
-    (str "Too heavy for " laser ": about " fps " fps (minimum " min-fps ")")))
+    (str "Too heavy for " laser ": about " fps " fps (minimum " min-fps ")"
+         (when (seq decimate) (str "\n" (decimate-advice w))))))
 
 (defn cue-line-text
   "The line above a cue editor's footer: \"⚠ ~2,010 points: about 12 fps on
    Laser C (25 kpps). Most points: Circle (1,999). Simplify it, or lower
    Laser C's minimum.\" \"Most points\" only once the item counts arrive
-   (the render counts them while the editor is open); nil for no warning."
-  [{:keys [laser points fps scan-rate item item-name] :as w}]
+   (the render counts them while the editor is open). When the laser's
+   Decimate keeps the cue's count, what to change of it instead
+   (decimate-advice), and no \"Most points\": the cue's items aren't why.
+   nil for no warning."
+  [{:keys [laser points fps scan-rate item item-name decimate] :as w}]
   (when w
     (str "⚠ ~" (grouped points) " points: about " fps " fps on " laser " (" (kpps scan-rate) " kpps)."
-         (when (and item item-name) (str " Most points: " item-name " (" (grouped (:points item)) ")."))
-         " Simplify it, or lower " laser "'s minimum.")))
+         (if (seq decimate)
+           (str " " (decimate-advice w))
+           (str (when (and item item-name) (str " Most points: " item-name " (" (grouped (:points item)) ")."))
+                " Simplify it, or lower " laser "'s minimum.")))))
 
 (defn cue-load-warning
   "The line above the footer of the cue at col, row's editor (both editors)
