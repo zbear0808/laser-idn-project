@@ -181,13 +181,17 @@ Either way, Escape during a drag puts the old zone back without asking.
 - **A ★ (built)** Keep warning: the cue is heavy, and the laser thins it.
 - **B** Count each laser's calibration chain: a laser with Decimate counts a cue at no more than Decimate's budget.
 
-**Q-D-3 · The meter when Decimate in a laser's chain leaves the count as it is** (the guard got under Decimate's budget first, or only anchors are left). Raised in the follow-up (12 §7). **Answered B** (2026-11-20); built in `c0e2d7b`.
+**Q-D-3 · The meter when Decimate in a laser's chain leaves the count as it is** (the guard got under Decimate's budget first, or only anchors are left). Raised in the follow-up (12 §7). **Answered B** (2026-11-20); built in `bfcaeab`.
 - **A** What the laser is asked for, as without Decimate: a heavier cue can then read lower (2,700 points 216%, 2,800 points 133%, with Decimate at 15 fps under a 20 fps minimum).
 - **B ★** What the laser draws, whenever its chain has an enabled Decimate, so the meter, the fps and LOW FPS always agree.
 
-**Q-D-4 · The ⚠'s advice when a laser's Decimate sets the count.** Raised in the follow-up (12 §7). **Answered B** (2026-11-20); built in `9423612`.
+**Q-D-4 · The ⚠'s advice when a laser's Decimate sets the count.** Raised in the follow-up (12 §7). **Answered B** (2026-11-20); built in `b2bdb77`, with the suggested settings rounded to work in `144c0a7` (the scan rate down to whole kpps, the target fps up).
 - **A** As for any cue: "Simplify it, or lower Laser C's minimum."
 - **B ★** Name Decimate: "Laser C's Decimate keeps ~830 points: set its scan rate to Laser C's 12 kpps, or lower Laser C's minimum."
+
+**Q-D-5 · A heavy cue's cell tooltip without Decimate.** Raised in follow-up 2 (12 §8). **Answered A** (2026-11-20), as built.
+- **A ★ (chosen)** As it was, "Too heavy for Laser C: about 12 fps (minimum 20)"; the advice is in the editor's line.
+- **B** Add "Simplify it, or lower Laser C's minimum." to the tooltip too.
 
 ## Projectors tab layout (`13-projectors-layout.md`; built as ★ A, 2026-11-20)
 
