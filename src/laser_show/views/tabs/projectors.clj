@@ -243,7 +243,7 @@
                 [{:fx/type :label :text "never below" :min-width :use-pref-size :style-class ["label-secondary"]}
                  {:fx/type fit-number-field :id field-id :projector-id id :fit-key fit-key :stored stored
                   :lo lo :hi 100 :to-value #(/ % 100.0) :disable disable}
-                 {:fx/type :label :text "%" :style-class ["label-secondary"]}])]
+                 {:fx/type :label :text "%" :min-width :use-pref-size :style-class ["label-secondary"]}])]
     {:fx/type :v-box
      :id "projector-fit-guard"
      :spacing 6
@@ -258,6 +258,7 @@
                        {:fx/type :check-box
                         :id "projector-fit-reduce"
                         :text "Draw fewer points below it"
+                        :min-width :use-pref-size
                         :selected reduce-points?
                         :on-selected-changed {:event/type :projectors/set-fit :projector-id id
                                               :key :reduce-points? :value :fx/event}}
@@ -267,6 +268,7 @@
                        {:fx/type :check-box
                         :id "projector-fit-dim"
                         :text "Then dim"
+                        :min-width :use-pref-size
                         :selected dim?
                         :on-selected-changed {:event/type :projectors/set-fit :projector-id id
                                               :key :dim? :value :fx/event}}
@@ -530,10 +532,29 @@
                                  :pref-width 40
                                  :style "-fx-text-fill: #808080; -fx-font-size: 10;"}]}])))}))
 
+(defn- inspector-column
+  "One of the inspector's columns, in a scroll pane of its own: each one
+   scrolls by itself. width fixes it (its vertical scroll bar inside), or
+   it takes the rest with :h-box/hgrow on its description."
+  [{:keys [id width spacing children]}]
+  (cond-> {:fx/type :scroll-pane
+           :id id
+           :fit-to-width true
+           :hbar-policy :never
+           :vbar-policy :as-needed
+           :style (str "-fx-background-color: " (css/bg-primary) "; -fx-background: " (css/bg-primary) ";")
+           :content {:fx/type :v-box
+                     :spacing spacing
+                     :padding {:top 8 :right 12 :bottom 12 :left 12}
+                     :style (str "-fx-background-color: " (css/bg-primary) ";")
+                     :children children}}
+    width (assoc :min-width width :pref-width width :max-width width)))
+
 (defn- projector-config-panel
-  "The inspector: the selected card's settings, calibration chain and test
-   pattern, below the rig strip. Uses the self-contained effect chain
-   sidebar with callbacks."
+  "The inspector: the selected card's settings, calibration chain, safety
+   zone and test pattern, below the rig strip, in three columns that each
+   scroll by themselves. Uses the self-contained effect chain sidebar with
+   callbacks."
   [{:keys [fx/context]}]
   (let [projector (fx/sub-ctx context subs/active-projector)
         projector-id (:id projector)
@@ -559,93 +580,83 @@
                           (chains/get-item-at-path effects selected-effect-path))
         clipboard-items (clipboard/get-effects-to-paste)]
     (if projector
-      {:fx/type :v-box
-       :children [{:fx/type :scroll-pane
-                   :v-box/vgrow :always
-                   :fit-to-width true
-                   :fit-to-height true
-                   :style (str "-fx-background-color: " (css/bg-primary) "; -fx-background: " (css/bg-primary) ";")
-                   :content {:fx/type :h-box
-                             :spacing 16
-                             :padding 16
-                             :style (str "-fx-background-color: " (css/bg-primary) ";")
-                             :children [;; Left: the projector's own settings
-                                        {:fx/type :v-box
-                                         :spacing 8
-                                         :pref-width 300
-                                         :children [{:fx/type :label
-                                                     :id "projector-config-title"
-                                                     :text (str "CONFIGURE: " (:name projector))
-                                                     :style "-fx-text-fill: white; -fx-font-size: 14; -fx-font-weight: bold;"}
-                                                    {:fx/type projector-basic-settings
-                                                     :projector projector}
-                                                    {:fx/type :separator}
-                                                    {:fx/type projector-rig-settings
-                                                     :projector projector}
-                                                    {:fx/type :separator}
-                                                    {:fx/type fit-guard-section
-                                                     :projector projector}]}
-                                        ;; Middle: the calibration chain, and Remove...
-                                        {:fx/type :v-box
-                                         :spacing 8
-                                         :pref-width 280
-                                         :children [{:fx/type :h-box
-                                                     :alignment :center-left
-                                                     :children [{:fx/type :label
-                                                                 :text "CALIBRATION EFFECTS"
-                                                                 :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
-                                                                {:fx/type :region :h-box/hgrow :always}
-                                                                {:fx/type projector-add-effect-menu
-                                                                 :projector-id projector-id}]}
-                                                    {:fx/type projector-effects-sidebar
-                                                     :fx/key projector-id  ;; Force recreation when projector changes to avoid stale closures
-                                                     :fx/context context
-                                                     :projector-id projector-id
-                                                     :selected-ids selected-ids
-                                                     :clipboard-items clipboard-items}
-                                                    {:fx/type :separator}
-                                                    {:fx/type :button
-                                                     :id "projector-remove-button"
-                                                     :text "Remove..."
-                                                     :style-class ["button-danger"]
-                                                     :tooltip {:fx/type :tooltip
-                                                               :text "Remove this projector and its calibration"}
-                                                     :on-action {:event/type :projectors/request-remove
-                                                                 :projector-id projector-id}}]}
-                                        ;; Right: Parameter editor + calibration controls
-                                        {:fx/type :v-box
-                                         :spacing 16
-                                         :h-box/hgrow :always
-                                         :children (vec
-                                                      (concat
-                                                        (when selected-effect
-                                                           [{:fx/type effect-parameter-editor
-                                                             :projector-id projector-id
-                                                             :effect-path selected-effect-path
-                                                             :effect selected-effect
-                                                             :ui-state effect-ui-state}])
-                                                       [{:fx/type :region :v-box/vgrow :always}
-                                                        ;; Safety zone above the test pattern (zones plan Z1)
-                                                        {:fx/type safety-editor/safety-section
-                                                         :fx/context context
-                                                         :projector-id projector-id}
-                                                        {:fx/type calibration-controls
-                                                         :fx/context context
-                                                         :projector-id projector-id}]))}]}}]}
+      {:fx/type :h-box
+       :min-height 80
+       :style (str "-fx-background-color: " (css/bg-primary) ";")
+       :children [;; Left: the projector's own settings
+                  {:fx/type inspector-column
+                   :id "projector-column-left"
+                   ;; FIT GUARD's rows need 314 px, beside the padding and a scroll bar
+                   :width 348
+                   :spacing 8
+                   :children [{:fx/type :label
+                               :id "projector-config-title"
+                               :text (str "CONFIGURE: " (:name projector))
+                               :style "-fx-text-fill: white; -fx-font-size: 14; -fx-font-weight: bold;"}
+                              {:fx/type projector-basic-settings
+                               :projector projector}
+                              {:fx/type :separator}
+                              {:fx/type projector-rig-settings
+                               :projector projector}
+                              {:fx/type :separator}
+                              {:fx/type fit-guard-section
+                               :projector projector}]}
+                  ;; Middle: the calibration chain, and Remove...
+                  {:fx/type inspector-column
+                   :id "projector-column-middle"
+                   :width 316
+                   :spacing 8
+                   :children [{:fx/type :h-box
+                               :alignment :center-left
+                               :children [{:fx/type :label
+                                           :text "CALIBRATION EFFECTS"
+                                           :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                                          {:fx/type :region :h-box/hgrow :always}
+                                          {:fx/type projector-add-effect-menu
+                                           :projector-id projector-id}]}
+                              {:fx/type projector-effects-sidebar
+                               :fx/key projector-id  ;; Force recreation when projector changes to avoid stale closures
+                               :fx/context context
+                               :projector-id projector-id
+                               :selected-ids selected-ids
+                               :clipboard-items clipboard-items}
+                              {:fx/type :separator}
+                              {:fx/type :button
+                               :id "projector-remove-button"
+                               :text "Remove..."
+                               :style-class ["button-danger"]
+                               :tooltip {:fx/type :tooltip
+                                         :text "Remove this projector and its calibration"}
+                               :on-action {:event/type :projectors/request-remove
+                                           :projector-id projector-id}}]}
+                  ;; Right: the selected effect's editor, the safety zone (zones plan Z1)
+                  ;; and the test pattern
+                  {:fx/type inspector-column
+                   :id "projector-column-right"
+                   :h-box/hgrow :always
+                   :spacing 16
+                   :children (vec
+                              (concat
+                               (when selected-effect
+                                 [{:fx/type effect-parameter-editor
+                                   :projector-id projector-id
+                                   :effect-path selected-effect-path
+                                   :effect selected-effect
+                                   :ui-state effect-ui-state}])
+                               [{:fx/type safety-editor/safety-section
+                                 :fx/context context
+                                 :projector-id projector-id}
+                                {:fx/type calibration-controls
+                                 :fx/context context
+                                 :projector-id projector-id}]))}]}
       ;; No projector selected
       {:fx/type :v-box
-       :children [{:fx/type :scroll-pane
-                   :v-box/vgrow :always
-                   :fit-to-width true
-                   :fit-to-height true
-                   :style (str "-fx-background-color: " (css/bg-primary) "; -fx-background: " (css/bg-primary) ";")
-                   :content {:fx/type :v-box
-                             :spacing 16
-                             :padding 16
-                             :style (str "-fx-background-color: " (css/bg-primary) "; -fx-background-radius: 4;")
-                             :children [{:fx/type :label
-                                         :text "Click a card to set it up"
-                                         :style "-fx-text-fill: #606060; -fx-font-style: italic;"}]}}]})))
+       :min-height 80
+       :padding 16
+       :style (str "-fx-background-color: " (css/bg-primary) ";")
+       :children [{:fx/type :label
+                   :text "Click a card to set it up"
+                   :style "-fx-text-fill: #606060; -fx-font-style: italic;"}]})))
 
 
 ;; Main Tab
