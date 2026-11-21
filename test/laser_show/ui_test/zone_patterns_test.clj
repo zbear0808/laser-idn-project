@@ -2,16 +2,21 @@
   "Zone patterns (zones plan Z5, 07 §7): the Pattern chip in both cue
    editors, the pattern window and how it says the pattern folds onto this
    rig, Zone pattern and Map cycle on the effects grid's Zone tab and an
-   empty effects cell's menu."
+   empty effects cell's menu; the pattern pads, STEP, and CYCLE on the map
+   pads."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.animation.show-time :as show-time]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.input-mapper :as input-mapper]
+            [laser-show.input.router :as input-router]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
             [laser-show.state.history :as history]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
-  (:import [javafx.scene Node]
+  (:import [javafx.css PseudoClass]
+           [javafx.scene Node]
            [javafx.scene.control Control Labeled Menu MenuButton MenuItem]))
 
 (use-fixtures :once fixtures/with-toolkit)
@@ -225,3 +230,221 @@
     (state/swap-state! assoc-in [:ui :timeline-prefs :add-panel :open?] true)
     (ui/wait-for! #(seq (ui/query-all "#timeline-browser-effects #shape-tab")))
     (is (empty? (ui/query-all "#zone-tab")))))
+
+
+;; The pattern pads (07 §7.3)
+
+(def ^:private pattern-id #uuid "00000000-0000-0000-0000-0000000000c1")
+
+(defn- uses-a-pattern!
+  "The cue at A1 alternates A ⇄ B; extra merges into its params."
+  ([] (uses-a-pattern! {}))
+  ([extra]
+   (state/swap-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns]
+                      [(-> (zone-patterns/preset-instance :alternate :cue)
+                           (assoc :id pattern-id)
+                           (update :params merge extra))])))
+
+(defn- pads-style [] (get-in (app-state) [:pattern-pads :style]))
+
+(defn- has-class? [selector cls]
+  (ui/on-fx-thread #(boolean (some-> ^Node (ui/query selector) .getStyleClass (.contains cls)))))
+
+(defn- pseudo? [selector pseudo-class]
+  (ui/on-fx-thread #(boolean (some-> ^Node (ui/query selector) .getPseudoClassStates
+                                     (.contains (PseudoClass/getPseudoClass pseudo-class))))))
+
+(defn- open-perform! []
+  (events/dispatch! {:event/type :ui/set-active-tab :tab-id :perform})
+  (ui/wait-for! #(ui/visible? "#vibe-pad-row")))
+
+(defn- with-input-mapper
+  "(f) with the input mapper running (zones-test's): a learned note reaches
+   the app only through it."
+  [f]
+  (input-mapper/set-dispatch-fn! events/dispatch!)
+  (input-mapper/start-mapper!)
+  (try
+    (f)
+    (finally
+      (input-mapper/stop-mapper!)
+      (input-mapper/set-dispatch-fn! nil))))
+
+(defn- note [type n]
+  {:type type :source :midi :channel 0 :note n :velocity (if (= :note-on type) 1.0 0.0)
+   :timestamp (System/currentTimeMillis)})
+
+(defn- press! [robot selector]
+  (ui/press-node! robot selector)
+  (ui/release-node! robot selector))
+
+(deftest pattern-pad-switches-test
+  (let [robot (ui/robot)]
+    (testing "no pattern anywhere: no strip, no map pads"
+      (is (not (ui/visible? "#pattern-strip")))
+      (is (not (ui/visible? "#zone-map-strip"))))
+    (uses-a-pattern!)
+    (ui/wait-for! #(ui/visible? "#pattern-chip-chase"))
+    (is (= ["● As set" "Off" "Alternate" "Chase" "Ping-pong" "Random" "Shift" "Swap" "STEP"]
+           (texts "#pattern-strip .pattern-pad")))
+    (is (= "Every pattern plays the style it was made with" (tooltip-of "#pattern-chip-as-set")))
+    (is (= "One zone after another" (tooltip-of "#pattern-chip-chase")))
+    (is (ui/visible? "#zone-map-chip-odd-even") "a pattern moves pictures between zones: the map pads show too")
+    (let [undo-depth (count (get-in (app-state) [:history :undo-stack]))]
+      (press! robot "#pattern-chip-chase")
+      (testing "no clock thread: at once"
+        (ui/wait-for! #(= :chase (pads-style)))
+        (is (nil? (get-in (app-state) [:pattern-pads :pending]))))
+      (ui/assert-text! "#pattern-chip-chase" "● Chase")
+      (ui/assert-text! "#pattern-chip-as-set" "As set")
+      (is (has-class? "#pattern-chip-chase" "pattern-pad-active"))
+      (is (= undo-depth (count (get-in (app-state) [:history :undo-stack]))) "a switch is live: no undo step"))
+    (is (= :alternate (get-in (cue 0 0) [:zone-patterns 0 :params :style])) "the cue keeps its own style")
+    (testing "on Perform: ZONE PATTERN, under ZONE MAP"
+      (open-perform!)
+      (ui/wait-for! #(ui/visible? "#pattern-pad-chase"))
+      (ui/assert-text! "#pattern-pad-chase-state" "now")
+      (is (not-any? #(.isFocusTraversable ^Node %) (ui/query-all ".pattern-pad")) "Space or Enter never presses one")
+      (press! robot "#pattern-pad-off")
+      (ui/wait-for! #(= :off (pads-style)))
+      (ui/assert-text! "#pattern-pad-off-state" "now")
+      (press! robot "#pattern-pad-as-set")
+      (ui/wait-for! #(nil? (pads-style)))
+      (ui/assert-text! "#pattern-pad-as-set-state" "now"))))
+
+(deftest pending-pattern-pad-blinks-test
+  (uses-a-pattern!)
+  (state/swap-state! assoc-in [:pattern-pads :pending] {:id 7 :style :chase :at-beat 1.0e6 :bar? false})
+  (ui/wait-for! #(ui/visible? "#pattern-chip-chase"))
+  (testing "waiting: amber, and it says so"
+    (is (has-class? "#pattern-chip-chase" "pattern-pad-pending"))
+    (ui/assert-text! "#pattern-chip-chase" "Chase ◌"))
+  (testing "no clock: it stays lit"
+    (is (not (pseudo? "#pattern-chip-chase" "blink"))))
+  (testing "while the clock runs it blinks, and only it"
+    (fixtures/with-clock
+     (fn [_]
+       (ui/wait-for! #(pseudo? "#pattern-chip-chase" "blink"))
+       (ui/wait-for! #(not (pseudo? "#pattern-chip-chase" "blink")))
+       (ui/wait-for! #(pseudo? "#pattern-chip-chase" "blink"))
+       (is (not (pseudo? "#pattern-chip-as-set" "blink"))))))
+  (testing "on Perform: next beat, or next bar"
+    (open-perform!)
+    (ui/wait-for! #(ui/visible? "#pattern-pad-chase"))
+    (ui/assert-text! "#pattern-pad-chase-state" "next beat")
+    (state/swap-state! assoc-in [:pattern-pads :pending :bar?] true)
+    (ui/assert-text! "#pattern-pad-chase-state" "next bar")))
+
+(deftest pattern-pad-learns-a-note-test
+  (with-input-mapper
+    (fn []
+      (let [robot (ui/robot)
+            k40 {:source :midi :channel 0 :note 40}
+            bound #(get-in (app-state) [:config :input :trigger-map k40])]
+        (uses-a-pattern!)
+        (open-perform!)
+        (ui/wait-for! #(ui/visible? "#pattern-pad-chase"))
+        (ui/assert-text! "#pattern-pad-chase-keys" "Right-click to learn")
+        (ui/right-click-node! robot (ui/query "#pattern-pad-chase"))
+        (ui/click! robot "#pattern-pad-chase-learn")
+        (ui/wait-for! #(= {:type :pattern-pad :target :chase} (get-in (app-state) [:backend :input :learning-target])))
+        (is (has-class? "#pattern-pad-chase" "pattern-pad-learning"))
+        (is (nil? (pads-style)) "the menu pressed nothing")
+        (input-router/dispatch! (note :note-on 40))
+        (ui/wait-for! #(= {:type :pattern-pad :target :chase} (bound)))
+        (ui/assert-text! "#pattern-pad-chase-keys" "MIDI Ch 1 Note 40")
+        (ui/wait-for! #(not (has-class? "#pattern-pad-chase" "pattern-pad-learning")))
+        (input-router/dispatch! (note :note-off 40))
+        (testing "the key presses the pad"
+          (input-router/dispatch! (note :note-on 40))
+          (ui/wait-for! #(= :chase (pads-style)))
+          (input-router/dispatch! (note :note-off 40)))
+        (testing "learning it again for another pad moves it"
+          (ui/right-click-node! robot (ui/query "#pattern-pad-swap"))
+          (ui/click! robot "#pattern-pad-swap-learn")
+          (ui/wait-for! #(= {:type :pattern-pad :target :swap} (get-in (app-state) [:backend :input :learning-target])))
+          (input-router/dispatch! (note :note-on 40))
+          (ui/wait-for! #(= {:type :pattern-pad :target :swap} (bound)))
+          (input-router/dispatch! (note :note-off 40))
+          (ui/assert-text! "#pattern-pad-chase-keys" "Right-click to learn")
+          (ui/assert-text! "#pattern-pad-swap-keys" "MIDI Ch 1 Note 40"))
+        (testing "Clear control"
+          (ui/right-click-node! robot (ui/query "#pattern-pad-swap"))
+          (ui/click! robot "#pattern-pad-swap-clear")
+          (ui/wait-for! #(nil? (bound)))
+          (ui/assert-text! "#pattern-pad-swap-keys" "Right-click to learn"))))))
+
+(deftest step-pad-steps-a-pattern-test
+  (let [robot (ui/robot)
+        step #(get-in (show-time/latest) [:zone-steps pattern-id])]
+    (uses-a-pattern! {:step-on :zone-step})
+    (open-perform!)
+    (ui/wait-for! #(ui/visible? "#pattern-pad-step"))
+    (is (= "Steps the patterns that step on the Zone step key" (tooltip-of "#pattern-pad-step")))
+    (ui/assert-text! "#pattern-pad-step-count" "0")
+    (events/dispatch! {:event/type :grid/trigger-cell :col 0 :row 0})
+    (ui/wait-for! #(some? (get-in (app-state) [:playback :active-cues [0 0]])))
+    (fixtures/with-clock
+     (fn [_]
+       (testing "the cue plays its pattern at step 0 before a press"
+         (ui/wait-for! #(= 0 (step))))
+       (press! robot "#pattern-pad-step")
+       (ui/wait-for! #(= 1 (get-in (app-state) [:playback :pulses :zone-step :id])))
+       (testing "the clock stamps the press: the count, and the pattern's next step"
+         (ui/wait-for! #(= "1" (ui/node-text "#pattern-pad-step-count")))
+         (ui/wait-for! #(= 1 (step))))
+       (press! robot "#pattern-pad-step")
+       (ui/wait-for! #(= 2 (step)))
+       (ui/wait-for! #(= "2" (ui/node-text "#pattern-pad-step-count")))))))
+
+
+;; The Map cycle on the map pads (07 §7.4)
+
+(def ^:private cycle-cell [1 2])
+
+(defn- cycle-on! []
+  (state/swap-state! assoc-in [:chains :effect-chains cycle-cell]
+                     {:active? true :items [(assoc (zone-patterns/cycle-instance) :id #uuid "00000000-0000-0000-0000-0000000000d1")]}))
+
+(defn- paused? [] (true? (get-in (app-state) [:zone-map :cycle-paused?])))
+
+(deftest cycle-pad-resumes-test
+  (let [robot (ui/robot)]
+    (state/swap-state! assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a)
+    (ui/wait-for! #(ui/visible? "#zone-map-chip-cycle"))
+    (testing "no Map cycle cell on: CYCLE is dim and says why"
+      (ui/assert-text! "#zone-map-chip-cycle" "↻ CYCLE")
+      (is (has-class? "#zone-map-chip-cycle" "zone-map-pad-dim"))
+      (is (= "Switch on a Map cycle cell on the Effects grid" (tooltip-of "#zone-map-chip-cycle"))))
+    (cycle-on!)
+    (testing "a cycle cell on: CYCLE is lit, and no map pad is the one in use"
+      (ui/wait-for! #(has-class? "#zone-map-chip-cycle" "zone-map-pad-active"))
+      (is (not (has-class? "#zone-map-chip-left-right" "zone-map-pad-active")))
+      (is (= "Map cycle: Left / Right, Odd / Even, a bar each" (tooltip-of "#zone-map-chip-cycle"))))
+    (testing "a map pad's press pauses it (no clock: at once)"
+      (press! robot "#zone-map-chip-unison")
+      (ui/wait-for! #(= :map/unison (get-in (app-state) [:zone-map :active])))
+      (ui/wait-for! paused?)
+      (ui/wait-for! #(= "↻ CYCLE · paused" (ui/node-text "#zone-map-chip-cycle")))
+      (is (not (has-class? "#zone-map-chip-cycle" "zone-map-pad-active")))
+      (is (has-class? "#zone-map-chip-unison" "zone-map-pad-active")))
+    (testing "CYCLE carries on"
+      (press! robot "#zone-map-chip-cycle")
+      (ui/wait-for! #(not (paused?)))
+      (ui/wait-for! #(has-class? "#zone-map-chip-cycle" "zone-map-pad-active"))
+      (ui/assert-text! "#zone-map-chip-cycle" "↻ CYCLE"))
+    (testing "the Target menu says the map is cycling"
+      (open-editor! 0 0)
+      (ui/wait-for! #(some? (ui/query "#target-chip-cue")))
+      (is (some #{"ZONES · map: cycling (Left / Right, Odd / Even)"} (item-texts "#target-chip-cue")))
+      (events/dispatch! {:event/type :ui/close-dialog :dialog-id :cue-chain-editor}))
+    (testing "on Perform, and the map the cycle shows now is marked ↻, from the clock"
+      (open-perform!)
+      (ui/wait-for! #(ui/visible? "#zone-map-pad-cycle"))
+      (ui/assert-text! "#zone-map-pad-cycle-state" "cycling")
+      (fixtures/with-clock
+       (fn [_]
+         (ui/wait-for! #(some (fn [id] (pseudo? (str "#zone-map-pad-" id) "cycling")) ["left-right" "odd-even"]))
+         (is (not (pseudo? "#zone-map-pad-unison" "cycling")) "Unison isn't in the cycle")
+         (ui/wait-for! #(some (fn [[id text]] (and (pseudo? (str "#zone-map-pad-" id) "cycling") (= text (ui/node-text (str "#zone-map-pad-" id "-name")))))
+                              [["left-right" "↻ LEFT / RIGHT"] ["odd-even" "↻ ODD / EVEN"]])))))))

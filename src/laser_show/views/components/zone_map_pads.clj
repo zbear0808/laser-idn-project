@@ -11,7 +11,13 @@
    at 4 Hz from the show clock's newest tick (redraw-blink!), steady without
    a clock. Right-click: Switch on the bar, learn or clear its control, Edit
    maps…. A pad never takes the keyboard focus, so Space or Enter can't
-   press it."
+   press it.
+
+   After the maps, CYCLE (zones plan Z5, 07 §7.4): lit while a Map cycle
+   cell picks the map, paused once a map pad's press lands, dim with no
+   cycle cell on. Its press carries the cycle on, on the beat like any
+   pad's. While it runs no map pad is the one in use, and the map it shows
+   now is marked ↻ (the :cycling pseudo-class), from the newest tick."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.animation.show-time :as show-time]
@@ -19,25 +25,47 @@
             [laser-show.views.components.clock-view :as clock-view]
             [laser-show.views.components.trigger-bank :as trigger-bank])
   (:import [javafx.css PseudoClass]
-           [javafx.scene Node]))
+           [javafx.scene Node]
+           [javafx.scene.control Labeled]))
 
 
 ;; The blink
 
 (def ^:private blink-class (PseudoClass/getPseudoClass "blink"))
 
+(def ^:private cycling-class (PseudoClass/getPseudoClass "cycling"))
+
 (def ^:private blink-half-ns
   "Half a 4 Hz blink."
   125000000)
 
+(defn- set-mark!
+  "A Labeled's text, base, with ↻ before it while mark?."
+  [^Labeled l base mark?]
+  (when (string? base)
+    (let [text (if mark? (str "↻ " base) base)]
+      (when (not= text (.getText l))
+        (.setText l text)))))
+
 (defn redraw-blink!
-  "A pad a switch waits for (its user data true) blinks at 4 Hz from the
-   newest tick's time; with no tick, or a stale one (no clock), it stays lit."
-  [^Node node snapshot pending?]
-  (.pseudoClassStateChanged node blink-class
-                            (boolean (and pending? snapshot
-                                          (not (show-time/stale? snapshot (System/nanoTime)))
-                                          (odd? (quot (long (:at-ns snapshot)) blink-half-ns))))))
+  "A pad a switch waits for blinks at 4 Hz from the newest tick's time; with
+   no tick, or a stale one (no clock), it stays lit. Its user data: pending?,
+   or {:pending? :map-id :text :name-text} for a map pad, which is :cycling,
+   its text (a chip's) or its name's (a large pad's) marked ↻, while the
+   tick's Map cycle shows its map (zones plan Z5)."
+  [^Node node snapshot data]
+  (let [{:keys [pending? map-id text name-text]} (if (map? data) data {:pending? data})
+        fresh? (and snapshot (not (show-time/stale? snapshot (System/nanoTime))))
+        {cycle-map :map paused? :paused?} (when fresh? (get-in snapshot [:routing :cycle]))
+        cycling? (boolean (and map-id (= map-id cycle-map) (not paused?)))]
+    (.pseudoClassStateChanged node blink-class
+                              (boolean (and pending? fresh?
+                                            (odd? (quot (long (:at-ns snapshot)) blink-half-ns)))))
+    (when map-id
+      (.pseudoClassStateChanged node cycling-class cycling?)
+      (when text (set-mark! node text cycling?))
+      (when-let [name-label (when name-text (.lookup node ".zone-map-pad-name"))]
+        (set-mark! name-label name-text cycling?)))))
 
 
 ;; A pad
@@ -103,9 +131,12 @@
         large? (= :large size)
         node-id (str (if large? "zone-map-pad-" "zone-map-chip-") (clojure.core/name map-id))
         pointer {:event/type :zone-map/pointer :map map-id}
+        small-text (cond active? (str "● " name) pending (str name " ◌") :else name)
         common {:fx/type :label
                 :id node-id
-                :user-data (some? pending)
+                :user-data (if large?
+                             {:pending? (some? pending) :map-id map-id :name-text (str/upper-case (or name ""))}
+                             {:pending? (some? pending) :map-id map-id :text small-text})
                 :focus-traversable false
                 :pick-on-bounds true
                 :style-class (cond-> ["zone-map-pad" (if large? "zone-map-pad-large" "zone-map-pad-small")]
@@ -131,6 +162,7 @@
                               :spacing 2
                               :mouse-transparent true
                               :children [{:fx/type :label
+                                          :id (str node-id "-name")
                                           :text (str/upper-case (or name ""))
                                           :style-class ["label" "zone-map-pad-name"]}
                                          {:fx/type :label
@@ -143,17 +175,117 @@
                                           :style-class ["label" "zone-map-pad-keys"]}]})
              (assoc common
                     :min-width :use-pref-size
-                    :text (cond active? (str "● " name) pending (str name " ◌") :else name)
+                    :text small-text
                     :tooltip {:fx/type :tooltip :text (chip-tooltip pad)}))}))
+
+
+;; CYCLE (zones plan Z5, 07 §7.4)
+
+(defn- cycle-state-text
+  "What CYCLE says under its name."
+  [{:keys [on? running? pending]}]
+  (cond
+    pending (if (= :bar pending) "next bar" "next beat")
+    running? "cycling"
+    on? "paused"
+    :else "off"))
+
+(defn- cycle-tooltip [{:keys [on? running? pending bar? bindings description]}]
+  (str (cond
+         (not on?) "Switch on a Map cycle cell on the Effects grid"
+         pending (str "Carrying the Map cycle on, on the next " (if (= :bar pending) "bar" "beat"))
+         running? description
+         :else (str "Paused: a map pad's press holds its map. Press to carry the Map cycle on, on the next "
+                    (if bar? "bar" "beat (Shift: the bar)")))
+       (when (seq bindings) (str " · " (keys-text bindings)))))
+
+(defn- cycle-menu
+  "CYCLE's menu: Switch on the bar, its control."
+  [node-id {:keys [bar? learning? bindings]}]
+  {:fx/type :context-menu
+   :items [{:fx/type :check-menu-item
+            :id (str node-id "-bar")
+            :text "Switch on the bar"
+            :selected (boolean bar?)
+            :on-action {:event/type :zone-map/set-pad-bar :map :cycle :bar? (not bar?)}}
+           {:fx/type :separator-menu-item}
+           {:fx/type :menu-item
+            :id (str node-id "-learn")
+            :text "Learn control…"
+            :on-action {:event/type :input/start-learn :target-action {:type :zone-map :target :cycle}}}
+           {:fx/type :menu-item
+            :id (str node-id "-cancel-learn")
+            :text "Cancel learning"
+            :disable (not learning?)
+            :on-action {:event/type :input/cancel-learn}}
+           {:fx/type :menu-item
+            :id (str node-id "-clear")
+            :text "Clear control"
+            :disable (empty? bindings)
+            :on-action {:event/type :zone-map/clear-control :map :cycle}}]})
+
+(defn cycle-pad
+  "CYCLE (props :size): ↻ CYCLE, lit while a Map cycle picks the map,
+   \"paused\" once a map pad's press landed, dim without a cycle cell on;
+   a press carries the cycle on (:zone-map/pointer :map :cycle)."
+  [{:keys [fx/context size]}]
+  (let [{:keys [on? running? paused? pending learning? bindings] :as state} (fx/sub-ctx context subs/map-cycle-state)
+        large? (= :large size)
+        node-id (if large? "zone-map-pad-cycle" "zone-map-chip-cycle")
+        pointer {:event/type :zone-map/pointer :map :cycle}
+        common {:fx/type :label
+                :id node-id
+                :user-data (some? pending)
+                :focus-traversable false
+                :pick-on-bounds true
+                :style-class (cond-> ["zone-map-pad" "zone-map-cycle-pad" (if large? "zone-map-pad-large" "zone-map-pad-small")]
+                               running? (conj "zone-map-pad-active")
+                               pending (conj "zone-map-pad-pending")
+                               learning? (conj "zone-map-pad-learning")
+                               (not on?) (conj "zone-map-pad-dim"))
+                :on-mouse-pressed pointer
+                :on-touch-pressed pointer
+                :tooltip {:fx/type :tooltip :text (cycle-tooltip state)}
+                :context-menu (cycle-menu node-id state)}]
+    {:fx/type clock-view/ext-clock-redraw
+     :redraw! #'redraw-blink!
+     :every-ms 40
+     :desc (if large?
+             (assoc common
+                    :min-width 110
+                    :pref-width 160
+                    :max-width Double/MAX_VALUE
+                    :min-height 64
+                    :alignment :center
+                    :content-display :graphic-only
+                    :graphic {:fx/type :v-box
+                              :alignment :center
+                              :spacing 2
+                              :mouse-transparent true
+                              :children [{:fx/type :label
+                                          :text "↻ CYCLE"
+                                          :style-class ["label" "zone-map-pad-name"]}
+                                         {:fx/type :label
+                                          :id (str node-id "-state")
+                                          :text (cycle-state-text state)
+                                          :style-class ["label" "zone-map-pad-state"]}
+                                         {:fx/type :label
+                                          :id (str node-id "-keys")
+                                          :text (keys-text bindings)
+                                          :style-class ["label" "zone-map-pad-keys"]}]})
+             (assoc common
+                    :min-width :use-pref-size
+                    :text (cond pending "↻ CYCLE ◌" paused? "↻ CYCLE · paused" :else "↻ CYCLE")))}))
 
 
 ;; The strip and the row
 
 (defn map-strip
-  "The Grid tab's strip, right of its title: \"Zone map:\" and a small pad
-   per map, while the show draws into a zone anywhere (Z4-Q1 A)."
+  "The Grid tab's strip, right of its title: \"Zone map:\", a small pad
+   per map, then CYCLE, while the show draws into a zone anywhere (Z4-Q1
+   A), or has a zone pattern or a Map cycle (zones plan Z5)."
   [{:keys [fx/context]}]
-  (let [shown? (fx/sub-ctx context subs/zones-in-use?)]
+  (let [shown? (fx/sub-ctx context subs/zone-map-pads-shown?)]
     {:fx/type :h-box
      :id "zone-map-strip"
      :spacing 6
@@ -161,18 +293,19 @@
      :visible shown?
      :managed shown?
      :children (if shown?
-                 (into [{:fx/type :label :text "Zone map:" :style-class ["label" "zone-map-strip-label"]}]
-                       (map (fn [id] {:fx/type map-pad :fx/key id :map-id id :size :small}))
-                       (fx/sub-ctx context subs/map-pad-ids))
+                 (-> [{:fx/type :label :text "Zone map:" :style-class ["label" "zone-map-strip-label"]}]
+                     (into (map (fn [id] {:fx/type map-pad :fx/key id :map-id id :size :small}))
+                           (fx/sub-ctx context subs/map-pad-ids))
+                     (conj {:fx/type cycle-pad :fx/key :cycle :size :small}))
                  [])}))
 
 (defn map-pad-row
-  "The Perform tab's ZONE MAP row, under the faders' meters: a pad per map,
-   sharing the width, while the show draws into a zone anywhere (Z4-Q1 A).
-   Always there, hidden while it has nothing to show, so it never makes new
-   nodes of the rest of the tab."
+  "The Perform tab's ZONE MAP row, under the faders' meters: a pad per map
+   and CYCLE, sharing the width, while the map pads show (map-strip's
+   rule). Always there, hidden while it has nothing to show, so it never
+   makes new nodes of the rest of the tab."
   [{:keys [fx/context]}]
-  (let [shown? (fx/sub-ctx context subs/zones-in-use?)]
+  (let [shown? (fx/sub-ctx context subs/zone-map-pads-shown?)]
     {:fx/type :v-box
      :id "zone-map-row"
      :spacing 6
@@ -182,6 +315,7 @@
                  [{:fx/type :label :text "ZONE MAP" :style-class ["label" "zone-map-row-title"]}
                   {:fx/type :h-box
                    :spacing 12
-                   :children (mapv (fn [id] {:fx/type map-pad :fx/key id :map-id id :size :large :h-box/hgrow :always})
-                                   (fx/sub-ctx context subs/map-pad-ids))}]
+                   :children (conj (mapv (fn [id] {:fx/type map-pad :fx/key id :map-id id :size :large :h-box/hgrow :always})
+                                         (fx/sub-ctx context subs/map-pad-ids))
+                                   {:fx/type cycle-pad :fx/key :cycle :size :large :h-box/hgrow :always})}]
                  [])}))

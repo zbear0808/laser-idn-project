@@ -172,7 +172,10 @@
            (:dispatch (zone-patterns/handle {:event/type :pattern-pads/pointer :pad :chase :fx/event (mouse false) :state (fresh)}))))
     (is (true? (get-in (zone-patterns/handle {:event/type :pattern-pads/pointer :pad :chase :fx/event (mouse true) :state (fresh)})
                        [:dispatch :bar?]))
-        "Shift: the bar"))
+        "Shift: the bar")
+    (is (= {:event/type :pattern-pads/step :src :pad}
+           (:dispatch (zone-patterns/handle {:event/type :pattern-pads/pointer :pad :step :fx/event (mouse false) :state (fresh)})))
+        "STEP's press presses the Zone step key: at once, no beat to wait for"))
   (let [s (run (fresh) {:event/type :pattern-pads/set-pad-bar :pad :random :bar? true})]
     (is (= {:random {:bar? true}} (get-in s [:config :pattern-pads])))
     (is (= "Change Pad Timing" (history/undo-label (:history s))))

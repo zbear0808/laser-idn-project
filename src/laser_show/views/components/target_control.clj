@@ -55,14 +55,15 @@
    {:scope :own (the level's own target; nil: it inherits) :inherited (the
    resolution it would inherit, for Inherit's text) :names (targets/names)
    :zone-map (the map in use) :zones (the zones the show uses) :audience
-   (the refs that reach the crowd)}.
+   (the refs that reach the crowd) :cycling (while a Map cycle picks the
+   map, its maps' names: the zones' header says so, zones plan Z5)}.
    Scopes: :item :group :track :clip :cue :column, every row; :show, no
    Inherit (nothing set is All); :lane, All and the groups only; :preview,
    Master (everything) for Inherit, no new zone, Combine or Pin; :pattern (a
    zone pattern's places, zones plan Z5), Every laser first, then All, the
    zones and the groups, ticked when ctx's :lane has them, no Inherit,
    Combine or Pin."
-  [{:keys [scope own inherited names zone-map zones audience lane]}]
+  [{:keys [scope own inherited names zone-map zones audience lane cycling]}]
   (let [own (targets/normalize-target own)
         pattern? (= :pattern scope)
         in-lane (set lane)
@@ -93,7 +94,9 @@
         :checked? (if (= :show scope) (or (nil? own) (= :all own)) (checked? :all))}]
       (when-not lane?
         (concat
-         [{:kind :header :text (str "ZONES · map: " (:name zone-map))}]
+         [{:kind :header :text (if (seq cycling)
+                                 (str "ZONES · map: cycling (" (str/join ", " cycling) ")")
+                                 (str "ZONES · map: " (:name zone-map)))}]
          (for [z zone-list]
            {:kind :zone :ref z :text (zone-text z) :checked? (checked? z) :new? false :target z})
          (when-not (= :preview scope)
@@ -182,12 +185,14 @@
 
 (defn menu-context
   "What menu-model reads besides the level (:names :zone-map :zones
-   :audience), from the subs."
+   :audience :cycling), from the subs."
   [context]
-  {:names (fx/sub-ctx context subs/names-ctx)
-   :zone-map (fx/sub-ctx context subs/active-zone-map)
-   :zones (fx/sub-ctx context subs/zones-in-use)
-   :audience (fx/sub-ctx context subs/vibe-audience-groups)})
+  (let [{:keys [running? maps]} (fx/sub-ctx context subs/map-cycle-state)]
+    {:names (fx/sub-ctx context subs/names-ctx)
+     :zone-map (fx/sub-ctx context subs/active-zone-map)
+     :zones (fx/sub-ctx context subs/zones-in-use)
+     :audience (fx/sub-ctx context subs/vibe-audience-groups)
+     :cycling (when running? maps)}))
 
 (defn target-chip
   "The Target chip (06 §4.5): a menu button shaped like the timeline's zone

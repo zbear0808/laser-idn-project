@@ -16,6 +16,7 @@
             [laser-show.input.events :as input-events]
             [laser-show.input.router :as input-router]
             [laser-show.input.store :as store]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
@@ -605,7 +606,7 @@
     (testing "a cue draws into a zone: the row, one pad per map"
       (state/swap-state! assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a)
       (ui/wait-for! #(ui/visible? "#zone-map-row"))
-      (ui/assert-count! "#zone-map-row .zone-map-pad" 3)
+      (ui/assert-count! "#zone-map-row .zone-map-pad" 4) ; and CYCLE (zones plan Z5)
       (is (< (scene-y "#vibe-meter-row") (scene-y "#zone-map-row") (scene-y "#vibe-status"))
           "under the faders' meters, over the status line"))
     (testing "a column's default counts too"
@@ -616,3 +617,26 @@
     (testing "no zone again: gone"
       (state/swap-state! assoc-in [:grid :column-targets] {})
       (ui/wait-for! #(not (ui/visible? "#zone-map-row"))))))
+
+
+;; The ZONE PATTERN row (zones plan Z5, 07 §7.3)
+
+(deftest pattern-row-shows-when-patterns-are-used-test
+  (let [robot (ui/robot)]
+    (open-perform! robot)
+    (testing "no zone pattern anywhere: no ZONE PATTERN row"
+      (is (not (ui/visible? "#pattern-row"))))
+    (testing "a cue's pattern: the row, under ZONE MAP, over the status line"
+      (state/swap-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns] [(zone-patterns/preset-instance :alternate :cue)])
+      (ui/wait-for! #(ui/visible? "#pattern-row"))
+      (ui/assert-count! "#pattern-row .pattern-pad" 9)
+      (is (ui/visible? "#zone-map-row") "a pattern moves pictures between zones: the map pads show too")
+      (is (< (scene-y "#vibe-meter-row") (scene-y "#zone-map-row") (scene-y "#pattern-row") (scene-y "#vibe-status"))))
+    (testing "a cell's, off, counts too"
+      (state/swap-state! #(-> %
+                              (update-in [:chains :cue-chains [0 0]] dissoc :zone-patterns)
+                              (assoc-in [:chains :effect-chains [1 1]] {:active? false :items [(zone-patterns/preset-instance :chase :cell)]})))
+      (ui/wait-for! #(ui/visible? "#pattern-row")))
+    (testing "none again: gone"
+      (state/swap-state! update-in [:chains :effect-chains] dissoc [1 1])
+      (ui/wait-for! #(not (ui/visible? "#pattern-row"))))))

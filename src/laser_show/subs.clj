@@ -1074,16 +1074,24 @@
        (sort-by pr-str)
        vec))
 
+(defn map-cycle-running?
+  "Does a Map cycle pick the map (zones plan Z5): a Map cycle cell is on,
+   and no map pad's press paused it?"
+  [context]
+  (and (zone-maps/cycle-on? {:chains {:effect-chains (fx/sub-val context get-in [:chains :effect-chains])}})
+       (not (fx/sub-val context get-in [:zone-map :cycle-paused?]))))
+
 (defn map-pad
   "One zone map pad, its booleans and keys only (06 §4.5): {:id :name
-   :active? (the map in use, as the UI shows it) :pending (nil, or :beat or
-   :bar while a switch to it waits) :bar? (its Switch on the bar)
-   :learning? :bindings}."
+   :active? (the map in use, as the UI shows it; none while a Map cycle
+   picks it, zones plan Z5) :pending (nil, or :beat or :bar while a switch
+   to it waits) :bar? (its Switch on the bar) :learning? :bindings}."
   [context id]
   (let [pending (fx/sub-val context get-in [:zone-map :pending])]
     {:id id
      :name (:name (fx/sub-ctx context zone-map id))
-     :active? (= id (:id (fx/sub-ctx context active-zone-map)))
+     :active? (and (= id (:id (fx/sub-ctx context active-zone-map)))
+                   (not (fx/sub-ctx context map-cycle-running?)))
      :pending (when (= id (:map pending)) (if (:bar? pending) :bar :beat))
      :bar? (true? (fx/sub-val context get-in [:config :zone-map-pads id :bar?]))
      :learning? (= {:type :zone-map :target id} (fx/sub-val context get-in [:backend :input :learning-target]))
@@ -1166,6 +1174,94 @@
    pattern window's ⓘ line (routing.zone-patterns/fold-text)."
   [context params]
   (zone-patterns/fold-text (fx/sub-ctx context pattern-world) params (fx/sub-ctx context names-ctx)))
+
+(defn- holds-effect?
+  "Does an effects cell's chain hold an effect-id, on or off?"
+  [effect-id chain]
+  (boolean (some #(= effect-id (:effect-id %)) (chains/flatten-chain (:items chain)))))
+
+(defn zone-patterns-in-use?
+  "Does the show have a zone pattern anywhere, on or off: on a cue, or in
+   an effects cell (07 §7.3)? The pattern pads show then."
+  [context]
+  (boolean
+   (or (some (comp seq :zone-patterns) (vals (fx/sub-val context get-in [:chains :cue-chains])))
+       (some #(holds-effect? :zone-pattern %) (vals (fx/sub-val context get-in [:chains :effect-chains]))))))
+
+(defn- map-cycles?
+  "Is there a Map cycle in an effects cell, on or off?"
+  [context]
+  (boolean (some #(holds-effect? :zone-map-cycle %) (vals (fx/sub-val context get-in [:chains :effect-chains])))))
+
+(defn zone-map-pads-shown?
+  "Do the zone map pads show: while the show draws into a zone (Z4-Q1 A),
+   or has a zone pattern or a Map cycle anywhere (zones plan Z5), which
+   move pictures between zones or pick the map."
+  [context]
+  (boolean (or (fx/sub-ctx context zones-in-use?)
+               (fx/sub-ctx context zone-patterns-in-use?)
+               (fx/sub-ctx context map-cycles?))))
+
+(defn pattern-pad-bindings
+  "The trigger-map keys learned for pattern pad pad (:step: the Zone step
+   key's), in a stable order."
+  [context pad]
+  (->> (fx/sub-val context get-in [:config :input :trigger-map])
+       (keep (fn [[k action]]
+               (when (if (= :step pad)
+                       (= :zone-step (:type action))
+                       (and (= :pattern-pad (:type action)) (= pad (:target action))))
+                 k)))
+       (sort-by pr-str)
+       vec))
+
+(defn pattern-pad
+  "One pattern pad (07 §7.3), its booleans and keys only: {:id :name
+   :active? (the pads' style is its; As set while they set none) :pending
+   (nil, or :beat or :bar while a switch to it waits) :bar? (its Switch on
+   the bar) :learning? :bindings}."
+  [context pad]
+  (let [{:keys [style pending]} (fx/sub-val context :pattern-pads)]
+    {:id pad
+     :name (zone-patterns/pad-name pad)
+     :active? (= pad (zone-patterns/style-pad style))
+     :pending (when (and pending (= pad (zone-patterns/style-pad (:style pending))))
+                (if (:bar? pending) :bar :beat))
+     :bar? (true? (fx/sub-val context get-in [:config :pattern-pads pad :bar?]))
+     :learning? (= {:type :pattern-pad :target pad} (fx/sub-val context get-in [:backend :input :learning-target]))
+     :bindings (fx/sub-ctx context pattern-pad-bindings pad)}))
+
+(defn step-pad
+  "STEP (07 §7.3): {:bindings (the Zone step key's) :learning?}; the count
+   it shows is the newest tick's."
+  [context]
+  {:bindings (fx/sub-ctx context pattern-pad-bindings :step)
+   :learning? (= {:type :zone-step} (fx/sub-val context get-in [:backend :input :learning-target]))})
+
+(defn map-cycle-state
+  "The CYCLE pad (07 §7.4): {:on? (a Map cycle cell is on) :running? (it
+   picks the map: on, and no map pad's press paused it) :paused? :pending
+   (nil, or :beat or :bar while CYCLE waits) :bar? :learning? :bindings
+   :maps (the running cycle's maps by name) :description (what it does,
+   routing.zone-patterns/describe-cycle)}."
+  [context]
+  (let [state {:chains {:effect-chains (fx/sub-val context get-in [:chains :effect-chains])}
+               :zone-maps (fx/sub-val context :zone-maps)}
+        on? (zone-maps/cycle-on? state)
+        paused? (true? (fx/sub-val context get-in [:zone-map :cycle-paused?]))
+        pending (fx/sub-val context get-in [:zone-map :pending])
+        running-cycle (when on? (zone-patterns/active-cycle state))]
+    {:on? on?
+     :running? (and on? (not paused?))
+     :paused? (and on? paused?)
+     :pending (when (= :cycle (:map pending)) (if (:bar? pending) :bar :beat))
+     :bar? (true? (fx/sub-val context get-in [:config :zone-map-pads :cycle :bar?]))
+     :learning? (= {:type :zone-map :target :cycle} (fx/sub-val context get-in [:backend :input :learning-target]))
+     :bindings (fx/sub-ctx context map-pad-bindings :cycle)
+     :maps (if running-cycle
+             (into [] (keep #(:name (zone-maps/map-by-id state %))) (:maps (:params running-cycle)))
+             [])
+     :description (when running-cycle (zone-patterns/describe-cycle (:params running-cycle) state))}))
 
 
 ;; Level 2: The rig strip (views/components/rig_strip.clj)

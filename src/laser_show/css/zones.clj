@@ -5,8 +5,8 @@
    column numbers that set a column's target, the zone map pads
    (views/components/zone_map_pads.clj) and the zones and maps under the
    Zone Groups tab (views/components/zone_maps_panel.clj); zone patterns'
-   chip, places and window (zones plan Z5,
-   views/components/zone_pattern_editor.clj).
+   chip, places and window, the pattern pads and CYCLE (zones plan Z5,
+   views/components/zone_pattern_editor.clj, pattern_pads.clj).
 
    cljfx.css writes a map of more than eight rules in hash order, so a state
    rule has one class more than the rule it overrides.
@@ -21,7 +21,7 @@
   "Zone, target and zone map styles."
   (css/register ::zones
     (let [{:keys [bg-interactive text-primary text-secondary text-muted]} theme/semantic-colors
-          {:keys [blue orange red border]} theme/base-colors]
+          {:keys [blue orange red border cat-purple]} theme/base-colors]
       {;; The Target chip: the timeline's zone chip's shape
        ".target-chip"
        {:-fx-background-radius 9
@@ -211,4 +211,58 @@
        {:-fx-text-fill red}
        ;; The ⇄ on a cue's badge
        ".grid-cell-target-badge .grid-cell-pattern-glyph"
-       {:-fx-text-fill blue}})))
+       {:-fx-text-fill blue}
+
+       ;; CYCLE, and the map a Map cycle shows now
+       ".zone-map-pad.zone-map-pad-dim"
+       {:-fx-opacity 0.45}
+       ".zone-map-pad.zone-map-pad-small:cycling"
+       {:-fx-background-color (colors/with-alpha cat-purple 0.55)
+        :-fx-border-color cat-purple}
+       ".zone-map-pad.zone-map-pad-large:cycling"
+       {:-fx-background-color (colors/with-alpha cat-purple 0.55)
+        :-fx-border-color cat-purple}
+
+       ;; The pattern pads: the map pads' shell
+       ".pattern-pad"
+       {:-fx-background-color bg-interactive
+        :-fx-background-radius 8
+        :-fx-border-radius 8
+        :-fx-border-color border
+        :-fx-border-width 1
+        :-fx-text-fill text-primary
+        :-fx-cursor "hand"}
+       ".pattern-pad.pattern-pad-large"
+       {:-fx-padding [6 8 6 8]}
+       ".pattern-pad.pattern-pad-small"
+       {:-fx-padding [2 10 2 10]
+        :-fx-background-radius 11
+        :-fx-border-radius 11
+        :-fx-font-size 11}
+       ".pattern-pad .pattern-pad-name"
+       {:-fx-text-fill text-primary
+        :-fx-font-weight "bold"
+        :-fx-font-size 13}
+       ".pattern-pad .pattern-pad-state"
+       {:-fx-text-fill text-secondary
+        :-fx-font-size 11}
+       ".pattern-pad .pattern-pad-keys"
+       {:-fx-text-fill text-muted
+        :-fx-font-size 10}
+       ".pattern-pad .pattern-step-count"
+       {:-fx-text-fill text-primary
+        :-fx-font-size 13}
+       ".pattern-pad .pattern-step-pulse"
+       {:-fx-background-color orange
+        :-fx-background-radius 3}
+       ".pattern-pad.pattern-pad-active"
+       {:-fx-background-color (colors/with-alpha blue 0.55)
+        :-fx-border-color blue}
+       ".pattern-pad.pattern-pad-pending"
+       {:-fx-background-color (colors/with-alpha orange 0.45)
+        :-fx-border-color orange}
+       ".pattern-pad.pattern-pad-pending:blink"
+       {:-fx-background-color bg-interactive}
+       ".pattern-pad.pattern-pad-learning"
+       {:-fx-border-color red
+        :-fx-border-width 2}})))

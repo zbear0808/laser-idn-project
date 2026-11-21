@@ -102,7 +102,11 @@
              (mapv (juxt :text :checked?) (filter #(= :zone (:kind %)) rows)))
           "the lane's zones are listed, ticked")
       (is (:checked? (row rows :group :graphics)))
-      (is (not (:checked? (row rows :group :crowd)))))))
+      (is (not (:checked? (row rows :group :crowd))))))
+  (testing "while a Map cycle picks the map, the header says so (zones plan Z5, 07 §7.4)"
+    (is (= "ZONES · map: cycling (Left / Right, Odd / Even)"
+           (:text (some #(when (= :header (:kind %)) %)
+                        (target-control/menu-model (assoc ctx :cycling ["Left / Right" "Odd / Even"]))))))))
 
 (deftest combine-rows-toggle-test
   (let [combine (fn [own] (:rows (some #(when (= :combine (:kind %)) %) (target-control/menu-model (assoc ctx :own own)))))]

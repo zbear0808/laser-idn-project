@@ -9,6 +9,7 @@
    [laser-show.state.domains :as domains]
    [laser-show.subs :as subs]
    [laser-show.events.handlers :as handlers]
+   [laser-show.routing.zone-patterns :as zone-patterns]
    [laser-show.state.templates :as templates]
    [laser-show.vibes.engine :as engine]
    [laser-show.vibes.library :as library]
@@ -1072,6 +1073,80 @@
     (testing "booleans and keys only: where the pending switch lands isn't in it"
       (let [ctx' (fx/swap-context ctx assoc-in [:zone-map :pending :at-beat] 12.0)]
         (is (= (pad :map/unison) (fx/sub-ctx ctx' subs/map-pad :map/unison)))))))
+
+
+;; The pattern pads and the Map cycle (zones plan Z5, 07 §7.3, §7.4)
+
+(deftest pattern-pad-sub-test
+  (let [key40 {:source :midi :channel 0 :note 40}
+        key41 {:source :midi :channel 0 :note 41}
+        s (-> (domains/build-initial-state)
+              (assoc :pattern-pads {:style :chase :pending {:id 3 :style :off :at-beat 33.0 :bar? false}})
+              (assoc-in [:config :pattern-pads :random :bar?] true)
+              (assoc-in [:config :input :trigger-map key40] {:type :pattern-pad :target :chase})
+              (assoc-in [:config :input :trigger-map key41] {:type :zone-step})
+              (assoc-in [:backend :input :learning-target] {:type :pattern-pad :target :swap}))
+        ctx (context s)
+        pad #(fx/sub-ctx ctx subs/pattern-pad %)]
+    (is (= {:id :chase :name "Chase" :active? true :pending nil :bar? false :learning? false :bindings [key40]}
+           (pad :chase)))
+    (is (= {:id :off :name "Off" :active? false :pending :beat :bar? false :learning? false :bindings []}
+           (pad :off))
+        "a switch to Off waits for the beat")
+    (is (= {:id :as-set :name "As set" :active? false :pending nil :bar? false :learning? false :bindings []}
+           (pad :as-set)))
+    (is (:bar? (pad :random)) "Switch on the bar")
+    (is (:learning? (pad :swap)))
+    (testing "As set is the one in use while the pads set no style"
+      (is (:active? (fx/sub-ctx (context (assoc s :pattern-pads {:style nil :pending nil})) subs/pattern-pad :as-set))))
+    (testing "a switch back to As set waits on As set"
+      (is (= :bar (:pending (fx/sub-ctx (context (assoc s :pattern-pads {:style :chase :pending {:id 4 :style nil :at-beat 36.0 :bar? true}}))
+                                        subs/pattern-pad :as-set)))))
+    (testing "STEP: its keys, and learning one"
+      (is (= {:bindings [key41] :learning? false} (fx/sub-ctx ctx subs/step-pad)))
+      (is (:learning? (fx/sub-ctx (context (assoc-in s [:backend :input :learning-target] {:type :zone-step})) subs/step-pad))))
+    (testing "booleans and keys only: where the waiting switch lands isn't in it"
+      (let [ctx' (fx/swap-context ctx assoc-in [:pattern-pads :pending :at-beat] 40.0)]
+        (is (= (pad :off) (fx/sub-ctx ctx' subs/pattern-pad :off)))))))
+
+(deftest zone-patterns-in-use-test
+  (let [s (domains/build-initial-state)
+        in-use? #(fx/sub-ctx (context %) subs/zone-patterns-in-use?)
+        cue-pattern (assoc-in s [:chains :cue-chains [0 0]] {:items [] :zone-patterns [(zone-patterns/preset-instance :alternate :cue)]})]
+    (is (false? (in-use? s)) "a new show has none")
+    (is (true? (in-use? cue-pattern)) "a cue's")
+    (is (true? (in-use? (assoc-in s [:chains :effect-chains [1 1]] {:active? false :items [(zone-patterns/preset-instance :chase :cell)]})))
+        "a cell's, off too: it can be switched on")
+    (is (false? (in-use? (assoc-in s [:chains :effect-chains [1 1]] {:active? true :items [(zone-patterns/cycle-instance)]})))
+        "a Map cycle is no pattern: the pattern pads don't switch it")
+    (is (false? (in-use? (assoc-in s [:chains :effect-chains [1 1]] {:active? true :items [{:effect-id :scale :params {}}]}))))
+    (testing "the map pads show with a pattern or a Map cycle, zones or not"
+      (is (false? (fx/sub-ctx (context s) subs/zone-map-pads-shown?)))
+      (is (true? (fx/sub-ctx (context cue-pattern) subs/zone-map-pads-shown?)))
+      (is (true? (fx/sub-ctx (context (assoc-in s [:chains :effect-chains [1 1]] {:active? false :items [(zone-patterns/cycle-instance)]}))
+                             subs/zone-map-pads-shown?))))))
+
+(deftest map-cycle-state-sub-test
+  (let [s (domains/build-initial-state)
+        cell {:active? true :items [(zone-patterns/cycle-instance)]}
+        on (assoc-in s [:chains :effect-chains [1 2]] cell)
+        cycle-state #(fx/sub-ctx (context %) subs/map-cycle-state)]
+    (is (= {:on? false :running? false :paused? false :pending nil :bar? false :learning? false :bindings [] :maps []
+            :description nil}
+           (cycle-state s))
+        "no cycle cell on")
+    (is (= {:on? true :running? true :paused? false :maps ["Left / Right" "Odd / Even"]
+            :description "Map cycle: Left / Right, Odd / Even, a bar each"}
+           (select-keys (cycle-state on) [:on? :running? :paused? :maps :description])))
+    (is (= {:running? false :paused? true} (select-keys (cycle-state (assoc-in on [:zone-map :cycle-paused?] true)) [:running? :paused?]))
+        "a map pad's press paused it")
+    (is (= :beat (:pending (cycle-state (assoc-in on [:zone-map :pending] {:id 1 :map :cycle :at-beat 4.0 :bar? false}))))
+        "CYCLE waits for the beat")
+    (is (false? (:on? (cycle-state (assoc-in on [:chains :effect-chains [1 2] :active?] false)))) "its cell off")
+    (testing "while it runs no map pad is the one in use: CYCLE is"
+      (is (:active? (fx/sub-ctx (context s) subs/map-pad :map/left-right)))
+      (is (not (:active? (fx/sub-ctx (context on) subs/map-pad :map/left-right))))
+      (is (:active? (fx/sub-ctx (context (assoc-in on [:zone-map :cycle-paused?] true)) subs/map-pad :map/left-right))))))
 
 
 ;; Who uses a group (zones plan Z4, 06 §8.7)

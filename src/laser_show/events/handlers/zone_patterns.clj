@@ -70,13 +70,15 @@
 
 (defn- handle-pointer
   "A pad's mouse or touch: its press presses the pad, waiting for the bar
-   with Shift; anything else does nothing (vibes/pointer-action)."
+   with Shift, and STEP's (:pad :step) presses the Zone step key; anything
+   else does nothing (vibes/pointer-action)."
   [{:keys [pad fx/event state]}]
-  (if (= :press (vibes/pointer-action event))
-    {:dispatch {:event/type :pattern-pads/press :pad pad
-                :bar? (boolean (and (instance? MouseEvent event) (.isShiftDown ^MouseEvent event)))
-                :src :pad}}
-    {:state state}))
+  (cond
+    (not= :press (vibes/pointer-action event)) {:state state}
+    (= :step pad) {:dispatch {:event/type :pattern-pads/step :src :pad}}
+    :else {:dispatch {:event/type :pattern-pads/press :pad pad
+                      :bar? (boolean (and (instance? MouseEvent event) (.isShiftDown ^MouseEvent event)))
+                      :src :pad}}))
 
 (defn- handle-press
   "A press of pad (one of zone-patterns/pad-ids), or of its learned key
