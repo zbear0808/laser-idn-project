@@ -166,17 +166,32 @@
       [:unit u s]
       [:host host s])))
 
+(defn manual-stable-id
+  "The stable id of a projector of another driver than IDN added by hand
+   (plans/2026-11-19-output-drivers/01 §5.3): [:manual driver projector-id],
+   its own, so a scan never matches it and two never share one."
+  [driver projector-id]
+  [:manual driver projector-id])
+
+(defn- idn? [p]
+  (= :idn (:driver p :idn)))
+
 (defn identity-label
   "\"Unit 0A 1B 2C 3D … · output 1\", or \"IP 10.0.0.5 · output 1 (the device
    sends no unit id)\"; why (\", so a new address …\") is added inside the
-   parentheses."
+   parentheses. Another driver's projector added by hand ([:manual …]):
+   \"Added by hand: a scan doesn't look for it\"; one a driver's scan found
+   ([:device driver key output], output drivers D4): \"Device NV-00123 ·
+   output 0\"."
   ([p] (identity-label p nil))
   ([p why]
-   (let [[kind v s] (or (:stable-id p) (stable-id p))]
-     (if (= :unit kind)
-       (let [tokens (str/split v #" ")]
-         (str "Unit " (if (> (count tokens) 4) (str (str/join " " (take 4 tokens)) " …") v)
-              " · output " s))
+   (let [[kind v s o] (or (:stable-id p) (stable-id p))]
+     (case kind
+       :unit (let [tokens (str/split v #" ")]
+               (str "Unit " (if (> (count tokens) 4) (str (str/join " " (take 4 tokens)) " …") v)
+                    " · output " s))
+       :manual "Added by hand: a scan doesn't look for it"
+       :device (str "Device " s " · output " o)
        (str "IP " v " · output " s " (the device sends no unit id" why ")")))))
 
 
@@ -606,17 +621,26 @@
 (defn- host-id [p]
   [:host (:host p) (output-number (:service-id p))])
 
+(defn- own-id
+  "A projector's identity when it has none stored: the one stable-id gives
+   for IDN, else its manual-stable-id (another driver's has no host)."
+  [id p]
+  (if (idn? p) (stable-id p) (manual-stable-id (:driver p) id)))
+
 (defn settled-ids
-  "{id stable-id} of the saved projectors: each its :stable-id, or the one
-   stable-id gives. When two share one (an old show made one per IP), the
-   enabled one keeps it (otherwise the smaller id) and the others fall back
-   to [:host address s]."
+  "{id stable-id} of the saved projectors: each its :stable-id, or own-id.
+   When two share one (an old show made one per IP), the enabled one keeps
+   it (otherwise the smaller id; a [:manual …] one, the projector it names)
+   and the others fall back to [:host address s], or for another driver than
+   IDN to their own manual-stable-id."
   [projectors]
-  (let [own (into {} (map (fn [[id p]] [id (or (:stable-id p) (stable-id p))])) projectors)]
-    (reduce (fn [acc [_ ids]]
+  (let [own (into {} (map (fn [[id p]] [id (or (:stable-id p) (own-id id p))])) projectors)
+        fallback (fn [id p] (if (idn? p) (host-id p) (manual-stable-id (:driver p) id)))]
+    (reduce (fn [acc [[kind _ named] ids]]
               (if (< 1 (count ids))
-                (let [keeper (first (sort-by (fn [id] [(if (enabled? (get projectors id)) 0 1) (id-text id)]) ids))]
-                  (reduce #(if (= keeper %2) %1 (assoc %1 %2 (host-id (get projectors %2)))) acc ids))
+                (let [keeper (or (when (= :manual kind) (some #{named} ids))
+                                 (first (sort-by (fn [id] [(if (enabled? (get projectors id)) 0 1) (id-text id)]) ids)))]
+                  (reduce #(if (= keeper %2) %1 (assoc %1 %2 (fallback %2 (get projectors %2)))) acc ids))
                 acc))
             own
             (group-by own (keys own)))))

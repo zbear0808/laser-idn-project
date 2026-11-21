@@ -10,6 +10,8 @@
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
             [laser-show.state.persistent :as persistent]
+            [laser-show.state.rig-file :as rig-file]
+            [laser-show.state.rig-store :as rig-store]
             [laser-show.state.serialization :as ser]
             [laser-show.state.templates :as templates]
             [laser-show.vibes.engine :as engine]
@@ -526,6 +528,38 @@
     (is (= :auto/right (get-in loaded [:chains :cue-chains [1 0] :target])))
     (is (= [:right] (get-in loaded [:projectors :projector-10-0-0-57-1 :zone-groups])) "and the rig is left alone")))
 
+
+;; A projector whose output driver isn't installed (output drivers OD-10)
+
+(def ^:private nova-laser
+  {:name "Nova 00123" :driver :acme/nova :driver-config {:serial "NV-00123" :output 0 :lead-ms 40}
+   :stable-id [:device :acme/nova "NV-00123" 0] :enabled? true :zone-groups [] :exclude-from-all? false
+   :tags #{:graphics} :scan-rate 30000 :safety {:limit [-0.9 -0.8 0.9 0.9] :blocked []}})
+
+(deftest unknown-driver-projector-round-trips-test
+  (let [state (-> (domains/build-initial-state)
+                  (assoc :projectors {:projector-acme-nova-NV-00123-0 nova-laser})
+                  (assoc :rig {:order [:projector-acme-nova-NV-00123-0] :middle :split :split-width 0.75}))]
+    (is (nil? (get-in state [:backend :output :drivers :acme/nova])) "not installed")
+    (testing "through rig.edn: written, read and applied as it was"
+      (let [dir (.toFile (java.nio.file.Files/createTempDirectory "unknown-driver" (make-array java.nio.file.attribute.FileAttribute 0)))
+            path (str (io/file dir "rig.edn"))]
+        (try
+          (rig-store/write! path (rig-file/rig-document state))
+          (let [{:keys [status doc]} (rig-store/read! path)
+                applied (rig-file/apply-rig-document (domains/build-initial-state) doc)]
+            (is (= :ok status))
+            (is (= nova-laser (get-in applied [:projectors :projector-acme-nova-NV-00123-0]))))
+          (finally
+            (doseq [^java.io.File f (reverse (file-seq dir))] (.delete f))))))
+    (testing "through the show's zip: its copy of the rig, and set up on an empty rig from it"
+      (state/init-state! state)
+      (persistent/save-project! test-project-file)
+      (let [hardware (get (ser/load-from-zip test-project-file) "hardware.edn")
+            set-up (rig-file/set-up-from-show (domains/build-initial-state) hardware {}
+                                              (rig-file/pin-map (domains/build-initial-state) hardware))]
+        (is (= nova-laser (get-in hardware [:projectors :projector-acme-nova-NV-00123-0])))
+        (is (= nova-laser (get-in set-up [:projectors :projector-acme-nova-NV-00123-0])))))))
 
 (deftest zone-data-survives-save-and-load-test
   (testing "zones plan Z4: your maps, the zones' labels, the grid's column defaults and the show's"

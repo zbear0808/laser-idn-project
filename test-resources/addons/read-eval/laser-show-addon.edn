@@ -1,0 +1,5 @@
+{:id :test/read-eval
+ :name #=(java.lang.System/setProperty "laser-show.test.read-eval" "evaluated")
+ :version "1.0.0"
+ :api 1
+ :drivers [laser-show-test-addon.sample.driver/driver]}

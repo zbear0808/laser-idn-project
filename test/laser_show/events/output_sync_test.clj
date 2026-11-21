@@ -3,7 +3,9 @@
    engine is built from requests a sync while streaming; nothing else does.
    Also: the output status written into app state is never an edit."
   (:require [clojure.test :refer [deftest is testing]]
+            [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.events.core :as events]
+            [laser-show.output.driver :as driver]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
@@ -142,3 +144,45 @@
         (is (= (:history s) (:history after)) "no undo entry")
         (is (= (:project s) (:project after)) "not dirty")
         (is (false? (get-in after [:project :dirty?])))))))
+
+;; Projectors with another output driver (plans/2026-11-19-output-drivers
+;; 01 §5.5)
+
+(def ^:private bridge
+  {:name "Bridge" :driver :lsps :driver-config {:host "127.0.0.1" :port 7266 :max-packet-bytes 1400}
+   :stable-id [:manual :lsps :c] :enabled? true :zone-groups [] :scan-rate 25000})
+
+(defn- with-bridge [running?]
+  (-> (streaming-state running?)
+      (assoc-in [:projectors :c] bridge)
+      (assoc-in [:backend :output :drivers] (driver/descriptors))
+      history/mark-clean))
+
+(deftest driver-config-edit-resyncs-test
+  (doseq [[label event] [["its port" {:event/type :projectors/update-driver-config :projector-id :c :key :port :value "7300"}]
+                         ["its host" {:event/type :projectors/update-driver-config :projector-id :c :key :host :value "10.0.0.20"}]
+                         ["its scan rate" {:event/type :projectors/update-settings :projector-id :c :updates {:scan-rate 30000}}]
+                         ["added by hand" {:event/type :projectors/add-manual :driver :lsps :name "D"
+                                           :driver-config {:host "127.0.0.1"}}]]]
+    (testing label
+      (let [effects (run (with-bridge true) event)]
+        (is (some? (refresh effects)))
+        (is (= (:projectors (:state effects)) (:projectors (refresh effects))) "the sync carries the new snapshot")))
+    (testing (str label ", not streaming")
+      (is (nil? (refresh (run (with-bridge false) event))))))
+  (testing "an edit that isn't applied, or a name, requests nothing"
+    (doseq [event [{:event/type :projectors/update-driver-config :projector-id :c :key :port :value "99999"}
+                   {:event/type :projectors/update-driver-config :projector-id :c :key :port :value "7266"}
+                   {:event/type :projectors/update-settings :projector-id :c :updates {:name "Renamed"}}]]
+      (is (nil? (refresh (run (with-bridge true) event))) (pr-str event)))))
+
+(deftest idn-fingerprint-unchanged-test
+  (is (= {:host "10.0.0.1" :port 7255 :service-id 0 :output-config {:color-bit-depth 8 :xy-bit-depth 16}}
+         (output-runtime/fingerprint (assoc projector-a :stable-id [:host "10.0.0.1" 0] :name "Renamed")))
+      "an IDN projector's fingerprint has no :driver or :driver-config")
+  (is (= {:a (output-runtime/fingerprint projector-a)}
+         (output-runtime/wanted (:projectors (streaming-state))))
+      "and :b, off, isn't wanted")
+  (is (= {:driver :lsps :driver-config (:driver-config bridge) :scan-rate 25000}
+         (get (output-runtime/wanted {:c bridge}) :c))
+      "another driver's is wanted without a host"))

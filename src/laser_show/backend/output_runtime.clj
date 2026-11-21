@@ -10,9 +10,10 @@
    - Each engine computes and sends its frames on its own streaming thread
      (streaming-engine/start!). The lifecycle thread only starts, stops and
      replaces engines.
-   - The status thread (output-status) publishes pure-data status as
-     :output/status at most every STATUS_INTERVAL_MS, when it differs from what
-     app state holds.
+   - The status thread (output-status) asks each running engine's driver for
+     its :status (streaming-engine/poll-driver-status!), then publishes
+     pure-data status as :output/status at most every STATUS_INTERVAL_MS,
+     when it differs from what app state holds.
    - drain! closes the runtime: every engine is stopped and later submits are
      dropped until open! (app/start!). Before the first open!/drain! the runtime
      opens on the first submit, so tests without an app can stream."
@@ -21,11 +22,19 @@
             [laser-show.backend.multi-engine :as multi-engine]
             [laser-show.backend.output-errors :as output-errors]
             [laser-show.backend.streaming-engine :as engine]
+            [laser-show.output.driver :as driver]
             [laser-show.state.core :as state])
   (:import [java.util.concurrent ExecutorService Executors ScheduledExecutorService
             ThreadFactory TimeUnit]))
 
 (def ^:const STATUS_INTERVAL_MS 250)
+
+(def ^:const STUCK_MS
+  "A running engine whose driver's :open has taken this long, or whose
+   streaming thread hasn't tried a frame for this long, is \"not
+   responding\": its driver is stuck in a call
+   (plans/2026-11-19-output-drivers/01 §1.4 C-5)."
+  1000)
 
 (def status-path [:backend :streaming :status])
 
@@ -35,18 +44,24 @@
 (defn fingerprint
   "What an engine is built from. A change restarts the projector's engine;
    names, groups, the rig's order, fit and safety settings restart nothing:
-   the routing comes with each tick, and safety is read live."
+   the routing comes with each tick, and safety is read live. An IDN
+   projector has no :driver or :driver-config, so its fingerprint is the same
+   as before there were drivers (plans/2026-11-19-output-drivers/01 §5.5)."
   [projector]
-  (select-keys projector [:host :port :service-id :output-config :scan-rate]))
+  (select-keys projector [:driver :driver-config :host :port :service-id :output-config :scan-rate]))
 
 (defn wanted
   "{projector-id fingerprint} of the projectors that should stream: enabled,
-   with a non-blank host."
+   and for IDN with a non-blank host. Any other driver's projector is wanted
+   whether or not its driver is installed (its start fails and says so). Pure:
+   it never reads the driver registry."
   [projectors]
   (into {}
         (keep (fn [[id p]]
                 (let [host (:host p)]
-                  (when (and (:enabled? p true) (string? host) (not (str/blank? host)))
+                  (when (and (:enabled? p true)
+                             (or (not= :idn (driver/projector-driver-id p))
+                                 (and (string? host) (not (str/blank? host)))))
                     [id (fingerprint p)]))))
         projectors))
 
@@ -85,9 +100,6 @@
 
 ;; Engines (lifecycle thread, and drain!)
 
-(defn- message-of [^Throwable t]
-  (str (.getName (class t)) ": " (.getMessage t)))
-
 (defn- stop-engines!
   "Stop the registry's engines for ids together (streaming-engine/stop-all!),
    then remove the ones this call stopped. One that another caller is stopping
@@ -114,8 +126,25 @@
       (swap! !registry assoc id entry)
       true)))
 
+(defn- create-engine
+  "The projector's engine (not started), or nil with the reason as its
+   :failed message: \"No host\" for an IDN projector without one, \"Output
+   driver :acme/nova is not installed\" for a driver the registry doesn't have
+   (OD-10)."
+  [id projector]
+  (try
+    (or (multi-engine/create-engine-for-projector id projector)
+        (do (swap! !intent assoc-in [:failed id] "No host")
+            nil))
+    (catch clojure.lang.ExceptionInfo e
+      (if (contains? (ex-data e) :driver)
+        (do (log/warn "Output: can't start" id "-" (ex-message e))
+            (swap! !intent assoc-in [:failed id] (ex-message e))
+            nil)
+        (throw e)))))
+
 (defn- start-engine! [id projector fp]
-  (if-let [e (multi-engine/create-engine-for-projector id projector)]
+  (when-let [e (create-engine id projector)]
     (when (register! id {:engine e :fingerprint fp :started-ms (System/currentTimeMillis)})
       (try
         (engine/start! e)
@@ -126,8 +155,7 @@
           (log/error t "Output: could not start" id)
           (engine/stop-all! [e])
           (swap! !registry #(if (identical? e (get-in % [id :engine])) (dissoc % id) %))
-          (swap! !intent assoc-in [:failed id] (message-of t)))))
-    (swap! !intent assoc-in [:failed id] "No host")))
+          (swap! !intent assoc-in [:failed id] (output-errors/message t)))))))
 
 (defn- sync!
   "Make the registry match projectors: stop engines no longer wanted or whose
@@ -170,6 +198,15 @@
 
 ;; Status
 
+(defn- stuck?
+  "True while e runs but its driver has been in one call for STUCK_MS (C-5):
+   an :open still in progress, or, once it is open, no frame tried."
+  [e ^Thread thread]
+  (let [{:keys [opening-since-ns last-attempt-ns]} (engine/get-stats e)
+        since (or opening-since-ns last-attempt-ns)]
+    (boolean (and since thread (.isAlive thread) (engine/running? e)
+                  (> (- (System/nanoTime) (long since)) (* STUCK_MS 1000000))))))
+
 (defn- whole [x] (when (number? x) (Math/round (double x))))
 
 (defn- tens [x] (when (number? x) (* 10 (Math/round (/ (double x) 10.0)))))
@@ -197,20 +234,32 @@
 
 (defn- engine-status [e errors id]
   (let [safety-error (:message (get errors [:safety id]))
+        engine-error (:message (get errors [:engine id]))
         error (some #(:message (get errors [% id])) [:engine :provider :projector-effects])
         ^Thread thread @(:thread e)
-        {:keys [frames-sent draw-fps scan-limited? fit]} (engine/get-stats e)]
-    (cond
-      ;; First: it is why the projector is dark (multi-engine guard-safety)
-      safety-error {:state :error :kind :safety :error "Safety error: output off" :detail safety-error}
-      error {:state :error :error error}
-      (and thread (not (.isAlive thread))) {:state :error :error "The streaming thread ended"}
-      (zero? frames-sent) {:state :starting}
-      :else (let [skipped (:message (get errors [:calibration id]))]
-              (cond-> {:state :streaming :fps (/ (Math/round (* 10.0 (double draw-fps))) 10.0)}
-                scan-limited? (assoc :scan-limited? true)
-                skipped (assoc :warning skipped)
-                fit (assoc :low? (boolean (:low? fit)) :load (load-of fit)))))))
+        {:keys [frames-sent draw-fps scan-limited? fit]} (engine/get-stats e)
+        ;; The driver's own :status (01 §1, G2), as the status thread last polled it
+        {driver-level :level driver-message :message driver-info :info} (engine/driver-status e)]
+    (cond->
+     (cond
+       ;; First: it is why the projector is dark (multi-engine guard-safety)
+       safety-error {:state :error :kind :safety :error "Safety error: output off" :detail safety-error}
+       (stuck? e thread) {:state :error :kind :stuck :error "The output driver is not responding"}
+       error (cond-> {:state :error :error error}
+               (and engine-error (engine/busy? e)) (assoc :busy? true))
+       (= :error driver-level) {:state :error :error (or driver-message "The output driver reports an error")}
+       (and thread (not (.isAlive thread))) {:state :error :error "The streaming thread ended"}
+       (zero? frames-sent) {:state :starting}
+       :else (let [skipped (:message (get errors [:calibration id]))
+                   warnings (cond-> []
+                              skipped (conj skipped)
+                              (= :warning driver-level)
+                              (conj (or driver-message "The output driver reports a warning")))]
+               (cond-> {:state :streaming :fps (/ (Math/round (* 10.0 (double draw-fps))) 10.0)}
+                 scan-limited? (assoc :scan-limited? true)
+                 (seq warnings) (assoc :warning (str/join "; " warnings))
+                 fit (assoc :low? (boolean (:low? fit)) :load (load-of fit)))))
+      driver-info (assoc :driver-info driver-info))))
 
 (defn status
   "Pure-data status for app state, or nil when stopped with nothing running:
@@ -230,7 +279,17 @@
    effects changed the count, what they left, which the meter counts),
    rounded, and :low? whether it is still below its minimum; both only while
    a frame has one. A projector whose safety stage fails is {:state :error
-   :kind :safety :error \"Safety error: output off\" :detail <message>}."
+   :kind :safety :error \"Safety error: output off\" :detail <message>}; one
+   whose driver is stuck in a call (stuck?) is {:state :error :kind :stuck
+   :error \"The output driver is not responding\"}, and one whose driver
+   isn't installed \"Output driver :acme/nova is not installed\". A driver
+   error that says the device is busy is {:state :error :error \"In use by
+   ShowCtl on 10.0.0.3\" :busy? true}.
+
+   A driver with :status (01 §1) adds to it: :level :error is {:state :error
+   :error message}, :warning keeps the state and adds its message to
+   :warning (after a skipped calibration effect's, joined by \"; \"), and
+   its :info is :driver-info, plain EDN, in any state."
   []
   (let [registry @!registry
         {:keys [wanted failed busy?]} @!intent
@@ -249,11 +308,21 @@
                                           {:state :starting}))]))
                            (distinct (concat (keys wanted) (keys registry))))}))))
 
+(defn- poll-driver-statuses!
+  "Ask every engine's driver for its :status (streaming-engine/
+   poll-driver-status!, which never throws), once per tick of the status
+   thread."
+  []
+  (doseq [{e :engine} (vals @!registry)]
+    (engine/poll-driver-status! e)))
+
 (defn- publish-status!
-  "Dispatch :output/status when the status differs from what app state holds
-   (not from what was sent last, so a write that got lost is redone)."
+  "Poll the drivers' :status, then dispatch :output/status when the status
+   differs from what app state holds (not from what was sent last, so a
+   write that got lost is redone)."
   []
   (try
+    (poll-driver-statuses!)
     (when-let [dispatch (:dispatch @!runtime)]
       (let [s (status)]
         (when (not= s (get-in (state/get-raw-state) status-path))

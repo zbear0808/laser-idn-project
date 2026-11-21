@@ -1,0 +1,6 @@
+{:id :test/windows-only
+ :name "Windows-only add-on"
+ :version "1.0.0"
+ :api 1
+ :drivers [laser-show-test-addon.sample.driver/driver]
+ :platforms [:windows]}

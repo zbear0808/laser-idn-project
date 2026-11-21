@@ -163,6 +163,32 @@
 
 (defn- near? [a b] (< (Math/abs (- (double a) (double b))) 2.0))
 
+(deftest a-card-that-grows-is-never-cut-test
+  (testing "a status that wraps to three lines and a driver's line make a card taller: the strip follows it, and goes back"
+    (with-lasers!)
+    (ui/click! (ui/robot) "#projectors-tab")
+    (ui/wait-for! #(some? (ui/query "#safety-canvas")))
+    (at-window-size! 1200 800)
+    (eventually #(shown? "#rig-card-a"))
+    (let [before (height "#rig-strip-scroll")]
+      (is (shown? "#rig-card-a"))
+      (state/swap-state! #(-> %
+                              (assoc-in [:backend :streaming :running?] true)
+                              (assoc-in [:backend :streaming :status]
+                                        {:engines 2 :wanted 2 :pending? false
+                                         :projectors {:a {:state :streaming :fps 58.7 :scan-limited? true
+                                                          :warning "Interlock open"
+                                                          :driver-info {:buffer-ms 40 :firmware "4.1.2" :scan-rate 30303}}}})))
+      (ui/wait-for! #(some? (ui/query "#projector-driver-info-a")))
+      (eventually #(and (< (+ before 30) (height "#rig-strip-scroll")) (shown? "#rig-card-a")))
+      (is (< (+ before 30) (height "#rig-strip-scroll")) "the strip grew with the card")
+      (is (shown? "#rig-card-a") "and the divider doesn't cut it")
+      (state/swap-state! #(-> %
+                              (assoc-in [:backend :streaming :running?] false)
+                              (assoc-in [:backend :streaming :status] nil)))
+      (eventually #(near? before (height "#rig-strip-scroll")))
+      (is (near? before (height "#rig-strip-scroll")) "the inspector gets its room back"))))
+
 (deftest dragged-divider-stays-for-the-session-test
   (let [robot (ui/robot)
         divider #(ui/query "#projectors-split > .split-pane-divider")

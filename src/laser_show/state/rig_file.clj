@@ -78,13 +78,25 @@
 
 ;; Matching a show's lasers onto this rig
 
+(defn- free-id
+  "A free id for a show's laser p (id) whose id is taken here (taken): for
+   IDN, rig/unique-projector-id from its host and output; for another
+   driver (it has no host), its own id with -2, -3 … (output drivers D2), so
+   the result doesn't depend on when it is worked out."
+  [taken id p]
+  (if (= :idn (:driver p :idn))
+    (rig/unique-projector-id taken (:host p) (:service-id p))
+    (->> (map #(keyword (str (name id) "-" %)) (iterate inc 2))
+         (remove #(contains? taken %))
+         first)))
+
 (defn pin-map
   "{show-id rig-id} for each projector in a show's hardware (its
    hardware.edn): the id of the projector here with the same stable id (a
    show from before Z2 is known by its :unit-id, as a scan knows it,
    rig/settled-ids). One whose unit isn't here keeps its id while no
-   projector here has it, else gets a free one, so its pins reach nothing
-   here rather than another laser."
+   projector here has it, else gets a free one (free-id), so its pins reach
+   nothing here rather than another laser."
   [state hardware]
   (let [show (or (:projectors hardware) {})
         here (or (:projectors state) {})
@@ -94,8 +106,7 @@
               (cond
                 (contains? m id) m
                 (not (contains? here id)) (assoc m id id)
-                :else (assoc m id (rig/unique-projector-id (into (set (keys here)) (concat (keys show) (vals m)))
-                                                           (:host p) (:service-id p)))))
+                :else (assoc m id (free-id (into (set (keys here)) (concat (keys show) (vals m))) id p))))
             matched
             (sort-by (comp str key) show))))
 
@@ -145,8 +156,9 @@
 
 (def ^:private identity-keys
   "What a laser already on this rig keeps when a show's setup comes onto it:
-   where and what it is here."
-  [:host :port :service-id :service-name :unit-id :stable-id])
+   where and what it is here, its output driver and that driver's settings
+   among them (output drivers D2: connection data, like :host and :port)."
+  [:host :port :service-id :service-name :unit-id :stable-id :driver :driver-config])
 
 (defn- matched-by-ip
   "The show's lasers (ids) matched to one here by a [:host …] identity only."
@@ -189,8 +201,9 @@
 (defn- bring-lasers
   "state with the lasers ids of a show's hardware (converted) and chains on
    this rig, each at its id here (pins): one already here keeps its
-   identity-keys and takes everything else from the show; one that isn't is
-   added. Zones come in as incoming-safety gives them; calibration and the
+   identity-keys (one it doesn't have, such as an IDN laser's :driver, it
+   doesn't take from the show either) and takes everything else from the
+   show; one that isn't is added. Zones come in as incoming-safety gives them; calibration and the
    virtual projectors on these lasers come too."
   [state hardware chains ids pins]
   (let [brought (set ids)]
@@ -199,7 +212,9 @@
                 (let [r (get pins id id)
                       show-p (incoming-safety (get-in hardware [:projectors id]))
                       here (get-in s [:projectors r])]
-                  (cond-> (assoc-in s [:projectors r] (merge show-p (select-keys here identity-keys)))
+                  (cond-> (assoc-in s [:projectors r] (if here
+                                                        (merge (apply dissoc show-p identity-keys) (select-keys here identity-keys))
+                                                        show-p))
                     (get chains id) (assoc-in [:chains :projector-effects r] (get chains id)))))
               s
               ids)

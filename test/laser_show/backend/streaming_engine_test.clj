@@ -1,5 +1,6 @@
 (ns laser-show.backend.streaming-engine-test
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.tools.logging :as log]
             [laser-show.animation.show-time :as show-time]
             [laser-show.backend.output-errors :as output-errors]
             [laser-show.backend.streaming-engine :as se]
@@ -7,7 +8,8 @@
             [laser-show.idn.fake-dac :as dac]
             [laser-show.idn.hello :as hello]
             [laser-show.idn.output-config :as oc]
-            [laser-show.idn.stream :as stream])
+            [laser-show.idn.stream :as stream]
+            [laser-show.output.recording-driver :as rd])
   (:import [java.net DatagramPacket DatagramSocket InetAddress SocketTimeoutException]
            [java.util.concurrent.locks LockSupport]))
 
@@ -93,14 +95,14 @@
       (is (some? engine) "Engine should be created even with nil host")
       ;; The host validation happens at the multi-engine level
       ;; when deciding which engines to create and start
-      (is (nil? (:target-host engine)) "Engine should have nil host"))))
+      (is (nil? (get-in engine [:driver-config :host])) "Engine should have nil host"))))
 
 (deftest engine-creation-with-blank-host-test
   (testing "Can create engine with blank host (validation should happen at multi-engine level)"
     (let [frame-provider (fn [] (t/empty-frame))
           engine (se/create-engine "" frame-provider)]
       (is (some? engine) "Engine should be created even with blank host")
-      (is (= "" (:target-host engine)) "Engine should have blank host"))))
+      (is (= "" (get-in engine [:driver-config :host])) "Engine should have blank host"))))
 
 (deftest engine-stats-test
   (testing "Engine provides stats after creation"
@@ -237,6 +239,12 @@
                        [(index (Math/round (/ (double x) 32.767))) timestamp])))
           (filter (comp #{port} :port) (dac/frames fake)))))
 
+(defn- local-port
+  "The engine's source port, once its streaming thread has opened the session."
+  [engine]
+  (dac/wait-for! #(some? @(:session engine)) 1000)
+  (.getLocalPort ^DatagramSocket (:socket @(:session engine))))
+
 (defn- with-clock-engine
   "Call (f fake engine port) with an engine paced by show-time/frame-signal,
    streaming tick-provider's frames to a fake DAC, while no clock thread runs
@@ -252,7 +260,7 @@
                                     :frame-signal show-time/frame-signal)]
        (try
          (se/start! engine)
-         (f fake engine (.getLocalPort ^DatagramSocket @(:socket engine)))
+         (f fake engine (local-port engine))
          (finally
            (se/stop! engine)
            (show-time/set-clock-running! false)
@@ -373,7 +381,7 @@
                                  :port (:port fake) :output-config oc/standard-config)]
     (try
       (se/start! engine)
-      (let [fs (frames-in-500-ms fake (.getLocalPort ^DatagramSocket @(:socket engine)))]
+      (let [fs (frames-in-500-ms fake (local-port engine))]
         (is (<= 15 (count fs) 32) (str (count fs) " frames in 500 ms at its own 60 fps")))
       (finally
         (se/stop! engine)
@@ -414,3 +422,293 @@
               (is (<= 2 @attempts 30) (str @attempts " sends tried in 300 ms"))
               (is (.isAlive ^Thread @(:thread engine))))))))
     (output-errors/clear!)))
+
+
+;; Through a driver (plans/2026-11-19-output-drivers/01 §1, 02 D1)
+
+(defn- calls-of [kind calls]
+  (filterv #(= kind (first %)) calls))
+
+(defn- start-driver-engine!
+  "An engine for the recording driver rec, started: paced by itself, or by
+   show-time/frame-signal with :frame-signal."
+  [rec provider & opts]
+  (se/start! (apply se/create-driver-engine (:driver rec) {:k 1} provider :id :rec opts)))
+
+(deftest driver-gets-sanitized-frames-test
+  (testing "C-1: the driver gets the provider's frame after sanitize-frame: the NaN point is
+            dropped, and a dark copy goes in front of the lit first point"
+    (let [rec (rd/recording-driver)
+          engine (start-driver-engine! rec (constantly [[0 0 1 1 1] [##NaN 0 1 1 1] [0.5 0.5 1 0 0]]))]
+      (try
+        (is (dac/wait-for! #(<= 3 (count @(:frames rec))) 2000))
+        (finally
+          (se/stop! engine)))
+      (is (every? #(= [[0 0 0.0 0.0 0.0] [0 0 1 1 1] [0.5 0.5 1 0 0]] %) @(:frames rec)))
+      (let [[kind config ctx] (first @(:calls rec))]
+        (is (= [:open {:k 1} {:id :rec :scan-rate 25000 :fps 60}] [kind config (dissoc ctx :cancelled?)])
+            "opened with its config and the engine's context")
+        (is (fn? (:cancelled? ctx)) "which can say the open was given up on (G3)"))
+      (is (= #{"output-streaming-rec"} (set (map second (calls-of :send @(:threads rec)))))
+          "sent on the engine's own thread, named for a driver other than IDN"))))
+
+(deftest driver-error-calls-on-error-then-blanks-test
+  (let [rec (rd/recording-driver {:fail-send? #{0}})
+        engine (start-driver-engine! rec (constantly [[-0.5 0.0 0.0 0.0 0.0] [0.5 0.0 1.0 1.0 1.0]]))]
+    (try
+      (is (dac/wait-for! #(<= 4 (count @(:calls rec))) 2000))
+      (finally
+        (se/stop! engine)
+        (output-errors/clear!)))
+    (is (= [[:send 2] [:on-error] [:send 0]] (subvec (vec (rest @(:calls rec))) 0 3))
+        "the failed send, :on-error, then an empty frame")
+    (is (every? #(= [:send 2] %) (subvec (vec (butlast (rest @(:calls rec)))) 3))
+        "then the frames again")
+    (is (= [:close] (peek @(:calls rec))))))
+
+(defn- tick-of
+  "The tick a frame of tick-frame shows."
+  [frame]
+  (when-let [[[x]] (seq frame)]
+    (Math/round (* 1000.0 (double x)))))
+
+(defn- with-paced-driver-engine
+  "Call (f engine) with an engine for rec paced by show-time/frame-signal,
+   sending tick-provider's frames, while the signal says a clock runs (the
+   test publishes the ticks)."
+  [rec f]
+  (show-time/reset-runtime!)
+  (show-time/set-clock-running! true)
+  (let [engine (start-driver-engine! rec tick-provider :frame-signal show-time/frame-signal)]
+    (try
+      (f engine)
+      (finally
+        (se/stop! engine)
+        (show-time/set-clock-running! false)
+        (show-time/reset-runtime!)))))
+
+(defn- sent-ticks [rec]
+  (into [] (keep #(some-> (tick-of %) (mod 1000))) @(:frames rec)))
+
+(deftest device-paced-driver-waits-for-ready-test
+  (testing "01 §1.3 case B: not ready twice, then ready: that tick's frame goes out then"
+    (let [slow-tick (atom nil)
+          polls (atom 0)
+          rec (rd/recording-driver {:ready (fn []
+                                             (if (= @slow-tick (:tick (show-time/latest)))
+                                               (< 2 (swap! polls inc))
+                                               true))})]
+      (with-paced-driver-engine rec
+        (fn [engine]
+          (let [a (publish!)]
+            (is (dac/wait-for! #(some #{(mod a 1000)} (sent-ticks rec)) 1000) "a ready driver gets the tick at once")
+            (reset! slow-tick (inc a))
+            (let [b (publish!)]
+              (is (= (inc a) b))
+              (is (dac/wait-for! #(some #{(mod b 1000)} (sent-ticks rec)) 1000))
+              (let [calls @(:calls rec)
+                    frames @(:frames rec)
+                    ;; Index in calls of the first send of b's frame
+                    k (first (keep-indexed (fn [i f] (when (= (mod b 1000) (mod (tick-of f) 1000)) i)) frames))
+                    at (nth (keep-indexed (fn [i [kind]] (when (= :send kind) i)) calls) k)]
+                (is (= [[:ready? false] [:ready? false] [:ready? true] [:send 2]]
+                       (subvec calls (- at 3) (inc at)))
+                    "asked again until it is ready, then sent")
+                (is (zero? (:frames-skipped (se/get-stats engine))))))))))))
+
+(deftest device-paced-driver-skips-a-tick-test
+  (testing "01 §1.3 case C: not ready for a whole interval: nothing is sent for that tick, it
+            counts as skipped and as seen, so the engine waits for the next one"
+    (let [blocked-tick (atom nil)
+          rec (rd/recording-driver {:ready #(not= @blocked-tick (:tick (show-time/latest)))})]
+      (with-paced-driver-engine rec
+        (fn [engine]
+          (let [a (publish!)]
+            (is (dac/wait-for! #(some #{(mod a 1000)} (sent-ticks rec)) 1000))
+            (reset! blocked-tick (inc a))
+            (let [b (publish!)]
+              (is (dac/wait-for! #(= 1 (:frames-skipped (se/get-stats engine))) 1000))
+              (let [polls (count (calls-of :ready? @(:calls rec)))]
+                (Thread/sleep 20)
+                (is (= polls (count (calls-of :ready? @(:calls rec))))
+                    "not asked again before the next tick (or the keepalive)"))
+              (let [c (publish!)]
+                (is (dac/wait-for! #(some #{(mod c 1000)} (sent-ticks rec)) 1000) "the next tick goes out")
+                (is (not-any? #{(mod b 1000)} (sent-ticks rec)) "the skipped tick never did")
+                (is (= 1 (:frames-skipped (se/get-stats engine))))))))))))
+
+(deftest driver-result-defaults-test
+  (let [frame-result #'se/frame-result
+        engine (se/create-driver-engine (:driver (rd/recording-driver)) {} (constantly []) :id :rec)
+        three [[0 0 0 0 0] [0.5 -0.5 1 0 0] [1 1 0 0 1]]
+        warnings (atom 0)]
+    (testing "01 §1.2: as given"
+      (is (= [5 23960] (frame-result engine three {:transfers 5 :duration-us 23960}))))
+    (testing "nil, or a key missing: 1 transfer, the frame's duration at the scan rate"
+      (is (= [1 80] (frame-result engine three nil)) "(3 - 1) / 25 000 s")
+      (is (= [1 16666] (frame-result engine [] nil)) "an empty frame lasts one frame interval")
+      (is (= [5 80] (frame-result engine three {:transfers 5})))
+      (is (= [1 23960] (frame-result engine three {:duration-us 23960}))))
+    (with-redefs [log/log* (fn [_ level _ _] (when (= :warn level) (swap! warnings inc)))]
+      (testing "a value of the wrong kind counts as missing, and is logged once per engine"
+        (is (= [1 80] (frame-result engine three {:transfers -1})))
+        (is (= [1 80] (frame-result engine three {:transfers "5" :duration-us ##NaN})))
+        (is (= [1 80] (frame-result engine three :sent)))
+        (is (= 1 @warnings)))
+      (is (= [1 80] (frame-result engine three nil)))
+      (is (= 1 @warnings) "nil isn't wrong"))
+    (testing "the stats count the driver's transfers and duration"
+      (let [rec (rd/recording-driver {:result (constantly {:transfers 5 :duration-us 23960})})
+            engine (start-driver-engine! rec (constantly three))]
+        (try
+          (is (dac/wait-for! #(<= 3 (:frames-sent (se/get-stats engine))) 2000))
+          (let [{:keys [frames-sent packets-sent frame-duration-us]} (se/get-stats engine)]
+            (is (= (* 5 frames-sent) packets-sent))
+            (is (= 23960 frame-duration-us)))
+          (finally
+            (se/stop! engine)))))))
+
+(deftest close-runs-once-test
+  (testing "C-4: a session is closed once, on its own output-close-<id> thread"
+    (let [rec (rd/recording-driver)
+          engine (start-driver-engine! rec (constantly []))]
+      (is (dac/wait-for! #(seq (calls-of :send @(:calls rec))) 2000))
+      (se/stop! engine)
+      (se/stop! engine)
+      (#'se/close! engine)
+      (is (= [[:close]] (calls-of :close @(:calls rec))))
+      (is (= [[:close "output-close-rec"]] (calls-of :close @(:threads rec))))
+      (is (nil? @(:session engine)) "the session is gone")
+      (is (= [:close] (peek @(:calls rec))) "nothing is sent after it"))))
+
+(deftest open-runs-on-the-streaming-thread-test
+  (testing "C-7: start! returns at once, and the session is opened on the engine's own thread"
+    (let [rec (rd/recording-driver {:block-open-ms {0 300}})
+          t0 (System/nanoTime)
+          engine (start-driver-engine! rec (constantly []))
+          ms (/ (- (System/nanoTime) t0) 1e6)]
+      (try
+        (is (< ms 200) (str "start! took " ms " ms"))
+        (is (nil? @(:session engine)) "not open yet")
+        (is (dac/wait-for! #(seq (calls-of :send @(:calls rec))) 2000))
+        (is (= {:config {:k 1}} @(:session engine)))
+        (is (= [[:open "output-streaming-rec"]] (calls-of :open @(:threads rec))))
+        (finally
+          (se/stop! engine))))))
+
+
+;; Contract additions from the first third-party add-on (01 §1.1, §1.4; 02 § 1D)
+
+(def ^:private lit-frame [[-0.5 0.0 0.0 0.0 0.0] [0.5 0.0 1.0 1.0 1.0]])
+
+(defn- kinds [calls]
+  (mapv first calls))
+
+(defn- engine-error []
+  (get-in (output-errors/snapshot) [[:engine :rec] :message]))
+
+(defn- check-reopen!
+  "rec's driver throws {:reopen? true} once (from a send or :ready?): the
+   error is reported, the session is closed on output-close-rec with no
+   :on-error and no blanking frame, and it is opened again REOPEN_MS later.
+   Returns the calls."
+  [rec failed]
+  (let [engine (start-driver-engine! rec (constantly lit-frame))]
+    (try
+      (is (dac/wait-for! #(seq (calls-of :close @(:calls rec))) 2000) "the session is closed")
+      (let [t0 (System/nanoTime)]
+        (is (re-find failed (str (engine-error))) "the error is reported under [:engine id]")
+        (is (nil? @(:session engine)) "and the session is cleared")
+        (is (= 1 (count (calls-of :open @(:calls rec)))) "not opened again at once")
+        (is (dac/wait-for! #(= 2 (count (calls-of :open @(:calls rec)))) 3000) "then opened again")
+        (let [ms (/ (- (System/nanoTime) t0) 1e6)]
+          (is (< (- se/REOPEN_MS 150) ms (+ se/REOPEN_MS 1000)) (str "reopened " ms " ms after the close"))))
+      (is (dac/wait-for! #(nil? (engine-error)) 2000) "the error clears once a frame goes out again")
+      (is (some? @(:session engine)))
+      (finally
+        (se/stop! engine)
+        (output-errors/clear!)))
+    (let [calls @(:calls rec)]
+      (is (not-any? #{[:on-error] [:send 0]} calls) "no :on-error and no blanking frame")
+      (is (= [:close :close] (kinds (calls-of :close calls))) "each session closed once (C-4): one by the reopen, one by Stop")
+      (is (= #{"output-close-rec"} (set (map second (calls-of :close @(:threads rec))))))
+      (is (= #{"output-streaming-rec"} (set (map second (calls-of :open @(:threads rec))))))
+      calls)))
+
+(deftest reopen-error-closes-and-reopens-test
+  (testing "G1: a send throws {:reopen? true}"
+    (let [rec (rd/recording-driver {:fail-send? #(when (= 3 %) {:reopen? true})})
+          calls (check-reopen! rec #"test: send 3 failed")]
+      (is (= [:open :send :send :send :send :close :open :send] (subvec (kinds calls) 0 8))
+          "the fourth send fails, the session is closed, then a new one streams")))
+  (testing "G1: :ready? throws {:reopen? true}"
+    (let [rec (rd/recording-driver {:ready (constantly true) :fail-ready? #(when (= 2 %) {:reopen? true})})
+          calls (check-reopen! rec #"test: ready\? 2 failed")]
+      (is (= [:open :ready? :send :ready? :send :ready? :close :open :ready? :send] (subvec (kinds calls) 0 10))
+          "nothing is sent to the session after its :ready? asked for the reopen"))))
+
+(deftest error-without-reopen-keeps-the-session-test
+  (testing "without :reopen? (here false), an error is handled as before: :on-error, the blanking
+            frame, and the same session goes on"
+    (let [rec (rd/recording-driver {:fail-send? #(when (= 2 %) {:reopen? false})})
+          engine (start-driver-engine! rec (constantly lit-frame))]
+      (try
+        (is (dac/wait-for! #(some? @(:session engine)) 1000))
+        (let [session @(:session engine)]
+          (is (dac/wait-for! #(<= 8 (count (calls-of :send @(:calls rec)))) 2000))
+          (is (identical? session @(:session engine)) "the session is kept"))
+        (finally
+          (se/stop! engine)
+          (output-errors/clear!)))
+      (let [calls @(:calls rec)]
+        (is (= [[:send 2] [:send 2] [:send 2] [:on-error] [:send 0] [:send 2]] (subvec (vec (rest calls)) 0 6)))
+        (is (= 1 (count (calls-of :open calls))) "opened once")
+        (is (= [[:close]] (calls-of :close calls)) "closed once, by Stop")
+        (is (= [:close] (peek calls)))))))
+
+(defn- until-cancelled
+  "An :on-open that waits (up to 3 s) until its ctx's :cancelled? says true,
+   then calls (then); records each answer of :cancelled? it saw first and
+   when it saw true."
+  [seen then]
+  (fn [_ _ {:keys [cancelled?]}]
+    (swap! seen conj [:first (cancelled?)])
+    (let [deadline (+ (System/nanoTime) 3000000000)]
+      (loop []
+        (cond
+          (cancelled?) (do (swap! seen conj [:cancelled (System/nanoTime)])
+                           (then))
+          (< (System/nanoTime) deadline) (do (Thread/sleep 2) (recur)))))))
+
+(deftest open-sees-cancelled-after-stop-test
+  (testing "G3: ctx's :cancelled? is false while the engine runs and true once it stops, so a
+            long :open can give up; one that throws then isn't reported, and Stop doesn't wait
+            out STOP_JOIN_MS"
+    (let [seen (atom [])
+          rec (rd/recording-driver {:on-open (until-cancelled seen #(throw (ex-info "test: open gave up" {})))})
+          engine (start-driver-engine! rec (constantly lit-frame))
+          ^Thread thread @(:thread engine)]
+      (is (dac/wait-for! #(seq @seen) 1000) "the open is under way")
+      (Thread/sleep 50)
+      (is (= [[:first false]] @seen) "not cancelled while it runs")
+      (let [t0 (System/nanoTime)]
+        (se/stop! engine)
+        (let [ms (/ (- (System/nanoTime) t0) 1e6)
+              [_ at] (second @seen)]
+          (is (< ms 300) (str "Stop took " ms " ms"))
+          (is (some? at) "the open saw it")
+          (when at
+            (is (< (/ (- at t0) 1e6) 100) "within a few ms of Stop"))))
+      (is (= [:open] (kinds @(:calls rec))) "nothing sent, nothing to close")
+      (is (nil? (engine-error)) "an open given up on while stopping isn't reported")
+      (is (not (.isAlive thread)) "the streaming thread has ended")))
+  (testing "an :open that returns a session after Stop anyway: that session is closed at once, and
+            never sent to"
+    (let [seen (atom [])
+          rec (rd/recording-driver {:on-open (until-cancelled seen (constantly nil))})
+          engine (start-driver-engine! rec (constantly lit-frame))]
+      (is (dac/wait-for! #(seq @seen) 1000))
+      (se/stop! engine)
+      (is (dac/wait-for! #(= [:open :close] (kinds @(:calls rec))) 1000) (pr-str @(:calls rec)))
+      (is (nil? @(:session engine)))
+      (is (nil? (engine-error))))))

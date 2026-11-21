@@ -99,6 +99,16 @@ jobs:
     - name: Run headless UI tests
       run: clojure '-M:${{ matrix.platform }}:test-ui:test-ui-headless'
 
+    # The add-on loader's tests (output drivers D3) on macOS and Windows too,
+    # where jars get locked, paths have drive letters and folders have their
+    # own hidden files; the rest of the unit suite runs on Ubuntu only.
+    # -n loads just that namespace. :test-ui-headless keeps JavaFX headless
+    # in case anything it loads pulls in cljfx. Runs even when the UI tests
+    # failed. The same quoting works in bash and pwsh (clojure.exe on Windows).
+    - name: Run add-on loader tests
+      if: ${{ !cancelled() }}
+      run: clojure '-M:${{ matrix.platform }}:test:test-ui-headless' -n laser-show.output.addons-test
+
     - name: Upload UI test results and screenshots
       if: failure()
       uses: actions/upload-artifact@v7

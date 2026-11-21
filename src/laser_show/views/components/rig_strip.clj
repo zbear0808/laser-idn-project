@@ -14,7 +14,6 @@
    meter and what the fit guard did; below its minimum fps the card turns
    amber."
   (:require [cljfx.api :as fx]
-            [clojure.string :as str]
             [laser-show.css.core :as css]
             [laser-show.events.core :as events]
             [laser-show.subs :as subs]
@@ -22,8 +21,12 @@
             [laser-show.views.components.group-matrix :as group-matrix]
             [laser-show.views.components.load-warning :as load-warning]
             [laser-show.views.components.preview :as preview])
-  (:import [javafx.scene Node]
-           [javafx.scene.input DragEvent KeyCode KeyEvent MouseButton MouseEvent TransferMode]))
+  (:import [javafx.application Platform]
+           [javafx.beans.value ChangeListener]
+           [javafx.scene Node]
+           [javafx.scene.control ScrollPane]
+           [javafx.scene.input DragEvent KeyCode KeyEvent MouseButton MouseEvent TransferMode]
+           [javafx.scene.layout GridPane Region]))
 
 
 (def card-width
@@ -62,9 +65,11 @@
 (defn output-status-text
   "One line for a projector's output status, or nil when it isn't streaming.
    The fps is how many new frames the projector draws per second; a warning
-   (a calibration effect skipped because it fails) comes last. A safety
-   error (zones plan Z1) is shown as it is: \"Safety error: output off\"."
-  [{:keys [state kind fps scan-limited? error warning]}]
+   (a calibration effect skipped because it fails, or the output driver's
+   own) comes last. A safety error (zones plan Z1) is shown as it is:
+   \"Safety error: output off\", and so is a device another program has
+   (:busy?, output drivers 1D): \"In use by ShowCtl on 10.0.0.3\"."
+  [{:keys [state kind fps scan-limited? error warning busy?]}]
   (case state
     :streaming (cond-> (cond
                          (nil? fps) "Streaming"
@@ -72,8 +77,23 @@
                          :else (format "Streaming · %.1f fps" (double fps)))
                  warning (str " · " warning))
     :starting "Starting…"
-    :error (if (= :safety kind) error (str "Error: " error))
+    :error (if (or (= :safety kind) busy?) error (str "Error: " error))
     nil))
+
+(defn card-status-text
+  "{:text :tooltip} of a card's status line, or nil for none: the output's
+   status (output-status-text), but short where the core's own message
+   doesn't fit a card (\"Driver not installed\", \"Driver not responding\"),
+   the whole message in the tooltip; with no status, \"Not found in the last
+   scan\" when a scan this session didn't find it."
+  [status {:keys [found? driver-installed?]}]
+  (let [{:keys [state kind error detail]} status
+        text (output-status-text status)]
+    (cond
+      (and (= :error state) (= :stuck kind)) {:text "Driver not responding" :tooltip error}
+      (and (= :error state) (false? driver-installed?)) {:text "Driver not installed" :tooltip error}
+      text {:text text :tooltip (or detail text)}
+      (not found?) {:text "Not found in the last scan" :tooltip "Not found in the last scan"})))
 
 
 ;; The header
@@ -135,56 +155,84 @@
                 (and excluded? (not position))
                 (assoc :tooltip {:fx/type :tooltip :text "Not in All or the automatic groups"}))
               {:fx/type :label
+               :id (str "rig-card-name-" (id-text id))
                :text card-name
                :max-width (- card-width 40)
+               ;; the card cuts a long name off: all of it here
+               :tooltip {:fx/type :tooltip :text (str card-name)}
                :style-class ["label-bold"]}]})
 
 (defn- card-host
-  "The address, and the On box at the right."
-  [{:keys [id host-label enabled?]}]
-  {:fx/type :h-box
-   :spacing 4
-   :alignment :center-left
-   :children [{:fx/type :label
-               :text host-label
-               :style-class ["text-small" "label-secondary"]}
-              {:fx/type :region :h-box/hgrow :always}
-              {:fx/type :check-box
-               :id (str "rig-card-enable-" (id-text id))
-               :text "On"
-               :min-width :use-pref-size
-               :selected (boolean enabled?)
-               :on-selected-changed {:event/type :projectors/set-enabled
-                                     :projector-id id
-                                     :enabled? :fx/event}}]})
+  "The address (driver/summary-parts: \"10.0.0.7 #1\"; for another driver
+   its name, \"LSPS\", with its settings, \"127.0.0.1:7266\", on a line of
+   their own under it, the card's full width), and the On box at the right."
+  [{:keys [id host-label address-lines enabled?]}]
+  (let [[line detail] address-lines]
+    {:fx/type :v-box
+     :children (cond-> [{:fx/type :h-box
+                         :spacing 4
+                         :alignment :center-left
+                         :children [{:fx/type :label
+                                     :id (str "rig-card-address-" (id-text id))
+                                     :text (or line host-label)
+                                     :max-width (- card-width 56)
+                                     :tooltip {:fx/type :tooltip :text (str host-label)}
+                                     :style-class ["text-small" "label-secondary"]}
+                                    {:fx/type :region :h-box/hgrow :always}
+                                    {:fx/type :check-box
+                                     :id (str "rig-card-enable-" (id-text id))
+                                     :text "On"
+                                     :min-width :use-pref-size
+                                     :selected (boolean enabled?)
+                                     :on-selected-changed {:event/type :projectors/set-enabled
+                                                           :projector-id id
+                                                           :enabled? :fx/event}}]}]
+                 detail (conj {:fx/type :label
+                               :id (str "rig-card-address-detail-" (id-text id))
+                               :text detail
+                               :max-width (- card-width 12)
+                               :tooltip {:fx/type :tooltip :text (str host-label)}
+                               :style-class ["text-small" "label-secondary"]}))}))
+
+(def ^:private three-lines
+  "The most a card's status or driver line takes (10 px text): longer is
+   cut off with \"…\", its tooltip has all of it."
+  43)
 
 (defn- card-status
-  "The dot and the status line: the output's while it streams (bold amber
-   while the laser is below its minimum fps), \"Not found in the last scan\"
-   (amber) when a scan this session didn't find it."
-  [{:keys [fx/context id found?]}]
-  (let [{:keys [state warning low?] :as status} (fx/sub-ctx context subs/projector-output-status id)
+  "The dot and the status line (card-status-text): the output's while it
+   streams (bold amber while the laser is below its minimum fps; amber while
+   its device is in use by another program), \"Not found in the last scan\"
+   (amber) when a scan this session didn't find it. It wraps to the card's
+   width, up to three lines."
+  [{:keys [fx/context card]}]
+  (let [id (:id card)
+        {:keys [state warning low? busy?] :as status} (fx/sub-ctx context subs/projector-output-status id)
         streaming-text (output-status-text status)
-        text (or streaming-text (when-not found? "Not found in the last scan"))]
+        {:keys [text tooltip]} (card-status-text status card)]
     {:fx/type :h-box
      :spacing 6
-     :alignment :center-left
-     :children (cond-> [{:fx/type status-indicator
-                         :id (str "projector-dot-" (id-text id))
-                         :status (case state
-                                   :streaming :connected
-                                   :starting :connecting
-                                   :error :offline
-                                   nil)}]
+     :alignment :top-left
+     :children (cond-> [{:fx/type :stack-pane
+                         ;; one line's height, so the dot stays beside the first line
+                         :min-height 14 :pref-height 14 :max-height 14
+                         :children [{:fx/type status-indicator
+                                     :id (str "projector-dot-" (id-text id))
+                                     :status (case state
+                                               :streaming :connected
+                                               :starting :connecting
+                                               :error :offline
+                                               nil)}]}]
                  text (conj (cond-> {:fx/type :label
                                      :id (str "projector-status-" (id-text id))
                                      :text text
                                      :wrap-text true
                                      :max-width (- card-width 30)
-                                     ;; its row keeps it to one line: the tooltip has all of it
-                                     :tooltip {:fx/type :tooltip :text (or (:detail status) text)}
+                                     :max-height three-lines
+                                     :tooltip {:fx/type :tooltip :text tooltip :wrap-text true :max-width 320}
                                      :style-class ["text-small" "label-secondary"]}
                               (= :error state) (assoc :style (str "-fx-text-fill: " (css/red) ";"))
+                              (and (= :error state) busy?) (assoc :style (str "-fx-text-fill: " (css/orange) ";"))
                               (or (and (= :streaming state) warning) (nil? streaming-text))
                               (assoc :style (str "-fx-text-fill: " (css/orange) ";"))
                               (and (= :streaming state) low?)
@@ -263,12 +311,31 @@
                                      :style-class ["label-secondary"]}
                               (seq note) (assoc :tooltip {:fx/type :tooltip :text note}))))}))
 
+(defn- card-driver-info
+  "What the output driver says of itself (its :status :info, output
+   drivers 1D), as one compact line (subs/projector-driver-info), e.g. the
+   scan rate it really runs at; nothing when it says nothing."
+  [{:keys [fx/context id]}]
+  (let [text (fx/sub-ctx context subs/projector-driver-info id)]
+    (if text
+      {:fx/type :label
+       :id (str "projector-driver-info-" (id-text id))
+       :text text
+       :wrap-text true
+       :max-width (- card-width 12)
+       :max-height three-lines
+       :tooltip {:fx/type :tooltip :text text :wrap-text true :max-width 320}
+       :style "-fx-font-size: 10;"
+       :style-class ["label-secondary"]}
+      {:fx/type :region :max-height 0 :managed false})))
+
 (defn- card-sections
   "A card, top to bottom: its sections (nil ones are left out)."
   [card]
   [(card-title card)
    (card-host card)
-   {:fx/type card-status :id (:id card) :found? (:found? card)}
+   {:fx/type card-status :card card}
+   {:fx/type card-driver-info :id (:id card)}
    {:fx/type card-load :id (:id card) :limit (:limit card)}])
 
 
@@ -277,15 +344,17 @@
 
 (defn- card-menu-items
   "Identify (Z1's event; off while the laser isn't outputting, as its button
-   is), on a device with more outputs, turning them all on, and on a card
+   is; not there for one that can't be reached, an IDN laser with no host),
+   on a device with more outputs, turning them all on, and on a card
    that is off, Forget this laser… (zones plan ZR: New Project keeps the
    rig, so a laser that's gone is forgotten here)."
-  [{:keys [id host enabled? multi-output?]} outputting?]
-  (cond-> [{:fx/type :menu-item
-            :id (str "rig-card-identify-" (id-text id))
-            :text "Identify"
-            :disable (not (and outputting? enabled? (not (str/blank? (str host)))))
-            :on-action {:event/type :projectors/identify :projector-id id}}]
+  [{:keys [id host enabled? multi-output? identifiable?]} outputting?]
+  (cond-> []
+    identifiable? (conj {:fx/type :menu-item
+                         :id (str "rig-card-identify-" (id-text id))
+                         :text "Identify"
+                         :disable (not (and outputting? enabled?))
+                         :on-action {:event/type :projectors/identify :projector-id id}})
     multi-output? (conj {:fx/type :menu-item
                          :id (str "rig-card-enable-all-" (id-text id))
                          :text (str "Turn on every output of " host)
@@ -332,6 +401,9 @@
     {:fx/type :label
      :content-display :graphic-only
      :padding 0
+     ;; Not for text (it has none): so the grid asks for the card's height at
+     ;; its width, and a status line that wraps gets its lines
+     :wrap-text true
      :context-menu {:fx/type :context-menu
                     :items (card-menu-items card outputting?)}
      :graphic {:fx/type :h-box
@@ -424,18 +496,53 @@
    :on-action {:event/type :rig/nudge-projector :projector-id selected :delta delta}})
 
 (defn- cards-height
-  "About the height of the cards' row, n cards with their thumbnails, and
-   room for the horizontal scroll bar (8 px, hovered) under more than 6 of
-   them, about what fits at 1200 px: the strip is never shorter, so the
-   divider above the inspector can't cut a card."
-  [n]
-  (+ 72 (+ thumbnail-size 2) 14 (if (> n 6) 8 0)))
+  "About the height of the cards' row, n cards with their thumbnails (the
+   status row a line high, 6 px more than its dot, so the dot stays beside
+   the status's first line), a line more when a card has its driver's
+   settings under its address, and room for the horizontal scroll bar
+   (8 px, hovered) under more than 6 of them, about what fits at 1200 px:
+   the strip is never shorter, so the divider above the inspector can't
+   cut a card."
+  [n detail-line?]
+  (+ 72 6 (+ thumbnail-size 2) 14 (if detail-line? 14 0) (if (> n 6) 8 0)))
 
 (defn- strip-height
   "About the height the cards and rows need (the cards' row, a row each,
    + Group): the strip is never taller, so the divider stops below + Group."
-  [rows n]
-  (+ (cards-height n) (* 17 rows) 38))
+  [rows n detail-line?]
+  (+ (cards-height n detail-line?) (* 17 rows) 38))
+
+(defn- fit-to-cards!
+  "Once pane's grid is laid out, its min height is what its cards' row
+   really takes, and its max what all its rows do (cards-height and
+   strip-height are only the first guess): a status or driver line that
+   wraps (up to three lines) makes a card taller than the guess, and the
+   divider above the inspector must not cut it."
+  [^ScrollPane pane]
+  (let [fit! (fn []
+               (when-let [^GridPane grid (.getContent pane)]
+                 (let [insets (.getInsets pane)
+                       row (transduce (comp (filter #(.isManaged ^Node %))
+                                            (filter #(zero? (or (GridPane/getRowIndex %) 0)))
+                                            (map (fn [^Node c] (.prefHeight c (.prefWidth c -1)))))
+                                      max 0.0 (.getChildren grid))
+                       grid-insets (.getInsets grid)
+                       hbar (if (> (.prefWidth grid -1) (.getWidth (.getViewportBounds pane))) 8.0 0.0)
+                       around (+ (.getTop insets) (.getBottom insets) hbar)
+                       lo (Math/ceil (+ row (.getTop grid-insets) (.getBottom grid-insets) around))
+                       hi (max lo (Math/ceil (+ (.prefHeight grid -1) around)))]
+                   (when (or (not= lo (.getMinHeight pane)) (not= hi (.getMaxHeight pane)))
+                     (.setMinHeight pane lo)
+                     (.setMaxHeight pane hi)))))
+        ;; after the layout pass, which the split pane above takes the sizes in
+        on-layout (reify ChangeListener (changed [_ _ _ _] (Platform/runLater fit!)))]
+    (when-let [^Region grid (.getContent pane)]
+      (.addListener (.layoutBoundsProperty grid) on-layout))
+    (.addListener (.contentProperty pane)
+                  (reify ChangeListener
+                    (changed [_ _ old new]
+                      (some-> ^Region old .layoutBoundsProperty (.removeListener on-layout))
+                      (some-> ^Region new .layoutBoundsProperty (.addListener on-layout)))))))
 
 (defn rig-strip
   "The cards between ◀ and ▶, and under them the group rows
@@ -451,34 +558,38 @@
         ids (mapv :id cards)
         selected (some #(when (:selected? %) (:id %)) cards)
         i (.indexOf ^java.util.List ids selected)
-        n (count ids)]
-    {:fx/type :scroll-pane
-     :id "rig-strip-scroll"
-     :vbar-policy :as-needed
-     :hbar-policy :as-needed
-     :min-height (cards-height n)
-     :max-height (strip-height (count (:rows matrix)) n)
-     :style-class ["scroll-pane-dark"]
-     :content {:fx/type :grid-pane
-               :id "rig-strip"
-               :focus-traversable true
-               :hgap 4
-               :vgap 0
-               :padding 4
-               :on-key-pressed (key-handler ids selected)
-               :children (-> [(move-button {:id "rig-move-left-button" :text "◀" :tooltip "Move left (Alt+←)"
-                                            :disable (not (pos? i)) :selected selected :delta -1 :column 0})]
-                             (into (map-indexed (fn [k card]
-                                                  {:fx/type rig-card
-                                                   :fx/key (:id card)
-                                                   :grid-pane/column (inc k)
-                                                   :grid-pane/row 0
-                                                   :grid-pane/valignment :top
-                                                   :card card
-                                                   :drop-mark drop-mark
-                                                   :outputting? outputting?}))
-                                   cards)
-                             (conj (move-button {:id "rig-move-right-button" :text "▶" :tooltip "Move right (Alt+→)"
-                                                 :disable (not (and (>= i 0) (< i (dec n)))) :selected selected :delta 1
-                                                 :column (inc n)}))
-                             (into (group-matrix/rows matrix cards)))}}))
+        n (count ids)
+        detail-line? (boolean (some (comp second :address-lines) cards))]
+    {:fx/type fx/ext-on-instance-lifecycle
+     :on-created fit-to-cards!
+     :desc
+     {:fx/type :scroll-pane
+      :id "rig-strip-scroll"
+      :vbar-policy :as-needed
+      :hbar-policy :as-needed
+      :min-height (cards-height n detail-line?)
+      :max-height (strip-height (count (:rows matrix)) n detail-line?)
+      :style-class ["scroll-pane-dark"]
+      :content {:fx/type :grid-pane
+                :id "rig-strip"
+                :focus-traversable true
+                :hgap 4
+                :vgap 0
+                :padding 4
+                :on-key-pressed (key-handler ids selected)
+                :children (-> [(move-button {:id "rig-move-left-button" :text "◀" :tooltip "Move left (Alt+←)"
+                                             :disable (not (pos? i)) :selected selected :delta -1 :column 0})]
+                              (into (map-indexed (fn [k card]
+                                                   {:fx/type rig-card
+                                                    :fx/key (:id card)
+                                                    :grid-pane/column (inc k)
+                                                    :grid-pane/row 0
+                                                    :grid-pane/valignment :top
+                                                    :card card
+                                                    :drop-mark drop-mark
+                                                    :outputting? outputting?}))
+                                    cards)
+                              (conj (move-button {:id "rig-move-right-button" :text "▶" :tooltip "Move right (Alt+→)"
+                                                  :disable (not (and (>= i 0) (< i (dec n)))) :selected selected :delta 1
+                                                  :column (inc n)}))
+                              (into (group-matrix/rows matrix cards)))}}}))

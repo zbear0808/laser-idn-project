@@ -4,9 +4,11 @@
    Includes:
    - Ableton Link configuration
    - MIDI input configuration
-   - OSC input configuration"
+   - OSC input configuration
+   - Add-ons (output drivers from add-on jars)"
   (:require
    [laser-show.css.core :as css]
+   [laser-show.views.components.addon-settings :as addon-settings]
    [laser-show.views.components.link-settings :as link-settings]
    [laser-show.views.components.midi-settings :as midi-settings]
    [laser-show.views.components.osc-settings :as osc-settings]))
@@ -60,6 +62,16 @@
                         
                         ;; OSC Configuration Section
                         {:fx/type osc-settings/osc-settings-section}
+
+                        ;; Output Section Header
+                        {:fx/type :label
+                         :text "OUTPUT"
+                         :style (str "-fx-text-fill: " (css/text-secondary) "; "
+                                     "-fx-font-size: 12; "
+                                     "-fx-font-weight: bold;")}
+
+                        ;; Add-ons Section
+                        {:fx/type addon-settings/addon-settings-section}
                         
                         ;; Spacer
                         {:fx/type :region

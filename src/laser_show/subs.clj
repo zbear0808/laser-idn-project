@@ -36,6 +36,7 @@
             [laser-show.animation.chains :as chains]
             [laser-show.animation.presets :as presets]
             [laser-show.animation.safety :as safety]
+            [laser-show.output.driver :as driver]
             [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
             [laser-show.routing.targets :as targets]
@@ -625,6 +626,155 @@
   [context]
   (:expanded-devices (fx/sub-val context :projector-ui) #{}))
 
+
+;; Level 2: Output drivers
+
+
+(defn driver-descriptors
+  "{driver-id descriptor} of every registered output driver
+   (laser-show.output.driver/descriptors, written by :addons/loaded).
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context get-in [:backend :output :drivers] {}))
+
+(defn driver-descriptor
+  "The descriptor of output driver id, or nil when it isn't installed."
+  [context id]
+  (get (fx/sub-ctx context driver-descriptors) id))
+
+(defn add-manual-types
+  "What the Add Projector dialog's Type offers: [{:id :name}], IDN first,
+   then the other installed drivers by name."
+  [context]
+  (->> (vals (fx/sub-ctx context driver-descriptors))
+       (map #(select-keys % [:id :name]))
+       (sort-by (fn [{:keys [id name]}] [(if (= :idn id) 0 1) (str/lower-case (str name)) (str id)]))
+       vec))
+
+(defn add-manual-form
+  "The Add Projector dialog's form as typed ([:ui :dialogs
+   :add-projector-manual]): {:driver (:idn without one) :descriptor (nil for
+   IDN's own fields, or a driver not installed) :fields :inputs {key text}
+   :config :errors (driver/coerce-config of the inputs) :can-add? (IDN: a
+   host; any other driver: no field error) :default-name (another driver:
+   what the projector is called without a name,
+   driver/default-projector-name)}."
+  [context]
+  (let [{:keys [driver driver-config host]} (fx/sub-ctx context dialog-data :add-projector-manual)
+        id (or driver :idn)]
+    (if (= :idn id)
+      {:driver :idn :can-add? (not (str/blank? (str host)))}
+      (let [descriptor (fx/sub-ctx context driver-descriptor id)
+            fields (:fields descriptor [])
+            inputs (or driver-config {})
+            {:keys [config errors]} (driver/coerce-config fields inputs)]
+        {:driver id
+         :descriptor descriptor
+         :fields fields
+         :inputs inputs
+         :config config
+         :errors errors
+         :can-add? (boolean (and descriptor (empty? errors)))
+         :default-name (driver/default-projector-name (fx/sub-val context :projectors) descriptor id)}))))
+
+(defn projector-driver
+  "What the projector settings show of projector-id's output driver:
+   {:driver :idn? :installed? :name (its descriptor's, or the id's text)
+   :fields :config (its :driver-config, the field defaults filled in)
+   :summary (driver/summary)}, or nil for an unknown projector."
+  [context projector-id]
+  (when-let [p (fx/sub-val context get-in [:projectors projector-id])]
+    (let [id (driver/projector-driver-id p)
+          descriptors (fx/sub-ctx context driver-descriptors)
+          d (get descriptors id)]
+      {:driver id
+       :idn? (= :idn id)
+       :installed? (or (= :idn id) (some? d))
+       :name (or (:name d) (if (= :idn id) "IDN" (subs (str id) 1)))
+       :fields (:fields d [])
+       :config (if d (merge (driver/field-defaults (:fields d)) (:driver-config p)) (:driver-config p))
+       :summary (driver/summary p descriptors)})))
+
+(defn- info-value-text [v]
+  (cond
+    (keyword? v) (name v)
+    (double? v) (if (== v (Math/rint v)) (str (long v)) (format "%.1f" v))
+    :else (str v)))
+
+(defn driver-info-text
+  "A compact line of a driver's :driver-info (output-runtime/status, 01
+   §1.5): its plain entries, a key and a value each, by key, joined by
+   \" · \" (\"buffer-ms 40 · scan-rate 30303\"); nested maps and vectors,
+   and nil, are left out. nil when nothing is left."
+  [info]
+  (when (map? info)
+    (let [entries (->> info
+                       (filter (fn [[_ v]] (or (string? v) (keyword? v) (number? v) (boolean? v))))
+                       (sort-by (comp str key))
+                       (map (fn [[k v]] (str (if (keyword? k) (name k) k) " " (info-value-text v)))))]
+      (when (seq entries)
+        (str/join " · " entries)))))
+
+(defn projector-driver-info
+  "driver-info-text of projector-id's :driver-info, or nil."
+  [context projector-id]
+  (driver-info-text (:driver-info (fx/sub-ctx context projector-output-status projector-id))))
+
+(defn addons-dir
+  "The add-ons folder's path as the OS writes it (written by :addons/loaded).
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context get-in [:backend :output :dir]))
+
+(defn- source-file-name
+  "The file name in an add-on status's :source: a path (either separator) or
+   a classpath descriptor's jar: URL."
+  [source]
+  (-> (str source)
+      (str/replace #"!/laser-show-addon\.edn$" "")
+      (str/split #"[/\\]")
+      last))
+
+(defn- addon-title
+  "\"Acme Nova 0.3.0\": the name (else the id, else fallback) and the version."
+  [{:keys [id name version]} fallback]
+  (str/join " " (remove str/blank? [(or name (some-> id str) fallback) version])))
+
+(defn addon-rows
+  "Settings → Add-ons: a row per add-on the loader tried, in its order:
+   {:title :state :state-text \"Loaded\" | \"Failed: …\" | \"Skipped: …\"
+    :drivers \"Name (:id), …\" (nil when none) :file \"acme-nova.jar\"}.
+   Depends on: backend domain"
+  [context]
+  (let [descriptors (fx/sub-ctx context driver-descriptors)]
+    (mapv (fn [{:keys [state error drivers source] :as status}]
+            (let [file (source-file-name source)]
+              {:title (addon-title status file)
+               :state state
+               :state-text (case state
+                             :loaded "Loaded"
+                             :skipped (str "Skipped: " error)
+                             (str "Failed: " error))
+               :drivers (when (seq drivers)
+                          (str/join ", " (for [id drivers]
+                                           (if-let [n (get-in descriptors [id :name])]
+                                             (str n " (" id ")")
+                                             (str id)))))
+               :file file}))
+          (fx/sub-val context get-in [:backend :output :addons] []))))
+
+(defn pending-install-rows
+  "Settings → Add-ons: the jars Install add-on… copied in since startup,
+   {:title :state-text :file}.
+   Depends on: backend domain"
+  [context]
+  (mapv (fn [{:keys [file] :as pending}]
+          (let [file-name (source-file-name file)]
+            {:title (addon-title pending file-name)
+             :state-text "Installed, loads at next start"
+             :file file-name}))
+        (fx/sub-val context get-in [:backend :output :pending-installs] [])))
+
 (defn calibrating-projector-id
   "Get the ID of the projector currently in calibration mode.
    Returns nil if no projector is calibrating.
@@ -995,34 +1145,46 @@
 (defn rig-cards
   "One map per card of the rig strip, in rig order (routing.rig): {:id
    :position (the laser's place in E, from 1; nil when it is off or excluded
-   from All) :name :host :service-id :host-label (\"10.0.0.7 #1\") :enabled?
-   :excluded? :tags :identity (rig/identity-label) :selected? :found? (false
-   once a scan this session didn't find it) :multi-output? (another output of
-   its device is a card too) :limit (its safety limit as safety/normalize
-   reads it, nil when it can't, for the thumbnail's outline)}."
+   from All) :name :host :service-id :driver :driver-installed? :host-label (driver/summary:
+   \"10.0.0.7 #1\" for IDN, \"LSPS · 127.0.0.1:7266\" for another driver)
+   :address-lines (driver/summary-parts: [\"LSPS\" \"127.0.0.1:7266\"])
+   :enabled? :excluded? :tags :identity (rig/identity-label) :selected?
+   :found? (false once a scan this session didn't find it; another driver's
+   is never not found, as no scan looks for it before output drivers D4)
+   :multi-output? (another output of its IDN device is a card too)
+   :identifiable? (it can be reached to Identify: IDN with a host, or any
+   other driver) :limit (its safety limit as safety/normalize reads it, nil
+   when it can't, for the thumbnail's outline)}."
   [context]
   (let [projectors (fx/sub-val context :projectors)
+        descriptors (fx/sub-ctx context driver-descriptors)
         inputs (rig/rig-inputs {:projectors projectors :rig (fx/sub-val context :rig)})
         position (zipmap (rig/e-order inputs) (iterate inc 1))
         selected (fx/sub-ctx context active-projector-id)
         found (when (fx/sub-val context get-in [:rig-ui :scanned?])
                 (found-outputs (fx/sub-ctx context discovered-devices)))
-        hosts (frequencies (map :host (vals projectors)))]
+        idn? #(= :idn (driver/projector-driver-id %))
+        hosts (frequencies (keep #(when (idn? %) (:host %)) (vals projectors)))]
     (mapv (fn [id]
-            (let [{:keys [host service-id tags] :as p} (get projectors id)]
+            (let [{:keys [host service-id tags] :as p} (get projectors id)
+                  idn (idn? p)]
               {:id id
                :position (position id)
                :name (rig/projector-name {:projectors projectors} id)
                :host host
                :service-id service-id
-               :host-label (if (and service-id (pos? service-id)) (str host " #" service-id) (str host))
+               :driver (driver/projector-driver-id p)
+               :driver-installed? (or (idn? p) (contains? descriptors (driver/projector-driver-id p)))
+               :host-label (driver/summary p descriptors)
+               :address-lines (driver/summary-parts p descriptors)
                :enabled? (rig/enabled? p)
                :excluded? (true? (:exclude-from-all? p))
                :tags (set tags)
                :identity (rig/identity-label p)
                :selected? (= id selected)
-               :found? (or (nil? found) (contains? found [host (or service-id 0)]))
-               :multi-output? (< 1 (get hosts host 0))
+               :found? (or (nil? found) (not idn) (contains? found [host (or service-id 0)]))
+               :multi-output? (and idn (< 1 (get hosts host 0)))
+               :identifiable? (or (not idn) (not (str/blank? (str host))))
                :limit (try (:limit (safety/normalize (:safety p))) (catch Exception _ nil))}))
           (:order inputs))))
 

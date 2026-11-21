@@ -12,6 +12,8 @@
    - selecting no tests is an error instead of a silent \"Ran 0 tests\"
    - the rig file (state.persistent/default-rig-file) is a temp folder's,
      unless -Dlaser-show.rig-file says otherwise
+   - so is the add-ons folder (output.addons/addons-dir), unless
+     -Dlaser-show.addons-dir says otherwise
 
    Directories are skipped here rather than with a default -r because
    cognitect.test-runner ORs -n with -r, so a fixed -r would stop `-n <ns>`
@@ -154,8 +156,20 @@
       (.deleteOnExit dir)
       (System/setProperty "laser-show.rig-file" (str (io/file dir "rig.edn"))))))
 
+(defn- isolate-addons-dir!
+  "Point the JVM property laser-show.addons-dir (output.addons/addons-dir) at
+   a fresh temp folder unless it is set, so no test can reach the user's own
+   add-ons (~/LaserShowProjects/addons). The folder itself isn't made: a
+   missing one is what a machine without add-ons has."
+  []
+  (when (str/blank? (System/getProperty "laser-show.addons-dir"))
+    (let [dir (.toFile (Files/createTempDirectory "laser-show-test-addons" (make-array FileAttribute 0)))]
+      (.deleteOnExit dir)
+      (System/setProperty "laser-show.addons-dir" (str (io/file dir "addons"))))))
+
 (defn -main [& args]
   (isolate-rig-file!)
+  (isolate-addons-dir!)
   (let [{:keys [options arguments errors summary]} (cli/parse-opts args cli-options)]
     (cond
       errors (do (run! println errors)

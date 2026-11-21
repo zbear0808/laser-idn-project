@@ -1,0 +1,5 @@
+{:id :test/bundles-clojure
+ :name "Add-on that bundles Clojure"
+ :version "1.0.0"
+ :api 1
+ :drivers [laser-show-test-addon.sample.driver/driver]}

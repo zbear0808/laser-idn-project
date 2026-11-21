@@ -305,7 +305,13 @@
    
    Each projector entry contains:
    - :name - User-friendly name
-   - :host - IP address
+   - :driver - The output driver it sends through (laser-show.output.driver),
+     set when it is created and never changed (OD-11). Absent for IDN, whose
+     connection keys are :host, :port, :service-id and :output-config
+   - :driver-config - Any other driver's settings, {key value} of its field
+     specs (e.g. LSPS {:host \"127.0.0.1\" :port 7266 :max-packet-bytes 1400});
+     kept as it is when the driver isn't installed (OD-10)
+   - :host - IP address (IDN)
    - :port - IDN port (default 7255)
    - :unit-id - Hardware unit ID from discovery
    - :enabled? - Whether to send output to this projector
@@ -321,7 +327,10 @@
    - :exclude-from-all? - true keeps it out of All and the automatic groups
      (laser-show.routing.rig); it still plays its own group and its groups
    - :stable-id - [:unit \"0A 1B …\" output] or [:host address output]: how a
-     scan knows it again (routing.rig/match-discovered)
+     scan knows it again (routing.rig/match-discovered). Another driver's:
+     [:manual driver projector-id] when added by hand (never matched by a
+     scan), [:device driver device-key output-id] when a scan found it
+     (output drivers D4)
    - :tags - Set of optional tags (:graphics, :crowd-scanning) for categorization
    - :status - Runtime connection status (not persisted)"
   {})
@@ -481,12 +490,17 @@
 
 
 (defstate backend
-  "Backend services state - streaming, input, logging."
+  "Backend services state - streaming, output drivers, input, logging."
   {:streaming {:default {:running? false
                          :status nil
                          :frame-stats {}
                          :cue-warnings nil}
                :doc "IDN output. :running? is the operator's intent (Stream/Stop); :status is what actually streams, pure data from backend/output_runtime.clj (the engines live there), each laser's fit-guard :load and :low? too; :cue-warnings {cell {:projector :points :fps :min-fps :scan-rate :item}}, the playing cues too heavy for a laser (the show clock's status, zones plan Z3), nil when none"}
+   :output {:default {:drivers {}
+                      :addons []
+                      :dir nil
+                      :pending-installs []}
+            :doc "The output drivers (laser-show.output.driver), as pure data: :drivers {id {:id :name :transport :fields :capabilities :discover? :addon}}, a copy of every registered driver's descriptor; :addons, a status per add-on the loader tried; :dir, the add-ons folder's path as the OS writes it. Written by :addons/loaded at startup. :pending-installs [{:id :name :version :file :replaced?}], the jars Install add-on… copied in since (each a <name>.jar.new that loads at the next start), written by :addons/installed. Never saved, never undone (the drivers themselves live in the registry)"}
    :input {:default {:midi {:enabled? true
                             :devices {}                ; Map of device-name -> device instance
                             :connected-devices #{}     ; Set of connected device names

@@ -33,6 +33,7 @@
             [laser-show.animation.safety :as safety]
             [laser-show.animation.test-pattern :as test-pattern]
             [laser-show.events.safety-guard :as guard]
+            [laser-show.output.driver :as driver]
             [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]))
 
@@ -77,32 +78,48 @@
 (defn- make-projector-config
   "Create a projector configuration map with defaults.
    
-   Required keys: :name, :host
+   Required keys: :name, and :host for IDN (no :driver, or :driver :idn)
    Optional keys: :port, :service-id, :service-name, :unit-id, :stable-id, :zone-groups, :tags, :scan-rate, :enabled?
    Without :stable-id, it is the one routing.rig/stable-id gives. A new
    projector lists no group and plays All (:exclude-from-all? false).
    
+   Any other driver (plans/2026-11-19-output-drivers/01 §5.1): :driver,
+   :driver-config (the field defaults of :fields filled in) and :stable-id
+   (required), and no :host, :port, :service-id or :output-config.
+   
    NOTE: Auto-discovered projectors default to enabled?=false.
    Manual projectors should pass enabled?=true explicitly.
    
-   Throws: IllegalArgumentException if host is nil or blank"
-  [{:keys [name host port service-id service-name unit-id stable-id zone-groups tags scan-rate enabled?]
+   Throws: IllegalArgumentException if an IDN projector's host is nil or blank"
+  [{:keys [name host port service-id service-name unit-id stable-id zone-groups tags scan-rate enabled?
+           driver driver-config fields]
     :or {port 7255 zone-groups [] tags #{} scan-rate stream/DEFAULT_SCAN_RATE enabled? false}}]
-  {:pre [(and host (not (str/blank? host)))]}
-  {:name name
-   :host host
-   :port port
-   :service-id service-id
-   :service-name service-name
-   :unit-id unit-id
-   :stable-id (or stable-id (rig/stable-id {:unit-id unit-id :service-id service-id :host host}))
-   :zone-groups zone-groups
-   :exclude-from-all? false
-   :tags tags
-   :enabled? enabled?
-   :scan-rate scan-rate
-   :output-config {:color-bit-depth 8
-                   :xy-bit-depth 16}})
+  {:pre [(or (and (keyword? driver) (not= :idn driver) (vector? stable-id))
+             (and host (not (str/blank? host))))]}
+  (if (and driver (not= :idn driver))
+    {:name name
+     :driver driver
+     :driver-config (merge (driver/field-defaults fields) driver-config)
+     :stable-id stable-id
+     :zone-groups zone-groups
+     :exclude-from-all? false
+     :tags tags
+     :enabled? enabled?
+     :scan-rate scan-rate}
+    {:name name
+     :host host
+     :port port
+     :service-id service-id
+     :service-name service-name
+     :unit-id unit-id
+     :stable-id (or stable-id (rig/stable-id {:unit-id unit-id :service-id service-id :host host}))
+     :zone-groups zone-groups
+     :exclude-from-all? false
+     :tags tags
+     :enabled? enabled?
+     :scan-rate scan-rate
+     :output-config {:color-bit-depth 8
+                     :xy-bit-depth 16}}))
 
 
 ;; Network Discovery
@@ -224,23 +241,78 @@
 ;; Manual Addition (still supported for non-discovered projectors)
 
 
+(defn- descriptor-of
+  "The descriptor of driver id in state ([:backend :output :drivers]), nil
+   when it isn't installed."
+  [state id]
+  (get-in state [:backend :output :drivers id]))
+
+(defn- added
+  "state with projector added at projector-id, selected, with the default
+   calibration, and the Add Projector dialog closed and cleared."
+  [state projector-id projector]
+  (-> state
+      (assoc-in [:projectors projector-id] projector)
+      (assoc-in [:chains :projector-effects projector-id :items] (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS))
+      (assoc-in [:projector-ui :active-projector] projector-id)
+      (assoc-in [:ui :dialogs :add-projector-manual] {:open? false})))
+
 (defn- handle-projectors-add-manual
   "Add a projector manually (not from discovery).
    Manual projectors are enabled by default. The Add Projector dialog
-   closes, and opens blank next time: a second click can't add it twice."
-  [{:keys [name host port state]}]
-  (let [projector-id (keyword (str "projector-" (System/currentTimeMillis)))
-        proj-name (or name host)
-        projector-config (make-projector-config
-                           {:name proj-name
-                            :host host
-                            :port (or port 7255)
-                            :enabled? true})]  ;; Manual = enabled by default
-    {:state (-> state
-                (assoc-in [:projectors projector-id] projector-config)
-                (assoc-in [:chains :projector-effects projector-id :items] (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS))
-                (assoc-in [:projector-ui :active-projector] projector-id)
-                (assoc-in [:ui :dialogs :add-projector-manual] {:open? false}))}))
+   closes, and opens blank next time: a second click can't add it twice.
+   
+   With :driver other than :idn (plans/2026-11-19-output-drivers/01 §5.1),
+   :driver-config is the typed field values, checked by driver/coerce-config
+   against the driver's descriptor: the defaults fill in, and with any
+   error, or a driver that isn't installed, nothing is added. Its stable id
+   is [:manual driver projector-id] (01 §5.3), so a scan never takes it for
+   another laser, and it starts at the driver's default scan rate. An
+   unnamed one is its driver's short name and a number
+   (driver/default-projector-name: \"LSPS 1\"), so its card doesn't say its
+   settings twice; an unnamed IDN one is named after its host."
+  [{:keys [name host port driver driver-config state]}]
+  (let [projector-id (keyword (str "projector-" (System/currentTimeMillis)))]
+    (if (and driver (not= :idn driver))
+      (let [descriptor (descriptor-of state driver)
+            {:keys [config errors]} (driver/coerce-config (:fields descriptor) driver-config)]
+        (if (or (nil? descriptor) (seq errors))
+          {:state state}
+          (let [projector (make-projector-config
+                            {:name name
+                             :driver driver
+                             :driver-config config
+                             :fields (:fields descriptor)
+                             :stable-id (rig/manual-stable-id driver projector-id)
+                             :scan-rate (driver/default-scan-rate descriptor)
+                             :enabled? true})
+                projector (cond-> projector
+                            (or (not (string? name)) (str/blank? name))
+                            (assoc :name (driver/default-projector-name (:projectors state) descriptor driver)))]
+            {:state (added state projector-id projector)})))
+      (let [proj-name (or name host)
+            projector-config (make-projector-config
+                               {:name proj-name
+                                :host host
+                                :port (or port 7255)
+                                :enabled? true})]  ;; Manual = enabled by default
+        {:state (added state projector-id projector-config)}))))
+
+(def ^:private manual-dialog-path [:ui :dialogs :add-projector-manual])
+
+(defn- handle-projectors-set-manual-driver
+  "The Add Projector dialog's Type (:driver): the fields typed for another
+   type are cleared; the name stays."
+  [{:keys [driver state]}]
+  (if (and (keyword? driver) (not= driver (get-in state (conj manual-dialog-path :driver) :idn)))
+    {:state (update-in state manual-dialog-path #(-> % (assoc :driver driver) (dissoc :driver-config)))}
+    {:state state}))
+
+(defn- handle-projectors-set-manual-field
+  "What is typed into one of the Add Projector dialog's driver fields (:key,
+   :value), kept as typed: Add checks it (driver/coerce-config)."
+  [{:keys [key value state]}]
+  {:state (assoc-in state (into manual-dialog-path [:driver-config key]) value)})
 
 
 ;; Projector Management
@@ -262,10 +334,11 @@
   (and (int? port) (<= 1 port 65535)))
 
 (defn- clamp-scan-rate-update
-  "updates with its :scan-rate clamped (stream/clamp-scan-rate), or without
-   it when it isn't a number."
-  [updates]
-  (if-let [rate (stream/clamp-scan-rate (:scan-rate updates))]
+  "updates with its :scan-rate clamped (driver/clamp-scan-rate: 1 000-100 000
+   pts/s, and the driver's :capabilities range when its descriptor has one),
+   or without it when it isn't a number."
+  [updates descriptor]
+  (if-let [rate (driver/clamp-scan-rate descriptor (:scan-rate updates))]
     (assoc updates :scan-rate rate)
     (dissoc updates :scan-rate)))
 
@@ -274,11 +347,16 @@
    
    A nil or blank host and a port outside 1-65535 are ignored (the other
    updates still apply), so a half-cleared field can't reach an engine. A scan
-   rate is clamped to 1 000-100 000 pts/s; one that isn't a number is ignored.
+   rate is clamped to 1 000-100 000 pts/s, and into the range of the
+   projector's driver (its :capabilities :scan-rate); one that isn't a number
+   is ignored. :driver and :driver-config are ignored: a projector's driver
+   never changes (OD-11), and its settings change through
+   :projectors/update-driver-config, which checks them.
    A projector known by its address ([:host …] stable id) is known by the new
    one after a host change; a unit's identity doesn't change."
   [{:keys [projector-id updates state]}]
-  (let [updates (cond-> updates
+  (let [descriptor (descriptor-of state (driver/projector-driver-id (get-in state [:projectors projector-id])))
+        updates (cond-> (dissoc updates :driver :driver-config)
                   (and (contains? updates :host)
                        (not (and (string? (:host updates))
                                  (not (str/blank? (:host updates))))))
@@ -288,13 +366,32 @@
                   (dissoc :port)
 
                   (contains? updates :scan-rate)
-                  clamp-scan-rate-update)
+                  (clamp-scan-rate-update descriptor))
         follow-host (fn [p]
                       (let [[kind _ s] (:stable-id p)]
                         (if (and (contains? updates :host) (= :host kind))
                           (assoc p :stable-id [:host (:host p) s])
                           p)))]
     {:state (update-in state [:projectors projector-id] #(follow-host (merge % updates)))}))
+
+(defn- handle-projectors-update-driver-config
+  "Set one of a non-IDN projector's driver fields (:key) to :value, typed
+   text or a value, checked by driver/coerce-field against the field spec in
+   its driver's descriptor (01 §5.4): only an {:ok v} applies (nil unsets
+   it, so its default applies). An invalid value, a key no field has
+   (:driver among them: OD-11), an IDN projector, one whose driver isn't
+   installed (its settings are kept as they are, OD-10), an unknown
+   projector, or the value it has change nothing."
+  [{:keys [projector-id key value state]}]
+  (let [p (get-in state [:projectors projector-id])
+        id (driver/projector-driver-id p)
+        spec (some #(when (= key (:key %)) %) (:fields (descriptor-of state id)))
+        {:keys [ok] :as result} (when (and p (not= :idn id) spec) (driver/coerce-field spec value))
+        config (:driver-config p)
+        new-config (if (some? ok) (assoc config key ok) (dissoc config key))]
+    (if (and result (not (contains? result :error)) (not= config new-config))
+      {:state (assoc-in state [:projectors projector-id :driver-config] new-config)}
+      {:state state})))
 
 
 (defn- handle-projectors-toggle-enabled
@@ -674,10 +771,13 @@
     :projectors/enable-all-by-ip (handle-projectors-enable-all-by-ip event)
     :projectors/set-service-enabled (handle-projectors-set-service-enabled event)
     :projectors/add-manual (handle-projectors-add-manual event)
+    :projectors/set-manual-driver (handle-projectors-set-manual-driver event)
+    :projectors/set-manual-field (handle-projectors-set-manual-field event)
     
     ;; Projector management
     :projectors/select-projector (handle-projectors-select-projector event)
     :projectors/update-settings (handle-projectors-update-settings event)
+    :projectors/update-driver-config (handle-projectors-update-driver-config event)
     :projectors/toggle-enabled (handle-projectors-toggle-enabled event)
     
     ;; Zone group assignment

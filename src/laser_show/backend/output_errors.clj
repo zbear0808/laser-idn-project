@@ -11,7 +11,8 @@
    skipped: the message names it), [:item-effects item-id],
    [:global-effects], [:effect instance-id], [:render cell], [:routing] (the
    show clock's resolver, routing.rig), [:show-clock]."
-  (:require [clojure.tools.logging :as log]))
+  (:require [clojure.string :as str]
+            [clojure.tools.logging :as log]))
 
 (def ^:const LOG_INTERVAL_MS 10000)
 
@@ -19,12 +20,18 @@
 
 (defn- now-ms [] (System/currentTimeMillis))
 
-(defn- message-of
-  "A failure's message: a Throwable's class and message, or a string as it is."
+(defn message
+  "A failure's message, as a projector's status shows it: an ex-info's
+   message as it is (it is written for people, as a driver's \"E-stop
+   active\" is), any other Throwable's class and message (the class says
+   what failed: \"java.net.SocketException: …\"), a string as it is. A
+   Throwable with no message is its class."
   [e]
-  (if (string? e)
-    e
-    (str (.getName (class e)) ": " (.getMessage ^Throwable e))))
+  (cond
+    (string? e) e
+    (str/blank? (.getMessage ^Throwable e)) (.getName (class e))
+    (instance? clojure.lang.ExceptionInfo e) (.getMessage ^Throwable e)
+    :else (str (.getName (class e)) ": " (.getMessage ^Throwable e))))
 
 (defn- record
   "The key's next entry after a failure at now. :log says what this failure
@@ -50,7 +57,7 @@
    once per 10 s per key."
   [key e]
   (let [now (now-ms)
-        message (message-of e)
+        message (message e)
         entry (get (swap! errors update key record now message) key)]
     (case (:log entry)
       :stack (if (string? e)

@@ -1,5 +1,6 @@
 (ns laser-show.views.tabs.projectors
-  "Projectors tab - for managing IDN laser projectors.
+  "Projectors tab - for managing laser projectors, whatever output driver
+   they send through (IDN, LSPS, an add-on's).
    
    Features:
    - The rig strip: every output a scan finds is a card, in rig order; drag
@@ -20,15 +21,18 @@
             [laser-show.common.util :as u]
             [laser-show.css.core :as css]
             [laser-show.idn.stream :as stream]
+            [laser-show.output.driver :as driver]
             [laser-show.routing.rig :as rig]
             [laser-show.views.components.visual-editors.custom-param-renderers :as custom-renderers]
             [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.views.components.safety-editor :as safety-editor]
             [laser-show.views.components.list :as list]
             [laser-show.views.components.commit-field :as commit-field]
+            [laser-show.views.components.driver-fields :as driver-fields]
             [laser-show.views.components.rig-file-status :as rig-file-status]
             [laser-show.views.components.rig-strip :as rig-strip])
-  (:import [javafx.beans.value ChangeListener]
+  (:import [javafx.application Platform]
+           [javafx.beans.value ChangeListener]
            [javafx.event Event]
            [javafx.scene Node]
            [javafx.scene.control SplitPane]
@@ -61,96 +65,189 @@
 ;; Projector Configuration Panel
 
 
+(defn- field-label
+  "A label in the settings' grid, at grid row row."
+  [row text]
+  {:fx/type :label
+   :fx/key [:label row]
+   :grid-pane/row row
+   :grid-pane/column 0
+   :text text
+   :min-width :use-pref-size
+   :style-class ["label-secondary"]})
+
+(defn- idn-cells
+  "An IDN projector's Host and Port, which apply on Enter or focus loss, on
+   grid rows row and row + 2."
+  [row {:keys [id host port]}]
+  [(field-label row "Host:")
+   {:fx/type commit-field/commit-field
+    :fx/key :idn-host
+    :grid-pane/row row
+    :grid-pane/column 1
+    :id "projector-host-field"
+    :text (or host "")
+    :pref-width 150
+    :on-commit (fn [typed]
+                 (let [new-host (str/trim typed)]
+                   (when-not (str/blank? new-host)
+                     {:event/type :projectors/update-settings
+                      :projector-id id
+                      :updates {:host new-host}})))}
+   (assoc (field-label (+ 2 row) "Port:") :id "projector-port-label")
+   {:fx/type commit-field/commit-field
+    :fx/key :idn-port
+    :grid-pane/row (+ 2 row)
+    :grid-pane/column 1
+    :id "projector-port-field"
+    :text (str (or port 7255))
+    :pref-width 60
+    :on-commit (fn [typed]
+                 (when-let [new-port (parse-port typed)]
+                   {:event/type :projectors/update-settings
+                    :projector-id id
+                    :updates {:port new-port}}))}])
+
+(defn- humanise-key
+  "A settings key as a label: :max-packet-bytes → \"Max packet bytes\",
+   :fast? → \"Fast\", :acme/serial → \"Serial\"."
+  [k]
+  (let [s (-> (if (keyword? k) (name k) (str k))
+              (str/replace #"\?$" "")
+              (str/replace "-" " "))]
+    (str/capitalize s)))
+
+(defn- setting-value-text [v]
+  (cond
+    (string? v) v
+    (keyword? v) (name v)
+    :else (pr-str v)))
+
+(defn- kept-settings-lines
+  "A driver that isn't installed: its kept :driver-config as read-only
+   \"Serial: NV-00123\" lines, in the config's order."
+  [config]
+  (mapv (fn [[k v]] (str (humanise-key k) ": " (setting-value-text v))) config))
+
+(defn- missing-driver-cells
+  "For a driver that isn't installed, why, and its settings as they are
+   kept, read only (OD-10), across the grid from row row."
+  [row driver config]
+  [{:fx/type :label
+    :fx/key :driver-missing
+    :grid-pane/row row
+    :grid-pane/column 0
+    :grid-pane/column-span 2
+    :id "projector-driver-missing"
+    :text (str "Output driver " driver " is not installed. Its settings are kept.")
+    :wrap-text true
+    :max-width 300
+    :min-height :use-pref-size
+    :style-class ["label-warning"]}
+   {:fx/type :label
+    :fx/key :driver-config-text
+    :grid-pane/row (+ 2 row)
+    :grid-pane/column 0
+    :grid-pane/column-span 2
+    :id "projector-driver-config-text"
+    :text (str/join "\n" (kept-settings-lines config))
+    :wrap-text true
+    :max-width 300
+    :min-height :use-pref-size
+    :style-class ["label-secondary"]}])
+
+(defn- connection-cells
+  "The driver's settings from grid row row: IDN's Host and Port, another
+   driver's fields (views/components/driver_fields, each one
+   :projectors/update-driver-config), or for one that isn't installed
+   missing-driver-cells."
+  [row projector {:keys [idn? installed? driver fields config]}]
+  (cond
+    idn? (idn-cells row projector)
+    installed? (driver-fields/grid-cells {:start-row row
+                                          :key driver
+                                          :fields fields
+                                          :values config
+                                          :mode :commit
+                                          :event {:event/type :projectors/update-driver-config
+                                                  :projector-id (:id projector)}})
+    :else (missing-driver-cells row driver config)))
+
 (defn- projector-basic-settings
-  "Basic projector settings (name, host, port, scan rate, service info)."
-  [{:keys [projector]}]
-  (let [{:keys [id name host port scan-rate service-id service-name]} projector
-        stored-rate (or scan-rate stream/DEFAULT_SCAN_RATE)]
-    {:fx/type :v-box
-     :spacing 8
-     :children (vec
-                 (concat
-                   ;; Name field
-                   [{:fx/type :h-box
-                     :spacing 8
-                     :alignment :center-left
-                     :children [{:fx/type :label
-                                 :text "Name:"
-                                 :pref-width 50
-                                 :style-class ["label-secondary"]}
-                                {:fx/type :text-field
-                                 :id "projector-name-field"
-                                 :text (or name "")
-                                 :pref-width 200
-                                 :style-class ["text-field-dark"]
-                                 :on-text-changed {:event/type :projectors/update-settings
-                                                   :projector-id id
-                                                   :updates {:name :fx/event}}}]}
-                    ;; Host and port
-                    {:fx/type :h-box
-                     :spacing 8
-                     :alignment :center-left
-                     :children [{:fx/type :label
-                                 :text "Host:"
-                                 :pref-width 50
-                                 :style-class ["label-secondary"]}
-                                {:fx/type commit-field/commit-field
-                                 :id "projector-host-field"
-                                 :text (or host "")
-                                 :pref-width 150
-                                 :on-commit (fn [typed]
-                                              (let [new-host (str/trim typed)]
-                                                (when-not (str/blank? new-host)
-                                                  {:event/type :projectors/update-settings
-                                                   :projector-id id
-                                                   :updates {:host new-host}})))}
-                                {:fx/type :label
-                                 :id "projector-port-label"
-                                 :text "Port:"
-                                 :min-width :use-pref-size
-                                 :style-class ["label-secondary"]}
-                                {:fx/type commit-field/commit-field
-                                 :id "projector-port-field"
-                                 :text (str (or port 7255))
-                                 :pref-width 60
-                                 :on-commit (fn [typed]
-                                              (when-let [new-port (parse-port typed)]
-                                                {:event/type :projectors/update-settings
-                                                 :projector-id id
-                                                 :updates {:port new-port}}))}]}
-                    ;; Scan rate: sets how long each frame takes to draw
-                    {:fx/type :h-box
-                     :spacing 8
-                     :alignment :center-left
-                     :children [{:fx/type :label
-                                 :text "Scan rate:"
-                                 :style-class ["label-secondary"]}
-                                {:fx/type commit-field/commit-field
-                                 :id "projector-scan-rate-field"
-                                 :text (str stored-rate)
-                                 :pref-width 80
-                                 :on-commit (fn [typed]
-                                              (let [rate (stream/clamp-scan-rate (parse-scan-rate typed))]
-                                                (when (and rate (not= rate stored-rate))
-                                                  {:event/type :projectors/update-settings
-                                                   :projector-id id
-                                                   :updates {:scan-rate rate}})))}
-                                {:fx/type :label
-                                 :text "pts/s"
-                                 :style-class ["label-secondary"]}]}]
+  "Basic projector settings, their labels and fields in one grid (two grid
+   rows each, as driver-fields/grid-cells, whose second is a field's
+   problem): name, its output driver (read only: it is set when the
+   projector is added, OD-11) and the driver's settings (IDN's host and
+   port, or another driver's fields), scan rate (kept in the driver's
+   range), service info."
+  [{:keys [fx/context projector]}]
+  (let [{:keys [id name scan-rate service-id service-name]} projector
+        {:keys [idn? installed? driver fields] :as info} (fx/sub-ctx context subs/projector-driver id)
+        descriptor (fx/sub-ctx context subs/driver-descriptor driver)
+        stored-rate (or scan-rate stream/DEFAULT_SCAN_RATE)
+        rate-row (+ 4 (if (and installed? (not idn?)) (* 2 (count fields)) 4))
+        output-row (+ 2 rate-row)]
+    {:fx/type :grid-pane
+     :id "projector-settings-grid"
+     :hgap 8
+     :vgap 4
+     :children (-> [(field-label 0 "Name:")
+                    {:fx/type :text-field
+                     :fx/key :name
+                     :grid-pane/row 0
+                     :grid-pane/column 1
+                     :id "projector-name-field"
+                     :text (or name "")
+                     :pref-width 200
+                     :style-class ["text-field-dark"]
+                     :on-text-changed {:event/type :projectors/update-settings
+                                       :projector-id id
+                                       :updates {:name :fx/event}}}
+                    ;; Its driver: fixed when it was added
+                    (field-label 2 "Type:")
+                    {:fx/type :label
+                     :fx/key :type
+                     :grid-pane/row 2
+                     :grid-pane/column 1
+                     :id "projector-driver-label"
+                     :text (:name info)
+                     :tooltip {:fx/type :tooltip
+                               :text "Set when the projector was added. To reach it another way, add a new projector."
+                               :wrap-text true
+                               :max-width 320}
+                     :style-class ["label-bold"]}]
+                   (into (connection-cells 4 projector info))
+                   ;; Scan rate: sets how long each frame takes to draw
+                   (conj (field-label rate-row "Scan rate:")
+                         {:fx/type :h-box
+                          :fx/key :scan-rate
+                          :grid-pane/row rate-row
+                          :grid-pane/column 1
+                          :spacing 8
+                          :alignment :center-left
+                          :children [{:fx/type commit-field/commit-field
+                                      :id "projector-scan-rate-field"
+                                      :text (str stored-rate)
+                                      :pref-width 80
+                                      :on-commit (fn [typed]
+                                                   (let [rate (driver/clamp-scan-rate descriptor (parse-scan-rate typed))]
+                                                     (when (and rate (not= rate stored-rate))
+                                                       {:event/type :projectors/update-settings
+                                                        :projector-id id
+                                                        :updates {:scan-rate rate}})))}
+                                     {:fx/type :label
+                                      :text "pts/s"
+                                      :style-class ["label-secondary"]}]})
                    ;; Service info (if multi-output device)
-                   (when (and service-id (pos? service-id))
-                     [{:fx/type :h-box
-                       :spacing 8
-                       :alignment :center-left
-                       :children [{:fx/type :label
-                                   :text "Output:"
-                                   :pref-width 50
-                                   :style-class ["label-secondary"]}
-                                  {:fx/type :label
-                                   :text (str "Service #" service-id
-                                             (when service-name (str " - " service-name)))
-                             :style (str "-fx-text-fill: " (css/selection-bg) "; -fx-font-size: 11;")}]}])))}))
+                   (cond-> (and idn? service-id (pos? service-id))
+                     (conj (field-label output-row "Output:")
+                           {:fx/type :label
+                            :fx/key :service
+                            :grid-pane/row output-row
+                            :grid-pane/column 1
+                            :text (str "Service #" service-id
+                                       (when service-name (str " - " service-name)))
+                            :style (str "-fx-text-fill: " (css/selection-bg) "; -fx-font-size: 11;")})))}))
 
 
 ;; The rig: identity, tags and Exclude from All (plans/2026-11-19-zones/04 §7)
@@ -703,14 +800,21 @@
 (defn- follow-default-divider!
   "Until split's divider is moved, put it at default-divider whenever
    split's height changes: when it is first laid out, and as the window is
-   resized."
+   resized; and whenever the strip's min or max height does, as its cards
+   grow a line or lose one (rig-strip/fit-to-cards!)."
   [^SplitPane split]
-  (.addListener (.heightProperty split)
-                (reify ChangeListener
-                  (changed [_ _ _ _]
-                    (when-not (moved? split)
-                      (when-let [position (default-divider split)]
-                        (.setDividerPositions split (double-array [position]))))))))
+  (let [follow! (fn []
+                  (when-not (moved? split)
+                    (when-let [position (default-divider split)]
+                      (.setDividerPositions split (double-array [position])))))
+        on-height (reify ChangeListener (changed [_ _ _ _] (follow!)))
+        ;; the strip's sizes change while it is laid out, where the split
+        ;; pane would put its divider back: after that pass
+        on-strip (reify ChangeListener (changed [_ _ _ _] (Platform/runLater follow!)))]
+    (.addListener (.heightProperty split) on-height)
+    (when-let [^Region strip (first (.getItems split))]
+      (.addListener (.minHeightProperty strip) on-strip)
+      (.addListener (.maxHeightProperty strip) on-strip))))
 
 (defn- on-divider?
   "Is node one of split's dividers, or inside one?"

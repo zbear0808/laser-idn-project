@@ -54,7 +54,7 @@
                                     :xy-bit-depth 16}}
           engine (me/create-engine-for-projector :test-proj projector)]
       (is (some? engine) "Engine should be created with valid host")
-      (is (= "192.168.1.100" (:target-host engine)) "Engine should have correct host"))))
+      (is (= "192.168.1.100" (get-in engine [:driver-config :host])) "Engine should have correct host"))))
 
 (deftest create-engine-with-nil-host-test
   (testing "Returns nil when projector has nil host"
@@ -139,8 +139,8 @@
                                     :xy-bit-depth 16}}
           engine (me/create-engine-for-projector :test-proj projector)]
       (is (some? engine) "Engine should be created")
-      (is (= 7 (:service-id engine)) "Engine should have service-id 7")
-      (is (= 7 (:channel-id engine)) "Engine should have channel-id equal to service-id"))))
+      (is (= 7 (get-in engine [:driver-config :service-id])) "Engine should have service-id 7")
+      (is (= 7 (get-in engine [:driver-config :channel-id])) "Engine should have channel-id equal to service-id"))))
 
 (deftest engine-default-channel-id-when-no-service-id-test
   (testing "Engine uses 0 for both channel-id and service-id when not specified"
@@ -151,8 +151,8 @@
                      :zone-groups [:all]}
           engine (me/create-engine-for-projector :test-proj projector)]
       (is (some? engine) "Engine should be created")
-      (is (= 0 (:service-id engine)) "Engine should default to service-id 0")
-      (is (= 0 (:channel-id engine)) "Engine should default to channel-id 0"))))
+      (is (= 0 (get-in engine [:driver-config :service-id])) "Engine should default to service-id 0")
+      (is (= 0 (get-in engine [:driver-config :channel-id])) "Engine should default to channel-id 0"))))
 
 (deftest engine-uses-the-projector-scan-rate-test
   (let [scan-rate #(:scan-rate (me/create-engine-for-projector :test-proj (merge {:host "192.168.1.100"} %)))]
@@ -185,7 +185,7 @@
                              :zone-groups [:left]}}})
     
     (let [engines (me/create-engines)
-          channel-ids (set (map :channel-id (vals engines)))]
+          channel-ids (set (map (comp :channel-id :driver-config) (vals engines)))]
       (is (= 3 (count engines)) "Should create 3 engines")
       (is (= #{1 2 10} channel-ids) "Each engine should have unique channel-id from service-id"))))
 

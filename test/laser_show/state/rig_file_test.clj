@@ -470,3 +470,62 @@
       (is (not (contains? (rig-file/group-copy (-> state
                                                     (assoc-in [:rig-file :group-copy :group-old] {:id :group-old :name "Old"})))
                           :group-old))))))
+
+;; Projectors with another output driver (plans/2026-11-19-output-drivers D2)
+
+(def ^:private bridge
+  "An LSPS laser added by hand on this rig."
+  {:name "Bridge" :driver :lsps :driver-config {:host "127.0.0.1" :port 7266 :max-packet-bytes 1400}
+   :stable-id [:manual :lsps :projector-1763560000000] :enabled? false :zone-groups [] :exclude-from-all? false
+   :tags #{} :scan-rate 25000})
+
+(deftest bring-lasers-keeps-this-rigs-driver-test
+  (let [here (assoc (domains/build-initial-state) :projectors {:projector-1763560000000 bridge})
+        ;; The show's copy of the same laser: its setup, and the bridge it reached there
+        show-bridge (assoc bridge :name "Bridge (Friday)" :enabled? true :scan-rate 30000
+                           :driver-config {:host "10.0.0.20" :port 7300 :max-packet-bytes 1200}
+                           :safety {:limit [-0.5 -0.5 0.5 0.5] :blocked []})
+        hardware {:projectors {:projector-1763560000000 show-bridge}
+                  :rig {:order [:projector-1763560000000]}}
+        set-up (rig-file/set-up-from-show here hardware {} (rig-file/pin-map here hardware))
+        laser (get-in set-up [:projectors :projector-1763560000000])]
+    (is (= {:driver :lsps :driver-config (:driver-config bridge) :stable-id (:stable-id bridge)}
+           (select-keys laser [:driver :driver-config :stable-id]))
+        "its driver and the driver's settings are connection data: this rig's")
+    (is (= {:name "Bridge (Friday)" :enabled? true :scan-rate 30000 :safety {:limit [-0.5 -0.5 0.5 0.5] :blocked []}}
+           (select-keys laser [:name :enabled? :scan-rate :safety]))
+        "everything else is the show's")
+    (testing "an IDN laser here never takes a driver from the show, nor another driver's laser IDN's address"
+      (let [idn-here (assoc (domains/build-initial-state) :projectors {:projector-10-0-0-5-1 laser-l})
+            odd {:projectors {:projector-10-0-0-5-1 (assoc laser-l :driver :lsps :driver-config {:host "h"}
+                                                                   :name "Odd")}
+                 :rig {:order [:projector-10-0-0-5-1]}}
+            p (get-in (rig-file/set-up-from-show idn-here odd {} (rig-file/pin-map idn-here odd))
+                      [:projectors :projector-10-0-0-5-1])]
+        (is (= "Odd" (:name p)))
+        (is (not (contains? p :driver)))
+        (is (not (contains? p :driver-config)))
+        (is (= "10.0.0.5" (:host p)))
+        (let [lsps-here (assoc (domains/build-initial-state) :projectors {:projector-1763560000000 bridge})
+              idn-show {:projectors {:projector-1763560000000 (assoc laser-l :stable-id (:stable-id bridge))}
+                        :rig {:order [:projector-1763560000000]}}
+              p (get-in (rig-file/set-up-from-show lsps-here idn-show {} (rig-file/pin-map lsps-here idn-show))
+                        [:projectors :projector-1763560000000])]
+          (is (= {:driver :lsps :driver-config (:driver-config bridge)} (select-keys p [:driver :driver-config])))
+          (is (not-any? #(contains? p %) [:host :port :service-id :unit-id])))))))
+
+(deftest pin-map-hostless-projector-test
+  (let [here (assoc (domains/build-initial-state)
+                    :projectors {:projector-1763560000000 laser-l
+                                 :projector-1763560000000-2 (assoc laser-l :stable-id [:unit "AB" 1])})
+        hardware {:projectors {:projector-1763560000000 bridge
+                               :projector-1763560099999 (assoc bridge :stable-id [:manual :lsps :projector-1763560099999])}}
+        pins (rig-file/pin-map here hardware)]
+    (is (= {:projector-1763560000000 :projector-1763560000000-3
+            :projector-1763560099999 :projector-1763560099999}
+           pins)
+        "a taken id gets the show's own id with -2, -3 …, never :projector--0 from a missing host")
+    (is (= pins (rig-file/pin-map here hardware)) "the same every time it is worked out")
+    (testing "one here with the same stable id is matched"
+      (let [here (assoc-in here [:projectors :projector-77] (assoc bridge :name "Bridge here"))]
+        (is (= :projector-77 (get (rig-file/pin-map here hardware) :projector-1763560000000)))))))

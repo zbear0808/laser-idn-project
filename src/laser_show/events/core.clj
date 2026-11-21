@@ -51,9 +51,11 @@
    - State updates preserve cljfx context memoization
    - Heavy event processing doesn't block UI rendering"
   (:require [cljfx.api :as fx]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
             [laser-show.dev-config :as dev-config]
+            [laser-show.output.addons :as addons]
             [laser-show.state.core :as state]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.state.persistent :as persistent]
@@ -73,7 +75,10 @@
            [javafx.application Platform]
            [java.awt Desktop Desktop$Action]
            [java.io File]
-           [java.net URI]))
+           [java.net URI]
+           [java.nio.file Files]
+           [java.nio.file.attribute FileAttribute]
+           [java.util.concurrent TimeUnit]))
 
 ;; Co-effects (inject data INTO events)
 ;; Co-effect functions take NO arguments and return data to inject.
@@ -305,6 +310,29 @@
       (catch Throwable t
         (log/error "Input learn failed:" (.getMessage t))))))
 
+;; Add-on Effects
+
+(defn- effect-addons-install
+  "Effect that installs an add-on jar (laser-show.output.addons/install!:
+   checked, then copied into dir as <name>.jar.new, which loads at the next
+   start), in a future. Then dispatches :addons/installed {:file :replaced?
+   :descriptor} or :addons/install-failed {:file-path :error}.
+   Args: {:file-path the jar :dir the add-ons folder (default addons-dir)}"
+  [{:keys [file-path dir]} dispatch]
+  (future
+    (dispatch
+     (try
+       (let [{:keys [^File file replaced? descriptor]} (addons/install! file-path (or dir (addons/addons-dir)))]
+         {:event/type :addons/installed
+          :file (.getAbsolutePath file)
+          :replaced? replaced?
+          :descriptor descriptor})
+       (catch Throwable t
+         (log/warn "Could not install add-on" file-path ":" (.getMessage t))
+         {:event/type :addons/install-failed
+          :file-path file-path
+          :error (or (ex-message t) (.getName (class t)))})))))
+
 ;; System Effects
 
 (defonce ^{:private true
@@ -332,6 +360,73 @@
         (log/warn "Opening URLs is not supported on this platform. URL:" url))
       (catch Throwable t
         (log/error "Could not open URL" url ":" (.getMessage t))))))
+
+(defn- desktop-open!
+  "Open dir in the OS's file manager through java.awt.Desktop: true, or
+   false when this platform has no Desktop OPEN."
+  [^File dir]
+  (if (and (Desktop/isDesktopSupported)
+           (.isSupported (Desktop/getDesktop) Desktop$Action/OPEN))
+    (do (.open (Desktop/getDesktop) dir) true)
+    false))
+
+(defn- xdg-open!
+  "Open dir with xdg-open (Linux desktops without Desktop OPEN): true when
+   it ran and exited with 0 within 5 s."
+  [^File dir]
+  (let [process (.start (ProcessBuilder. ^java.util.List ["xdg-open" (.getAbsolutePath dir)]))]
+    (and (.waitFor process 5 TimeUnit/SECONDS)
+         (zero? (.exitValue process)))))
+
+(def ^:private folder-opener
+  "The platform calls :system/open-folder makes."
+  {:desktop-open desktop-open!
+   :xdg-open xdg-open!
+   :os #(:os (addons/current-platform))})
+
+(defonce ^{:private true
+           :doc "Stand-ins for folder-opener's calls (see set-folder-opener!)."}
+  !folder-opener
+  (atom nil))
+
+(defn set-folder-opener!
+  "Replace some of the platform calls :system/open-folder makes, for tests:
+   {:desktop-open (fn [dir] bool) :xdg-open (fn [dir] bool) :os (fn [] os)};
+   nil puts the real ones back."
+  [opener]
+  (reset! !folder-opener opener))
+
+(defn- try-open
+  "(open dir), false when it throws (logged)."
+  [how open dir]
+  (try
+    (boolean (open dir))
+    (catch Throwable t
+      (log/warn "Could not open" (.getAbsolutePath ^File dir) "with" how ":" (.getMessage t))
+      false)))
+
+(defn- effect-system-open-folder
+  "Effect that opens a folder in the OS's file manager, off the agent
+   thread (plans/2026-11-19-output-drivers/01 §4.4): it makes the folder if
+   it is missing, then tries Desktop/open when OPEN is supported, then
+   xdg-open on Linux. If none of that works it dispatches :on-failed with
+   :path, the folder's full path, for a notice.
+   Args: {:path :on-failed}. Returns the future."
+  [{:keys [path on-failed]} dispatch]
+  (future
+    (let [dir (io/file (or path (addons/addons-dir)))
+          {:keys [desktop-open xdg-open os]} (merge folder-opener @!folder-opener)
+          opened? (try
+                    (Files/createDirectories (.toPath dir) (make-array FileAttribute 0))
+                    (or (try-open "Desktop" desktop-open dir)
+                        (and (= :linux (os)) (try-open "xdg-open" xdg-open dir)))
+                    (catch Throwable t
+                      (log/warn "Could not make the folder" (.getAbsolutePath dir) ":" (.getMessage t))
+                      false))]
+      (when-not opened?
+        (log/info "Could not open" (.getAbsolutePath dir) "; showing its path")
+        (when on-failed
+          (dispatch (assoc on-failed :path (.getAbsolutePath dir))))))))
 
 (def ^:private dev-reload-fns
   {:styles 'laser-show.css.reload/reload-all-styles!
@@ -535,9 +630,15 @@
    - :project/load - read project zip from disk, then :on-loaded (inline)
    - :rig/write - hand the rig file's contents to the rig writer; :rig/written
      or :rig/write-failed comes back (later, rig-writer thread)
+   - :addons/install - check an add-on jar and copy it into the add-ons
+     folder as <name>.jar.new; :addons/installed or :addons/install-failed
+     comes back (later, future)
    - :fx/show-file-chooser - show file open/save dialog (later, FX thread)
    - :system/exit - end the application through the fn registered with set-exit-fn!
    - :system/open-url - open a URL in the system browser
+   - :system/open-folder - make a folder and open it in the file manager
+     (Desktop, then xdg-open on Linux); :on-failed with its :path comes back
+     when neither can (later, future)
    - :dev/reload - reload :styles or :app code (dev only)
    - :clipboard/copy-effects - copy effects to clipboard
    - :clipboard/paste-effects - paste effects from clipboard (effects grid) (inline)
@@ -558,11 +659,14 @@
    :project/load effect-load-project
    ;; The rig file
    :rig/write effect-rig-write
+   ;; Add-ons
+   :addons/install effect-addons-install
    ;; File chooser dialog
    :fx/show-file-chooser effect-show-file-chooser
    ;; System
    :system/exit effect-system-exit
    :system/open-url effect-system-open-url
+   :system/open-folder effect-system-open-folder
    :dev/reload effect-dev-reload
    ;; Clipboard effects for effect chain editor
    :clipboard/copy-effects effect-clipboard-copy-effects

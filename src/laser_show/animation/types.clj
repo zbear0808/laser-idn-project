@@ -13,12 +13,12 @@
    
    This allows effects and calculations to work with full floating-point
    precision. Conversion to hardware-specific formats (8-bit or 16-bit)
-   happens at the IDN output stage.
+   happens at the output driver (IDN's is idn/driver.clj).
    
    IDN-Stream Specification Compliance (Revision 002, July 2025)
    =============================================================
    
-   At output time, LaserPoint values are converted to IDN-Stream format:
+   For an IDN projector, LaserPoint values are converted to IDN-Stream format:
    
    | LaserPoint Index | IDN-Stream Range    | Configurable |
    |------------------|---------------------|--------------|

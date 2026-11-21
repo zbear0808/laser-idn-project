@@ -5,16 +5,20 @@
    Port and Scan rate fields apply on Enter or focus loss, not per keystroke."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.app :as app]
             [laser-show.backend.multi-engine :as me]
             [laser-show.backend.output-runtime :as output-runtime]
-            [laser-show.backend.streaming-engine :as se]
             [laser-show.css.core :as css]
+            [laser-show.dev-config :as dev-config]
             [laser-show.events.core :as events]
+            [laser-show.idn.driver :as idn-driver]
             [laser-show.idn.fake-dac :as dac]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
   (:import [java.net UnknownHostException]
+           [javafx.scene Node Parent]
+           [javafx.scene.control Labeled]
            [javafx.scene.paint Color]
            [javafx.scene.shape Circle]))
 
@@ -38,11 +42,11 @@
 (defn- with-unresolvable
   "Run f with host failing to resolve, as a DNS lookup would."
   [host f]
-  (let [resolve! @#'se/target-address!]
-    (with-redefs-fn {#'se/target-address! (fn [engine]
-                                            (if (= host (:target-host engine))
-                                              (throw (UnknownHostException. (str host ": unknown host")))
-                                              (resolve! engine)))}
+  (let [resolve! @#'idn-driver/target-address!]
+    (with-redefs-fn {#'idn-driver/target-address! (fn [engine]
+                                                    (if (= host (:target-host engine))
+                                                      (throw (UnknownHostException. (str host ": unknown host")))
+                                                      (resolve! engine)))}
       f)))
 
 (defn- label-text []
@@ -76,6 +80,50 @@
         (ui/assert-text! "#streaming-status-label" "Streaming to 1 of 2 · 1 error")
         (ui/click! robot "#stream-btn")
         (ui/assert-text! "#streaming-status-label" "Not streaming")))))
+
+(deftest status-bar-labels-are-never-cut-off-test
+  ;; At 1200 px in dev mode, with two projectors streaming at different rates
+  ;; and three failing, the output summary ("60.4–60.7 fps · 3 errors") took
+  ;; the bar past its width, and every label was cut off ("Ba…", "Effec…")
+  (with-redefs [dev-config/dev-mode? (constantly true)]
+    (app/start-test!)
+    (ui/sync-fx!)
+    (ui/set-size! (ui/main-window) 1200 800)
+    (state/swap-state! assoc-in [:chains :cue-chains [0 0]]
+                       {:items [{:id (random-uuid) :type :preset :preset-id :circle :enabled? true :effects []}]})
+    (events/dispatch! {:event/type :grid/trigger-cell :col 0 :row 0})
+    (ui/wait-for! #(some? (ui/query "#status-playing")))
+    (let [p (fn [n] {:name n :host "10.0.0.9" :enabled? true :zone-groups [:all]})]
+      (state/swap-state!
+       #(-> %
+            (assoc :projectors {:a (p "Busy one") :b (p "Nova stage left") :c (p "Reopen one") :d (p "Status one") :e (p "Stuck one")})
+            (assoc-in [:backend :streaming :running?] true)
+            (assoc-in [:backend :streaming :frame-stats]
+                      {:avg-base-us 346 :avg-effects-us 0 :avg-latency-us 346 :p95-latency-us 1043 :max-latency-us 2221
+                       :avg-idn-us 597 :p95-idn-us 1483 :max-idn-us 10230})
+            (assoc-in [:backend :streaming :status]
+                      {:engines 5 :wanted 5 :pending? false
+                       :projectors {:a {:state :error :error "In use by ShowCtl on 10.0.0.3" :busy? true}
+                                    :b {:state :error :error "Output driver :acme/nova is not installed"}
+                                    :c {:state :streaming :fps 60.7}
+                                    :d {:state :streaming :fps 60.4}
+                                    :e {:state :error :kind :stuck :error "The output driver is not responding"}}}))))
+    (ui/wait-for! #(= "60.4–60.7 fps · 3 errors" (ui/node-text "#status-output-health")))
+    (let [labels (ui/on-fx-thread
+                  #(vec (filter (fn [n] (and (instance? Labeled n) (.isVisible ^Node n) (seq (.getText ^Labeled n))))
+                                (tree-seq (fn [n] (instance? Parent n))
+                                          (fn [^Parent n] (seq (.getChildrenUnmodifiable n)))
+                                          (ui/query "#status-bar")))))
+          summary (ui/query "#status-output-health")]
+      (is (<= 12 (count labels)) "Playing, the frame times and Output, each a label and a value")
+      (doseq [^Labeled l labels :when (not= summary l)]
+        (is (= (.getText l) (ui/shown-text l)) (str "\"" (.getText l) "\" isn't cut off")))
+      (testing "the output summary gives way first, all of it in its tooltip"
+        (is (str/includes? (str (ui/on-fx-thread #(some-> (.getTooltip ^Labeled summary) .getText)))
+                           "60.4–60.7 fps · 3 errors"))
+        (is (str/includes? (str (ui/on-fx-thread #(some-> (.getTooltip ^Labeled summary) .getText)))
+                           "Stuck one: The output driver is not responding")
+            "and the errors")))))
 
 (deftest no-projectors-enabled-links-to-the-projectors-tab-test
   (let [robot (ui/robot)]

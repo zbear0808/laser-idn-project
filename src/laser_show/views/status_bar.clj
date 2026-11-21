@@ -20,14 +20,21 @@
 (defn status-item
   "A single status bar item with label and value. :id and :tooltip (text)
    go on the value; :value-color replaces its text colour; :size is the text
-   size in px (default text-size)."
-  [{:keys [id label value value-width monospace? alignment value-color tooltip size]
+   size in px (default text-size).
+
+   When the bar is too narrow for every item, the bar's HBox shrinks every
+   item that can shrink by the same amount, so the labels and values keep
+   their width (or :value-width) and never cut off: only a value with
+   :shrink? gives way, ending in \"…\", the whole of it in its tooltip
+   (:tooltip, else the value)."
+  [{:keys [id label value value-width monospace? alignment value-color tooltip size shrink?]
     :or {alignment :center-left size text-size}}]
   {:fx/type :h-box
    :spacing 4
    :alignment :center-left
    :children [{:fx/type :label
                :text (str label ":")
+               :min-width :use-pref-size
                :style (str "-fx-text-fill: " (css/text-muted) "; -fx-font-size: " size ";")}
               (cond-> {:fx/type :label
                        :text (str value)
@@ -36,7 +43,8 @@
                                    (when monospace?
                                      " -fx-font-family: 'Consolas', 'Monaco', monospace;"))}
                 id (assoc :id id)
-                tooltip (assoc :tooltip {:fx/type :tooltip :text tooltip})
+                (not shrink?) (assoc :min-width :use-pref-size)
+                (or tooltip shrink?) (assoc :tooltip {:fx/type :tooltip :text (or tooltip (str value))})
                 value-width (assoc :min-width value-width
                                    :pref-width value-width
                                    :alignment alignment))]})
@@ -69,6 +77,9 @@
                   {:fx/type :label
                    :id "status-notice-text"
                    :text text
+                   ;; it gives way when the bar is too narrow, as the output's
+                   ;; health does: all of it here
+                   :tooltip {:fx/type :tooltip :text text :wrap-text true :max-width 480}
                    :style (str "-fx-text-fill: " (color) "; -fx-font-size: " text-size ";")}]})
     {:fx/type :label :text "" :pref-width 0}))
 
@@ -110,7 +121,8 @@
   (format "%5dµs" (long (or us 0))))
 
 (defn frame-stats-status
-  "Status showing frame generation latency stats and IDN streaming stats."
+  "Status showing frame generation latency stats and the output's send
+   times (every output driver's)."
   [{:keys [fx/context]}]
   (let [{:keys [avg-base-us avg-effects-us avg-latency-us
                 p95-latency-us max-latency-us
@@ -150,8 +162,10 @@
                            :monospace? true
                            :size 11}]
                   avg-idn-us
+                  ;; the output loop's time for a frame, whatever its driver
+                  ;; (streaming-engine records it for every one)
                   (conj {:fx/type status-item
-                         :label "IDN"
+                         :label "Send"
                          :value (str (format-us avg-idn-us)
                                      " (p95: " (format-us p95-idn-us)
                                      ", max: " (format-us max-idn-us) ")")
@@ -188,7 +202,9 @@
         nil))))
 
 (defn output-health
-  "The output's health (output-health-text); the errors in its tooltip."
+  "The output's health (output-health-text): the first thing to give way
+   when the bar is too narrow (status-item's :shrink?), all of it and the
+   errors in its tooltip."
   [{:keys [fx/context]}]
   (let [{:keys [errors] :as connection} (fx/sub-ctx context subs/connection-status)
         text (output-health-text connection (:projectors (fx/sub-ctx context subs/streaming-status)))]
@@ -198,7 +214,8 @@
        :label "Output"
        :value text
        :value-color (when (seq errors) (css/red))
-       :tooltip (when (seq errors) (str/join "\n" errors))}
+       :shrink? true
+       :tooltip (str/join "\n" (cons text errors))}
       {:fx/type :label :text "" :pref-width 0})))
 
 
@@ -219,6 +236,7 @@
                    :style-class [(if dirty? "icon-warning" "icon-success")]}
                   {:fx/type :label
                    :text (if dirty? "Modified" "Saved")
+                   :min-width :use-pref-size
                    :style (str "-fx-text-fill: "
                               (if dirty? (css/accent-warning) (css/accent-success))
                               "; -fx-font-size: " text-size ";")}]}

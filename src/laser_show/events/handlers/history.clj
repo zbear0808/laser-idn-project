@@ -176,6 +176,7 @@
    :projectors/set-exclude-from-all "Exclude From All"
    :projectors/set-tag "Change Tags"
    :projectors/set-fit "Change Fit Guard"
+   :projectors/update-driver-config "Change Output Settings"
    :rig/move-projector "Move Projector"
    :rig/nudge-projector "Move Projector"
    :rig/set-middle "Change Middle Laser"

@@ -1,0 +1,5 @@
+{:id :test/sample
+ :name "Sample add-on"
+ :version "1.0.0"
+ :api 1
+ :drivers [laser-show-test-addon.sample.driver/driver]}

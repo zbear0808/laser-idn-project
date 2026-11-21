@@ -1,0 +1,6 @@
+{:id :test/taken-id
+ :name "Taken id add-on"
+ :version "1.0.0"
+ :api 1
+ :drivers [laser-show-test-addon.taken-id.driver/fresh
+           laser-show-test-addon.taken-id.driver/taken]}

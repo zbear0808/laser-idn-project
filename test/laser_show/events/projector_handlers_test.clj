@@ -16,6 +16,7 @@
    [laser-show.events.handlers.projector :as projectors]
    [laser-show.events.safety-guard :as guard]
    [laser-show.animation.fit-guard :as fit-guard]
+   [laser-show.output.driver :as driver]
    [laser-show.routing.refs :as refs]
    [laser-show.routing.rig :as rig]
    [laser-show.vibes.library :as library]
@@ -971,3 +972,199 @@
     (is (identical? outputting-state (:state (projectors/handle (assoc event :state outputting-state))))
         (str (:event/type event)))))
 
+
+
+;; Projectors with another output driver (plans/2026-11-19-output-drivers,
+;; D2: 01 §5.1, §5.3, §5.4, OD-11)
+
+
+(def ^:private fields-descriptor
+  "A driver with every field type, for the coercion table (no registry
+   needed: handlers only read the descriptors in state)."
+  {:id :test/fields :name "Test fields" :transport :other
+   :fields [{:key :host :label "Host" :type :host :required? true}
+            {:key :port :label "Port" :type :int :min 1 :max 65535 :default 7266}
+            {:key :mode :label "Mode" :type :choice :options [[:a "A"] [:b "B"]] :default :a}
+            {:key :fast? :label "Fast" :type :boolean}]
+   :capabilities {:scan-rate {:min 5000 :max 30000 :default 30000}}
+   :discover? false :addon nil})
+
+(def ^:private driver-state
+  "The built-in drivers' descriptors in state, as :addons/loaded writes them,
+   and the test driver's."
+  (assoc-in base-state [:backend :output :drivers]
+            (assoc (driver/descriptors) :test/fields fields-descriptor)))
+
+(defn- add-manual [state event]
+  (projectors/handle (assoc event :event/type :projectors/add-manual :state state)))
+
+(defn- only-projector [result]
+  (let [[[id p] & more] (seq (get-in result [:state :projectors]))]
+    (assert (nil? more))
+    [id p]))
+
+(deftest add-manual-lsps-projector-test
+  (let [open (assoc-in driver-state [:ui :dialogs :add-projector-manual] {:open? true :driver :lsps})
+        result (add-manual open {:driver :lsps :name "Bridge" :driver-config {:host "127.0.0.1" :port "7266"}})
+        [id p] (only-projector result)]
+    (is (= {:name "Bridge" :driver :lsps
+            :driver-config {:host "127.0.0.1" :port 7266 :max-packet-bytes 1400}
+            :stable-id [:manual :lsps id]
+            :zone-groups [] :exclude-from-all? false :tags #{} :enabled? true :scan-rate 25000}
+           p)
+        "01 §5.1's shape: no :host, :port or :output-config, the field defaults filled in")
+    (is (= id (get-in result [:state :projector-ui :active-projector])) "selected")
+    (is (= 2 (count (get-in result [:state :chains :projector-effects id :items]))) "with the default calibration")
+    (is (= {:open? false} (get-in result [:state :ui :dialogs :add-projector-manual])) "the dialog closed and cleared")
+    (testing "without a name, it is its driver's short name and the first number no projector's name has"
+      (is (= "LSPS 1"
+             (:name (second (only-projector (add-manual driver-state {:driver :lsps :driver-config {:host " 10.0.0.9 " :port 7300}}))))))
+      (is (= "LSPS 1"
+             (:name (second (only-projector (add-manual driver-state {:driver :lsps :name "  " :driver-config {:host "10.0.0.9"}}))))))
+      (let [taken (assoc driver-state :projectors {:a {:name "LSPS 1"} :b {:name "LSPS 3"} :c {:name "IDN 2"}})
+            new-name (fn [state event]
+                       (let [before (set (keys (:projectors state)))]
+                         (some (fn [[id p]] (when-not (before id) (:name p)))
+                               (get-in (add-manual state event) [:state :projectors]))))]
+        (is (= "LSPS 2" (new-name taken {:driver :lsps :driver-config {:host "h"}})) "unique among the projectors")
+        (is (= "Test fields 1" (new-name taken {:driver :test/fields :driver-config {:host "h"}}))
+            "a driver without a :short-name: its name")))
+    (testing "fields that don't coerce, or a driver that isn't installed, add nothing"
+      (doseq [[label event] [["no host" {:driver :lsps :driver-config {:port "7266"}}]
+                             ["a port out of range" {:driver :lsps :driver-config {:host "h" :port "99999"}}]
+                             ["a packet size that isn't a number" {:driver :lsps :driver-config {:host "h" :max-packet-bytes "big"}}]
+                             ["not installed" {:driver :acme/nova :driver-config {:serial "NV-00123"}}]]]
+        (is (identical? driver-state (:state (add-manual driver-state event))) label)))
+    (testing "it starts at the driver's default scan rate, in its range"
+      (is (= 30000 (:scan-rate (second (only-projector (add-manual driver-state {:driver :test/fields :driver-config {:host "h"}})))))))))
+
+(deftest add-manual-idn-unchanged-test
+  (doseq [event [{:name "Stage left" :host "10.0.0.5" :port 7300}
+                 {:name "Stage left" :host "10.0.0.5" :port 7300 :driver :idn}]]
+    (testing (pr-str event)
+      (is (= {:name "Stage left" :host "10.0.0.5" :port 7300 :service-id nil :service-name nil :unit-id nil
+              :stable-id [:host "10.0.0.5" 0] :zone-groups [] :exclude-from-all? false :tags #{}
+              :enabled? true :scan-rate 25000 :output-config {:color-bit-depth 8 :xy-bit-depth 16}}
+             (second (only-projector (add-manual driver-state event))))
+          "today's shape exactly: no :driver, no :driver-config")))
+  (is (thrown? AssertionError (add-manual driver-state {:driver :idn :host " "})) "and still a host"))
+
+(defn- with-lsps
+  "driver-state with an LSPS projector :b at 127.0.0.1:7266, and an IDN one :a."
+  []
+  (-> driver-state
+      (assoc-in [:projectors :b] {:name "Bridge" :driver :lsps
+                                  :driver-config {:host "127.0.0.1" :port 7266 :max-packet-bytes 1400}
+                                  :stable-id [:manual :lsps :b] :zone-groups [] :exclude-from-all? false
+                                  :tags #{} :enabled? true :scan-rate 25000})
+      (assoc-in [:projectors :t] {:name "Fields" :driver :test/fields :driver-config {:host "h"}
+                                  :stable-id [:manual :test/fields :t] :enabled? true :scan-rate 30000})
+      (assoc-in [:projectors :a] {:name "IDN" :host "10.0.0.5" :port 7255 :enabled? true})))
+
+(defn- edit-config [state id k v]
+  (:state (projectors/handle {:event/type :projectors/update-driver-config :projector-id id :key k :value v :state state})))
+
+(deftest update-driver-config-validates-test
+  (let [s (with-lsps)
+        config #(get-in % [:projectors %2 :driver-config])]
+    (testing "01 §5.4's table: only an {:ok v} applies"
+      (doseq [[id k input expected] [[:b :port "7300" 7300]
+                                     [:b :port 7301 7301]
+                                     [:b :port "99999" 7266]
+                                     [:b :port "seven" 7266]
+                                     [:b :host "  " "127.0.0.1"]
+                                     [:b :host " 10.0.0.9 " "10.0.0.9"]
+                                     [:t :mode :b :b]
+                                     [:t :mode "b" "b-is-not-a-value"]
+                                     [:t :mode :c nil]
+                                     [:t :fast? true true]
+                                     [:t :fast? "maybe" nil]]]
+        (testing (pr-str [id k input])
+          (let [after (edit-config s id k input)]
+            (if (= "b-is-not-a-value" expected)
+              (is (identical? s after) "a choice is one of its values")
+              (if (= (get-in s [:projectors id :driver-config k]) expected)
+                (is (identical? s after) "unchanged")
+                (is (= expected (get (config after id) k)))))))))
+    (testing "an unset optional field goes, so its default applies"
+      (is (= {:host "h"} (config (edit-config (edit-config s :t :port "7400") :t :port "") :t))))
+    (testing "a key no field has, an IDN projector, an unknown one, a driver that isn't installed: nothing"
+      (is (identical? s (edit-config s :b :colour "red")))
+      (is (identical? s (edit-config s :a :port "7300")))
+      (is (identical? s (edit-config s :nope :port "7300")))
+      (let [missing (assoc-in s [:projectors :b :driver] :acme/nova)]
+        (is (identical? missing (edit-config missing :b :port "7300")) "its settings are kept as they are (OD-10)")))))
+
+(deftest update-driver-config-is-undoable-test
+  (let [pipeline #(events/handle-event-pipeline (assoc %2 :state %1))
+        start (-> (with-lsps) history/mark-clean (assoc-in [:backend :streaming :running?] true))
+        result (pipeline start {:event/type :projectors/update-driver-config :projector-id :b :key :port :value "7300"})
+        edited (:state result)]
+    (is (= 7300 (get-in edited [:projectors :b :driver-config :port])))
+    (is (= "Change Output Settings" (history/undo-label (:history edited))))
+    (is (= (get-in edited [:projectors :b]) (get-in result [:multi-engine/refresh :projectors :b]))
+        "while streaming, its engine restarts with the new config")
+    (let [undone (pipeline edited {:event/type :history/undo})]
+      (is (= 7266 (get-in undone [:state :projectors :b :driver-config :port])) "Undo puts it back")
+      (is (= 7266 (get-in undone [:multi-engine/refresh :projectors :b :driver-config :port]))
+          "and the engine follows"))
+    (testing "an invalid value is no undo step"
+      (is (nil? (history/undo-label (:history (:state (pipeline start {:event/type :projectors/update-driver-config
+                                                                        :projector-id :b :key :port :value "0"})))))))))
+
+(deftest driver-never-changes-after-creation-test
+  (let [s (with-lsps)
+        update-settings #(:state (projectors/handle {:event/type :projectors/update-settings :projector-id %2
+                                                     :updates %3 :state %1}))]
+    (is (nil? (get-in (update-settings s :a {:driver :lsps :name "Renamed"}) [:projectors :a :driver]))
+        "an IDN projector stays IDN")
+    (is (= "Renamed" (get-in (update-settings s :a {:driver :lsps :name "Renamed"}) [:projectors :a :name]))
+        "the other updates still apply")
+    (is (= :lsps (get-in (update-settings s :b {:driver :acme/nova}) [:projectors :b :driver])))
+    (is (= (get-in s [:projectors :b :driver-config])
+           (get-in (update-settings s :b {:driver-config {:port 1}}) [:projectors :b :driver-config]))
+        "its settings change only through update-driver-config, which checks them")
+    (is (identical? s (edit-config s :b :driver :idn)) "update-driver-config has no :driver field")
+    (is (identical? s (edit-config s :a :driver :lsps)))))
+
+(deftest manual-driver-projector-stable-id-test
+  (let [first-added (:state (add-manual driver-state {:driver :lsps :name "A" :driver-config {:host "127.0.0.1"}}))
+        _ (Thread/sleep 2)
+        both (:state (add-manual first-added {:driver :lsps :name "B" :driver-config {:host "127.0.0.1"}}))
+        sids (into {} (map (fn [[id p]] [id (:stable-id p)])) (:projectors both))]
+    (is (= 2 (count sids)))
+    (is (every? (fn [[id sid]] (= [:manual :lsps id] sid)) sids) "each its own id: never shared, never a host")
+    (is (= sids (rig/settled-ids (:projectors both))))
+    (testing "a scan never moves, upgrades or replaces them"
+      (let [scanned-state (:state (scan both (scanned "127.0.0.1" nil) (scanned "10.0.0.5" unit-l 1)))]
+        (is (= (:projectors both) (select-keys (:projectors scanned-state) (keys sids))))
+        (is (= 4 (count (:projectors scanned-state))) "the IDN devices are new projectors of their own, even the one on the bridge's host")))
+    (testing "two that share one (a copied file) are settled apart by their own ids, not to [:host nil 0]"
+      (let [copied (assoc-in (:projectors both) [(first (keys sids)) :stable-id] (val (second (seq sids))))]
+        (is (= sids (rig/settled-ids copied)))))
+    (is (= "Added by hand: a scan doesn't look for it" (rig/identity-label (val (first (:projectors both))))))))
+
+(deftest scan-rate-clamps-to-driver-capabilities-test
+  (let [s (with-lsps)
+        rate (fn [id r] (get-in (projectors/handle {:event/type :projectors/update-settings :projector-id id
+                                                    :updates {:scan-rate r} :state s})
+                                [:state :projectors id :scan-rate]))]
+    (is (= [5000 30000 20000] [(rate :t 2000) (rate :t 40000) (rate :t 20000)]) "into the driver's 5 000–30 000")
+    (is (= [1000 100000] [(rate :b 500) (rate :b 200000)]) "LSPS: 1 000–100 000")
+    (is (= [1000 100000] [(rate :a 500) (rate :a 200000)]) "IDN as before")
+    (is (= 30000 (rate :t "fast")) "a non-number is dropped")
+    (testing "a driver that isn't installed: only the core's range"
+      (is (= 40000 (get-in (projectors/handle {:event/type :projectors/update-settings :projector-id :t
+                                               :updates {:scan-rate 40000}
+                                               :state (update-in s [:backend :output :drivers] dissoc :test/fields)})
+                           [:state :projectors :t :scan-rate]))))))
+
+(deftest live-lsps-projector-asks-before-a-larger-zone-test
+  (let [live (-> (with-lsps)
+                 (assoc-in [:projectors :b :safety] small)
+                 (assoc-in [:backend :streaming :running?] true))
+        result (projectors/handle {:event/type :projectors/set-safety :projector-id :b
+                                   :safety {:limit [-1 -1 1 1]} :state live})]
+    (is (guard/outputting? live :b) "01 §5.5: wanted without a host")
+    (is (= small (get-in result [:state :projectors :b :safety])) "not applied yet")
+    (is (true? (get-in result [:state :ui :dialogs :confirm :open?])) "Z1 asks first")))

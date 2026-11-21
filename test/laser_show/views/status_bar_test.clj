@@ -22,13 +22,20 @@
     (is (= 7 (count (format-us 15000))))))
 
 (deftest status-item-test
-  (testing "renders default status-item without fixed width"
+  (testing "renders default status-item without fixed width, its label and value never cut off"
     (let [rendered (status-bar/status-item {:label "Test" :value "123"})
-          [_ val-label] (:children rendered)]
+          [label val-label] (:children rendered)]
       (is (= :h-box (:fx/type rendered)))
       (is (= "123" (:text val-label)))
-      (is (nil? (:min-width val-label)))
+      (is (= :use-pref-size (:min-width label)))
+      (is (= :use-pref-size (:min-width val-label)))
       (is (nil? (:pref-width val-label)))))
+
+  (testing "a value with :shrink? gives way when the bar is too narrow, all of it in its tooltip"
+    (let [[label val-label] (:children (status-bar/status-item {:label "Output" :value "60.4–60.7 fps · 3 errors" :shrink? true}))]
+      (is (= :use-pref-size (:min-width label)) "the label still doesn't")
+      (is (nil? (:min-width val-label)))
+      (is (= "60.4–60.7 fps · 3 errors" (get-in val-label [:tooltip :text])))))
 
   (testing "renders status-item with value-width and monospace font"
     (let [rendered (status-bar/status-item {:label "Base"
@@ -69,6 +76,19 @@
       (doseq [[label value] (map :children items)]
         (is (= 11 (font-size (:style label))))
         (is (= 11 (font-size (:style value))))))))
+
+(deftest send-time-is-every-drivers-test
+  (testing "the time to send a frame is the output loop's, for every output driver (IDN, LSPS, an add-on's): not \"IDN\""
+    (let [stats (status-bar/frame-stats-status
+                 {:fx/context (fx/create-context
+                               (assoc-in (domains/build-initial-state) [:backend :streaming :frame-stats]
+                                         {:avg-base-us 10 :avg-effects-us 5 :avg-latency-us 15
+                                          :p95-latency-us 20 :max-latency-us 30
+                                          :avg-idn-us 1479 :p95-idn-us 2897 :max-idn-us 6959})
+                               state/cache-factory)})
+          send-item (last (:children stats))]
+      (is (= "Send" (:label send-item)))
+      (is (= " 1479µs (p95:  2897µs, max:  6959µs)" (:value send-item))))))
 
 (defn- cue
   "A playing cue as subs/playing-cues gives it."

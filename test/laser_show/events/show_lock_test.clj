@@ -10,6 +10,7 @@
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.history :as history-handlers]
             [laser-show.events.show-lock :as show-lock]
+            [laser-show.output.driver :as driver]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
             [laser-show.state.persistent :as persistent]
@@ -308,3 +309,17 @@
       (is (= [-1.0 -1.0 1.0 1.0] (:limit (zone (run s0 {:event/type :projectors/set-safety :projector-id :p1
                                                          :safety {:limit [-1 -1 1 1]}}))))))))
 
+
+(deftest driver-config-edit-is-refused-while-locked-test
+  (let [s0 (-> (starter)
+               (assoc-in [:projectors :b] {:name "Bridge" :driver :lsps :enabled? true :zone-groups []
+                                           :driver-config {:host "127.0.0.1" :port 7266 :max-packet-bytes 1400}
+                                           :stable-id [:manual :lsps :b]})
+               (assoc-in [:backend :output :drivers] (driver/descriptors))
+               (history/mark-clean))
+        event {:event/type :projectors/update-driver-config :projector-id :b :key :port :value "7300"}]
+    (is (= 7300 (get-in (run s0 event) [:projectors :b :driver-config :port])) "unlocked, it applies")
+    (let [s (:state (handle (lock s0) event))]
+      (is (= (lock s0) (without-notices s)) "locked, the only change is the notice")
+      (is (= {:text "Change Output Settings refused" :event :projectors/update-driver-config}
+             (get-in s [:ui :show-lock-notice]))))))

@@ -4,6 +4,7 @@
    [cljfx.api :as fx]
    [clojure.test :refer [deftest is testing]]
    [laser-show.events.handlers.timing :as timing]
+   [laser-show.output.driver]
    [laser-show.state.core :as state]
    [laser-show.state.domains :as domains]
    [laser-show.subs :as subs]
@@ -845,6 +846,132 @@
                                     subs/cue-warning 2 0)
                         :item-name))
         "no item counts (its editor is closed): no item")))
+
+;; Projectors with another output driver (output drivers D2)
+
+(def ^:private bridge
+  {:name "Bridge" :driver :lsps :driver-config {:host "127.0.0.1" :port 7266}
+   :stable-id [:manual :lsps :b] :enabled? true})
+
+(defn- with-drivers [s]
+  (assoc-in s [:backend :output :drivers] (laser-show.output.driver/descriptors)))
+
+(deftest rig-cards-show-driver-summary-test
+  (let [s (-> base-state
+              with-drivers
+              (assoc :projectors {:l {:name "Laser L" :host "10.0.0.5" :service-id 1 :enabled? true}
+                                  :b bridge
+                                  :b2 (assoc bridge :name "Bridge 2" :stable-id [:manual :lsps :b2])
+                                  :nova {:name "Nova" :driver :acme/nova :driver-config {:serial "NV-00123"}
+                                        :stable-id [:device :acme/nova "NV-00123" 0] :enabled? false}}))
+        by-id #(into {} (map (juxt :id %)) (fx/sub-ctx (context %2) subs/rig-cards))]
+    (is (= {:l "10.0.0.5 #1" :b "LSPS · 127.0.0.1:7266" :b2 "LSPS · 127.0.0.1:7266" :nova "acme/nova · not installed"}
+           (by-id :host-label s))
+        "the address line is driver/summary")
+    (is (= {:l :idn :b :lsps :b2 :lsps :nova :acme/nova} (by-id :driver s)))
+    (is (= {:l ["10.0.0.5 #1" nil] :b ["LSPS" "127.0.0.1:7266"] :b2 ["LSPS" "127.0.0.1:7266"]
+            :nova ["acme/nova" "not installed"]}
+           (by-id :address-lines s))
+        "on two lines for another driver")
+    (is (= {:l false :b false :b2 false :nova false} (by-id :multi-output? s))
+        "lasers without a host aren't one device's outputs")
+    (is (= {:l true :b true :b2 true :nova true} (by-id :identifiable? s)))
+    (is (= "Added by hand: a scan doesn't look for it" (:b (by-id :identity s))))
+    (is (= "Device NV-00123 · output 0" (:nova (by-id :identity s))))
+    (testing "after a scan, only an IDN laser can be not found"
+      (let [scanned (-> s
+                        (assoc-in [:rig-ui :scanned?] true)
+                        (assoc-in [:projector-ui :discovered-devices] [{:address "10.0.0.9" :services []}]))]
+        (is (= {:l false :b true :b2 true :nova true} (by-id :found? scanned)))))))
+
+(deftest add-manual-form-sub-test
+  (let [form #(fx/sub-ctx (context (assoc-in (with-drivers base-state) [:ui :dialogs :add-projector-manual] %)) subs/add-manual-form)]
+    (is (= [:idn :lsps] (mapv :id (fx/sub-ctx (context (with-drivers base-state)) subs/add-manual-types))) "IDN first")
+    (is (= {:driver :idn :can-add? false} (form {:open? true})))
+    (is (= {:driver :idn :can-add? true} (form {:open? true :host "10.0.0.5"})))
+    (let [{:keys [can-add? errors config fields]} (form {:open? true :driver :lsps})]
+      (is (false? can-add?))
+      (is (= {:host "Host is required"} errors))
+      (is (= {:port 7266 :max-packet-bytes 1400} config))
+      (is (= [:host :port :max-packet-bytes] (mapv :key fields))))
+    (is (true? (:can-add? (form {:open? true :driver :lsps :driver-config {:host "127.0.0.1"}}))))
+    (is (= {:port "Port must be 1–65535"}
+           (:errors (form {:open? true :driver :lsps :driver-config {:host "127.0.0.1" :port "99999"}}))))
+    (is (false? (:can-add? (form {:open? true :driver :acme/gone :driver-config {:host "h"}}))) "not installed")
+    (testing "the name an unnamed one gets (the Name field's prompt)"
+      (is (= "LSPS 1" (:default-name (form {:open? true :driver :lsps}))))
+      (is (= "LSPS 2" (:default-name (fx/sub-ctx (context (-> (with-drivers base-state)
+                                                                (assoc :projectors {:b (assoc bridge :name "LSPS 1")})
+                                                                (assoc-in [:ui :dialogs :add-projector-manual] {:open? true :driver :lsps})))
+                                                 subs/add-manual-form))))
+      (is (nil? (:default-name (form {:open? true}))) "IDN is named after its host"))))
+
+(deftest projector-driver-sub-test
+  (let [s (-> base-state with-drivers
+              (assoc :projectors {:l {:name "Laser L" :host "10.0.0.5"} :b bridge
+                                  :nova {:name "Nova" :driver :acme/nova :driver-config {:serial "NV-00123"}}}))
+        info #(fx/sub-ctx (context s) subs/projector-driver %)]
+    (is (= {:driver :idn :idn? true :installed? true :name "IDN (ILDA Digital Network)"}
+           (select-keys (info :l) [:driver :idn? :installed? :name])))
+    (is (= {:driver :lsps :idn? false :installed? true :name "LSPS point stream (UDP)"
+            :config {:host "127.0.0.1" :port 7266 :max-packet-bytes 1400} :summary "LSPS · 127.0.0.1:7266"}
+           (select-keys (info :b) [:driver :idn? :installed? :name :config :summary])))
+    (is (= {:driver :acme/nova :installed? false :name "acme/nova" :config {:serial "NV-00123"} :fields []}
+           (select-keys (info :nova) [:driver :installed? :name :config :fields]))
+        "kept as it is, read only")
+    (is (nil? (info :nope)))))
+
+(deftest projector-driver-info-sub-test
+  (is (= "buffer-ms 40 · interlock closed · lit? true · rate 30.5 · scan-rate 30303"
+         (subs/driver-info-text {:scan-rate 30303 :buffer-ms 40 :interlock :closed :lit? true :rate 30.5
+                                 :fifo [1 2] :nested {:a 1} :gone nil}))
+      "plain keys and values, by key; nested ones and nil left out")
+  (is (nil? (subs/driver-info-text {:fifo [1 2]})))
+  (is (nil? (subs/driver-info-text nil)))
+  (let [s (assoc-in base-state [:backend :streaming :status :projectors :b]
+                    {:state :streaming :fps 59.8 :warning "Interlock open" :driver-info {:scan-rate 30303.0}})]
+    (is (= "scan-rate 30303" (fx/sub-ctx (context s) subs/projector-driver-info :b)) "a whole double as a whole number")
+    (is (nil? (fx/sub-ctx (context s) subs/projector-driver-info :a)))))
+
+
+;; Settings → Add-ons (plans/2026-11-19-output-drivers/02 § D3)
+
+
+(deftest addon-rows-test
+  (let [statuses [{:id :test/sample :name "Sample add-on" :version "1.0.0" :source "/Users/zoë/LaserShowProjects/addons/sample.jar"
+                   :state :loaded :drivers [:test/sample-stream :test/gone] :load-ms 12}
+                  {:id :test/broken :name "Broken add-on" :version "1.0.0" :source "C:\\Users\\Zoë Smith\\LaserShowProjects\\addons\\broken.jar"
+                   :state :failed :error "Could not load acme.driver: boom"}
+                  {:source "/addons/garbage.jar" :state :failed :error "Can't read garbage.jar: zip END header not found"}
+                  {:id :test/windows-only :version "2.0" :source "/addons/win.jar" :state :skipped
+                   :error "Not available on macOS (aarch64); it supports Windows"}
+                  {:id :dev/nova :name "Nova (dev)" :source "jar:file:/Users/z/.m2/nova.jar!/laser-show-addon.edn" :state :loaded :drivers []}]
+        drivers {:test/sample-stream {:id :test/sample-stream :name "Sample add-on stream"}}
+        ctx (context (-> base-state
+                         (assoc-in [:backend :output :addons] statuses)
+                         (assoc-in [:backend :output :drivers] drivers)
+                         (assoc-in [:backend :output :dir] "/Users/zoë/LaserShowProjects/addons")
+                         (assoc-in [:backend :output :pending-installs]
+                                   [{:id :acme/nova :name "Acme Nova" :version "0.3.0" :file "/Users/zoë/LaserShowProjects/addons/acme.jar.new" :replaced? false}
+                                    {:id :acme/x :file "C:\\addons\\x.jar.new" :replaced? true}])))]
+    (is (= [{:title "Sample add-on 1.0.0" :state :loaded :state-text "Loaded"
+             :drivers "Sample add-on stream (:test/sample-stream), :test/gone" :file "sample.jar"}
+            {:title "Broken add-on 1.0.0" :state :failed :state-text "Failed: Could not load acme.driver: boom"
+             :drivers nil :file "broken.jar"}
+            {:title "garbage.jar" :state :failed :state-text "Failed: Can't read garbage.jar: zip END header not found"
+             :drivers nil :file "garbage.jar"}
+            {:title ":test/windows-only 2.0" :state :skipped
+             :state-text "Skipped: Not available on macOS (aarch64); it supports Windows" :drivers nil :file "win.jar"}
+            {:title "Nova (dev)" :state :loaded :state-text "Loaded" :drivers nil :file "nova.jar"}]
+           (fx/sub-ctx ctx subs/addon-rows)))
+    (is (= [{:title "Acme Nova 0.3.0" :state-text "Installed, loads at next start" :file "acme.jar.new"}
+            {:title ":acme/x" :state-text "Installed, loads at next start" :file "x.jar.new"}]
+           (fx/sub-ctx ctx subs/pending-install-rows)))
+    (is (= "/Users/zoë/LaserShowProjects/addons" (fx/sub-ctx ctx subs/addons-dir)))
+    (testing "before startup has said: nothing"
+      (let [ctx (context base-state)]
+        (is (= [] (fx/sub-ctx ctx subs/addon-rows)))
+        (is (= [] (fx/sub-ctx ctx subs/pending-install-rows)))))))
 
 
 ;; Grid badges (zones plan Z4, 06 §8.5)

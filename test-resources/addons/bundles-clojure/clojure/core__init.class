@@ -1,0 +1,1 @@
+Not a real class file. The loader refuses any jar with a clojure/core__init.class entry, without loading it.

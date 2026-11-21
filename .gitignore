@@ -3,6 +3,8 @@ pom.xml
 pom.xml.asc
 *.jar
 *.class
+# The add-on loader's test fixture: a fake class file the loader must refuse
+!/test-resources/addons/bundles-clojure/clojure/core__init.class
 /lib/
 /classes/
 /target/

@@ -1,0 +1,5 @@
+{:id :test/udp
+ :name "UDP test add-on"
+ :version "1.0.0"
+ :api 1
+ :drivers [laser-show-test-addon.udp.driver/driver]}

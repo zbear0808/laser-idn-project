@@ -13,6 +13,7 @@
    (-main)   - Main entry point"
   (:require [cljfx.api :as fx]
             [cljfx.css :as css]
+            [clojure.java.io :as io]
             [clojure.tools.logging :as log]
             [taoensso.timbre :as timbre]
             [laser-show.state.core :as state]
@@ -27,6 +28,8 @@
             [laser-show.animation.show-time :as show-time]
             [laser-show.services.show-clock :as show-clock]
             [laser-show.backend.output-runtime :as output-runtime]
+            [laser-show.output.addons :as addons]
+            [laser-show.output.driver :as driver]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.link :as link]
             [laser-show.input.gamepad :as gamepad]
@@ -124,6 +127,29 @@
 
 (declare stop! exit!)
 
+(defn- load-addons
+  "Load the add-on jars (output.addons/load-all!, plans/2026-11-19-output-drivers/01
+   §4.2) from opts' :dir, else the add-ons folder (~/LaserShowProjects/addons),
+   with the rest of opts for load-all!, and log what loaded and how long each
+   took. {:addons [status …] :dir the folder's path}."
+  [opts]
+  (let [dir (io/file (or (:dir opts) (addons/addons-dir)))
+        statuses (addons/load-all! (assoc opts :dir dir))
+        {:keys [loaded failed skipped]} (group-by :state statuses)]
+    (log/info "Add-ons from" (.getAbsolutePath dir) ":"
+              (count loaded) "loaded" (mapv (fn [{:keys [id load-ms]}] (str id " in " load-ms " ms")) loaded)
+              "·" (count failed) "failed ·" (count skipped) "skipped")
+    {:addons statuses :dir (.getAbsolutePath dir)}))
+
+(defn- dispatch-drivers-loaded!
+  "Put the registered output drivers' descriptors, the add-ons' statuses and
+   the add-ons folder (load-addons) into app state, through :addons/loaded."
+  [{:keys [addons dir]}]
+  (events/dispatch! {:event/type :addons/loaded
+                     :addons (vec addons)
+                     :drivers (driver/descriptors)
+                     :dir dir}))
+
 (defn- starter-state
   "A fresh starter document: the starter cues, vibes and the Master."
   []
@@ -172,7 +198,8 @@
   "Start the laser show application.
    
    Initializes state on this machine's rig (its file, ~/LaserShowProjects/rig.edn),
-   creates renderer, and mounts the UI.
+   loads the add-on jars (~/LaserShowProjects/addons) before the output
+   runtime opens, creates renderer, and mounts the UI.
    Auto-scans for IDN devices on startup, matched against the loaded rig.
    Returns the app instance."
   []
@@ -189,7 +216,9 @@
     (log/info "Dev mode: Window close will not exit JVM"))
 
   ;; A fresh starter document on this machine's rig
-  (let [rig (load-rig (starter-state) (persistent/default-rig-file))]
+  (let [rig (load-rig (starter-state) (persistent/default-rig-file))
+        ;; The add-on jars' drivers, registered before the output runtime opens
+        loaded-addons (load-addons {})]
     (state/init-state! (:state rig))
 
     (init-styles!)
@@ -205,7 +234,11 @@
       (events/set-exit-fn! #(exit!))
       (input-mapper/set-dispatch-fn! events/dispatch!))
 
-    (after-rig-loaded! rig))
+    (after-rig-loaded! rig)
+
+    ;; The output drivers and add-ons, as data for the views; before the
+    ;; startup scan, so it sees every driver
+    (dispatch-drivers-loaded! loaded-addons))
 
   ;; After dispatch! reaches the agent, so the clock's reports queue there
   (show-clock/start!)
@@ -279,7 +312,8 @@
 (defn stop!
   "Stop the mounted cljfx application and release application-owned services:
    the UI, the show clock, the input mapper, the streaming engines (the
-   output runtime is drained), input devices, the Carabiner link and the rig
+   output runtime is drained), the add-ons' drivers (unregistered, their
+   jars closed), input devices, the Carabiner link and the rig
    file (its pending change written, its lock let go). dispatch! falls back
    to the synchronous handler afterwards.
 
@@ -291,6 +325,8 @@
   (show-clock/stop!)
   (input-mapper/stop-mapper!)
   (stop-streaming!)
+  ;; Nothing streams now: the next start loads the add-ons again
+  (addons/unload-all!)
   (stop-input-devices!)
   (disconnect-link!)
   (stop-rig-file!)
@@ -321,13 +357,27 @@
    No rig file is read or written unless the state names one in
    [:rig-file :path] (a test's temp folder): then it is locked, read and
    saved as app/start! does with the real one, so no test reaches the user's
-   ~/LaserShowProjects/rig.edn."
+   ~/LaserShowProjects/rig.edn.
+
+   No add-on is loaded unless opts has :addons-dir (a test's temp folder):
+   then its jars load as app/start! loads the real folder's, before the
+   output runtime opens, for :addons-platform ({:os :arch}, default this
+   machine's) and without classpath descriptors. Either way :addons/loaded
+   says which folder Settings → Add-ons shows and installs into: that one,
+   else output.addons/addons-dir (a temp folder in tests, test_runner.clj).
+   initial-state nil is the starter state."
   ([]
    (start-test! (starter-state)))
   ([initial-state]
+   (start-test! initial-state {}))
+  ([initial-state {:keys [addons-dir addons-platform]}]
    (stop!)
-   (let [path (get-in initial-state [:rig-file :path])
-         rig (if path (load-rig initial-state path) {:state initial-state})]
+   (let [initial-state (or initial-state (starter-state))
+         path (get-in initial-state [:rig-file :path])
+         rig (if path (load-rig initial-state path) {:state initial-state})
+         loaded-addons (if addons-dir
+                         (load-addons {:dir addons-dir :platform addons-platform :classpath-loader nil})
+                         {:addons [] :dir (.getAbsolutePath (addons/addons-dir))})]
      (state/init-state! (:state rig))
      (show-time/reset-runtime!)
      (init-styles!)
@@ -335,6 +385,7 @@
      (let [app (create-app)]
        (reset! *app app)
        (events/set-dispatch-fn! (:handler app))
+       (dispatch-drivers-loaded! loaded-addons)
        (after-rig-loaded! rig)
        app))))
 

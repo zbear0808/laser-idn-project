@@ -49,9 +49,11 @@
     (se/start! engine)))
 
 (defn- port-of
-  "The engine's source port, which identifies it on the fake DAC."
+  "The engine's source port, which identifies it on the fake DAC (once its
+   streaming thread has opened the session)."
   [engine]
-  (.getLocalPort ^java.net.DatagramSocket @(:socket engine)))
+  (dac/wait-for! #(some? @(:session engine)) 1000)
+  (.getLocalPort ^java.net.DatagramSocket (:socket @(:session engine))))
 
 (defn- wait-for-frames! [n]
   (dac/wait-for! #(>= (count (dac/frames *dac*)) n) 3000))

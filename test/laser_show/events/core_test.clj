@@ -3,13 +3,17 @@
    the current event inline, which call back through the dispatcher they are
    given, the no-app dispatch! fallback, and the dev-mode lost-update detector."
   (:require
+   [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [clojure.tools.logging.test :as log-test]
    [laser-show.events.core :as events]
+   [laser-show.events.handlers :as handlers]
    [laser-show.events.handlers.timing :as timing]
+   [laser-show.output.jar-builder :as jar]
    [laser-show.state.core :as state]
-   [laser-show.state.domains :as domains]))
+   [laser-show.state.domains :as domains])
+  (:import [java.io File]))
 
 (use-fixtures :each (fn [f]
                       (state/init-state! (domains/build-initial-state))
@@ -42,7 +46,7 @@
                :output/write-status
                :project/save :project/load :fx/show-file-chooser :system/exit :system/open-url
                :dev/reload :clipboard/copy-effects :clipboard/paste-effects
-               :projectors/scan]))
+               :projectors/scan :addons/install :system/open-folder]))
   (is (not (contains? events/effects :clipboard/paste-projector-effects))
       "a projector chain pastes through the list editor's own clipboard (zones Z0)")
   (is (not (contains? events/effects :timing/calculate-bpm)) "a tap sets the BPM in its own handler's state"))
@@ -202,3 +206,131 @@
                         (= "laser-show.events.core" (str (:logger-ns %)))
                         (str/includes? (str (:message %)) ":ui/update-dialog-data"))
                   (log-test/the-log)))))))
+
+
+;; Add-ons: installing and the folder (plans/2026-11-19-output-drivers/02 § D3)
+
+
+(defn- with-temp-dir
+  "(f dir) with a new temp folder, deleted after."
+  [f]
+  (let [dir (jar/temp-dir! "laser-show-core-test")]
+    (try (f dir) (finally (jar/delete-tree! dir)))))
+
+(defn- install-through-the-pipeline
+  "Install add-on… from the chooser's result for src into addons-dir: the
+   event the :addons/install effect dispatches back, then that event run,
+   as the app would."
+  [src addons-dir]
+  (state/swap-state! assoc-in [:backend :output :dir] (.getAbsolutePath ^File addons-dir))
+  (let [got (promise)]
+    (events/event-handler {:event/type :addons/install-picked :file-path (.getAbsolutePath ^File src)}
+                          #(deliver got %))
+    (let [event (deref got 5000 ::timeout)]
+      (when (map? event)
+        (events/event-handler event (fn [_])))
+      event)))
+
+(deftest install-effect-dispatches-installed-test
+  (with-temp-dir
+    (fn [dir]
+      (let [{:keys [file]} (jar/build! (io/file dir "downloads") "sample")
+            addons-dir (io/file dir "Zoë Smith" "addons")
+            event (install-through-the-pipeline file addons-dir)
+            pending (io/file addons-dir "sample.jar.new")]
+        (is (= {:event/type :addons/installed
+                :file (.getAbsolutePath pending)
+                :replaced? false
+                :descriptor {:id :test/sample :name "Sample add-on" :version "1.0.0"}}
+               event)
+            "from the effect's own thread, through dispatch")
+        (is (.isFile pending) "the folder made, the jar in it as .jar.new")
+        (is (= "Installed Sample add-on 1.0.0. Restart Laser Show to load it."
+               (get-in (state/get-raw-state) [:ui :notice :text])))
+        (is (= [(.getAbsolutePath pending)]
+               (mapv :file (get-in (state/get-raw-state) [:backend :output :pending-installs]))))
+        (testing "again, with a jar of that name already loaded from the folder: Replaced"
+          (jar/build! addons-dir "sample")
+          (is (true? (:replaced? (install-through-the-pipeline file addons-dir))))
+          (is (= "Replaced Sample add-on 1.0.0. Restart Laser Show to load it."
+                 (get-in (state/get-raw-state) [:ui :notice :text]))))))))
+
+(deftest install-effect-dispatches-failed-for-a-bad-jar-test
+  (with-temp-dir
+    (fn [dir]
+      (let [{:keys [file]} (jar/build! (io/file dir "downloads") "api2")
+            addons-dir (io/file dir "addons")
+            event (install-through-the-pipeline file addons-dir)]
+        (is (= {:event/type :addons/install-failed
+                :file-path (.getAbsolutePath ^File file)
+                :error "Built for output API 2; this app has API 1"}
+               event))
+        (is (empty? (.listFiles addons-dir)) "nothing written")
+        (is (= {:text "Could not install api2.jar: Built for output API 2; this app has API 1" :level :error}
+               (select-keys (get-in (state/get-raw-state) [:ui :notice]) [:text :level])))
+        (is (= [] (get-in (state/get-raw-state) [:backend :output :pending-installs])))
+        (testing "a file that isn't a jar"
+          (let [txt (doto (io/file dir "notes.txt") (spit "hi"))]
+            (is (= "notes.txt is not a .jar file" (:error (install-through-the-pipeline txt addons-dir))))))))))
+
+(defn- open-folder
+  "Run Open add-ons folder for path with the platform calls stubbed by
+   opener: {:dispatched [events] :calls [[step path] …]}."
+  [path opener]
+  (let [calls (atom [])
+        dispatched (atom [])
+        record (fn [step result]
+                 (fn [^File dir]
+                   (swap! calls conj [step (.getAbsolutePath dir)])
+                   (if (instance? Throwable result) (throw result) result)))]
+    (state/swap-state! assoc-in [:backend :output :dir] path)
+    (events/set-folder-opener! {:desktop-open (record :desktop (:desktop opener))
+                                :xdg-open (record :xdg-open (:xdg-open opener))
+                                :os (constantly (:os opener))})
+    (try
+      ;; What the handler asks for (open-folder-runs-effect-test); the
+      ;; effect's future is waited for
+      (let [effect (:system/open-folder (handlers/handle-event {:event/type :addons/open-folder
+                                                                :state (state/get-raw-state)}))]
+        (deref ((get events/effects :system/open-folder) effect #(swap! dispatched conj %)) 5000 nil)
+        {:dispatched @dispatched :calls @calls})
+      (finally
+        (events/set-folder-opener! nil)))))
+
+(deftest open-folder-falls-back-to-xdg-open-test
+  (with-temp-dir
+    (fn [dir]
+      (let [path (.getAbsolutePath (io/file dir "LaserShowProjects" "addons"))]
+        (testing "Desktop can open it: only that"
+          (let [{:keys [calls dispatched]} (open-folder path {:desktop true :os :linux})]
+            (is (= [[:desktop path]] calls))
+            (is (= [] dispatched))
+            (is (.isDirectory (io/file path)) "made first, so there is something to open")))
+        (testing "on Linux, Desktop can't (no OPEN, or it throws): xdg-open"
+          (doseq [desktop [false (RuntimeException. "no desktop")]]
+            (let [{:keys [calls dispatched]} (open-folder path {:desktop desktop :xdg-open true :os :linux})]
+              (is (= [[:desktop path] [:xdg-open path]] calls))
+              (is (= [] dispatched) "opened: no notice"))))
+        (testing "not on Linux: no xdg-open"
+          (is (= [[:desktop path]] (:calls (open-folder path {:desktop false :xdg-open true :os :macos})))))))))
+
+(deftest open-folder-falls-back-to-a-notice-test
+  (with-temp-dir
+    (fn [dir]
+      (let [path (.getAbsolutePath (io/file dir "Zoë Smith" "addons"))
+            notice (str "Couldn't open the add-ons folder. It is at " path)]
+        (doseq [opener [{:desktop false :os :macos}
+                        {:desktop false :xdg-open false :os :linux}
+                        {:desktop (RuntimeException. "no") :xdg-open (java.io.IOException. "no xdg-open") :os :linux}]]
+          (testing (pr-str opener)
+            (let [{:keys [dispatched]} (open-folder path opener)]
+              (is (= [{:event/type :addons/open-folder-failed :path path}] dispatched))
+              (events/event-handler (first dispatched) (fn [_]))
+              (is (= {:text notice :level :info}
+                     (select-keys (get-in (state/get-raw-state) [:ui :notice]) [:text :level]))))))
+        (testing "a folder that can't be made: the notice too, and nothing is asked to open it"
+          (let [file (doto (io/file dir "a-file") (spit "x"))
+                path (.getAbsolutePath (io/file file "addons"))
+                {:keys [dispatched calls]} (open-folder path {:desktop true :os :macos})]
+            (is (= [] calls))
+            (is (= [{:event/type :addons/open-folder-failed :path path}] dispatched))))))))

@@ -14,7 +14,7 @@
 (def typography
   "Typography styles for the application."
   (css/register ::typography
-    (let [{:keys [text-primary text-secondary text-muted]} theme/semantic-colors]
+    (let [{:keys [text-primary text-secondary text-muted accent-warning accent-danger]} theme/semantic-colors]
       
       {".header-primary"
        {:-fx-text-fill text-primary
@@ -36,6 +36,15 @@
         :-fx-font-size 10
         :-fx-font-style "italic"}
        
+       ;; A field's problem, or something kept but not usable
+       ".label-warning"
+       {:-fx-text-fill accent-warning
+        :-fx-font-size 11}
+
+       ".label-error"
+       {:-fx-text-fill accent-danger
+        :-fx-font-size 10}
+
        ".label-bold"
        {:-fx-text-fill text-primary
         :-fx-font-weight "bold"}

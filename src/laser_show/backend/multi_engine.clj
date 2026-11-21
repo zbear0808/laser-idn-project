@@ -40,7 +40,7 @@
             [laser-show.animation.safety :as safety]
             [laser-show.animation.test-pattern :as test-pattern]
             [laser-show.services.frame-service :as frame-service]
-            [laser-show.idn.output-config :as output-config]
+            [laser-show.output.driver :as driver]
             [laser-show.routing.compose :as compose]))
 
 
@@ -259,39 +259,33 @@
 
 
 (defn create-engine-for-projector
-  "Create a streaming engine for a specific projector.
+  "Create a streaming engine for a specific projector, sending through its
+   output driver with the config driver/projector-config gives it.
    
    Args:
    - projector-id: The projector's ID keyword
    - projector: The projector configuration map
    
-   Returns: A streaming engine instance (not started), or nil if host is invalid
+   Returns: A streaming engine instance (not started), or nil for an IDN
+   projector whose host is invalid. Throws \"Output driver :acme/nova is not
+   installed\" for a driver the registry doesn't have (OD-10).
    
    NOTE: service-id targets the physical laser output on multi-head DACs.
    Each projector entry represents one service/output on the device."
   [projector-id projector]
-  (let [host (:host projector)]
-    (when (and host (not (str/blank? host)))
-      (let [port (or (:port projector) 7255)
-            ;; service-id targets the physical output on the DAC (0-255)
-            ;; This is different from channel-id which is for logical multiplexing
-            service-id (or (:service-id projector) 0)
-            output-cfg (if-let [cfg (:output-config projector)]
-                         (output-config/make-config
-                           (or (:color-bit-depth cfg) 8)
-                           (or (:xy-bit-depth cfg) 16))
-                         output-config/default-config)
+  (let [[driver-id config] (driver/projector-config projector)
+        host (:host config)]
+    (when (or (not= :idn driver-id) (and host (not (str/blank? host))))
+      (let [output-driver (or (driver/lookup driver-id)
+                              (throw (ex-info (str "Output driver " driver-id " is not installed")
+                                              {:driver driver-id})))
             frame-provider (create-projector-frame-provider projector-id)]
-            (log/info (format "Creating engine for %s -> %s:%d service %d (channel %d)"
-                              projector-id host port service-id service-id))
-            (engine/create-engine host frame-provider
-                                  :id projector-id
-                                  :port port
-                                  :channel-id service-id
-                                  :service-id service-id
-                                  :output-config output-cfg
-                                  :scan-rate (:scan-rate projector)
-                                  :frame-signal show-time/frame-signal)))))
+        (log/info (format "Creating engine for %s -> %s %s"
+                          projector-id driver-id (pr-str (dissoc config :output-config))))
+        (engine/create-driver-engine output-driver config frame-provider
+                                     :id projector-id
+                                     :scan-rate (:scan-rate projector)
+                                     :frame-signal show-time/frame-signal)))))
 
 (defn create-engines
   "Create streaming engines for all enabled projectors.

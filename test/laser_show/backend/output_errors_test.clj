@@ -9,6 +9,16 @@
 (defn- entries []
   (filterv #(= "laser-show.backend.output-errors" (str (:logger-ns %))) (log-test/the-log)))
 
+(deftest message-says-what-a-driver-said-test
+  (testing "an ex-info's message is written for people (a driver's \"E-stop active\"): as it is, so a card has room for it"
+    (is (= "E-stop active" (oe/message (ex-info "E-stop active" {:reopen? true}))))
+    (is (= "clojure.lang.ExceptionInfo" (oe/message (ex-info "" {}))) "with nothing to say, its class"))
+  (testing "any other throwable keeps its class, which says what failed"
+    (is (= "java.net.SocketException: Network is unreachable"
+           (oe/message (java.net.SocketException. "Network is unreachable"))))
+    (is (= "java.lang.NullPointerException" (oe/message (NullPointerException.)))))
+  (is (= "No host" (oe/message "No host")) "a string as it is"))
+
 (deftest logs-once-then-throttled-test
   (let [now (atom 1000)
         e (ex-info "corner pin failed" {})]
