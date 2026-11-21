@@ -49,7 +49,7 @@ The precise rules are in **`01-model-and-routing-spec.md`**. Every phase doc imp
 | `08-phase-z6-step-grid.md` | Z6: the drum-machine step grid |
 | `09-phase-zr-rig-file.md` | ZR: the rig in its own file (physical setup outside the show) |
 | `10-questions.md` | **Every open question in one place**, each with its context, the options and a recommendation, grouped by phase |
-| `11-vibe-phase8-zone-effects.md` | Vibe Phase 8 (zone chase, swap and shift on the effects grid), moved here from the vibe plan on 2026-11-20. Z5 builds its shared stage over refs; its 8b (reactions, the audience rule with V10 A, lint) comes after Z5 |
+| `11-vibe-phase8-zone-effects.md` | Vibe Phase 8 (zone chase, swap and shift on the effects grid), moved here from the vibe plan on 2026-11-20. **Done:** Z5 built 8a and most of 8b over refs; the four zone tap reactions landed in `6544efb`..`cdf1d57` (§12–§13) |
 | `probes/` | `vibe_probes_test.clj` (v19–v24, moved with Phase 8) and, from Z3, `zones_probes_test.clj` (z1–z4) |
 | `12-decimate-effect.md` | Decimate: an effect that thins a frame to a target fps at a given scan rate (25 kpps, 30 fps by default), keeping blanking, line ends, dwell points and corners. **Done** (`e7b93e4`..`d6fbb15`) |
 | `13-projectors-layout.md` | The Projectors tab's layout pass: a divider between the rig strip and the inspector, each inspector column scrolling on its own, so the safety zone and the test pattern fit at 1200 × 800. **Done** (`77230f1`..`0a1c219`) |

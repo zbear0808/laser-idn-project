@@ -171,6 +171,28 @@ Either way, Escape during a drag puts the old zone back without asking.
 - **A ★ (built)** Keep them until Z5, then take them out with their fixtures.
 - **B** Take them out now.
 
+## Vibe Phase 8's zone reactions (`11-vibe-phase8-zone-effects.md` §12.10; built as ★ A, 2026-11-20)
+
+**Z8b-Q1 · The Effects grid's New tap reaction ▸ and the four.**
+- **A ★ (built)** It offers them as every template: made with their default places, on at once but the chase, not greyed.
+- **B** It doesn't. **C** It offers them, with the hop off until switched on.
+
+**Z8b-Q2 · The swap's and the shift's places.**
+- **A ★ (built)** Zones (A ⇄ B; A → B → C → D): what the cues draw into, through the map in use.
+- **B** Every laser, as the hop and the chase. **C** All four over zones.
+
+**Z8b-Q3 · Two info lint rows Z5 didn't build** (a laser goes dark while a move runs; a swap or shift with nothing to trade).
+- **A ★ (built)** Later, with the rest of the patterns' lint.
+- **B** Now, at least "has nothing to swap: no cue in this vibe draws into A or B", which a new Zone swap often meets.
+
+**Z8b-Q4 · Do the four follow the pattern pads?**
+- **A ★ (built)** Yes, as every zone pattern does.
+- **B** No: a tap reaction keeps its own style.
+
+**Z8b-Q5 · Perform's line when an edit leaves a reaction off** (one that can reach the crowd).
+- **A ★ (built)** As it is: the Vibes tab's lint says it at once; Perform says it when the vibe next switches its FX on.
+- **B** Perform says it at once too (an engine change).
+
 ## Decimate (`12-decimate-effect.md`)
 
 **Q-D-1 · The load meter with Decimate in a laser's calibration chain.** **Answered B** (2026-11-20); built in `9585cae`.

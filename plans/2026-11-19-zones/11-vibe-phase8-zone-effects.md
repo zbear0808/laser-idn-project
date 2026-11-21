@@ -1,7 +1,7 @@
 # Phase 8: zone effects (chase, swap, shift)
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`; the files cited are the same at `67735d0`, and `state/domains.clj` and `events/handlers/effects.clj` are cited at `b1da0f2` because Phase 1 is editing both)
-**Status:** Done. 8a and most of 8b in zones Phase Z5 (`1d3d3b8`..`376d5f6`, on `master`; §12.1), and 8b's four tap reactions on `vibe-8b` (`6544efb`..`cdf1d57`, 2026-11-20; as built in §13), not merged yet. Still owed: the checks on a real projector. V10 is answered A (§11; it was the vibe overview's §7)   **Last verified against:** `ea4d153` (§12, §13); `b1da0f2` for §1–§9 (probes v19–v24, §11; they were the vibe overview's §3)
+**Status:** Done. 8a and most of 8b in zones Phase Z5 (`1d3d3b8`..`376d5f6`, on `master`; §12.1), and 8b's four tap reactions (`6544efb`..`cdf1d57`, 2026-11-20, on `master`; as built in §13). Still owed: the checks on a real projector. V10 is answered A (§11; it was the vibe overview's §7)   **Last verified against:** `ea4d153` (§12, §13); `b1da0f2` for §1–§9 (probes v19–v24, §11; they were the vibe overview's §3)
 **Supersedes / Superseded by:** none   **Related findings:** V6 and R-4 (a random pick must not scan the crowd), extended here to effects that move a picture. The effects-grid editor offering the zone selector, which does nothing there, is fixed on the way. The zones plan (`plans/2026-11-18-zones-ux/00-overview.md`, a draft written after this phase) asks for the same effects in its §4.5 and question 20; §9 says how the two fit
 
 > **Moved 2026-11-20.** This was Phase 8 of the vibe-mode plan, `plans/2026-11-18-vibe-mode/`, which was deleted when its Phases 1–7 were done (the folder is in git history at `8b4b7d7`). It lives here because the zones plan builds the same effects (Z5, `07-phase-z5-zone-patterns.md`). In this doc, `00-overview.md` and `01-…` to `07-…` mean that plan's docs, not this folder's: the parts it relies on are copied in §11 below (V10, still open, and probes v19–v24). The probes moved with it: `probes/vibe_probes_test.clj` in this folder.
@@ -442,7 +442,7 @@ Run: `clj -M:mac-arm:test reactions vibes-test subs-test library engine show-loc
 > - **A ★ (built)** As it is: the Vibes tab's lint says it at once, where the edit is made, and Perform's status line says it when the vibe next switches its FX set on, or FLASH leaves a flash FX cell off.
 > - **B** `refresh-fx` reports it too, so Perform says it at once (an engine change: Z5's `refused-cell-is-reported-test` would gain the edit's case).
 
-## 13. As built (2026-11-20, `6544efb`..`cdf1d57`, on `vibe-8b`)
+## 13. As built (2026-11-20, `6544efb`..`cdf1d57`, on `master`)
 
 Built in worktree `vibe-8b` off `ea4d153` (`master`: Z5 as it landed, its code `376d5f6`'s), while zones Z6 was built beside it on `zones-z6`. The ★ answers are built: Z8b-Q1 A (the Effects grid's New tap reaction ▸ offers the four, made as their templates are), Z8b-Q2 A (the swap and the shift over zones), Z8b-Q3 A (§7's two info rows later) and Z8b-Q4 A (they follow the pattern pads), and the build's Z8b-Q5 A (§12.10). The audience rule is Z5's (V10 A). **Not done: seeing them on a real projector**: a hop across three lasers on HIT, a swap of A and B on ACCENT under Left / Right, a chase while FLASH is held.
 
