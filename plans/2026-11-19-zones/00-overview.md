@@ -52,6 +52,7 @@ The precise rules are in **`01-model-and-routing-spec.md`**. Every phase doc imp
 | `11-vibe-phase8-zone-effects.md` | Vibe Phase 8 (zone chase, swap and shift on the effects grid), moved here from the vibe plan on 2026-11-20. Z5 builds its shared stage over refs; its 8b (reactions, the audience rule with V10 A, lint) comes after Z5 |
 | `probes/` | `vibe_probes_test.clj` (v19–v24, moved with Phase 8) and, from Z3, `zones_probes_test.clj` (z1–z4) |
 | `12-decimate-effect.md` | Decimate: an effect that thins a frame to a target fps at a given scan rate (25 kpps, 30 fps by default), keeping blanking, line ends, dwell points and corners. **Done** (`e7b93e4`..`d6fbb15`) |
+| `13-projectors-layout.md` | The Projectors tab's layout pass: a divider between the rig strip and the inspector, each inspector column scrolling on its own, so the safety zone and the test pattern fit at 1200 × 800. **Done** (`77230f1`..`0a1c219`) |
 
 The phase docs were written against slightly different commits, then re-checked: 04 and 09 at `4fa9eee`, 05 and 06 at `6aaad7d` (both after vibe Phase 6); 07 and 08 at `f178f56`; 02 and 03 at `70f7db8` by an independent review. **02 (Z0) is built**, and its as-built note records where it landed. Vibe Phases 3–6 and UX Phase 3 landed in between, so **re-check each doc's citations at HEAD when its phase starts.**
 

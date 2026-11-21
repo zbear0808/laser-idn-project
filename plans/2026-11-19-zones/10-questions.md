@@ -189,6 +189,24 @@ Either way, Escape during a drag puts the old zone back without asking.
 - **A** As for any cue: "Simplify it, or lower Laser C's minimum."
 - **B ★** Name Decimate: "Laser C's Decimate keeps ~830 points: set its scan rate to Laser C's 12 kpps, or lower Laser C's minimum."
 
+## Projectors tab layout (`13-projectors-layout.md`; built as ★ A, 2026-11-20)
+
+**Q-L-1 · Where TEST PATTERN sits.**
+- **A ★ (built)** At the top of the middle column, so CONFIGURE, TEST PATTERN and SAFETY ZONE start side by side, always in view.
+- **B** Back under SAFETY ZONE in the right column, which then needs scrolling at 1200 × 800.
+
+**Q-L-2 · The strip at 1200 × 800 until the divider is moved.**
+- **A ★ (built)** Its cards only: the inspector gets the 430 px its safety zone needs, and the group rows are a scroll or a drag away. From 1440 × 900 some rows show.
+- **B** The cards and the All row: Add blocked area and Reset are then cut by about 8 px. **C** The whole strip, as before, with the inspector scrolling.
+
+**Q-L-3 · Copy to… / Mirror to… at 1200 × 800.**
+- **A ★ (built)** Under the fold of the right column, a short scroll.
+- **B** On the Add / Reset row, so all of SAFETY ZONE shows at 1200 × 800 (changes Z1's editor).
+
+**Q-L-4 · A window resize after the divider was moved.**
+- **A ★ (built)** The change is shared between the strip and the inspector, as the preview's divider does.
+- **B** The strip keeps its height and the inspector takes the change.
+
 ## ZR · The rig file (`09-phase-zr-rig-file.md`)
 
 **Q-ZR-1 · Where the rig file lives.**

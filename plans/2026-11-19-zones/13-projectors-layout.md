@@ -1,6 +1,6 @@
 # The Projectors tab: a layout pass
 
-**Written:** 2026-11-20 at `cc9e000` (`master`: Z0–Z3, ZR and Decimate in).   **Status:** **built on branch `projectors-layout`** (`2a865d9`..`0baf299`), not merged; the as-built note is §5.   **Asked for by the user** (the direction approved): setting up a laser at 1200 × 800 should need no hunting. A divider to drag between the rig strip and the inspector; the strip keeps its own scrolling; each inspector column scrolls on its own; defaults that show the whole safety canvas and its Add / Reset buttons at 1200 × 800 with a laser selected; the divider's place kept for the session (UI state: never saved with the show or the rig, not undoable). No behaviour changes beyond layout, and every node id kept.   **Built alongside** Z4 and a Decimate follow-up (the card's load meter): see §2's last list.
+**Written:** 2026-11-20 at `cc9e000` (`master`: Z0–Z3, ZR and Decimate in).   **Status:** **Done, on `master`** (`77230f1`..`0a1c219`); the as-built note is §5.   **Asked for by the user** (the direction approved): setting up a laser at 1200 × 800 should need no hunting. A divider to drag between the rig strip and the inspector; the strip keeps its own scrolling; each inspector column scrolls on its own; defaults that show the whole safety canvas and its Add / Reset buttons at 1200 × 800 with a laser selected; the divider's place kept for the session (UI state: never saved with the show or the rig, not undoable). No behaviour changes beyond layout, and every node id kept.   **Built alongside** Z4 and a Decimate follow-up (the card's load meter): see §2's last list.
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks anything that doesn't exist yet.
 
@@ -69,7 +69,7 @@ Failing tests first in each step, run red against the step before.
 | 4 | `test(ui): no scrolling to the inspector's sections` | the five tests that scrolled |
 | 5 | `plans: the Projectors tab's layout pass, as built` | – |
 
-## 5. As built (2026-11-20, `2a865d9`..`0baf299`, on branch `projectors-layout`, not merged)
+## 5. As built (2026-11-20, `77230f1`..`0a1c219`, on `master`)
 
 Built in worktree `wt-projectors-layout` off `master` at `cc9e000`, while Z4 and the Decimate follow-up were built in theirs. Z4 has since landed (`master` at `4c5fcc8`); "For the merge" has the trial merges. A prototype of the whole design (not committed) was measured and screenshotted before §1–§4 were written; the commits below were then made from it, tests first.
 
@@ -77,10 +77,10 @@ Built in worktree `wt-projectors-layout` off `master` at `cc9e000`, while Z4 and
 
 | # | Commit | Step (§4) |
 |---|---|---|
-| 1 | `45620c7` | this plan, §1–§4 |
-| 2 | `2a865d9` | NEW `inspector-column`: the inspector is three scroll panes, NEW `#projector-column-left` (348 px), `#projector-column-middle` (316 px) and `#projector-column-right` (the rest), without the region that pushed the right column down; FIT GUARD's boxes and "%" keep their whole width; NEW `projectors-layout-test` with `each-column-scrolls-on-its-own-test` and `fit-guard-shows-whole-test` |
-| 3 | `da4c135` | NEW `#projectors-split` holds the strip and the inspector; NEW `default-divider`, `follow-default-divider!`, `remember-divider`; NEW `rig-strip/cards-height`, the strip's `:min-height` (its cards) and `:max-height` (all its rows); TEST PATTERN at the top of the middle column; NEW `:rig/set-divider` and `[:rig-ui :divider]`; `setting-up-a-laser-needs-no-scrolling-test`, `dragged-divider-stays-for-the-session-test`, `divider-is-kept-for-the-session-test`; the four tests that click a strip row scroll the strip to it |
-| 4 | `0baf299` | the eleven `ui/scroll-into-view!` calls of §1 are gone (the helper stays) |
+| 1 | `e935ffd` | this plan, §1–§4 |
+| 2 | `77230f1` | NEW `inspector-column`: the inspector is three scroll panes, NEW `#projector-column-left` (348 px), `#projector-column-middle` (316 px) and `#projector-column-right` (the rest), without the region that pushed the right column down; FIT GUARD's boxes and "%" keep their whole width; NEW `projectors-layout-test` with `each-column-scrolls-on-its-own-test` and `fit-guard-shows-whole-test` |
+| 3 | `53589f1` | NEW `#projectors-split` holds the strip and the inspector; NEW `default-divider`, `follow-default-divider!`, `remember-divider`; NEW `rig-strip/cards-height`, the strip's `:min-height` (its cards) and `:max-height` (all its rows); TEST PATTERN at the top of the middle column; NEW `:rig/set-divider` and `[:rig-ui :divider]`; `setting-up-a-laser-needs-no-scrolling-test`, `dragged-divider-stays-for-the-session-test`, `divider-is-kept-for-the-session-test`; the four tests that click a strip row scroll the strip to it |
+| 4 | `0a1c219` | the eleven `ui/scroll-into-view!` calls of §1 are gone (the helper stays) |
 | 5 | this commit | this note |
 
 Screenshots (headless, the scratch test of §1, with the app's rig file line; not committed):
@@ -127,8 +127,8 @@ Dragged 100 px down, the strip is 232 px and `[:rig-ui :divider]` is 0.443, with
 
 | Step | Before the change |
 |---|---|
-| 2 | Against `master`'s views (at `45620c7`): `each-column-scrolls-on-its-own-test` 1 error (no `#projector-column-right`). `fit-guard-shows-whole-test`, written after the prototype's screenshots, against `master`'s `projectors.clj`: 2 failures ("Draw fewer points belo...", and "..." for "%"). That first run of the namespace also had step 3's two UI tests: 19 failures and 1 error |
-| 3 | Against `2a865d9`: `setting-up-a-laser-needs-no-scrolling-test` 16 failures (at 1200 × 800 FIT GUARD, Show test pattern, Identify, the canvas, the Limit and Blocked rows, Add and Reset; at 1440 × 900 the same but the canvas and the Limit row, and Copy to… and Mirror to…), `dragged-divider-stays-for-the-session-test` 1 error (no divider). `divider-is-kept-for-the-session-test` against the handlers without the event (the same at `45620c7` and `2a865d9`): 4 failures, its unknown event returning no state. The four row tests as they were on `master`, against step 3's views: 4 errors (the row is under the inspector) |
+| 2 | Against `master`'s views (at `e935ffd`): `each-column-scrolls-on-its-own-test` 1 error (no `#projector-column-right`). `fit-guard-shows-whole-test`, written after the prototype's screenshots, against `master`'s `projectors.clj`: 2 failures ("Draw fewer points belo...", and "..." for "%"). That first run of the namespace also had step 3's two UI tests: 19 failures and 1 error |
+| 3 | Against `77230f1`: `setting-up-a-laser-needs-no-scrolling-test` 16 failures (at 1200 × 800 FIT GUARD, Show test pattern, Identify, the canvas, the Limit and Blocked rows, Add and Reset; at 1440 × 900 the same but the canvas and the Limit row, and Copy to… and Mirror to…), `dragged-divider-stays-for-the-session-test` 1 error (no divider). `divider-is-kept-for-the-session-test` against the handlers without the event (the same at `e935ffd` and `77230f1`): 4 failures, its unknown event returning no state. The four row tests as they were on `master`, against step 3's views: 4 errors (the row is under the inspector) |
 | 4 | none: it removes calls. The five tests pass without them against step 3's views |
 
 ### Verification
@@ -136,7 +136,8 @@ Dragged 100 px down, the strip is 232 px and `[:rig-ui :divider]` is 0.443, with
 | Where | Unit suite (`clj -M:mac-arm:test`) | UI suite (`clj -M:test-ui:mac-arm:test-ui-headless`) |
 |---|---|---|
 | `cc9e000` (the base) | 1,447 tests, 541,789 assertions, 0 failures | 195 tests, 884 assertions, 0 failures: 12 §6's runs of the same `src/` and `test/` trees (`d6fbb15`), not run again |
-| **`0baf299`, the branch's last code** | **1,448 tests, 541,801 assertions, 0 failures** | **199 tests, 940 assertions, 0 failures** |
+| `0a1c219`, the branch's last code, on `cc9e000` | 1,448 tests, 541,801 assertions, 0 failures | 199 tests, 940 assertions, 0 failures |
+| **rebased onto `bb1e4bc` (Z4 and the Decimate follow-up in, no conflicts), as landed** | **1,529 tests, 542,918 assertions, 0 failures, 0 errors** | **216 tests, 1,075 assertions, 0 failures, 0 errors** |
 
 Each step also ran its targeted namespaces: step 2 `projectors-layout-test`, `setup-dialogs-test`, `safety-editor-test`, `rig-card-test` and `rig-strip-test` (44 tests, 139 assertions); step 3 `projectors-layout-test` (4 tests, 56 assertions), `rig-handlers-test` (15 tests, 131 assertions), and `rig-strip-test`, `zone-groups-tab-test`, `setup-dialogs-test`, `safety-editor-test` and `rig-card-test` (46 tests, 139 assertions); step 4 the four namespaces it changed (42 tests, 126 assertions). `streaming-engine-test/new-tick-goes-out-without-the-minimum-gap-test` passed in the full run. clj-kondo reports no errors or warnings on the touched files (one info, "Redundant nested call: +", in `cards-height`, as `strip-height` had on `master`). No test wrote under the home folder: `~/LaserShowProjects` doesn't exist.
 
