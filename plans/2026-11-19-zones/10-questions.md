@@ -350,3 +350,21 @@ Either way, Escape during a drag puts the old zone back without asking.
 **Z6-Q5 · Where the grid opens.**
 - **A ★** Its own window.
 - **B** Inside the pattern window.
+
+**Raised while building Z6** (2026-11-20; 08 §12 has the context; built as ★ A):
+
+**Z6-Q6 · A pattern that was a grid, its style switched since.**
+- **A ★ (built)** Step grid… brings its steps back: they stay in the pattern when the style changes.
+- **B** It becomes a new grid of its current style's first 8 steps.
+
+**Z6-Q7 · What Shift and Swap become as a grid** (a grid lights places; it can't trade what's in them).
+- **A ★ (built)** A new grid's start: Alternate over the pattern's zones.
+- **B** A Chase over its zones.
+
+**Z6-Q8 · The show lock in the grid's window.**
+- **A ★ (built)** The editing part is greyed out with a line that says why; opening it, its cursor and the playhead go on.
+- **B** Everything stays live, and each click is refused with a notice.
+
+**Z6-Q9 · A new modulator on a pattern's Style spans Steps too.**
+- **A ★ (built)** 0 to 6, Steps last, so an old show's modulator from 0 to 5 keeps its six styles.
+- **B** It spans the six rule styles only; Steps is picked by hand.

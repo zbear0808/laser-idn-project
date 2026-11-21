@@ -130,7 +130,7 @@ There is still **one render per cue per tick** (spec invariant 8). Everything pe
 | **Z4** ✅ | **Done in code** (`64fab99`..`b44e388`, 06 §13); the real-projector checks are still owed. **A cue drawn into Zone A follows the zone map you switch live.** Zones and maps, one Target control, inheritance with "from …", grid badges, map pads with switch timing, migration | ~6 d | Z3 | 06 |
 | **ZR** ✅ | **Done** (`5ec8979`..`af7ba97`, 09 §13; built alongside Z3). **New Project keeps your rig. Opening someone's show never touches your safety zones.** The rig file, and matching a show's groups onto it | ~3–4 d | Z2 (best after Z4) | 09 |
 | **Z5** ✅ | **Done in code** (`1d3d3b8`..`376d5f6`, 07 §13); the real-projector checks are still owed. **Alternate, chase, swap and shift between zones on the beat or on HIT; cycle maps.** Zone patterns on cues and on effect cells, shared with vibe Phase 8; pattern pads | ~4.5 d | Z4 (+ Phase 8a, if it landed) | 07 |
-| **Z6** | **Program a zone pattern on a drum-machine grid** | ~3 d | Z5 | 08 |
+| **Z6** ✅ | **Done in code** (`e31d24b`..`372e00a`, 08 §13); the real-projector checks are still owed. **Program a zone pattern on a drum-machine grid** | ~3 d | Z5 | 08 |
 
 That's about **33–36 days**. Suggested order: **Z0 → (Z1 ∥ Z2) → Z3 → Z4 → ZR → Z5 → Z6**. ZR can move earlier if the rig being wiped by New Project gets in the way.
 
