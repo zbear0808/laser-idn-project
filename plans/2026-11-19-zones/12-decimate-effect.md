@@ -1,6 +1,6 @@
 # Decimate: an effect that thins a frame to a target fps
 
-**Written:** 2026-11-20 at `c067030` (`master`, Z0–Z3 and ZR in).   **Status:** **Done, on `master`** (`e7b93e4`..`d6fbb15`, fast-forwarded from `3229c95`). The as-built note is §6. The follow-up for Q-D-1 B and Q-D-2 B is §7 (`5adfd4b`..`16a3e10`, on branch `decimate-b`, not merged). Not checked on a real projector. Asked for by the user on 2026-11-20 ("a decimate effect that will reduce point counts by a factor to target a certain fps at a given kpps… default to 25 kpps and 30 fps… try to never mess with anchor blanking points").   **Needs:** Z3's fit guard (`animation/fit_guard.clj`: `budget`, `keep-mask`, `thin`; 05 §13).   **Size:** ~0.5 d. It can be built alongside Z4.
+**Written:** 2026-11-20 at `c067030` (`master`, Z0–Z3 and ZR in).   **Status:** **Done, on `master`** (`e7b93e4`..`d6fbb15`, fast-forwarded from `3229c95`). The as-built note is §6. The follow-up for Q-D-1 B and Q-D-2 B is §7 (`9585cae`..`114e49e`, on `master`), and the second, for Q-D-3 B and Q-D-4 B, is §8 (`c0e2d7b`..`9423612`, on branch `decimate-c`, not merged). Not checked on a real projector. Asked for by the user on 2026-11-20 ("a decimate effect that will reduce point counts by a factor to target a certain fps at a given kpps… default to 25 kpps and 30 fps… try to never mess with anchor blanking points").   **Needs:** Z3's fit guard (`animation/fit_guard.clj`: `budget`, `keep-mask`, `thin`; 05 §13).   **Size:** ~0.5 d. It can be built alongside Z4.
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks anything that doesn't exist yet.
 
@@ -300,3 +300,133 @@ Everything else in `rig.clj` merges on its own: the `ns` form, `routing-keys`, `
 **Q-D-4 · The ⚠'s advice when the laser's Decimate sets the count.**
 - **A ★ (built)** As for any cue: "Simplify it, or lower Laser C's minimum."
 - **B** Name Decimate: "Laser C's Decimate keeps ~830 points: set its scan rate to Laser C's 12 kpps, or lower Laser C's minimum."
+
+## 8. Follow-up 2 (Q-D-3 B, Q-D-4 B) (2026-11-20, `c0e2d7b`..`9423612`, on branch `decimate-c`, not merged)
+
+The user answered §7's two questions B (`10-questions.md` § Decimate). Built in worktree `wt-decimate-c` off `master` at `bb1e4bc`, where the first follow-up had landed on Z4 (`9585cae`..`114e49e`). `master` has since moved to `4b19812` (the Projectors layout pass landed). "For the merge" has a trial merge with it.
+
+### Where it landed
+
+| # | Commit | What |
+|---|---|---|
+| 1 | `c0e2d7b` | Q-D-3 B, the meter: NEW `fit-guard/drawn`; `multi-engine/show-frame` uses it for a laser whose routing has a `:decimate-budget` |
+| 2 | `9423612` | Q-D-4 B, the advice: NEW `points/chain-decimate` (`chain-budget` now reads it); the routing's `:outputs` gain `:decimate-kpps` and `:decimate-fps`; `compose/cue-warnings` gives a warning `:decimate`; `load-warning/cue-warning-text` and `cue-line-text` (NEW private `decimate-advice`); `subs/cue-warning`'s docstring |
+| 3 | this commit | this note, and Q-D-3 and Q-D-4 in `10-questions.md` |
+
+The two code commits share no file. Step 1 passes its tests on its own: they were run with step 2's files stashed.
+
+### What changed
+
+**The meter (Q-D-3 B).** Whenever a laser's calibration chain has an enabled Decimate, the meter counts what reaches the safety stage, whether Decimate cut points or not.
+- `show-frame` reads `:decimate-budget` from the routing, which has it only while the chain has an enabled Decimate. After `recount`, `fit-guard/drawn` gives the record `:effect-points`, its `:points`.
+- With Decimate at 15 fps (1,666 points) on a laser at 25 kpps with a minimum of 20, a 2,700-point cue now reads 1,620 / 1,250 = **130%** (it read 216%); a 2,800-point one reads 133%, as before. A heavier cue no longer reads lower, and the meter, the fps (15) and LOW FPS (on) describe the same frame. A frame the guard could thin only to its anchors also reads what the laser draws.
+- Dark frames work as §7 left them (S-14). A Decimate laser's dark frame now carries its own `:effect-points`, and `smooth` replaces it with the lit frames'.
+- Without an enabled Decimate nothing changes: the meter is what the laser is asked for, unless a projector effect changed the count (§7).
+
+**The advice (Q-D-4 B).** When a laser's Decimate is what keeps a cue's count (its budget is under the cue's points on that laser), and that laser is the one the warning names, the warning carries `:decimate`: what to change of that Decimate.
+- `:scan-rate` when its scan rate is over the laser's. At the laser's, the laser draws at Decimate's target or faster.
+- `:fps` when its target is under the laser's minimum.
+- Both when both. With neither, Decimate can't leave the laser under its minimum, so a warning where Decimate keeps the count always has one.
+
+The text says so in the editor's line and in the cue cell's tooltip (on a second line):
+- "Laser C's Decimate keeps ~830 points: set its scan rate to Laser C's 12 kpps, or lower Laser C's minimum.", the user's words, for `:scan-rate`;
+- "… keeps ~1,670 points: raise its target fps to 20, or lower Laser C's minimum." for `:fps`;
+- "… set its scan rate to Laser C's 12 kpps and raise its target fps to 20, or lower …" for both.
+
+The rounding is the existing line's: points to the nearest 10 (`~830`, the show clock's rounding of `:points`, which is the budget here), kpps as "12" or "27.5", fps whole. The routing's `:outputs` carry the deciding values beside `:decimate-budget`, as the effect counts them (clamped, a modulated one at its default): `:decimate-kpps` and `:decimate-fps`, from `points/chain-decimate`. So `compose` decides from values the show clock hasn't rounded. Without Decimate, or with one that doesn't keep the count (a cue under its budget), the warning has no `:decimate`, and both texts are as before.
+
+### Deviations and small rules
+
+- **"Most points" goes when Decimate keeps the count.** The editor's line used to read "⚠ ~830 points: about 14 fps on Laser A (12 kpps). Most points: Circle (3,000). Simplify it, or lower Laser A's minimum." (the UI test's red run). The item's 3,000 is more than the line's 830, and simplifying the cue doesn't help. The line now ends with Decimate's advice alone.
+- **The cell's tooltip had no advice before.** It said "Too heavy for Laser C: about 14 fps (minimum 20)"; "Simplify it…" is only in the editor's line. The brief puts the Decimate sentence in both places, so the tooltip gains it as a second line when Decimate keeps the count, and is as it was otherwise. Asked below (Q-D-5).
+- **A target under the minimum gets its own advice,** which the brief's example doesn't cover: on a laser at Decimate's own scan rate, "set its scan rate to Laser C's 25 kpps" would change nothing. "raise its target fps to 20" uses the warning's `:min-fps`, whole, as "(minimum 20)" does.
+- **`points/chain-budget` is now `(:budget (chain-decimate items))`.** Nothing in `src/` calls it any more (the routing reads `chain-decimate`); its tests (§7) still pin the rules the two share.
+- **Not touched:**
+  - `views/components/rig_strip.clj` and `views/tabs/projectors.clj` (the layout pass's);
+  - `services/show_clock.clj`: its rounding passes `:decimate` through;
+  - `backend/output_runtime.clj`, `00-overview.md`, and in `10-questions.md` anything but Q-D-3's and Q-D-4's "built in".
+
+### Tests added
+
+- `laser-show.animation.fit-guard-test`: NEW `drawn-meters-what-the-laser-draws-test` (2,700 points: the guard's 1,620; nothing else changes; a recounted record is as it was; a dark one still leaves the meter as it was).
+- `laser-show.backend.multi-engine-test`: NEW `decimate-that-changes-nothing-still-meters-what-the-laser-draws-test` (Decimate at 15 fps: 2,700 points meter 1,620, 2,800 meter 1,666, 500 meter 500; a disabled Decimate, or a chain without one, gives no `:effect-points`).
+- `laser-show.routing.compose-test`: in `cue-warnings-count-a-decimated-cue-at-its-budget-test` the 1,666-point warning has `:decimate #{:fps}`; NEW `cue-warnings-say-which-decimate-setting-to-change-test`:
+  - a 12 kpps laser with Decimate at 25 kpps: `#{:scan-rate}`;
+  - a target under the minimum: `#{:fps}`, on a faster laser too;
+  - both;
+  - of several Decimates, the one with the smallest budget;
+  - a cue under the budget, a disabled Decimate, or none: no `:decimate`.
+- `laser-show.animation.effects.points-test`: NEW `chain-decimate-is-the-one-that-keeps-the-count-test`.
+- `laser-show.routing.rig-test`: `outputs-carry-each-lasers-decimate-budget-test` checks `:decimate-kpps` and `:decimate-fps` of the Decimate that keeps the count, and that a laser without one has none of the three keys.
+- `laser-show.views.components.load-warning-test`: `cue-warning-text-test` checks the tooltip and the line with `:decimate` (scan rate, target, both, 27.5 kpps), and the tooltip without it. Its first assertions, which have no `:decimate`, are the "unchanged" check.
+- UI, `laser-show.ui-test.cue-load-test`: NEW `decimate-that-keeps-the-count-is-named-test`. A 12 kpps laser with Decimate at 25 kpps plays the 3,000-point ring:
+  - the tooltip reads "Too heavy for Laser A: about 14 fps (minimum 20)", with the advice under it;
+  - the editor's line reads "⚠ ~830 points: about 14 fps on Laser A (12 kpps). Laser A's Decimate keeps ~830 points: set its scan rate to Laser A's 12 kpps, or lower Laser A's minimum."
+
+  The namespace's other tests are the UI's "unchanged without Decimate".
+
+### Red first
+
+The tests were written first and run against `bb1e4bc`'s code.
+
+| Namespaces | Before the change |
+|---|---|
+| `multi-engine-test`, `compose-test`, `load-warning-test`, `rig-test`, together | 99 tests, 71,919 assertions, **14 failures**: `decimate-that-changes-nothing-…` 2 (2,700 and 500 points had no `:effect-points`; 2,800 passed, recounted already), `cue-warnings-count-a-decimated-cue-…` 1 and `cue-warnings-say-which-…` 5 (no `:decimate`), `cue-warning-text-test` 5 (no advice), `outputs-carry-…` 1 (no scan rate or target) |
+| `fit-guard-test`, `points-test` | couldn't compile (no `fg/drawn`, no `points/chain-decimate`). Against stubs (the record as it is; nil): 25 tests, 7,988 assertions, 8 failures, `drawn-…` 2 and `chain-decimate-…` 6 |
+| UI, `decimate-that-keeps-the-count-is-named-test` | 2 failures: the tooltip without the advice, and the line "… Most points: Circle (3,000). Simplify it, or lower Laser A's minimum." |
+
+Passing before the change, by design, as checks of what mustn't change: the 2,800-point and the disabled and no-Decimate parts of the multi-engine test, the compose test's "as for any cue" part, and in `cue-warning-text-test` the tooltip without `:decimate` and the first assertions.
+
+### Verification
+
+| Where | Unit suite (`clj -M:mac-arm:test`) | UI suite (`clj -M:test-ui:mac-arm:test-ui-headless`) |
+|---|---|---|
+| `bb1e4bc`, the base (§7's run of the rebased follow-up) | 1,528 tests, 542,906 assertions, 0 failures | 212 tests, 1,019 assertions, 0 failures |
+| **`9423612`, the branch's last code** | **1,532 tests, 542,939 assertions, 0 failures, 0 errors** | **213 tests, 1,021 assertions, 0 failures, 0 errors** |
+| the trial merge with `master` `4b19812` (tree `683944b`, made before this note) | 1,533 tests, 542,950 assertions, 0 failures, 0 errors | 217 tests, 1,077 assertions, 0 failures, 0 errors |
+
+`master` at `4b19812` has 1,529 tests and 542,918 assertions, and 216 UI tests and 1,075 assertions (13's numbers for the layout pass as landed, not run again). This branch adds 4 unit tests and 1 UI test, both on its own and on the merge. Its new tests make 33 unit assertions and 2 UI ones. The merge's unit count is 32 over `master`'s, which is likely a test elsewhere whose assertion count varies by one between runs: §7's two runs of the same code read 542,906 and 542,907.
+
+- **Targeted runs while working:**
+  - after the code: `fit-guard-test`, `multi-engine-test`, `output-lifecycle-test`, `load-warning-test`, `compose-test`, `rig-test`, `points-test`, `show-clock-test` and `subs-test`, 225 tests, 80,559 assertions, 0 failures;
+  - step 1 alone: `fit-guard-test`, `multi-engine-test`, `output-lifecycle-test`, `load-warning-test` and `streaming-engine-test`, 99 tests, 8,361 assertions, 0 failures;
+  - UI: `cue-load-test`, `rig-card-test` and `grid-test`, 21 tests, 103 assertions, 0 failures.
+- `streaming-engine-test/new-tick-goes-out-without-the-minimum-gap-test` passed in every full run.
+- clj-kondo reports nothing new on the touched files but one info: a "redundant long coercion" at `chain-decimate`'s `(long (fit-guard/budget …))`, which `points.clj`'s boxed-math warning needs, as in `decimate`.
+- No test wrote under the home folder: `~/LaserShowProjects` doesn't exist.
+
+**Not done: the check on a real projector.**
+- At 25 kpps with Decimate at 15 fps, a 2,700-point cue: the card reads 130%, red, and LOW FPS is on.
+- On a 12 kpps laser with Decimate at its defaults, a heavy cue: the cue cell's tooltip and its editor name Decimate.
+
+### For the merge
+
+`git merge-tree --write-tree master decimate-c` (`master` at `4b19812`) **has no conflicts**. The layout pass that landed in between touches none of this branch's code or test files.
+- Files this branch touches:
+  - `src/laser_show/animation/fit_guard.clj`: NEW `drawn`, after `recount`;
+  - `src/laser_show/backend/multi_engine.clj`: `show-frame`;
+  - `src/laser_show/animation/effects/points.clj`: the `ns` docstring, NEW `chain-decimate`, `chain-budget`;
+  - `src/laser_show/routing/rig.clj`: `decimate-of` (was `decimate-budget`) and `routing`;
+  - `src/laser_show/routing/compose.clj`: NEW private `decimate-fixes`, and `cue-warnings`;
+  - `src/laser_show/views/components/load_warning.clj`: NEW private `decimate-advice`, `cue-warning-text` and `cue-line-text`;
+  - `src/laser_show/subs.clj`: `cue-warning`'s docstring;
+  - tests:
+    - `fit_guard_test.clj`: one test, after `dark-frames-leave-the-meter-as-it-was-test`;
+    - `multi_engine_test.clj`: `lit-circle` and one test, at the end;
+    - `compose_test.clj`: an assertion of `cue-warnings-count-a-decimated-cue-at-its-budget-test`, and one test at the end;
+    - `points_test.clj`: one test, at the end;
+    - `rig_test.clj`: `outputs-carry-each-lasers-decimate-budget-test`;
+    - `load_warning_test.clj`: `cue-warning-text-test`;
+    - `ui_test/cue_load_test.clj`: one test, at the end;
+  - this doc (the status line and this section) and `10-questions.md` (Q-D-3's and Q-D-4's "built in").
+
+### Found on the way
+
+- **A fractional scan rate can't be typed into Decimate.** A laser at 27,500 pts/s reads "set its scan rate to Laser C's 27.5 kpps", as the line already writes it, but Decimate's scan rate is a whole number (1–100). 27 works; 28 is over the laser's and leaves the warning. Not changed.
+- **A fractional minimum is rounded in the advice,** as in "(minimum 22)". A minimum of 22.4 reads "raise its target fps to 22", and at 22 the laser can still be just under 22.4. The tooltip already rounds the minimum the same way. Not changed.
+
+### Questions for the user
+
+**Q-D-5 · The cue cell's tooltip without Decimate.** The tooltip now names Decimate when it keeps the count, but it never had the plain advice.
+- **A ★ (built)** As before: "Too heavy for Laser C: about 12 fps (minimum 20)", with the advice in the editor's line only.
+- **B** The editor's advice in the tooltip too: "Simplify it, or lower Laser C's minimum."
