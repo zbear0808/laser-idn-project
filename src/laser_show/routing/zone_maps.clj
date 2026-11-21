@@ -15,6 +15,7 @@
    effective map from then on (effective-map-id) while the commit comes back
    as an event. Every switch lands through commit."
   (:require [clojure.string :as str]
+            [laser-show.animation.chains :as chains]
             [laser-show.routing.targets :as targets]))
 
 
@@ -74,15 +75,30 @@
   [at-beat beats]
   (>= (+ (double beats) 1e-9) (double at-beat)))
 
+(defn- holds-cycle?
+  "Does an effects cell's chain hold an enabled Map cycle (zones plan Z5)?"
+  [chain]
+  (boolean (some #(= :zone-map-cycle (:effect-id %)) (chains/flatten-chain (:items chain)))))
+
+(defn cycle-on?
+  "Does a Map cycle run (zones plan Z5): an enabled :zone-map-cycle in an
+   effects cell that is on?"
+  [state]
+  (boolean (some (fn [[_ chain]] (and (:active? chain) (holds-cycle? chain)))
+                 (get-in state [:chains :effect-chains]))))
+
 (defn effective-map-id
   "The map in use at a tick, at the global beats (spec §4's order): the
-   pending map once due?; else cycle, the Map cycle's pick (zones plan Z5;
-   nil until then), unless [:zone-map :cycle-paused?]; else [:zone-map
-   :active]. An id that is no map is Left / Right."
+   pending map once due? (:cycle, the CYCLE pad's, is cycle then); else
+   cycle, the Map cycle's pick (zones plan Z5; nil without one), unless
+   [:zone-map :cycle-paused?]; else [:zone-map :active]. An id that is no
+   map is Left / Right."
   [state beats cycle]
   (let [{:keys [active pending cycle-paused?]} (:zone-map state)
+        due (when (and pending (due? (:at-beat pending) beats)) (:map pending))
         id (cond
-             (and pending (due? (:at-beat pending) beats)) (:map pending)
+             (= :cycle due) (or cycle active)
+             due due
              (and cycle (not cycle-paused?)) cycle
              :else active)]
     (if (map-by-id state id) id default-map-id)))
@@ -132,12 +148,34 @@
 
 (defn commit
   "state with map id in use, and no switch pending. Every switch lands here:
-   a press at once, a due one, Stop and Retrigger, Use now (zones plan Z5
-   pauses a running Map cycle here too)."
+   a press at once, a due one, Stop and Retrigger, Use now. While a Map
+   cycle runs, a map that lands pauses it on that map ([:zone-map
+   :cycle-paused?], zones plan Z5 S-2, Z5-Q2 A); :cycle, the CYCLE pad's,
+   resumes it and leaves the active map as it is."
   [state id]
-  (-> state
-      (assoc-in [:zone-map :active] id)
-      (assoc-in [:zone-map :pending] nil)))
+  (if (= :cycle id)
+    (-> state
+        (assoc-in [:zone-map :pending] nil)
+        (assoc-in [:zone-map :cycle-paused?] false))
+    (cond-> (-> state
+                (assoc-in [:zone-map :active] id)
+                (assoc-in [:zone-map :pending] nil))
+      (cycle-on? state) (assoc-in [:zone-map :cycle-paused?] true))))
+
+(defn resume-cycle
+  "state with a paused Map cycle resumed when one of cells (effects cells
+   just switched on) holds a Map cycle (zones plan Z5, 07 §8.6)."
+  [state cells]
+  (if (and (get-in state [:zone-map :cycle-paused?])
+           (some #(holds-cycle? (get-in state [:chains :effect-chains %])) cells))
+    (assoc-in state [:zone-map :cycle-paused?] false)
+    state))
+
+(defn cycling?
+  "Does the Map cycle pick the map now: one runs (cycle-on?) and isn't
+   paused?"
+  [state]
+  (and (cycle-on? state) (not (get-in state [:zone-map :cycle-paused?]))))
 
 (defn- clock-on?
   "Can a press wait for a beat: the clock thread runs and the transport
@@ -177,17 +215,25 @@
   "A press of map-id (Shift or the pad's setting: bar?), from clock ({:beats
    the global beats :running? the clock thread's :now-ms :input-time :id}):
    schedule-slot on [:zone-map], with the tempo [:timing :bpm] and the
-   transport [:playback :playing?]. What lands goes through commit; a
-   switch that waits is [:zone-map :pending] {:id :map :at-beat :bar?}."
+   transport [:playback :playing?]. While a Map cycle picks the map, the
+   value in use is :cycle (zones plan Z5): a map pad then switches and
+   pauses it, even the active map's, and CYCLE cancels a waiting switch;
+   with no Map cycle on, CYCLE does nothing. What lands goes through
+   commit; a switch that waits is [:zone-map :pending] {:id :map :at-beat
+   :bar?}."
   [state map-id bar? clock]
-  (let [{:keys [pending landed]} (schedule-slot {:active (or (get-in state [:zone-map :active]) default-map-id)
-                                                 :pending (get-in state [:zone-map :pending])
-                                                 :key :map}
-                                                map-id bar?
-                                                (assoc clock
-                                                       :bpm (get-in state [:timing :bpm])
-                                                       :playing? (boolean (get-in state [:playback :playing?]))))]
-    (assoc-in (reduce commit state landed) [:zone-map :pending] pending)))
+  (if (and (= :cycle map-id) (not (cycle-on? state)))
+    state
+    (let [{:keys [pending landed]} (schedule-slot {:active (if (cycling? state)
+                                                             :cycle
+                                                             (or (get-in state [:zone-map :active]) default-map-id))
+                                                   :pending (get-in state [:zone-map :pending])
+                                                   :key :map}
+                                                  map-id bar?
+                                                  (assoc clock
+                                                         :bpm (get-in state [:timing :bpm])
+                                                         :playing? (boolean (get-in state [:playback :playing?]))))]
+      (assoc-in (reduce commit state landed) [:zone-map :pending] pending))))
 
 
 ;; The map editor's warnings (06 §7.5)

@@ -24,6 +24,7 @@
             [laser-show.profiling.frame-profiler :as profiler]
             [laser-show.routing.compose :as compose]
             [laser-show.routing.rig :as rig]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.services.frame-service :as fs]
             [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
@@ -323,7 +324,7 @@
         (is (= 2 (count (due))) "260 ms on, still pending in app state: again"))
       (testing "handled: the map is in use, and nothing more is due"
         (run! events/event-handler (due))
-        (is (= {:active :map/unison :pending nil} (:zone-map (state/get-raw-state))))
+        (is (= {:active :map/unison :pending nil} (select-keys (:zone-map (state/get-raw-state)) [:active :pending])))
         (reset! sent [])
         (with-redefs [events/dispatch! #(swap! sent conj %)]
           (show-clock/tick! 900000000))
@@ -879,3 +880,69 @@
         (with-redefs [events/dispatch! #(swap! sent conj %)]
           (show-clock/tick! 400000000))
         (is (empty? (vibe-reports)))))))
+
+
+;; Zones plan Z5: the Map cycle's pick before the routing, and the zone
+;; stage's steps in the snapshot (07 §4.4, §8.6)
+
+(defn- ticks-to!
+  "Ticks every 100 ms from from-ns (the fake clock) to beats b at 120 BPM
+   (500 ms a beat), the last one on b; [the last snapshot, its ns]."
+  [from-ns b]
+  (let [to-ns (long (* b 500000000))]
+    (loop [ns (long from-ns)]
+      (let [ns (min ns to-ns)
+            s (show-clock/tick! ns)]
+        (if (>= ns to-ns) [s to-ns] (recur (+ ns 100000000)))))))
+
+(defn- cycle-cell!
+  "A Map cycle in B2 ([1 1]), on: Left / Right, then Odd / Even, a bar each."
+  []
+  (state/assoc-in-state! [:chains :effect-chains [1 1]]
+                         {:active? true :items [(assoc (zone-patterns/cycle-instance) :id :c1)]}))
+
+(deftest map-cycle-sets-the-effective-map-test
+  (init! {[0 0] (cue :circle)})
+  (two-lasers!)
+  (cycle-cell!)
+  (state/assoc-in-state! [:zone-map :active] :map/unison)
+  (with-redefs [events/dispatch! (fn [_])]
+    (let [map-at (fn [[s _]] (get-in s [:routing :map]))
+          t0 (show-clock/tick! 0)
+          [s1 n1] (ticks-to! 100000000 3.9)
+          [s2 n2] (ticks-to! (+ n1 100000000) 4.0)
+          [s3 n3] (ticks-to! (+ n2 100000000) 7.9)
+          [s4 _] (ticks-to! (+ n3 100000000) 8.0)]
+      (is (= :map/left-right (get-in t0 [:routing :map])) "07 §8.6: beat 0, step 0: Left / Right, though Unison is the active map")
+      (is (= [:map/left-right :map/odd-even :map/odd-even :map/left-right] (mapv map-at [[s1] [s2] [s3] [s4]]))
+          "a bar each, from the tick that reaches it")
+      (is (= {:cell [1 1] :map :map/odd-even :paused? false} (get-in s2 [:routing :cycle])) "the snapshot says what the cycle shows")
+      (is (= [[:p1 nil nil]] (rig/resolve-ref (:routing s2) :zone/a)) "and the routing follows it: A is Odd")
+      (testing "paused, the active map; the snapshot says it is paused"
+        (state/assoc-in-state! [:zone-map :cycle-paused?] true)
+        (let [s (show-clock/tick! (+ 4100000000 0))]
+          (is (= :map/unison (get-in s [:routing :map])))
+          (is (true? (get-in s [:routing :cycle :paused?])))))
+      (testing "its cell off: no cycle in the snapshot, the routing the cached one"
+        (state/assoc-in-state! [:chains :effect-chains [1 1] :active?] false)
+        (let [a (show-clock/tick! 4200000000)
+              b (show-clock/tick! 4216666667)]
+          (is (nil? (get-in a [:routing :cycle])))
+          (is (identical? (:routing a) (:routing b))))))))
+
+(deftest snapshot-carries-zone-steps-and-cycle-test
+  (init! {[0 0] (assoc (cue :circle) :zone-patterns [(assoc (zone-patterns/preset-instance :alternate :cue) :id :p1)])})
+  (two-lasers!)
+  (trigger! 0 0)
+  (with-redefs [events/dispatch! (fn [_])]
+    (let [first-tick (show-clock/tick! 0)
+          [s _] (ticks-to! 100000000 1.5)]
+      (is (= {:p1 0} (:zone-steps first-tick)) "each pattern's step, for the pattern window's Now")
+      (is (= 1 (get-in s [:zone-steps :p1])) "it follows the cue's beats")
+      (is (= #{:zone/a :zone/b} (into #{} (comp (mapcat :cues) (mapcat (comp keys :zone-frames))) [first-tick s]))
+          "and the cue's picture moves")
+      (is (nil? (get-in s [:routing :cycle])) "no cycle on: none in the snapshot")))
+  (testing "nothing playing: no steps"
+    (show-time/reset-runtime!)
+    (state/swap-state! assoc-in [:playback :active-cues] {})
+    (is (= {} (:zone-steps (show-clock/tick! 0))))))

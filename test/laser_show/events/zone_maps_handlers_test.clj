@@ -4,9 +4,11 @@
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.zone-maps :as zone-maps]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
-            [laser-show.state.history :as history]))
+            [laser-show.state.history :as history]
+            [laser-show.vibes.library :as library]))
 
 (defn- fresh [] (history/mark-clean (domains/build-initial-state)))
 
@@ -42,7 +44,11 @@
 (defn- schedule [state map-id clock & {:as more}]
   (:state (zone-maps/handle (merge {:event/type :zone-map/schedule :map map-id :clock clock :state state} more))))
 
-(defn- zone-map [state] (:zone-map state))
+(defn- zone-map
+  "The map in use and the switch waiting (zones plan Z5's :cycle-paused? has
+   tests of its own, below)."
+  [state]
+  (select-keys (:zone-map state) [:active :pending]))
 
 (deftest press-reads-the-clock-then-schedules-test
   (is (= {:show-clock/read {:on-read {:event/type :zone-map/schedule :map :map/odd-even :bar? false :input-time 1234}}}
@@ -270,3 +276,83 @@
         (is (= (get-in s [:config :input :trigger-map]) (get-in undone [:config :input :trigger-map])))
         (is (= {:bar? true} (get-in undone [:config :zone-map-pads :map/custom-1])))
         (is (= :map/left-right (get-in undone [:zone-map :active])))))))
+
+
+;; The Map cycle against the map pads (zones plan Z5, 07 §8.6, Z5-Q2 A)
+
+(defn- with-cycle
+  "A playing show with a Map cycle on in B2 ([1 1]), Unison in use."
+  []
+  (-> (playing)
+      (assoc-in [:chains :effect-chains [1 1]] {:active? true :items [(assoc (zone-patterns/cycle-instance) :id :c1)]})
+      (assoc-in [:zone-map :active] :map/unison)
+      (history/mark-clean)))
+
+(defn- paused? [state] (true? (get-in state [:zone-map :cycle-paused?])))
+
+(deftest map-switch-pauses-a-running-cycle-test
+  (testing "a pad's switch that lands while the cycle runs pauses it on that map"
+    (let [s (run (with-cycle) {:event/type :zone-map/schedule :map :map/odd-even :clock (clock 16.04)})]
+      (is (= :map/odd-even (get-in s [:zone-map :active])))
+      (is (paused? s))
+      (is (empty? (get-in s [:history :undo-stack])) "live: no undo step")
+      (is (false? (get-in s [:project :dirty?])) "not unsaved")))
+  (testing "so does one that waited, when the clock's report lands it"
+    (let [waiting (run (with-cycle) {:event/type :zone-map/schedule :map :map/odd-even :clock (clock 16.5)})
+          id (get-in waiting [:zone-map :pending :id])]
+      (is (not (paused? waiting)) "not yet: it hasn't landed")
+      (is (paused? (run waiting {:event/type :show-clock/zone-map-due :id id :map :map/odd-even})))))
+  (testing "Use now, and Stop landing a waiting switch"
+    (is (paused? (run (with-cycle) {:event/type :zone-maps/use-now :map :map/left-right})))
+    (is (paused? (run (run (with-cycle) {:event/type :zone-map/schedule :map :map/odd-even :clock (clock 16.5)})
+                      {:event/type :transport/stop}))))
+  (testing "pressing the map that is active pauses on it too: the cycle's pick was in use"
+    (let [s (run (with-cycle) {:event/type :zone-map/schedule :map :map/unison :clock (clock 16.04)})]
+      (is (= :map/unison (get-in s [:zone-map :active])))
+      (is (paused? s)))))
+
+(deftest cycle-pad-resumes-test
+  (let [paused (run (with-cycle) {:event/type :zone-maps/use-now :map :map/left-right})]
+    (is (paused? paused))
+    (testing "CYCLE reads the clock, as a map pad does"
+      (is (= {:show-clock/read {:on-read {:event/type :zone-map/schedule :map :cycle :bar? false :input-time nil}}}
+             (zone-maps/handle {:event/type :zone-map/press :map :cycle :state paused}))))
+    (testing "on the beat: at once within 50 ms, it resumes and the active map stays"
+      (let [s (run paused {:event/type :zone-map/schedule :map :cycle :clock (clock 14.0)})]
+        (is (not (paused? s)))
+        (is (= :map/left-right (get-in s [:zone-map :active])))
+        (is (empty? (get-in s [:history :undo-stack])))))
+    (testing "else it waits for the beat, and blinks; its due report resumes it"
+      (let [waiting (run paused {:event/type :zone-map/schedule :map :cycle :clock (clock 13.5)})
+            id (get-in waiting [:zone-map :pending :id])]
+        (is (= {:map :cycle :at-beat 14.0 :bar? false} (dissoc (get-in waiting [:zone-map :pending]) :id)))
+        (is (paused? waiting))
+        (is (not (paused? (run waiting {:event/type :show-clock/zone-map-due :id id :map :cycle}))))))
+    (testing "a learned key presses it too"
+      (is (= :cycle (get-in (zone-maps/handle {:event/type :zone-map/press :map :cycle :input-time 5 :state paused})
+                            [:show-clock/read :on-read :map]))))))
+
+(deftest switching-a-cycle-cell-on-resumes-test
+  (let [paused (-> (run (with-cycle) {:event/type :zone-maps/use-now :map :map/left-right})
+                   (assoc-in [:chains :effect-chains [1 1] :active?] false)
+                   (assoc-in [:chains :effect-chains [0 1]] {:active? false :items [{:id :sc :effect-id :scale :enabled? true :params {}}]}))]
+    (is (paused? (run paused {:event/type :effects/toggle-cell :col 0 :row 1})) "another cell: still paused")
+    (is (not (paused? (run paused {:event/type :effects/toggle-cell :col 1 :row 1}))) "the cycle's cell on: it carries on")
+    (is (not (paused? (run paused {:event/type :effects/toggle-cell :col 1 :row 1 :fx/event true}))) "from its check box too")
+    (let [on (assoc-in paused [:chains :effect-chains [1 1] :active?] true)]
+      (is (paused? (run on {:event/type :effects/toggle-cell :col 1 :row 1})) "switched off, nothing resumes"))
+    (testing "a vibe switching it on resumes it too"
+      (let [s (-> paused
+                  (assoc-in [:config :vibes] {:order [:v1 :v2] :next-id 3
+                                              :library {:v1 (assoc (library/new-vibe :v1 1 "One") :fx [])
+                                                        :v2 (assoc (library/new-vibe :v2 2 "Two") :fx [[1 1]] :allow-audience? true)}})
+                  (assoc-in [:vibe-runtime :current] :v1))]
+        (is (not (paused? (run s {:event/type :vibe/select :vibe :v2}))))))))
+
+(deftest no-cycle-nothing-to-pause-test
+  (let [s (run (playing) {:event/type :zone-map/schedule :map :map/odd-even :clock (clock 16.04)})]
+    (is (= :map/odd-even (get-in s [:zone-map :active])))
+    (is (not (paused? s)) "nothing ran, nothing paused"))
+  (testing "CYCLE with no cycle on does nothing"
+    (is (= (:zone-map (playing)) (:zone-map (run (playing) {:event/type :zone-map/schedule :map :cycle :clock (clock 16.5)}))))
+    (is (= (:zone-map (playing)) (:zone-map (run (playing) {:event/type :zone-map/schedule :map :cycle :clock (clock 16.04)}))))))

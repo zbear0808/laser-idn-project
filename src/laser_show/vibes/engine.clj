@@ -38,6 +38,7 @@
   (:require [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.events.handlers.grid :as grid]
             [laser-show.events.helpers :as h]
+            [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.state.extractors :as ex]
             [laser-show.triggers.shuffle-bag :as bag]
             [laser-show.vibes.library :as library]
@@ -87,14 +88,16 @@
   (filterv #(get-in state [:chains :effect-chains %]) (distinct cells)))
 
 (defn- switch-on
-  "[state cells]: those of cells that were off, now on."
+  "[state cells]: those of cells that were off, now on. A Map cycle among
+   them carries on if a map pad paused it (zones plan Z5)."
   [state cells]
-  (reduce (fn [[s on] cell]
-            (if (get-in s [:chains :effect-chains cell :active?])
-              [s on]
-              [(assoc-in s [:chains :effect-chains cell :active?] true) (conj on cell)]))
-          [state []]
-          (existing-fx state cells)))
+  (let [[state on] (reduce (fn [[s on] cell]
+                             (if (get-in s [:chains :effect-chains cell :active?])
+                               [s on]
+                               [(assoc-in s [:chains :effect-chains cell :active?] true) (conj on cell)]))
+                           [state []]
+                           (existing-fx state cells))]
+    [(zone-maps/resume-cycle state on) on]))
 
 (defn- switch-off [state cells]
   (reduce (fn [s cell]

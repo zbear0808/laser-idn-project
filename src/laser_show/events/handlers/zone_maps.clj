@@ -225,12 +225,18 @@
                 :src :pad}}
     {:state state}))
 
+(defn- pad-map?
+  "Is id one a pad presses: a map of state's show, or :cycle (the CYCLE
+   pad, zones plan Z5: it resumes the Map cycle)?"
+  [state id]
+  (or (= :cycle id) (some? (zone-maps/map-by-id state id))))
+
 (defn- handle-press
   "A press of map's pad, or of its learned key (:input-time, when it was
    played): the show clock's beats are read, then :zone-map/schedule. An
-   unknown map changes nothing."
+   unknown map changes nothing; :cycle is the CYCLE pad's."
   [{:keys [map bar? input-time state]}]
-  (if (zone-maps/map-by-id state map)
+  (if (pad-map? state map)
     {:show-clock/read {:on-read {:event/type :zone-map/schedule :map map :bar? (boolean bar?) :input-time input-time}}}
     {:state state}))
 
@@ -239,7 +245,7 @@
    or on the next bar with Shift or the pad's setting
    ([:config :zone-map-pads map :bar?]) (routing.zone-maps/schedule)."
   [{:keys [map bar? input-time clock state]}]
-  (if (zone-maps/map-by-id state map)
+  (if (pad-map? state map)
     {:state (zone-maps/schedule state map
                                 (or (boolean bar?) (true? (get-in state [:config :zone-map-pads map :bar?])))
                                 (assoc clock :input-time input-time))}

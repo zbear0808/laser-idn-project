@@ -430,7 +430,9 @@
   {:active {:default :map/left-right
             :doc "The map in use: a built-in's id or one of yours; one that is no map is Left / Right (routing.zone-maps/effective-map-id)"}
    :pending {:default nil
-             :doc "{:id :map :at-beat :bar?}: a switch waiting for its beat (routing.zone-maps/schedule); the show clock routes by it from that beat until :show-clock/zone-map-due commits it. Never saved, cleared by Open and New"}})
+             :doc "{:id :map :at-beat :bar?}: a switch waiting for its beat (routing.zone-maps/schedule); the show clock routes by it from that beat until :show-clock/zone-map-due commits it. :map :cycle is the CYCLE pad's (zones plan Z5): it resumes the Map cycle. Never saved, cleared by Open and New"}
+   :cycle-paused? {:default false
+                   :doc "A map switch that landed while a Map cycle ran paused it (zones plan Z5 S-2, Z5-Q2 A): the effective map is :active until CYCLE lands or a Map cycle cell is switched on (routing.zone-maps/commit, resume-cycle). Runtime: never saved, cleared by Open and New"}})
 
 (defstate zone-group-ui
   "UI state for zone group selection.

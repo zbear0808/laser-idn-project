@@ -18,6 +18,7 @@
    for all effect-level operations."
  (:require [clojure.tools.logging :as log]
            [laser-show.events.helpers :as h]
+           [laser-show.routing.zone-maps :as zone-maps]
            [laser-show.state.clipboard :as clipboard]
            [laser-show.vibes.reactions :as reactions]
            [laser-show.vibes.refs :as refs]))
@@ -27,7 +28,8 @@
 
 
 (defn- handle-effects-toggle-cell
-  "Toggle an effects cell on/off.
+  "Toggle an effects cell on/off. A Map cycle switched on carries on if a
+   map pad paused it (zones plan Z5).
    
    If :fx/event is provided (from checkbox :on-selected-changed), use that value directly.
    Otherwise (from grid cell click), toggle the current state."
@@ -43,9 +45,10 @@
     (if (nil? cell)
       ;; Nothing to switch on in an empty cell
       {:state (assoc-in state [:effects :selected-cell] [col row])}
-      {:state (-> state
-                  (assoc-in [:chains :effect-chains [col row] :active?] new-active)
-                  (assoc-in [:effects :selected-cell] [col row]))})))
+      {:state (cond-> (-> state
+                          (assoc-in [:chains :effect-chains [col row] :active?] new-active)
+                          (assoc-in [:effects :selected-cell] [col row]))
+                (true? new-active) (zone-maps/resume-cycle [[col row]]))})))
 
 (defn- handle-effects-clear-cell
   "Clear all effects from a cell, and the triggers and vibes that named it."

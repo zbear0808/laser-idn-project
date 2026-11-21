@@ -5,7 +5,8 @@
    warnings."
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.routing.targets :as targets]
-            [laser-show.routing.zone-maps :as zone-maps]))
+            [laser-show.routing.zone-maps :as zone-maps]
+            [laser-show.routing.zone-patterns :as zone-patterns]))
 
 (def ^:private crowd-sweep
   {:id :map/custom-1 :name "Crowd sweep" :lanes [:auto/left :crowd] :overrides {:zone/c :auto/center}})
@@ -223,3 +224,59 @@
     (testing "the next custom id"
       (is (= :map/custom-3 (zone-maps/next-custom-id state)))
       (is (= :map/custom-1 (zone-maps/next-custom-id {}))))))
+
+
+;; The Map cycle (zones plan Z5, 07 §8.6; spec §4 with S-2)
+
+(def ^:private cycling
+  "state with a Map cycle on in cell [1 1] (B2) and Unison in use."
+  (-> state
+      (assoc-in [:zone-map :active] :map/unison)
+      (assoc-in [:chains :effect-chains [1 1]] {:active? true :items [(zone-patterns/cycle-instance)]})))
+
+(deftest effective-map-order-with-a-cycle-test
+  (is (= :map/odd-even (zone-maps/effective-map-id cycling 5.0 :map/odd-even)) "(2) the cycle's pick beats the active map")
+  (is (= :map/unison (zone-maps/effective-map-id cycling 5.0 nil)) "(3) no pick: the active map")
+  (is (= :map/left-right (zone-maps/effective-map-id (assoc-in cycling [:zone-map :pending] {:id 1 :map :map/left-right :at-beat 2.0}) 5.0 :map/odd-even))
+      "(1) a due switch beats the pick")
+  (testing "a waiting CYCLE (:cycle) is the pick once due, though the cycle is paused"
+    (let [s (-> cycling
+                (assoc-in [:zone-map :cycle-paused?] true)
+                (assoc-in [:zone-map :pending] {:id 1 :map :cycle :at-beat 14.0}))]
+      (is (= :map/unison (zone-maps/effective-map-id s 13.9 :map/odd-even)) "not yet: paused, the active map")
+      (is (= :map/odd-even (zone-maps/effective-map-id s 14.0 :map/odd-even)))
+      (is (= :map/unison (zone-maps/effective-map-id s 14.0 nil)) "no pick: the active map")))
+  (is (= :map/left-right (zone-maps/effective-map-id cycling 5.0 :map/gone)) "a pick that is no map: Left / Right"))
+
+(deftest paused-cycle-gives-the-active-map-test
+  (let [paused (assoc-in cycling [:zone-map :cycle-paused?] true)]
+    (is (= :map/unison (zone-maps/effective-map-id paused 5.0 :map/odd-even)))
+    (testing "a map that lands while the cycle runs pauses it (S-2): the last thing done wins"
+      (is (= {:active :map/left-right :pending nil :cycle-paused? true}
+             (select-keys (:zone-map (zone-maps/commit cycling :map/left-right)) [:active :pending :cycle-paused?])))
+      (is (true? (get-in (zone-maps/commit paused :map/odd-even) [:zone-map :cycle-paused?])) "paused already: it stays so"))
+    (testing "CYCLE landing resumes it and leaves the active map as it was"
+      (is (= {:active :map/unison :pending nil :cycle-paused? false}
+             (select-keys (:zone-map (zone-maps/commit paused :cycle)) [:active :pending :cycle-paused?]))))
+    (testing "with no cycle on, a switch pauses nothing"
+      (is (not (get-in (zone-maps/commit state :map/odd-even) [:zone-map :cycle-paused?])))
+      (is (not (zone-maps/cycle-on? state)))
+      (is (zone-maps/cycle-on? cycling))
+      (is (not (zone-maps/cycle-on? (assoc-in cycling [:chains :effect-chains [1 1] :active?] false))) "its cell off")
+      (is (not (zone-maps/cycle-on? (assoc-in cycling [:chains :effect-chains [1 1] :items 0 :enabled?] false))) "its effect off"))
+    (testing "resume-cycle: only for cells that hold a Map cycle"
+      (is (false? (get-in (zone-maps/resume-cycle paused [[1 1]]) [:zone-map :cycle-paused?])))
+      (is (identical? paused (zone-maps/resume-cycle paused [[0 3]])) "another cell")
+      (is (identical? cycling (zone-maps/resume-cycle cycling [[1 1]])) "nothing paused: nothing to do"))
+    (testing "a press while the cycle runs: CYCLE is the value in use, so a map pad switches and CYCLE cancels"
+      (let [clock {:beats 9.3 :running? true :now-ms 0 :id :p1}
+            s (assoc-in cycling [:playback :playing?] true)
+            waiting (zone-maps/schedule s :map/unison false clock)]
+        (is (= {:id :p1 :map :map/unison :at-beat 10.0 :bar? false} (get-in waiting [:zone-map :pending]))
+            "07 §8.6: Unison pressed at 9.30 waits for 10, though it is the active map")
+        (is (nil? (get-in (zone-maps/schedule waiting :cycle false clock) [:zone-map :pending])) "CYCLE cancels it")
+        (is (= {:id :p1 :map :cycle :at-beat 14.0 :bar? false}
+               (get-in (zone-maps/schedule (assoc-in s [:zone-map :cycle-paused?] true) :cycle false (assoc clock :beats 13.5))
+                       [:zone-map :pending]))
+            "paused, CYCLE waits for the beat like any pad")
+        (is (identical? state (zone-maps/schedule state :cycle false clock)) "no cycle on: CYCLE does nothing")))))

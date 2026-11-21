@@ -6,8 +6,9 @@
    1. steps show time from app state's intents and requests and the MIDI
       timecode (show-time/step);
    2. works out the zone map in use at the tick's beats (a pending switch
-      once its beat is reached, routing.zone-maps/effective-map-id), then
-      the routing (routing.rig/cached-routing: which lasers each group and
+      once its beat is reached, else the Map cycle's pick while one runs
+      and isn't paused, routing.zone-maps/effective-map-id), then the
+      routing (routing.rig/cached-routing: which lasers each group and
       zone reaches, and each laser's halves, scan rate and fit settings),
       from the tick's state and before the render (spec 01 §5), the cached
       one while nothing it reads changed;
@@ -16,8 +17,9 @@
       for the whole tick: the tick's one read of app state and of the input
       store (every tick, playing or not), the faders as their bindings now
       give them (vibes.faders), the presses tap reactions follow
-      (show-time/pulse-view; calibration gets none) and the global effects
-      (frame-service/render-context);
+      (show-time/pulse-view; calibration gets none), the global effects and
+      what the zone stage reads (frame-service/render-context, zone-ctx: the
+      routing's lasers, the pattern pads' style);
    4. publishes the result (show-time/publish!), which wakes every projector's
       engine: each composes its laser's frame from the tick's cues and
       routing and sends it on its own thread (backend/multi_engine.clj,
@@ -38,6 +40,7 @@
    Only app requires this namespace; tests call tick! by hand."
   (:require [clojure.tools.logging :as log]
             [laser-show.animation.cue-timing :as cue-timing]
+            [laser-show.animation.effects :as effects]
             [laser-show.animation.show-time :as show-time]
             [laser-show.backend.output-errors :as output-errors]
             [laser-show.common.timing :as timing]
@@ -229,6 +232,25 @@
         [vibe-sent reports] (show-time/due-reports (:vibe-sent runtime) (cond-> (or stuck []) report (conj report)) now-ms)]
     [(assoc runtime :vibe-sent vibe-sent) reports]))
 
+(defn- cycle-step
+  "What the Map cycle that runs (zones plan Z5, 07 §8.6: the last in
+   reading order, routing.zone-patterns/active-cycle) shows at this tick:
+   {:cell :map :paused?}, its parameters at the global clock with the tick's
+   presses; nil when none runs. One that throws is reported under
+   [:zone-map-cycle], and picks nothing."
+  [state global-clock pulses beats]
+  (when-let [{:keys [cell effect]} (zone-patterns/active-cycle state)]
+    (try
+      (let [ctx (assoc (cue-timing/get-global-timing-context global-clock (double (or (ex/bpm state) 120.0)))
+                       :pulses pulses)
+            pick (zone-patterns/cycle-pick (effects/resolve-effect-params effect ctx) pulses beats
+                                           (mapv :id (zone-maps/all-maps state)))]
+        (output-errors/ok! [:zone-map-cycle])
+        {:cell cell :map pick :paused? (true? (get-in state [:zone-map :cycle-paused?]))})
+      (catch Throwable e
+        (output-errors/report! [:zone-map-cycle] e)
+        nil))))
+
 (defn tick!
   "One tick at now-ns (System/nanoTime): step show time, work out the
    routing (spec 01 §5: before the render, from the tick's state, and the
@@ -247,10 +269,11 @@
         {:keys [runtime reports]} (show-time/step before state mtc-pos now-ms)
         pulses (show-time/pulse-view runtime)
         beats (show-time/global-beats runtime)
-        ;; The map in use at this tick's beats: a pending switch from the
-        ;; tick that reaches its beat (zones plan Z4, spec §4); Z5's Map
-        ;; cycle passes its pick here
-        map-id (zone-maps/effective-map-id state beats nil)
+        ;; The Map cycle's pick (zones plan Z5), then the map in use at this
+        ;; tick's beats (spec §4): a pending switch from the tick that
+        ;; reaches its beat, else the pick unless paused, else the active map
+        cycle (cycle-step state (:global runtime) pulses beats)
+        map-id (zone-maps/effective-map-id state beats (:map cycle))
         [routing-cache routing] (routing-step (:routing-cache runtime) state map-id)
         ;; What the zone stage reads (zones plan Z5): the routing's rig, the
         ;; pattern pads' style at this tick's beats
@@ -266,7 +289,8 @@
                                             :positions (show-time/positions runtime)
                                             :pulses pulses
                                             :faders (faders/fader-values input-values (get-in state [:config :input :macro-map]))
-                                            :routing routing
+                                            :routing (cond-> routing cycle (assoc :cycle cycle))
+                                            :zone-steps (into {} (keep (comp :zone-steps meta :zone-frames)) cues)
                                             :preview (delay (frame-service/preview-data cues routing))))
         ;; After publish!, so the engines never wait for them
         [runtime status] (status-step runtime state snapshot mtc-pos now-ms)
