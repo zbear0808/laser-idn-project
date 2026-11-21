@@ -227,16 +227,20 @@
   "Spec §8's cue warnings: {cell {:projector :points :fps :min-fps :scan-rate
    :item}} for each cue of the tick that a laser it reaches would draw below
    that laser's :min-fps (its scan rate over the cue's points on it,
-   cue-points), at its worst laser: the lowest fps, ties to the lower
-   :index, an excluded laser's (nil) last. :item {:id :points} is the
-   top-level item with the most points on that laser, when the cue's frames
-   carry :item-points (an edited cue's, frame-service)."
+   cue-points, at most its :decimate-budget: a laser with Decimate in its
+   calibration chain is counted as drawing no more, Q-D-2 B, though anchors
+   can leave more; the warning is an estimate), at its worst laser: the
+   lowest fps, ties to the lower :index, an excluded laser's (nil) last.
+   :item {:id :points} is the top-level item with the most points on that
+   laser, when the cue's frames carry :item-points (an edited cue's,
+   frame-service)."
   [cues routing]
   (into {}
         (keep (fn [{:keys [cell zone-frames]}]
                 (when-let [worst (->> (:outputs routing)
-                                      (keep (fn [[pid {:keys [index scan-rate fit]}]]
-                                              (let [points (cue-points zone-frames routing pid)
+                                      (keep (fn [[pid {:keys [index scan-rate fit decimate-budget]}]]
+                                              (let [points (cond-> (cue-points zone-frames routing pid)
+                                                             decimate-budget (min decimate-budget))
                                                     fps (when (pos? points) (/ (double scan-rate) points))]
                                                 (when (and fps (< fps (double (:min-fps fit))))
                                                   {:projector pid :points points :fps fps :min-fps (:min-fps fit)

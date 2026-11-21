@@ -594,6 +594,24 @@
       (is (some? (get (cue-warnings) [0 0])))
       (is (not (contains? (get (cue-warnings) [0 0]) :item))))))
 
+(def ^:private decimate
+  {:id (random-uuid) :effect-id :decimate :enabled? true :params {:kpps 25 :fps 30}})
+
+(deftest decimate-put-in-a-calibration-chain-moves-the-warning-test
+  (testing "Q-D-2 B: the next warnings count the cue at Decimate's budget on a laser that has one in its calibration chain"
+    (init! {[0 0] (heavy-cue)})
+    (two-lasers!)
+    (trigger! 0 0)
+    (with-redefs [mtc/current (constantly {:state :stopped})]
+      (ticks! 2)
+      (is (= :p1 (get-in (cue-warnings) [[0 0] :projector])) "both draw its 2,000 points under 20 fps; p1 has the lower index")
+      (state/assoc-in-state! [:chains :projector-effects :p1 :items] [decimate])
+      (ticks! 20 50000000)
+      (is (= :p2 (get-in (cue-warnings) [[0 0] :projector])) "p1 draws 833 of them: only p2 is too slow")
+      (state/assoc-in-state! [:chains :projector-effects :p2 :items] [decimate])
+      (ticks! 20 400000000)
+      (is (nil? (cue-warnings)) "both do: no ⚠"))))
+
 (deftest timecode-status-reaches-app-state-test
   (with-redefs [mtc/current (constantly {:state :running :seconds 3599.0 :fps 25
                                          :tc {:h 0 :m 59 :s 59 :f 0 :drop? false}})]

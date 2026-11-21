@@ -385,3 +385,30 @@
         (is (= {:id :a :points 1400} (get-in (compose/cue-warnings [(cue frames)] r) [[0 0] :item])))))
     (testing "without the counts (the cue's editor is closed), no item"
       (is (not (contains? (get (compose/cue-warnings [(cue (with-meta frames nil))] r) [0 0]) :item))))))
+
+(deftest cue-warnings-count-a-decimated-cue-at-its-budget-test
+  (testing "Q-D-2 B: a laser whose calibration chain has Decimate counts a cue at no more than Decimate's budget"
+    (let [decimate (fn [& {:as params}] {:id (random-uuid) :effect-id :decimate :enabled? true
+                                         :params (merge {:kpps 25 :fps 30} params)})
+          state (rig-state 2)
+          on (fn [chains] (routing (reduce-kv #(assoc-in %1 [:chains :projector-effects %2 :items] %3) state chains)))
+          heavy (cue {:all (circle 2000)})]
+      (is (= {[0 0] {:projector :p1 :points 2000 :fps 12.5 :min-fps 20 :scan-rate 25000}}
+             (compose/cue-warnings [heavy] (routing state)))
+          "without Decimate: 12.5 fps on both, p1 first")
+      (is (= {[0 0] {:projector :p2 :points 2000 :fps 12.5 :min-fps 20 :scan-rate 25000}}
+             (compose/cue-warnings [heavy] (on {:p1 [(decimate)]})))
+          "p1 decimates it to its target, 833 points at 30 fps: only p2 warns")
+      (is (= {} (compose/cue-warnings [heavy] (on {:p1 [(decimate)] :p2 [(decimate)]}))) "both do: no ⚠")
+      (is (= {[0 0] {:projector :p1 :points 1666 :fps (/ 25000.0 1666) :min-fps 20 :scan-rate 25000}}
+             (compose/cue-warnings [heavy] (on {:p1 [(decimate :fps 15)] :p2 [(decimate)]})))
+          "a target under the laser's minimum: counted at its 1,666 points, still too heavy")
+      (is (= :p1 (get-in (compose/cue-warnings [heavy] (on {:p1 [(assoc (decimate) :enabled? false)]})) [[0 0] :projector]))
+          "a disabled Decimate counts for nothing")
+      (testing "a cue under the budget counts as it is"
+        (let [state (assoc-in state [:projectors :p1 :fit] {:min-fps 30})
+              light (cue {:auto.laser/p1 (circle 900)})]
+          (is (= {:points 900 :fps (/ 25000.0 900)} (select-keys (get (compose/cue-warnings [light] (routing state)) [0 0]) [:points :fps]))
+              "900 points: 27.8 fps, under its 30")
+          (is (= {} (compose/cue-warnings [light] (routing (assoc-in state [:chains :projector-effects :p1 :items] [(decimate)]))))
+              "Decimate takes it to 833, its 30 fps"))))))

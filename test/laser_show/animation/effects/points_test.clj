@@ -7,7 +7,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.tools.logging.test :as log-test]
             [laser-show.animation.effects :as effects]
-            [laser-show.animation.effects.points]
+            [laser-show.animation.effects.points :as points]
             [laser-show.animation.effects.shape]
             [laser-show.animation.fit-guard :as fg]
             [laser-show.animation.modulation :as mod]
@@ -200,3 +200,27 @@
       (is (= 833 (count (effects/apply-effect-chain circle chain (at-beat 0.5))))
           "half a beat on, at its bottom, 30 fps")
       (is (= 2 @evaluations) "and once for the next frame"))))
+
+
+;; Read without running it: a laser's budget for the cue warnings (Q-D-2 B)
+
+(deftest chain-budget-reads-the-params-test
+  (is (= 833 (points/chain-budget [(decimate)])) "the defaults: ⌊25,000 / 30⌋")
+  (is (= [1333 416] [(points/chain-budget [(decimate :kpps 40)]) (points/chain-budget [(decimate :fps 60)])]))
+  (is (= (count (decimated (lit-circle 3000) :kpps 30 :fps 45)) (points/chain-budget [(decimate :kpps 30 :fps 45)]))
+      "the count it leaves a frame with points to lose")
+  (is (= 416 (points/chain-budget [(decimate) (scale 0.5) (decimate :fps 60)])) "several: the smallest")
+  (is (= [208 33] [(points/chain-budget [(decimate :fps 500)]) (points/chain-budget [(decimate :kpps 0)])])
+      "clamped as the effect clamps them: 120 fps, 1 kpps")
+  (testing "modulated: at its default"
+    (is (= 833 (points/chain-budget [(decimate :fps {:type :sine :min 30.0 :max 60.0 :period 1.0})])))
+    (is (= 1333 (points/chain-budget [(decimate :kpps 40 :fps {:type :sine :min 30.0 :max 60.0 :period 1.0})]))
+        "only the modulated one")
+    (is (= 833 (points/chain-budget [(assoc (decimate :fps 60) :keyframe-modulator {:enabled? true :keyframes []})]))
+        "under a keyframe modulator its params are the keyframes'"))
+  (testing "only an enabled one counts, a group's too"
+    (is (nil? (points/chain-budget [(assoc (decimate) :enabled? false)])))
+    (is (= 416 (points/chain-budget [{:type :group :enabled? true :items [(decimate :fps 60)]}])))
+    (is (nil? (points/chain-budget [{:type :group :enabled? false :items [(decimate :fps 60)]}]))))
+  (is (nil? (points/chain-budget [(scale 0.5)])) "no Decimate: nil")
+  (is (nil? (points/chain-budget nil))))

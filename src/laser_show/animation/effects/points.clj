@@ -14,8 +14,12 @@
    ones it keeps when the pass completes. Effects after it in a chain get the
    thinned frame, but the frame context made for the chain, so a per-point
    modulator after it reads the count from before. Best last in its chain:
-   fewer points, keeping blanking, corners and line ends."
-  (:require [laser-show.animation.effects :as effects]
+   fewer points, keeping blanking, corners and line ends.
+
+   chain-budget reads the budget of the Decimate in a laser's calibration
+   chain from its params, for the cue warnings (routing.rig/routing)."
+  (:require [laser-show.animation.chains :as chains]
+            [laser-show.animation.effects :as effects]
             [laser-show.animation.fit-guard :as fit-guard]))
 
 (set! *warn-on-reflection* true)
@@ -72,6 +76,24 @@
           ([result point]
            (vswap! points conj! point)
            result))))))
+
+(defn chain-budget
+  "The budget of the Decimate in a calibration chain's items, read from its
+   params without running the chain (Q-D-2 B): ⌊kpps · 1000 / fps⌋, each
+   clamped as decimate-xf clamps it, a modulated one (a modulator, or the
+   keyframes of an enabled keyframe modulator) at its default; the smallest
+   when the chain has several. nil without an enabled one
+   (chains/flatten-chain: a disabled group's are off)."
+  [items]
+  (let [budgets (into []
+                      (comp (filter #(= :decimate (:effect-id %)))
+                            (map (fn [{:keys [params keyframe-modulator]}]
+                                   (let [params (if (:enabled? keyframe-modulator) {} params)]
+                                     (fit-guard/budget (* 1000.0 (in-range (:kpps params) kpps-param))
+                                                       (in-range (:fps params) fps-param))))))
+                      (chains/flatten-chain items))]
+    (when (seq budgets)
+      (reduce min budgets))))
 
 (effects/register-effect!
  {:id :decimate

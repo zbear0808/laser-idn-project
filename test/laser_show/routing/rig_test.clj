@@ -447,6 +447,21 @@
     (is (close-fits? {:L [-0.2 0.0 0.5] :R [0.2 0.0 0.5]} (get-in outputs [:p1 :regions])) "from its safety limit")
     (is (close-fits? {:L [-0.25 0.0 0.75] :R [0.25 0.0 0.75]} (get-in outputs [:p3 :regions])) "the whole range without one")))
 
+(defn- decimate [fps] {:id (random-uuid) :effect-id :decimate :enabled? true :params {:kpps 25 :fps fps}})
+
+(deftest outputs-carry-each-lasers-decimate-budget-test
+  (testing "Q-D-2 B: the budget of the Decimate in a laser's calibration chain, the smallest of several, read from its params"
+    (let [state (-> (rig-state 5)
+                    (assoc-in [:chains :projector-effects :p1 :items] [(decimate 30)])
+                    (assoc-in [:chains :projector-effects :p2 :items] [(decimate 30) (decimate 60)])
+                    (assoc-in [:chains :projector-effects :p3 :items] [(assoc (decimate 30) :enabled? false)])
+                    (assoc-in [:chains :projector-effects :p4 :items] 5))
+          {:keys [outputs]} (routing-of state)]
+      (is (= [833 416] (mapv #(get-in outputs [% :decimate-budget]) [:p1 :p2])))
+      (is (not-any? #(contains? (get outputs %) :decimate-budget) [:p3 :p4 :p5])
+          "none for a disabled one, for a chain that can't be read (the routing is worked out all the same), or without one")
+      (is (= (dissoc (:outputs (routing-of (rig-state 5))) :p1 :p2) (dissoc outputs :p1 :p2)) "and nothing else changes"))))
+
 (deftest region-fits-follow-the-safety-limit-test
   (is (close-fits? {:L [-0.25 0.0 0.75] :R [0.25 0.0 0.75]} (rig/region-fits [-1.0 -1.0 1.0 1.0] 0.75))
       "L is -1…0.5 and R -0.5…1, each scaled by min(1.5, 2)/2")
@@ -483,10 +498,15 @@
     (is (= (routing-of state) r))
     (is (identical? r r') "the same routing, not an equal one")
     (is (identical? cache cache'))
-    (testing "nothing but the rig, the projectors, the groups, the maps and the map id counts"
+    (testing "nothing but the rig, the projectors, the groups, the maps, the map id and the lasers' calibration chains counts"
       (is (identical? r (second (rig/cached-routing cache (rig/routing-inputs (assoc state :chains {:cue-chains {}}
                                                                                      :playback {:playing? true})
-                                                                              nil))))))))
+                                                                              nil)))))
+      (let [state (assoc-in state [:chains :projector-effects :p1 :items] [(decimate 30)])
+            [cache r] (rig/cached-routing nil (rig/routing-inputs state nil))]
+        (is (identical? r (second (rig/cached-routing cache (rig/routing-inputs (assoc-in state [:chains :cue-chains [0 0]] {:items []})
+                                                                                nil))))
+            "a cue's chain isn't one")))))
 
 (deftest cached-routing-follows-an-edit-test
   (let [state (rig-state 3)
@@ -499,6 +519,7 @@
                                   ["a group defined" (assoc state :zone-groups {:graphics {:name "Graphics"}}) nil]
                                   ["a fit setting" (assoc-in state [:projectors :p1 :fit :min-fps] 30) nil]
                                   ["a safety limit" (assoc-in state [:projectors :p1 :safety :limit] [-0.5 -0.5 0.5 0.5]) nil]
+                                  ["a laser's calibration chain" (assoc-in state [:chains :projector-effects :p1 :items] [(decimate 30)]) nil]
                                   ["the map" state :map/odd-even]]]
       (testing what
         (let [inputs (rig/routing-inputs edited map-id)
@@ -506,6 +527,12 @@
           (is (not (identical? r r')))
           (is (= (rig/routing inputs) r'))
           (is (identical? r' (second (rig/cached-routing cache' inputs))) "and kept from then on"))))
+    (testing "Decimate put in a laser's calibration chain, then its target fps changed (Q-D-2 B): that laser's outputs follow"
+      (let [with (assoc-in state [:chains :projector-effects :p1 :items] [(decimate 30)])
+            [cache' r'] (rig/cached-routing cache (rig/routing-inputs with nil))
+            [_ r''] (rig/cached-routing cache' (rig/routing-inputs (assoc-in with [:chains :projector-effects :p1 :items 0 :params :fps] 60)
+                                                                   nil))]
+        (is (= [nil 833 416] (mapv #(get-in % [:outputs :p1 :decimate-budget]) [r r' r''])))))
     (testing "an equal state that isn't identical is worked out again, to the same routing"
       (let [[_ r'] (rig/cached-routing cache (rig/routing-inputs (update state :projectors #(into {} %)) nil))]
         (is (not (identical? r r')))
