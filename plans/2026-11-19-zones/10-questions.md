@@ -288,6 +288,24 @@ Either way, Escape during a drag puts the old zone back without asking.
 - **A ★** The cue's start, so A always comes first.
 - **B** The show's beats, so every cue alternates in step.
 
+**Raised while building Z5** (2026-11-20; 07 §12 has the context; built as ★ A):
+
+**Z5-Q7 · The show lock and a pattern's parameters.**
+- **A ★ (built)** Locked, a zone pattern's or a Map cycle's parameter, modulator or keyframe edit is refused ("Zone pattern edit refused"); point effects' edits still go through.
+- **B** Let them through, as other parameter edits are.
+
+**Z5-Q8 · The map pad in use, while a Map cycle runs.**
+- **A ★ (built)** Pressing it switches to that map on the beat and pauses the cycle there; CYCLE carries on.
+- **B** It does nothing while the cycle runs.
+
+**Z5-Q9 · Alternate over one place.**
+- **A ★ (built)** Lit on even steps, dark on odd: one laser blinks its picture on the beat.
+- **B** Lit on every step: nothing moves.
+
+**Z5-Q10 · When the zone map pads show.**
+- **A ★ (built)** While a cue draws into a zone, and also while the show has a zone pattern or a Map cycle anywhere.
+- **B** Only Z4's rule (a cue draws into a zone).
+
 ## Z6 · Step grid (`08-phase-z6-step-grid.md`)
 
 **Z6-Q1 · A new grid's length and speed.**
