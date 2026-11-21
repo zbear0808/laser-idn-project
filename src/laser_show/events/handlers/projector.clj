@@ -7,17 +7,17 @@
    - Virtual projectors provide alternate corner-pin with inherited color curves
    
    AUTO-DISCOVERY FLOW:
-   - A network scan matches each output it finds to a projector by its stable
+   - A scan matches each output it finds to a projector by its stable
      id (routing.rig/match-discovered): a known unit and output keeps its id
      and setup when its address changes (it moves); anything else becomes a
      new projector, disabled by default
    - Users enable/disable projectors via toggle controls
    - A projector can be removed (:projectors/remove, after a confirm); a later
      scan finds the device again, turned off, with default calibration
-   - 'Enable All' enables all projectors from an IP address
+   - The card menu can enable every output on one device
    
    This file handles:
-   - Network device discovery (scan, auto-create projectors)
+   - Output device discovery (scan, auto-create projectors)
    - Projector configuration (settings, enabled state, corner-pin)
    - Zone group assignment
    - Virtual projector creation and management
@@ -27,7 +27,6 @@
             [clojure.string :as str]
             [laser-show.events.handlers.zone-groups :as zone-groups]
             [laser-show.events.helpers :as h]
-            [laser-show.common.util :as u]
             [laser-show.idn.stream :as stream]
             [laser-show.animation.fit-guard :as fit-guard]
             [laser-show.animation.safety :as safety]
@@ -84,7 +83,7 @@
    projector lists no group and plays All (:exclude-from-all? false).
    
    Any other driver (plans/2026-11-19-output-drivers/01 §5.1): :driver,
-   :driver-config (the field defaults of :fields filled in) and :stable-id
+   :driver-config (filled in by Add Manual, as reported by Scan) and :stable-id
    (required), and no :host, :port, :service-id or :output-config.
    
    NOTE: Auto-discovered projectors default to enabled?=false.
@@ -92,14 +91,14 @@
    
    Throws: IllegalArgumentException if an IDN projector's host is nil or blank"
   [{:keys [name host port service-id service-name unit-id stable-id zone-groups tags scan-rate enabled?
-           driver driver-config fields]
+           driver driver-config]
     :or {port 7255 zone-groups [] tags #{} scan-rate stream/DEFAULT_SCAN_RATE enabled? false}}]
   {:pre [(or (and (keyword? driver) (not= :idn driver) (vector? stable-id))
              (and host (not (str/blank? host))))]}
   (if (and driver (not= :idn driver))
     {:name name
      :driver driver
-     :driver-config (merge (driver/field-defaults fields) driver-config)
+     :driver-config driver-config
      :stable-id stable-id
      :zone-groups zone-groups
      :exclude-from-all? false
@@ -126,17 +125,49 @@
 
 
 (defn- handle-projectors-scan-network
-  "Start scanning the network for IDN devices."
+  "Start a scan (Scan): IDN's discovery and every output driver's
+   :discover (the :projectors/scan effect)."
   [{:keys [state]}]
   (let [broadcast-addr (get-in state [:projector-ui :broadcast-address] "255.255.255.255")]
     {:state (assoc-in state [:projector-ui :scanning?] true)
      :projectors/scan {:broadcast-address broadcast-addr}}))
 
 
-(defn- discovered-projector
-  "A new projector for an output a scan found (one of match-discovered's
-   :new): disabled, named after the output or the device."
-  [{:keys [device service stable-id]}]
+(defn- descriptor-of
+  "The descriptor of driver id in state ([:backend :output :drivers]), nil
+   when it isn't installed."
+  [state id]
+  (get-in state [:backend :output :drivers id]))
+
+(defn- driver-output-name
+  "What a new projector for output of another driver's device is called:
+   the device's name (else its key), and with more outputs the output's
+   name (else \"Output <id>\") after it: \"Nova 00123\", \"Nova 7 · Output A\"."
+  [{:keys [device-key outputs] device-name :name} {:keys [output-id] output-name :name}]
+  (let [base (if (and (string? device-name) (not (str/blank? device-name))) device-name (str device-key))]
+    (if (< 1 (count outputs))
+      (str base " · " (if (and (string? output-name) (not (str/blank? output-name))) output-name (str "Output " output-id)))
+      base)))
+
+(defn- discovered-driver-projector
+  "A new projector for output of another driver's device a scan found
+   (01 §5.1): disabled, with the output's config, its stable device id,
+   and the driver's default scan rate."
+  [state {:keys [device output stable-id]}]
+  (let [driver (:driver device)
+        descriptor (descriptor-of state driver)]
+    (make-projector-config
+      {:name (driver-output-name device output)
+       :driver driver
+       :driver-config (:driver-config output)
+       :stable-id stable-id
+       :scan-rate (driver/default-scan-rate descriptor)
+       :enabled? false})))
+
+(defn- discovered-idn-projector
+  "A new projector for an IDN output a scan found: disabled, named after
+   the output or the device."
+  [device service stable-id]
   (let [{:keys [address host-name unit-id] device-port :port} device
         {:keys [service-id] service-name :name :or {service-id 0}} service]
     (make-projector-config
@@ -151,6 +182,14 @@
        :stable-id stable-id
        :enabled? false})))
 
+(defn- discovered-projector
+  "A new projector for an output a scan found (one of match-discovered's
+   :new): an IDN one, or another driver's (discovered-driver-projector)."
+  [state {:keys [device service stable-id] :as found}]
+  (if (= :idn (:driver device :idn))
+    (discovered-idn-projector device service stable-id)
+    (discovered-driver-projector state found)))
+
 (defn- with-identity
   "p with the stable id a scan found, and that unit id when it is a unit's."
   [p [kind v :as sid]]
@@ -159,12 +198,12 @@
 
 (defn- found-in-scan
   "(fn [document] document) that puts what a scan found into a document:
-   the new projectors and their calibration, the moves (host and port) and
-   the identities. A projector the document doesn't have is left out of the
-   moves and identities."
+   the new projectors and their calibration, the moves (host and port, or
+   another driver's :driver-config) and the identities. A projector the
+   document doesn't have is left out of the moves and identities."
   [new-projectors new-effects moves upgrades]
   (let [present (fn [f m] (fn [ps] (reduce-kv (fn [ps id v] (if (contains? ps id) (update ps id f v) ps)) ps m)))
-        move (present (fn [p {:keys [host port]}] (assoc p :host host :port port)) moves)
+        move (present merge moves)
         upgrade (present with-identity upgrades)]
     (fn [doc]
       (-> doc
@@ -176,17 +215,22 @@
    matched to a projector by its stable id (routing.rig/match-discovered):
    - a known unit and output at a new address moves there (host and port), and
      keeps its id, name, calibration, groups and place; a notice says so;
+   - a known output of another driver's device whose :driver-config changed
+     moves the same way (only its connection config is replaced);
    - a projector added by hand, or known by its address, takes the unit's
      identity;
    - any other output is a new projector, disabled, with a free id and the
-     default calibration.
+     default calibration (another driver's: driver-projector-id, plans/
+     2026-11-19-output-drivers/01 §5.3).
+   :warnings (a discoverer that failed or timed out, a device left out) show
+   as one :warning notice, after any move's.
    
    Discovery isn't a user edit: all of it is backfilled into undo history and
    the saved baseline, so it is never undone and never counts as an unsaved
    change."
-  [{:keys [devices state]}]
+  [{:keys [devices warnings state]}]
   (let [{:keys [moves upgrades new notices]} (rig/match-discovered (:projectors state) devices)
-        new-projectors (into {} (map (fn [output] [(:id output) (discovered-projector output)])) new)
+        new-projectors (into {} (map (fn [output] [(:id output) (discovered-projector state output)])) new)
         new-effects (into {} (map (fn [id] [id {:items (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS)}]))
                           (keys new-projectors))
         found (found-in-scan new-projectors new-effects moves upgrades)
@@ -194,15 +238,16 @@
                       (assoc-in [:projector-ui :scanning?] false)
                       (assoc-in [:projector-ui :discovered-devices] (vec devices))
                       (assoc-in [:rig-ui :scanned?] true))]
-    (cond-> (if (seq notices)
-              (h/show-notice new-state (str/join " " notices) :info)
-              {:state new-state})
+    (cond-> (cond
+              (seq warnings) (h/show-notice new-state (str/join " " (conj (vec notices) (str/join "; " warnings))) :warning)
+              (seq notices) (h/show-notice new-state (str/join " " notices) :info)
+              :else {:state new-state})
       (or (seq new-projectors) (seq moves) (seq upgrades))
       (assoc :history/backfill found))))
 
 
 (defn- handle-projectors-scan-failed
-  "Handle scan failure: Scan Network is back, and a notice says why."
+  "Handle scan failure: Scan is back, and a notice says why."
   [{:keys [error state]}]
   (log/warn "Network scan failed:" error)
   (h/show-notice (assoc-in state [:projector-ui :scanning?] false)
@@ -210,19 +255,32 @@
                  :error))
 
 
-;; Enable/Disable by IP Address (New auto-discovery flow)
+;; Enable one or all outputs of a device
 
 
 (defn- handle-projectors-enable-all-by-ip
-  "Enable all projectors matching a given IP address.
-   Used by 'Enable All' button in discovery panel."
+  "Turn on the IDN outputs of the given host."
   [{:keys [address state]}]
   (let [projector-ids (->> (get state :projectors {})
-                           (filter (fn [[_ p]] (= (:host p) address)))
+                           (filter (fn [[_ p]] (and address (= :idn (driver/projector-driver-id p)) (= (:host p) address))))
                            (map first))]
     {:state (reduce #(assoc-in %1 [:projectors %2 :enabled?] true)
                     state
                     projector-ids)}))
+
+
+(defn- handle-projectors-enable-device
+  "Turn every output of another driver's device on or off (:enabled? true
+   or false), from the card menu's \"Turn on every output of …\": the
+   projectors whose stable id is [:device driver device-key …]. Any other
+   :enabled?, or a device with none, changes nothing."
+  [{:keys [driver device-key enabled? state]}]
+  {:state (if (boolean? enabled?)
+            (reduce-kv (fn [s id p]
+                         (if (= [driver device-key] (some-> (rig/output-key p) pop))
+                           (assoc-in s [:projectors id :enabled?] enabled?) s))
+                       state (:projectors state))
+            state)})
 
 
 (defn- handle-projectors-set-service-enabled
@@ -231,7 +289,7 @@
    new address."
   [{:keys [host service-id enabled? state]}]
   (let [service (or service-id 0)
-        projector-id (some (fn [[id p]] (when (and (= host (:host p)) (= service (or (:service-id p) 0))) id))
+        projector-id (some (fn [[id p]] (when (= [host service] (rig/output-key p)) id))
                            (sort-by (comp str key) (:projectors state)))]
     (if projector-id
       {:state (assoc-in state [:projectors projector-id :enabled?] enabled?)}
@@ -240,12 +298,6 @@
 
 ;; Manual Addition (still supported for non-discovered projectors)
 
-
-(defn- descriptor-of
-  "The descriptor of driver id in state ([:backend :output :drivers]), nil
-   when it isn't installed."
-  [state id]
-  (get-in state [:backend :output :drivers id]))
 
 (defn- added
   "state with projector added at projector-id, selected, with the default
@@ -281,8 +333,7 @@
           (let [projector (make-projector-config
                             {:name name
                              :driver driver
-                             :driver-config config
-                             :fields (:fields descriptor)
+                             :driver-config (merge (driver/field-defaults (:fields descriptor)) config)
                              :stable-id (rig/manual-stable-id driver projector-id)
                              :scan-rate (driver/default-scan-rate descriptor)
                              :enabled? true})
@@ -555,14 +606,21 @@
                                             :choice-value :all)))})))
 
 (defn- drop-discovered-output
-  "The Discover list without the output host's service-id, so it doesn't keep
-   a box that can no longer do anything."
-  [devices host service-id]
-  (mapv (fn [device]
-          (if (= host (:address device))
-            (update device :services (fn [services] (filterv #(not= (or service-id 0) (or (:service-id %) 0)) services)))
-            device))
-        devices))
+  "The scan's device list without projector p's output: an IDN host's
+   service-id, or another driver's output by its stable id [:device driver
+   key output-id], so it doesn't keep an output no projector has."
+  [devices {:keys [host service-id stable-id] :as p}]
+  (let [[kind driver key output-id] stable-id]
+    (mapv (fn [device]
+            (cond
+              (and (= :idn (:driver p :idn)) (= :idn (:driver device :idn)) (= host (:address device)))
+              (update device :services (fn [services] (filterv #(not= (or service-id 0) (or (:service-id %) 0)) services)))
+
+              (and (= :device kind) (= driver (:driver device)) (= key (:device-key device)))
+              (update device :outputs (fn [outputs] (filterv #(not= output-id (:output-id %)) outputs)))
+
+              :else device))
+          devices)))
 
 (defn- handle-projectors-remove
   "Remove a projector, its calibration chain, its editor and list state, its
@@ -573,7 +631,7 @@
    streaming, the output-sync middleware stops its engine. An unknown id
    changes nothing."
   [{:keys [projector-id state] :as event}]
-  (if-let [{:keys [host service-id]} (get-in state [:projectors projector-id])]
+  (if-let [p (get-in state [:projectors projector-id])]
     (let [clear-if (fn [s path] (if (= projector-id (get-in s path)) (assoc-in s path nil) s))
           pin (rig/laser-ref projector-id)
           pinned (count (refs/cues-using (get-in state [:chains :cue-chains]) pin))
@@ -590,7 +648,7 @@
                       (clear-if [:projector-ui :active-projector])
                       (clear-if [:projector-ui :calibrating-projector-id])
                       (update-in [:projector-ui :identify] dissoc projector-id)
-                      (update-in [:projector-ui :discovered-devices] drop-discovered-output host service-id))]
+                      (update-in [:projector-ui :discovered-devices] drop-discovered-output p))]
       (if (pos? pinned)
         (h/show-notice removed
                        (str "Removed " (projector-label state projector-id) " · "
@@ -769,6 +827,7 @@
     
     ;; Enable/disable projectors (new auto-discovery flow)
     :projectors/enable-all-by-ip (handle-projectors-enable-all-by-ip event)
+    :projectors/enable-device (handle-projectors-enable-device event)
     :projectors/set-service-enabled (handle-projectors-set-service-enabled event)
     :projectors/add-manual (handle-projectors-add-manual event)
     :projectors/set-manual-driver (handle-projectors-set-manual-driver event)

@@ -11,7 +11,7 @@ Other drivers come from **add-on jars** (§4).
 
 This document is for people writing a driver or a bridge. It describes **output API 1**. You don't need to know the rest of the app's code.
 
-**Status:** the contract, the point encoder, the LSPS driver, the streaming core that calls every driver this way, add-on jars (loaded at startup, listed in Settings → Add-ons, installed with Install add-on…), and the projector model and UI are in: **Add Manual…** has a Type picker listing every installed driver (the add-ons' among them), a projector's settings show its driver's fields, and its card shows what the driver says (§1.9). Scan for every driver (D4) is still to come.
+**Status:** the contract, the point encoder, the LSPS driver, the streaming core that calls every driver this way, add-on jars (loaded at startup, listed in Settings → Add-ons, installed with Install add-on…), and the projector model and UI are in: **Add Manual…** has a Type picker listing every installed driver (the add-ons' among them), a projector's settings show its driver's fields, and its card shows what the driver says (§1.9). **Scan** runs every driver's `:discover` next to IDN's own discovery, and each output it finds becomes a card on the rig strip (§1.12).
 
 Contents:
 
@@ -52,7 +52,7 @@ A driver is a plain Clojure map. It is not a protocol and not a Java interface. 
 | `:close!` | yes | `(fn [session] _)`. Leaves the beam dark and releases everything |
 | `:ready?` | no | `(fn [session] bool)`, for device-paced DACs (§1.6). It may throw `{:reopen? true}` too |
 | `:on-error` | no | `(fn [session throwable] _)`. Called after a failed frame, before the blanking frame. IDN uses it to forget its cached address |
-| `:discover` | no | `(fn [{:keys [timeout-ms broadcast-address]}] [device …])`. Lists devices for **Scan** |
+| `:discover` | no | `(fn [{:keys [timeout-ms broadcast-address broadcast-addresses]}] [device …])`. Lists the devices it can reach, for **Scan** (§1.12) |
 | `:describe` | no | `(fn [config] "127.0.0.1:7266")`, for the logs (the UI builds its line from `:summary?` fields, §1.3) |
 | `:status` | no | `(fn [session] {:level :ok\|:warning\|:error :message "Interlock open" :info {…}})`: what the device says, for the projector's status (§1.9). It must return at once from what the session already knows: read atoms, never do I/O. It runs on another thread than the sends |
 
@@ -103,7 +103,7 @@ Each projector has its own thread, so a driver that blocks only stalls its own p
 
 **A long `:open`.** Check `((:cancelled? ctx))` between its steps (each handshake try, each USB request), and give up by throwing once it says true: the app doesn't report an error then. If your `:open` returns a session after Stop anyway, the app closes it at once and never sends to it. Keep each step short (below `STUCK_MS` = 1000 ms), or the status says "The output driver is not responding" meanwhile (C-5).
 
-The app never interrupts a thread to stop a driver: an interrupt closes any NIO channel the thread is using and can break a native call, so it would do more harm than the stuck call.
+The app never interrupts a projector's streaming thread to stop a driver: an interrupt closes any NIO channel the thread is using and can break a native call. Discovery has its own threads and timeout (§1.12).
 
 ### 1.5 The `:send-frame!` result
 
@@ -214,7 +214,65 @@ A driver may start daemon threads in `:open`, for example to read a device's rep
 
 The levels are `:trace :debug :info :warn :error`; any other throws an `IllegalArgumentException`. It returns `nil`, and writes nothing when the app's logging has that level off for that name.
 
-### 1.12 A minimal driver
+### 1.12 Scan (`:discover`)
+
+**Scan** on the Projectors tab (also run at startup) asks IDN and every installed driver with `:discover` at the same time. Your function and the reading of its results run on a worker thread with your add-on's classloader. A new output appears as a card with **On** unchecked. Without `:discover`, use **Add Manual…**.
+
+**What `:discover` gets:**
+
+```clojure
+{:timeout-ms 3000                                   ; how long to listen
+ :broadcast-address "255.255.255.255"               ; the scan's own, for one broadcast
+ :broadcast-addresses ["192.168.1.255" "10.0.0.255"]} ; one per network interface
+```
+
+`:broadcast-addresses` lists the first available IPv4 broadcast for each up, non-loopback interface in OS order, skipping duplicates and interfaces without a broadcast. This lets a network driver reach devices on both Ethernet and Wi-Fi when the OS sends a limited broadcast out of just one interface. The singular `:broadcast-address` is the user's selected broadcast and stays available independently.
+
+| Machine | `:broadcast-addresses` |
+|---|---|
+| Wi-Fi 192.168.1.20/24 and Ethernet 10.0.0.2/24, both up | `["192.168.1.255" "10.0.0.255"]` |
+| Ethernet 10.0.0.2/16 only | `["10.0.255.255"]` |
+| Only loopback, or no IPv4 | `[]` |
+
+A USB driver ignores both and lists its devices.
+
+**What it returns:** a vector (or any sequential collection, or `nil` for none) of devices:
+
+```clojure
+[{:device-key "NV-00123"                 ; unique and stable within your driver: a serial number, a MAC
+  :name "Nova 00123"                     ; optional
+  :outputs [{:output-id 0                ; unique within the device
+             :name "Output A"            ; optional
+             :driver-config {:serial "NV-00123" :output 0}}]}]   ; what :open gets (§1.3)
+```
+
+- `:device-key` is a non-blank string or an integer. Pick something that stays the same when the device gets a new address: it is how the app knows the device again.
+- `:output-id` is a non-blank string or an integer, and each output is one projector. A device with one output has one.
+- `:driver-config` is a map of plain EDN data that can be saved in the rig file. Return the complete connection config, including any non-editable settings your driver needs. The app stores it as returned; when opening a session it supplies field defaults for omitted keys (§1.3).
+- A device whose shape isn't this is left out, and so is a second device with a key one before it has; each one gets a warning.
+
+**Timeouts and failures.** Return before the scan's shared `:timeout-ms` deadline (3 seconds). The app cancels overdue discovery futures and ignores late results; give device I/O its own timeouts and release any handles in `finally`.
+
+| Outcome | What the user sees |
+|---|---|
+| Every discoverer answers | the cards; no notice |
+| `:discover` throws, for example because a native library is missing | the other discoverers' cards, and a warning with the driver's `:name` and the message: "Acme Nova: libnova not found" |
+| Yours doesn't answer in time | the other cards, and "Acme Nova: no answer within 3 s" |
+| Yours returns something that isn't a list | "Acme Nova: :discover returned something other than a list of devices" |
+| A device is left out | "Acme Nova: left out device NV-2: it has no :outputs" |
+| Every discoverer fails, IDN's included | "Could not scan the network: <IDN's error>", as with IDN alone |
+
+Several warnings show as one notice, joined by "; ".
+
+**What happens to what it finds.** Each output is matched to a projector by its identity, `[:device driver-id device-key output-id]` (the projector's `:stable-id`):
+
+- **A new output** gets an id made from the driver, device key and output (`:projector-acme-nova-NV-00123-0`). Characters outside `[A-Za-z0-9-]` become `-`; collisions get `-2`, `-3` and so on. It starts at the driver's default scan rate with the default calibration. Multiple outputs get distinct card titles, e.g. "Nova 00123 · Output A" and "Nova 00123 · Output B".
+- **A known output** keeps its projector, whether it's on, its name, calibration, groups and place. If its `:driver-config` changes (say a new IP), the connection config alone is replaced: "Stage left moved (same device)." Keep the identity stable across such moves, just as an IDN unit keeps its unit id at a new address.
+- **A projector added by hand** (Add Manual) is never matched by a scan, even for a driver with `:discover`: it is its own (`[:manual driver-id projector-id]`).
+
+Discovery is backfilled into Undo and the saved baseline. A missing driver output **keeps its card**, with "Not found in the last scan". This indication only applies to outputs Scan looks for. When a device has multiple cards, its menu offers "Turn on every output of NV-00123".
+
+### 1.13 A minimal driver
 
 An illustrative driver for a made-up USB DAC (`acme.nova.sdk` stands for your device's library):
 
@@ -261,6 +319,11 @@ An illustrative driver for a made-up USB DAC (`acme.nova.sdk` stands for your de
    :send-frame! send-frame!
    :close! close!
    :ready? (fn [{:keys [device]}] (sdk/ready? device))
+   :discover (fn [_opts]                  ; a USB driver lists what is plugged in (§1.12)
+               (for [serial (sdk/list-serials)]
+                 {:device-key serial
+                  :name (str "Nova " serial)
+                  :outputs [{:output-id 0 :driver-config {:serial serial}}]}))
    :describe (fn [{:keys [serial]}] (str "Nova " serial))})
 ```
 
@@ -487,7 +550,7 @@ while True:
 
 ## 4. Add-on jars
 
-An add-on is a `.jar` file that brings one or more drivers. Laser Show loads every add-on in its **add-ons folder** once, when it starts. Its drivers then show up next to the built-in ones, in **Add Manual…**'s Type picker (and, once Scan asks every driver, which is landing in stages, in **Scan** for drivers with `:discover`). **Settings → Add-ons** lists what loaded, what didn't and why.
+An add-on is a `.jar` file that brings one or more drivers. Laser Show loads every add-on in its **add-ons folder** once, when it starts. Its drivers then show up next to the built-in ones, in **Add Manual…**'s Type picker and, for drivers with `:discover`, in **Scan** (§1.12). **Settings → Add-ons** lists what loaded, what didn't and why.
 
 The test fixture `test-resources/addons/sample/` in this repo is a small working example of the layout below (it is never built or shipped as an add-on).
 

@@ -1,6 +1,6 @@
 # Output drivers: the contract
 
-**Status:** In progress: step 0, D1 and D2 done (D2's UI half on `output-d2-ui`, f61ea74) (D1 on branch `output-d1-seam`, 3adc96f), D2's encoder and LSPS on `output-drivers`; 1D's additions to API 1 (from the first third-party add-on, `02` § 1D) at 8a5b4bf, on `output-drivers`; `master` (zones Z3 and ZR) merged in at `6f6f4df`   **Last verified against:** `cd10149` (D1's sections against `04dfd4b`; 1D's against `a8899d1`; §1.1's and §1.5's citations of the engine and the output runtime, §4.2's of `app.clj` and §5.3's of the rig, subs and rig strip moved to `6f6f4df`; the ones that describe the code before D1 stay at `cd10149`). Re-checked at `6f96aaf` (`master` at `4b19812` merged in): nothing in the contract changed; that merge's citations are in `00` §7
+**Status:** API 1 through D3 landed at `5a9a41c`. **D4 built** on `output-d4-discovery`; D5 hardware acceptance is pending. **Last verified against:** `0d673ea` for discovery (§1, §5.3). Earlier implementation notes retain their historical revisions (`02` and `00` §7).
 This doc is the contract every phase in `02-phases.md` builds and tests against. "API 1" is the version that `laser-show.output.api/api-version` (NEW) reports. Step 0's `laser-show.output.driver/validate` checks the table below.
 
 ## 1. The driver map (API 1)
@@ -21,7 +21,7 @@ A driver is a plain map. Its data keys are copied into app state (`00` §5). Its
 | `:close!` | yes | `(fn [session] _)`. Leaves the beam dark and releases everything, threads of the driver's own included (C-11) |
 | `:ready?` | no | `(fn [session] bool)`, for device-paced DACs (§1.3). May throw `{:reopen? true}` as `:send-frame!` does |
 | `:on-error` | no | `(fn [session throwable] _)`, called after a failed frame, before the blanking frame (IDN uses it to drop its cached address, as `streaming_engine.clj:388` did before D1; now `idn/driver.clj` `on-error`) |
-| `:discover` | no | `(fn [{:keys [timeout-ms broadcast-address broadcast-addresses]}] [device …])` (§5.3). Runs in the scan's future. `:broadcast-addresses` (D4, 1D's G10) is a vector with one broadcast address per up, non-loopback IPv4 interface, worked out by the core, e.g. `["10.0.0.255" "192.168.1.255"]`; `:broadcast-address` stays for drivers that send one broadcast |
+| `:discover` | no | `(fn [{:keys [timeout-ms broadcast-address broadcast-addresses]}] [device …])` (§5.3). Runs in its own future under its driver's classloader. `:broadcast-addresses` (D4, 1D's G10) is a vector with one broadcast address per up, non-loopback IPv4 interface, worked out by the core, e.g. `["10.0.0.255" "192.168.1.255"]`; `:broadcast-address` stays for drivers that send one broadcast |
 | `:describe` | no | `(fn [config] "127.0.0.1:7266")`, for logs and the projector list |
 | `:status` | no | 1D (G2, G5): `(fn [session] {:level :ok\|:warning\|:error :message "Interlock open" :info {:scan-rate 30303 :buffer-ms 40}})`. Called by the output-status thread, not the streaming one (C-9), so it must never block: it reads atoms the session keeps, no I/O. Sanitized to plain EDN and shown in the projector's status (§1.5) |
 
@@ -377,31 +377,31 @@ A driver's `:discover` returns devices like this. The core adds `:driver`:
  :outputs [{:output-id 0 :name "Output A" :driver-config {:serial "NV-00123" :output 0}}]}
 ```
 
-IDN devices keep today's shape (`events/core.clj:246-258`) and get `:driver :idn`.
+IDN devices keep their shape and get `:driver :idn` (`output/discovery.clj:62-82`). For another driver, the device key and each output id must be nonblank strings or integers, the output config a map of plain data. Names are optional. An invalid device (including duplicate output ids), or a second device with the same key within a driver, is dropped with a warning; valid siblings still reach the rig.
 
-Since Z2, every output a scan finds is a card on the rig strip, and the scan matches it to a projector by stable id (`rig/match-discovered`, `rig.clj:616-680`). The keys per device shape:
+Every new output becomes a card on the rig strip; the scan matches against existing projectors by stable id (`routing/rig.clj:690-778`). The keys per device shape:
 
-| Device | Stable id (`:stable-id`, `match-discovered`) | Found-output key (`subs/found-outputs`, `subs.clj:847-855`, read by `rig-cards` `:found?`) | Device grouping (`rig-cards` `:multi-output?`, `subs.clj:872, 814`; the card menu, `rig_strip.clj:289-292`) |
+| Device | Stable id (`:stable-id`, `match-discovered`) | Found-output key (`rig/output-key`, `routing/rig.clj:179`; `subs/found-outputs`, `subs.clj:1131`) | Device grouping (`subs/rig-cards`, `subs.clj:1143`; card menu, `rig_strip.clj:345`) |
 |---|---|---|---|
-| IDN `{:address "10.0.0.5" :unit-id "0A 1B …" :services [{:service-id 1}]}` | `[:unit "0A 1B …" 1]`, or `[:host "10.0.0.5" 1]` without a usable unit id (as today, `rig.clj:172-179`) | `["10.0.0.5" 1]` (as today) | by host `"10.0.0.5"` (as today) |
+| IDN `{:address "10.0.0.5" :unit-id "0A 1B …" :services [{:service-id 1}]}` | `[:unit "0A 1B …" 1]`, or `[:host "10.0.0.5" 1]` without a usable unit id (`routing/rig.clj:160-167`) | `["10.0.0.5" 1]` | by host `"10.0.0.5"` |
 | `{:driver :acme/nova :device-key "NV-00123" …}` | `[:device :acme/nova "NV-00123" 0]` | `[:acme/nova "NV-00123" 0]` | by `[:acme/nova "NV-00123"]` |
-| A non-IDN projector added by hand | `[:manual :lsps :projector-1763560000000]`: its own id, so it never matches a scan, and two of them never share one (`rig/settled-ids`, `rig.clj:586-599`, would otherwise move one of them to `[:host nil 0]`) | none: a driver without `:discover` is never "Not found in the last scan" | not grouped |
+| A non-IDN projector added by hand | `[:manual :lsps :projector-1763560000000]`: its own id, so it never matches a scan (`rig/settled-ids`, `routing/rig.clj:650`) | none; neither a manual driver projector nor one whose driver lacks `:discover` is marked missing | not grouped |
 
-`rig/identity-label` (`rig.clj:181-192`) gets a line for each new form: "Device NV-00123 · output 0" and "Added by hand: a scan doesn't look for it". Built in D2 (both lines, the `[:device …]` one ready for D4). As built, `rig/settled-ids` gives a hostless projector without a stored id its `rig/manual-stable-id`, and when two share a `[:manual …]` id (a copied file), the projector it names keeps it and the other falls back to its own `[:manual driver id]`, never `[:host nil 0]`. The card shows `driver/summary-parts`, `["LSPS" "127.0.0.1:7266"]`, on two lines; `summary` joins them with " · ".
+`rig/identity-label` (`routing/rig.clj:189`) already knows both forms from D2: "Device NV-00123 · output 0" and "Added by hand: a scan doesn't look for it". `rig/settled-ids` gives a hostless projector without a stored id its `rig/manual-stable-id`, and when two share a `[:manual …]` id (a copied file), the projector it names keeps it and the other falls back to its own `[:manual driver id]`, never `[:host nil 0]`. The card shows `driver/summary-parts`, `["LSPS" "127.0.0.1:7266"]`, on two lines; `summary` joins them with " · ".
 
-The projector id for a discovered non-IDN output is NEW `driver-projector-id [driver device-key output-id]`: `"projector-"`, then the driver's namespace and name joined by `-`, then the key, then the output. Every character outside `[A-Za-z0-9-]` becomes `-`. While that id is taken, `-2`, `-3` … are added, as `rig/unique-projector-id` (`rig.clj:575-581`) does for IDN. IDN keeps `rig/projector-id` (`rig.clj:569-573`).
+`rig/driver-projector-id [driver device-key output-id]` (`routing/rig.clj:632`) makes a base id from `"projector-"`, the driver's namespace and name joined by `-`, the key and the output. Every character outside `[A-Za-z0-9-]` becomes `-`. Both drivers' base ids use `rig/unique-projector-id` (`:623`) for `-2`, `-3` … suffixes when taken. IDN keeps `rig/projector-id`.
 
 | Args | Id |
 |---|---|
 | `:acme/nova "NV-00123" 0` | `:projector-acme-nova-NV-00123-0` |
-| `:helios/usb "0x1A2B" 0` | `:projector-helios-usb-0x1A2B-0` |
+| `:zeta/beam "0x1A2B" 0` | `:projector-zeta-beam-0x1A2B-0` |
 | `:acme/nova "10.0.0.9" 2` | `:projector-acme-nova-10-0-0-9-2` |
 
-A scan never replaces an existing projector. As `match-discovered` does today for an IDN unit at a new address (it moves host and port only, `rig.clj:658-662`), a known non-IDN output whose discovered `:driver-config` differs from the stored one moves: its `:moves` entry is `{:driver-config …}`, and nothing else about the projector changes.
+A scan never replaces an existing projector. As `match-discovered` does for an IDN unit at a new address (host and port only, `routing/rig.clj:754-758`), a known non-IDN output whose discovered config differs moves: its `:moves` entry is `{:driver-config new-config}` (`:690-699`). This replaces the opaque connection map, not other projector settings.
 
-**The scan runs every discoverer at once.** IDN first, then each driver with `:discover`, each in its own future and deref'd with `timeout-ms` (3000, as `events/core.clj:244`).
+**The scan runs every discoverer at once** (`output/discovery.clj:154-195`). Results are collected in deterministic order: IDN first, then drivers by id. The 3000 ms budget is shared; an overdue future is cancelled and late results are ignored. Validation and realization take place under the add-on's loader, within that same budget.
 
-**What a discoverer gets (1D, G10; built in D4).** `{:timeout-ms 3000 :broadcast-address "255.255.255.255" :broadcast-addresses ["10.0.0.255" "192.168.1.255"]}`. `:broadcast-addresses` is worked out once per scan by the core, not by each driver: one entry per network interface that is up and not loopback, from each of its IPv4 `InterfaceAddress`es' `getBroadcast` (an interface without one, such as a point-to-point link, is skipped), deduplicated, in interface order. It can be `[]`. `:broadcast-address` stays as it is (the scan's own, `events/core.clj:239`) for drivers that send one broadcast. Why: on some OSes a limited broadcast (255.255.255.255) from a PC with several network cards goes out of one interface only, so a DAC on the other network is never found (the first third-party add-on's G10).
+**What a discoverer gets (1D, G10; built in D4).** `{:timeout-ms 3000 :broadcast-address "255.255.255.255" :broadcast-addresses ["10.0.0.255" "192.168.1.255"]}`. Once per scan the core takes the first available IPv4 `getBroadcast` on each up, non-loopback interface. Interfaces with none are skipped, and addresses are deduplicated in interface order (`output/discovery.clj:29-57`). The vector can be `[]`. The singular `:broadcast-address` is the scan's selected address (`events/handlers/projector.clj:127-133`). Some OSes send a limited broadcast out of one interface only; the vector lets a network driver reach the others too.
 
 | Machine | `:broadcast-addresses` |
 |---|---|
@@ -415,7 +415,7 @@ The outcomes:
 |---|---|
 | All succeed | `:projectors/scan-complete {:devices [...] :warnings []}` |
 | IDN ok, `:acme/nova` throws "libnova not found" | `scan-complete` with the IDN devices and `:warnings ["Acme Nova: libnova not found"]`, shown as a `:warning` notice |
-| `:helios/usb` times out | `scan-complete`, `:warnings ["Helios: no answer within 3 s"]` |
+| `:zeta/beam` times out | `scan-complete`, `:warnings ["Zeta: no answer within 3 s"]` |
 | Every discoverer fails | `:projectors/scan-failed {:error <IDN's message>}`, as today with IDN alone |
 
 ### 5.4 Field specs

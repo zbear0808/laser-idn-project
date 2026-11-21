@@ -52,10 +52,10 @@
    - Heavy event processing doesn't block UI rendering"
   (:require [cljfx.api :as fx]
             [clojure.java.io :as io]
-            [clojure.string :as str]
             [clojure.tools.logging :as log]
             [laser-show.dev-config :as dev-config]
             [laser-show.output.addons :as addons]
+            [laser-show.output.discovery :as discovery]
             [laser-show.state.core :as state]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.state.persistent :as persistent]
@@ -68,7 +68,6 @@
             [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.events.handlers.output-sync :as output-sync]
             [laser-show.common.util :as u]
-            [laser-show.idn.hello :as idn-hello]
             [laser-show.input.link :as link]
             [laser-show.animation.show-time :as show-time])
   (:import [javafx.stage FileChooser FileChooser$ExtensionFilter Stage]
@@ -236,44 +235,15 @@
 ;; Projector Scanning Effects
 
 (defn- effect-projectors-scan
-  "Effect that scans the network for IDN devices using IDN-Hello protocol.
-   Uses broadcast UDP to discover devices, then queries each device for
-   available services/outputs via Service Map Request.
-   
-   Each device may have multiple laser output services (multi-head DACs)."
-  [{:keys [broadcast-address]} dispatch]
+  "Scan for IDN and driver outputs off the event agent, and queue one result."
+  [opts dispatch]
   (future
-    (try
-      (log/info (format "Scanning network for IDN devices (broadcast: %s)..." broadcast-address))
-      ;; Use service-aware discovery to enumerate outputs per device
-      (let [discovered (idn-hello/discover-devices-with-services broadcast-address 3000 1000)
-            ;; Transform discovered devices to the format expected by UI
-            devices (mapv (fn [device]
-                            {:address (:address device)
-                             :host-name (let [name (:host-name device)]
-                                          (if (str/blank? name)
-                                            (:address device)
-                                            name))
-                             :unit-id (:unit-id device)
-                             :port (or (:port device) 7255)
-                             :status (:status device)
-                             :protocol-version (:protocol-version device)
-                             ;; Include discovered services (laser outputs)
-                             :services (vec (:services device))
-                             :relays (vec (:relays device))})
-                          discovered)]
-        (log/info (format "Found %d IDN device(s)" (count devices)))
-        (doseq [device devices]
-          (log/debug (format "  Device %s: %d service(s)"
-                             (:address device)
-                             (count (:services device)))))
-        (dispatch {:event/type :projectors/scan-complete
-                   :devices devices}))
-      (catch Exception e
-        (log/error "Network scan failed:" (.getMessage e))
-        (log/debug e "Network scan stack trace")
-        (dispatch {:event/type :projectors/scan-failed
-                   :error (.getMessage e)})))))
+    (let [result (try (discovery/scan opts)
+                      (catch Exception e
+                        (log/error e "Device scan failed")
+                        {:error (ex-message e)}))]
+      (dispatch (assoc result :event/type (if (contains? result :error)
+                                            :projectors/scan-failed :projectors/scan-complete))))))
 
 ;; Link Effects
 
@@ -642,7 +612,7 @@
    - :dev/reload - reload :styles or :app code (dev only)
    - :clipboard/copy-effects - copy effects to clipboard
    - :clipboard/paste-effects - paste effects from clipboard (effects grid) (inline)
-   - :projectors/scan - scan network for IDN devices (later, future)"
+   - :projectors/scan - scan for IDN devices and every driver's (later, future)"
   {:state effect-state
    :dispatch effect-dispatch
    :dispatch-later effect-dispatch-later

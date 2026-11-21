@@ -310,6 +310,61 @@
              (rig/settled-ids (assoc-in projectors [:projector-10-0-0-6-1 :enabled?] false)))
           "neither on: the smaller id keeps it"))))
 
+(defn- driver-device [driver key & outputs]
+  {:driver driver :device-key key :name (str "Nova " key)
+   :outputs (mapv (fn [[o cfg]] {:output-id o :name (str "Output " o) :driver-config cfg}) (partition 2 outputs))})
+
+(deftest driver-projector-id-test
+  (testing "01 §5.3's table"
+    (is (= :projector-acme-nova-NV-00123-0 (rig/driver-projector-id :acme/nova "NV-00123" 0)))
+    (is (= :projector-zeta-beam-0x1A2B-0 (rig/driver-projector-id :zeta/beam "0x1A2B" 0)))
+    (is (= :projector-acme-nova-10-0-0-9-2 (rig/driver-projector-id :acme/nova "10.0.0.9" 2))))
+  (testing "an unqualified driver, a number for a key, odd characters"
+    (is (= :projector-lsps-7-a (rig/driver-projector-id :lsps 7 "a")))
+    (is (= :projector-acme-nova-bus-1-port--3-0 (rig/driver-projector-id :acme/nova "bus 1/port #3" 0))))
+  (testing "made unique as unique-projector-id does"
+    (is (= :projector-acme-nova-NV-1-0-3
+           (rig/unique-projector-id #{:projector-acme-nova-NV-1-0 :projector-acme-nova-NV-1-0-2}
+                                    (rig/driver-projector-id :acme/nova "NV-1" 0))))))
+
+(deftest match-discovered-driver-devices-test
+  (let [known {:stage {:name "Stage" :driver :acme/nova :driver-config {:serial "NV-1" :host "10.0.0.9"}
+                       :stable-id [:device :acme/nova "NV-1" 0]}
+               :hand {:name "Hand" :driver :acme/nova :driver-config {:serial "NV-1"}
+                      :stable-id [:manual :acme/nova :hand]}}]
+    (testing "new: each output its stable id and a free id"
+      (let [{:keys [moves upgrades new notices]} (rig/match-discovered {} [(driver-device :acme/nova "NV-1" 0 {:serial "NV-1"} 1 {:serial "NV-1" :o 1})])]
+        (is (= [{:id :projector-acme-nova-NV-1-0 :stable-id [:device :acme/nova "NV-1" 0]}
+                {:id :projector-acme-nova-NV-1-1 :stable-id [:device :acme/nova "NV-1" 1]}]
+               (mapv #(select-keys % [:id :stable-id]) new)))
+        (is (= [{:output-id 1 :name "Output 1" :driver-config {:serial "NV-1" :o 1}} "NV-1"]
+               ((juxt :output (comp :device-key :device)) (second new))))
+        (is (= [{} {} []] [moves upgrades notices]))))
+    (testing "known, with the same settings: nothing to do; one added by hand is never matched"
+      (is (= {:moves {} :upgrades {} :new [] :notices []}
+             (rig/match-discovered known [(driver-device :acme/nova "NV-1" 0 {:serial "NV-1" :host "10.0.0.9"})]))))
+    (testing "moved: the complete new config from the output, including a key's removal"
+      (is (= {:moves {:stage {:driver-config {:host "10.0.0.20"}}} :upgrades {} :new []
+              :notices ["Stage moved (same device)."]}
+             (rig/match-discovered known [(driver-device :acme/nova "NV-1" 0 {:host "10.0.0.20"})])))
+      (is (= ["2 lasers moved (same devices): Stage, Two."]
+             (:notices (rig/match-discovered (assoc known :two {:name "Two" :driver :acme/nova :driver-config {:host "a"}
+                                                                :stable-id [:device :acme/nova "NV-2" 0]})
+                                             [(driver-device :acme/nova "NV-1" 0 {:host "b"})
+                                              (driver-device :acme/nova "NV-2" 0 {:host "b"})])))))
+    (testing "an id that is taken, and another driver's device with the same key"
+      (let [{:keys [new]} (rig/match-discovered {:projector-acme-nova-NV-1-0 {:name "Old" :driver :acme/nova
+                                                                              :stable-id [:manual :acme/nova :projector-acme-nova-NV-1-0]}}
+                                                [(driver-device :acme/nova "NV-1" 0 {})
+                                                 (driver-device :acme/nova "NV.1" 0 {})
+                                                 (driver-device :zeta/beam "NV-1" 0 {})])]
+        (is (= [:projector-acme-nova-NV-1-0-2 :projector-acme-nova-NV-1-0-3 :projector-zeta-beam-NV-1-0]
+               (mapv :id new)))))
+    (testing "IDN devices and driver devices in one scan"
+      (let [{:keys [new]} (rig/match-discovered {} [(device "10.0.0.5" unit-l 1) (driver-device :acme/nova "NV-1" 0 {})])]
+        (is (= [:projector-10-0-0-5-1 :projector-acme-nova-NV-1-0] (mapv :id new)))
+        (is (= [[:unit unit-l 1] [:device :acme/nova "NV-1" 0]] (mapv :stable-id new)))))))
+
 
 ;; Properties of the fold, over generated rigs
 

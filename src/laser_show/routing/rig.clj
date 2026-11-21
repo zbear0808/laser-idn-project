@@ -176,6 +176,16 @@
 (defn- idn? [p]
   (= :idn (:driver p :idn)))
 
+(defn output-key
+  "The key of a projector's output in a scan: [host service] for IDN,
+   [driver device-key output-id] for another driver. A manually added
+   non-IDN projector has no scan key. Popping the output gives its device."
+  [{:keys [host service-id stable-id driver] :as p}]
+  (if (idn? p)
+    (when host [host (output-number service-id)])
+    (let [[kind d k o] stable-id]
+      (when (and (= :device kind) (= driver d) (some? k) (some? o)) [d k o]))))
+
 (defn identity-label
   "\"Unit 0A 1B 2C 3D … · output 1\", or \"IP 10.0.0.5 · output 1 (the device
    sends no unit id)\"; why (\", so a new address …\") is added inside the
@@ -611,12 +621,22 @@
   (keyword (str "projector-" (str/replace (str host) "." "-") "-" (output-number service-id))))
 
 (defn unique-projector-id
-  "projector-id, or with -2, -3 … while taken (a map or set of ids)."
-  [taken host service-id]
-  (let [base (projector-id host service-id)]
-    (->> (cons base (map #(keyword (str (name base) "-" %)) (iterate inc 2)))
-         (remove #(contains? taken %))
-         first)))
+  "A base projector id (or one made from an IDN host and service), with
+   -2, -3 … added while taken (a map or set of ids)."
+  ([taken base]
+   (->> (cons base (map #(keyword (str (name base) "-" %)) (iterate inc 2)))
+        (remove #(contains? taken %))
+        first))
+  ([taken host service-id] (unique-projector-id taken (projector-id host service-id))))
+
+(defn driver-projector-id
+  "A new projector's id for output-id of another driver's device
+   (plans/2026-11-19-output-drivers/01 §5.3): \"projector-\", the driver's
+   namespace and name, the device key and the output, joined by -, every
+   character outside [A-Za-z0-9-] made -: :projector-acme-nova-NV-00123-0."
+  [driver device-key output-id]
+  (keyword (str/replace (str/join "-" (remove nil? ["projector" (namespace driver) (name driver) device-key output-id]))
+                        #"[^A-Za-z0-9-]" "-")))
 
 (defn- host-id [p]
   [:host (:host p) (output-number (:service-id p))])
@@ -660,6 +680,27 @@
     (str (count moved) " lasers have new addresses: "
          (str/join ", " (map #(projector-name {:projectors projectors} %) moved)) ".")))
 
+(defn- device-move-notice [projectors moved]
+  (case (count moved)
+    0 nil
+    1 (str (projector-name {:projectors projectors} (first moved)) " moved (same device).")
+    (str (count moved) " lasers moved (same devices): "
+         (str/join ", " (map #(projector-name {:projectors projectors} %) moved)) ".")))
+
+(defn- match-driver-output
+  "Match a driver's validated output by its stable identity. Only its
+   connection config can move; an unknown output reserves a new rig id."
+  [projectors by-sid acc [{:keys [driver device-key] :as d} {:keys [output-id driver-config] :as o}]]
+  (let [sid [:device driver device-key output-id]]
+    (if-let [id (get by-sid sid)]
+      (cond-> acc
+        (not= driver-config (get-in projectors [id :driver-config]))
+        (-> (assoc-in [:moves id] {:driver-config driver-config}) (update :device-moved conj id)))
+      (let [id (unique-projector-id (:taken acc) (driver-projector-id driver device-key output-id))]
+        (-> acc
+            (update :taken conj id)
+            (update :new conj {:id id :device d :output o :stable-id sid}))))))
+
 (defn match-discovered
   "Match a scan's devices to the saved projectors by stable id:
    1. each output gets a stable id; devices of one scan that report the same
@@ -672,12 +713,20 @@
       none;
    4. otherwise the output is new, with a free id (unique-projector-id);
    5. two saved projectors with one stable id: see settled-ids.
-   Returns {:moves {id {:host :port}} :upgrades {id stable-id} (every
-   identity to write: step 3's, and saved projectors whose settled id isn't
-   stored yet) :new [{:id :device :service :stable-id}] :notices [text]}."
+   Another driver's device (:driver, :device-key, :outputs; output drivers
+   D4, 01 §5.3): each output's stable id is [:device driver key output-id];
+   a projector that has it moves when the output's :driver-config differs,
+   and anything else is new (driver-projector-id, made unique). An IDN device without an :address is
+   dropped.
+   Returns {:moves {id {:host :port} or {:driver-config}} :upgrades {id
+   stable-id} (every identity to write: step 3's, and saved projectors whose
+   settled id isn't stored yet) :new [{:id :device :service :stable-id} or
+   {:id :device :output :stable-id}] :notices [text]}."
   [projectors devices]
   (let [projectors (or projectors {})
-        devices (into [] (comp (filter #(and (string? (:address %)) (not (str/blank? (:address %)))))
+        driver-devices (remove idn? devices)
+        devices (into [] (comp (filter idn?)
+                               (filter #(and (string? (:address %)) (not (str/blank? (:address %)))))
                                (distinct))
                       devices)
         shared (->> (group-by #(usable-unit-id (:unit-id %)) devices)
@@ -715,8 +764,11 @@
                           (-> acc
                               (update :taken conj id)
                               (update :new conj {:id id :device d :service s :stable-id sid})))))))
-                {:moves {} :upgrades {} :new [] :moved [] :claimed #{} :taken (set (keys projectors))}
+                {:moves {} :upgrades {} :new [] :moved [] :device-moved [] :claimed #{} :taken (set (keys projectors))}
                 outputs)
+        result (reduce (partial match-driver-output projectors by-sid)
+                       result
+                       (for [d driver-devices o (:outputs d)] [d o]))
         unstored (into {} (remove (fn [[id sid]] (= sid (get-in projectors [id :stable-id])))) settled)]
     {:moves (:moves result)
      :upgrades (merge unstored (:upgrades result))
@@ -724,4 +776,5 @@
      :notices (into (mapv #(str (count-word (count %)) " devices report the same unit id ("
                                 (str/join ", " %) "): matched by IP.")
                           shared)
-                    (keep identity [(move-notice projectors (:moved result) (:moves result))]))}))
+                    (keep identity [(move-notice projectors (:moved result) (:moves result))
+                                    (device-move-notice projectors (:device-moved result))]))}))

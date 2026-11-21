@@ -1,6 +1,6 @@
 # Output drivers: phases D1–D5
 
-**Status:** In progress: step 0 (skeleton) on branch `output-drivers`; **D1 done** (3adc96f, merged at a8899d1); **1D done** (8a5b4bf, on `output-drivers`); **D2 done** (the encoder and LSPS on `output-drivers`; the model and UI on `output-d2-ui`: 5c5c189, eab6aa0, f61ea74, with `output-drivers` and D3 merged in); `master` with zones Z3 and ZR merged in at `6f6f4df` (`00` §7); **D3 done** (7bb72eb, on `output-d3-ui`, not merged yet)   **Last verified against:** `cd10149` (`master` with zones Z0–Z2), with the citations of current code in files ZR and Z3 changed (step 0's, 1D's and D2–D4's) moved to `6f6f4df`; D1's lists of the old engine's lines and of the test lines it changed stay as they were. `master` at `4b19812` (the Projectors tab's layout pass, Decimate's follow-up) merged in at `6f96aaf`: what moved is in `00` §7, and the strip's new `fit-to-cards!` at the end of the Live UI pass section. Other plans are landing in parallel (zones, vibe), so **re-check every citation at HEAD before starting a phase**.
+**Status:** In progress. Step 0 through D3 and the live UI pass landed at `5a9a41c`. **D4 done** on `output-d4-discovery` (`8b6d3aa`, `0d673ea`), not merged. D5 is pending. **Last verified against:** `0d673ea` for D4; earlier phase sections cite the code at their own revisions. Re-check the current tree before starting a phase.
 The contract is in `01-driver-contract.md` (referred to as `01` §n). Test commands follow the `:test` alias (`deps.edn`), e.g. `clj -M:mac-arm:test streaming-engine output-lifecycle`.
 
 Every phase starts the same way: write the failing tests first, against the fake DAC (`test/laser_show/idn/fake_dac.clj`), the recording driver (D1) or the LSPS receiver (D2).
@@ -185,7 +185,7 @@ The new keys, with data:
 | G7 | `(api/log! level name message & [throwable])` | `(api/log level name message)` and `(api/log level name throwable message)`, as `clojure.tools.logging`'s own arg order; `:trace` too |
 | G8 | the docs | the docs, and the loader's message |
 | G9 | `:lit?` | as proposed |
-| G10 | `:broadcast-addresses` in the scan opts | plan text for D4 (§ D4 below, `01` §5.3) |
+| G10 | `:broadcast-addresses` in the scan opts | built in D4 (`8b6d3aa`): first usable IPv4 broadcast on each up, non-loopback interface, deduplicated in interface order (`output/discovery.clj:29-57`) |
 
 The add-on's "a driver may queue a frame more than once" note went into `01` §1.2 and the docs' §1.5.
 
@@ -472,60 +472,71 @@ The real app in a headless dev REPL (`start-test!` with a temp `:addons-dir` and
 
 ---
 
-## D4 · Discovery for every driver (zones Z2 has landed)
+## D4 · Discovery for every driver: done on `output-d4-discovery`
 
-**Goal:** Scan finds IDN devices and every add-on's devices, and each output it finds becomes a disabled card on the rig strip, as it does today for IDN. A known output keeps its projector.
+**Built:** `8b6d3aa` (feature, contract docs and unit tests), `0d673ea` (TestFX), from `5a9a41c`. **Scan** discovers IDN and driver outputs together. A new output gets its own disabled card; a known output keeps its projector and calibration when its connection changes.
 
-### Changes per namespace
+### As built
 
-- **`laser-show.events.core/effect-projectors-scan`** (`:233-271`): `01` §5.3's table: concurrent discoverers, timeouts, `:warnings`. Each discoverer gets `{:timeout-ms :broadcast-address :broadcast-addresses}` (1D's G10, `01` §5.3): NEW `broadcast-addresses []`, worked out once per scan, one broadcast address per up, non-loopback IPv4 interface (`NetworkInterface/getNetworkInterfaces`, `.isUp`, `.isLoopback`, each `InterfaceAddress`'s `.getBroadcast`), deduplicated; `:broadcast-address` stays as it is. IDN's own scan is unchanged.
-- **`laser-show.routing.rig`:**
-  - `match-discovered` (`:616-680`) also takes non-IDN devices (today it drops every device without an `:address`, `:633`): each output's stable id is `[:device driver device-key output-id]`, a known one whose `:driver-config` differs gets a `:moves` entry `{:driver-config …}`, and a new one gets NEW `driver-projector-id` (`01` §5.3), made unique as `unique-projector-id` (`:575-581`) does;
-  - `identity-label` (`:181-192`): the `[:device …]` line.
-- **`laser-show.events.handlers.projector`:**
-  - `discovered-projector` (`:119-135`) branches on `:driver`: a non-IDN output gets `:driver`, its `:driver-config` and its stable id, and no `:host`;
-  - `found-in-scan` (`:143-155`) applies a `{:driver-config …}` move;
-  - `handle-projectors-scan-complete` (`:157-184`) shows `:warnings` as a `:warning` notice and backfills as today;
-  - `drop-discovered-output` (`:460-468`, on remove) also drops a non-IDN output, by its driver, device key and output id;
-  - NEW `handle-projectors-enable-device`, next to `handle-projectors-enable-all-by-ip` (`:199-208`), and its line in the `handle` case (`:662-716`).
-- **`laser-show.subs`:** `found-outputs` (`:847-855`) and `rig-cards`' `:multi-output?` (`:872`, `:887`) follow `01` §5.3's table.
-- **`laser-show.views.components.rig-strip`:** "Scan Network" becomes "Scan" (`:104`), and the header's hint (`:89`) says "Scan finds them". For a driver device with more outputs, the card menu's "Turn on every output of …" (`:289-292`) dispatches NEW `:projectors/enable-device {:driver :device-key}` instead of `:projectors/enable-all-by-ip`. Each card's On box (`:projectors/set-enabled`) already turns one output on, so no other enable event is needed.
-- **`laser-show.events.show-lock`:** `blocked-events` (`:24-53`) gains `:projectors/enable-device`, next to `:projectors/enable-all-by-ip` (`:43`).
+- The button and startup (`views/components/rig_strip.clj:113-127`, `app.clj:257`) dispatch `:projectors/scan-network`. Its handler sets the scanning flag and requests the existing `:projectors/scan` effect (`events/handlers/projector.clj:127-133`). The effect queues one completion or failure from a future (`events/core.clj:237-246`). No scan worker writes app state.
+- NEW `output/discovery.clj` keeps the OS interface snapshot and pure broadcast selection (`:29-57`), IDN adapter (`:62`), add-on result validation (`:87-149`), futures and deadline (`:154-195`) together. IDN uses the same Hello call (3000 ms, 1000 ms per service map), normalization and IDs as before. Its future gets the same overall 3-second deadline as every other discoverer. Work, including realization of an add-on's outputs, happens through `driver/with-loader` (`output/driver.clj:437`). Results are collected IDN first, then by driver id. One invalid device doesn't hide its valid siblings. Partial failures carry warnings; if everyone fails, the error is IDN's.
+- `rig/match-discovered` handles both device shapes (`routing/rig.clj:690-778`), reusing the settled-id index and set of taken projector ids. The new identity is `[:device driver device-key output-id]`. Its readable base id uses `driver-projector-id` and the same `unique-projector-id` suffixes as IDN (`:623-640`). A move writes exactly `{:driver-config new-config}`, including removal of obsolete config keys. Field defaults apply when the driver opens. A scan never overwrites a name, tag, group, placement, enabled state, safety zone or calibration chain on a known projector.
+- `scan-complete` (`events/handlers/projector.clj:185-246`) puts new outputs and moves in the rig document, existing undo snapshots and the saved baseline. Scan results and the scanning flag remain transient UI state. Move notices and any discovery warnings share one notice, at warning level if there are warnings. Removing a driver projector takes its output out of the last-scan device list (`:608`).
+- `rig/output-key` (`routing/rig.clj:179`) supplies a common key for card lookup, grouping and enable actions. IDN uses `[host service]`; another discovered output uses `[driver device-key output-id]`; another driver added by hand has no key. A saved driver output can be marked missing only after a scan and only if its installed driver still supports discovery (`subs.clj:1131-1195`). The menu dispatches `:projectors/enable-device {:driver d :device-key k :enabled? true}` for a driver device (`rig_strip.clj:345-365`), still by host for IDN. This is one undoable rig edit and the show lock refuses it (`events/handlers/projector.clj:272`, `events/handlers/history.clj:176`, `events/show_lock.clj:46`).
 
-The plan had D4 group a discovery panel by driver and key its expand set by device; Z2 replaced that panel with the rig strip, so that work is gone, and `:projectors/toggle-device-expand` and `enabled-projector-services` (no view uses them, `00` §1) stay as they are.
+### Deviations from the sketch
 
-### Tests
+- Z2 already provided the rig strip, per-card On box, matcher and backfill path. D2 already provided the `[:device …]` identity label and the collision rules for saved identities. D4 extends those paths; it needs neither a discovery panel nor new persistent identity fields.
+- The effect delegates to a discovery namespace rather than doing discovery and validation inline. All futures share **one deadline** so multiple unresponsive drivers cannot multiply the scan time. Timed-out futures are cancelled; a driver still needs bounded I/O. The IDN driver map and the Hello protocol are unchanged.
+- `enabled-projector-services` (`subs.clj:610`) now uses the same keys even though no view calls it. The IDN-only setters can no longer match another driver's outputs via a nil host. The `enable-device` event takes an explicit boolean and has an undo/lock label. The old expand-set state is untouched.
 
-- **`laser-show.events.core-test`:**
-  - `scan-runs-every-discoverer-test`;
-  - `discoverers-get-broadcast-addresses-test` (G10: with the interface list stubbed, `01` §5.3's three rows, and `:broadcast-address` still there);
-  - `failing-discoverer-gives-warning-test`;
-  - `slow-discoverer-times-out-test`;
-  - `all-discoverers-fail-gives-scan-failed-test`.
-- **`laser-show.routing.rig-test`:** `match-discovered-driver-devices-test` (new, known, moved, and an id that is taken).
-- **`laser-show.events.projector-handlers-test`:**
-  - `scan-creates-driver-projectors-test` (`01` §5.3's id table);
-  - `rescan-keeps-driver-projector-test` (its calibration, groups and place stay; a changed `:driver-config` is moved);
-  - `scan-warnings-show-a-notice-test`;
-  - `enable-device-turns-on-its-outputs-test`.
-- **`laser-show.subs-test`:** `rig-cards-find-driver-outputs-test`.
-- **UI:** `laser-show.ui-test.discovery-drivers-test/driver-device-can-be-enabled-test` (a recording driver with `:discover`, registered by the fixture: Scan makes its card, and its On box turns it on).
+### Tests and validation
 
-**Commit:** `feat(output): Scan finds every driver's devices`
+New tests (namespaces below have the `laser-show.` prefix):
+
+| Namespace | Test vars |
+|---|---|
+| `output.discovery-test` | `broadcast-addresses-from-interfaces-test`, `interfaces-are-data-test` |
+| `events.core-test` | `scan-runs-every-discoverer-test` (barrier and loader, including lazy output data), `discoverers-get-broadcast-addresses-test`, `invalid-driver-device-is-dropped-test`, `failing-discoverer-gives-warning-test`, `slow-discoverer-times-out-test`, `all-discoverers-fail-gives-scan-failed-test`, `idn-only-scan-unchanged-test` |
+| `routing.rig-test` | `driver-projector-id-test`, `match-discovered-driver-devices-test` |
+| `events.projector-handlers-test` | `scan-creates-driver-projectors-test`, `rescan-keeps-driver-projector-test`, `moved-driver-device-is-matched-test`, `scan-warnings-show-a-notice-test`, `enable-device-test`, `remove-driver-projector-leaves-the-device-list-test` |
+| `events.show-lock-test` | `enable-device-is-refused-while-locked-test` |
+| `subs-test` | `enabled-outputs-cover-drivers-test`, `rig-cards-find-driver-outputs-test` |
+| `ui-test.discovery-drivers-test` | `driver-device-can-be-enabled-test`, `not-found-after-rescan-test`, `turn-on-every-output-of-a-device-test`, `scan-warning-notice-test`, `discovered-driver-streams-test` (fake discovery delegating to the real LSPS sender) |
+
+Existing tests changed: `views.tabs.projectors-test/rig-header-text-test` expects “Scan”; `events.projector-handlers-test/failed-scan-shows-a-notice-test` and `subs-test/rig-cards-show-driver-summary-test` have updated assertion descriptions only. Existing IDN scan fixtures and assertions still run.
+
+**Red first:** the initial six unit namespaces had 70 failing assertions; all five new UI flows timed out on the IDN-only implementation. Contract checks also caught an unbounded IDN wait, a grace period accepting late results, lazy outputs read outside the loader, and filling/merging configs rather than replacing them. A TestFX menu-text wait was a test bug: a popup item is a container, not a label. Fixed the lookup and reran the menu test in isolation (1 test, 3 assertions). No timing failures in either final suite.
+
+| Apple Silicon Mac | Tests | Assertions | Result |
+|---|---:|---:|---|
+| Targeted unit (the six unit namespaces above plus `views.tabs.projectors-test`, `events.history-handlers-test`) | 225 | 3,876 | pass |
+| Targeted new TestFX namespace | 5 | 25 | pass |
+| Related TestFX (`rig-strip`, `rig-card`, `projector-drivers`, `zones`, `setup-dialogs`, `rig-report`) | 74 | 368 | pass |
+| Full headless UI (`clj -M:test-ui:mac-arm:test-ui-headless`) | 248 | 1,302 | pass |
+| Full unit (`clj -M:mac-arm:test`) | 1,681 | 556,337 | pass |
+
+`clj -M:kondo --lint src test --parallel --fail-level error`: 0 errors, 18 existing warnings.
+
+**Live check:** `app/start-test!` in a dedicated headless nREPL, with a temporary rig file and an empty add-ons folder. Before each plorer Scan the check asserted the identity of the IDN Hello stub and the complete set of registered discovery functions. Three new cards appeared off; the menu turned on only the two outputs of `NV-7`. With just the bridge enabled, a starter circle and Stream produced **24 complete 65-point frames** on `127.0.0.1`, no LSPS violations. Stop produced **one CLOSE, then silence**. A second fake scan showed the two missing outputs and the warning. An earlier interactive check left the loopback recorder collecting packets during a pause and exhausted the REPL heap; the final check bounded Stream and Stop in one script and closed the receiver and app in `finally`.
+
+**Network isolation:** new scan tests stub `idn-hello/discover-devices-with-services`, enumerate fake interface data and allow only test discoverers before pressing Scan. The real receiver binds loopback; no private add-ons are loaded. The final full suites and the live REPL additionally ran under a process-local macOS policy denying outbound IP other than loopback.
+
+**Screenshots** (local, gitignored): `test-results/output-d4/d4-1-before-scan.png`, `d4-2-after-scan.png`, `d4-3-card-menu.png`, `d4-4-enabled.png`, `d4-5-streaming.png`, `d4-6-rescan-not-found-and-warning.png` in the same folder.
 
 ---
 
-## D5 · Checking the contract against a real Helios add-on
+## D5 · Checking the contract against a real USB add-on
 
 **Goal:** prove the add-on path on real USB hardware with a device-paced DAC (`:ready?`).
 
-The Helios add-on is built in **its own repo** (OD-8), and its USB library is that repo's choice. Nothing from it lands here. This phase in this repo is limited to:
+The USB add-on is built in **its own repo** (OD-8), and its USB library is that repo's choice. Nothing from it lands here. This phase in this repo is limited to:
 - fixing whatever the add-on shows is missing or wrong in the contract, `laser-show.output.api`, the loader or `docs/OUTPUT_DRIVERS.md`;
 - bumping `api-version` if a fix breaks API 1. Ideally nothing breaks it.
 
 What the add-on is expected to do, which is the contract test:
-- **The driver:** `:helios/usb`, `:transport :usb`, `:platforms` listing the OSes it ships native libraries for.
-  - `:discover` lists the USB devices with Helios's vendor and product ids, taken from the vendor's SDK when the work starts, not from this plan;
+- **The driver:** a qualified id, `:transport :usb`, `:platforms` listing the OSes it ships native libraries for.
+  - `:discover` lists USB devices matching the vendor and product ids from the device's SDK;
   - `:ready?` reads the device's status;
   - `:send-frame!` encodes with `laser-show.output.api` or packs its own format;
   - `:capabilities` (points per frame, scan-rate range) come from the SDK;
@@ -544,6 +555,6 @@ What the add-on is expected to do, which is the contract test:
 ## Done when
 
 - [ ] D1–D4 are merged with the full unit and UI suites green (`targeted-ui-testing`: the targeted tests first, then both full suites), and the add-on loader tests green on macOS, Windows and Linux in CI.
-- [ ] D5: a Helios add-on from its own repo has passed the hardware checks above.
-- [ ] `docs/OUTPUT_DRIVERS.md` is current.
+- [ ] D5: a USB add-on from its own repo has passed the hardware checks above.
+- [x] `docs/OUTPUT_DRIVERS.md` is current through D4.
 - [ ] Then mark this plan Done and delete it (git keeps it).

@@ -597,29 +597,25 @@
       (assoc (get projectors active-id) :id active-id))))
 
 (defn discovered-devices
-  "Get list of devices from the last network scan.
+  "Get the devices from the last scan.
    Depends on: projector-ui domain"
   [context]
   (:discovered-devices (fx/sub-val context :projector-ui) []))
 
 (defn projector-scanning?
-  "Check if a network scan is in progress.
+  "Check if a device scan is in progress.
    Depends on: projector-ui domain"
   [context]
   (:scanning? (fx/sub-val context :projector-ui) false))
 
 
 (defn enabled-projector-services
-  "Get set of [host service-id] pairs for ENABLED projectors only.
-   Used by discovery panel to show accurate enabled state for each service.
+  "The found-output keys (rig/output-key: [host service-id] for IDN, [driver
+   device-key output-id] for another driver's device) of the ENABLED
+   projectors. No view uses it since zones Z2's rig strip.
    Depends on: projectors domain (which IS the map of projector-id -> config)"
   [context]
-  (let [items (fx/sub-val context :projectors)]
-    (into #{}
-          (comp (filter :enabled?)
-                (map (fn [proj]
-                       [(:host proj) (or (:service-id proj) 0)])))
-          (vals items))))
+  (into #{} (comp (filter rig/enabled?) (keep rig/output-key)) (vals (fx/sub-val context :projectors))))
 
 (defn expanded-discovered-devices
   "Get set of device addresses that are expanded in the discovery panel.
@@ -1352,13 +1348,15 @@
 
 
 (defn- found-outputs
-  "#{[host service-id]} of the outputs the last scan found (service 0 for a
-   device with none)."
+  "#{key} of the outputs the last scan found, as rig/output-key has them:
+   [host service-id] of an IDN device's (service 0 for a device with none),
+   [driver device-key output-id] of another driver's."
   [devices]
-  (into #{} (mapcat (fn [{:keys [address services]}]
-                      (if (seq services)
-                        (map (fn [s] [address (or (:service-id s) 0)]) services)
-                        [[address 0]])))
+  (into #{} (mapcat (fn [{:keys [driver address services device-key outputs]}]
+                      (cond
+                        (not= :idn (or driver :idn)) (map (fn [o] [driver device-key (:output-id o)]) outputs)
+                        (seq services) (map (fn [s] [address (or (:service-id s) 0)]) services)
+                        :else [[address 0]])))
         devices))
 
 (defn rig-cards
@@ -1368,9 +1366,14 @@
    \"10.0.0.7 #1\" for IDN, \"LSPS · 127.0.0.1:7266\" for another driver)
    :address-lines (driver/summary-parts: [\"LSPS\" \"127.0.0.1:7266\"])
    :enabled? :excluded? :tags :identity (rig/identity-label) :selected?
-   :found? (false once a scan this session didn't find it; another driver's
-   is never not found, as no scan looks for it before output drivers D4)
-   :multi-output? (another output of its IDN device is a card too)
+   :found? (false once a scan this session didn't find it: an IDN laser, or
+   another driver's output a scan found ([:device …] stable id) when its
+   driver has :discover; never one added by hand, or of a driver without
+   :discover, which no scan looks for)
+   :multi-output? (another output of its device is a card too: by host for
+   IDN, by driver and device key for another driver's)
+   :device-key (another driver's device's key, for its card menu; nil for
+   IDN and one added by hand)
    :identifiable? (it can be reached to Identify: IDN with a host, or any
    other driver) :limit (its safety limit as safety/normalize reads it, nil
    when it can't, for the thumbnail's outline)}."
@@ -1382,18 +1385,20 @@
         selected (fx/sub-ctx context active-projector-id)
         found (when (fx/sub-val context get-in [:rig-ui :scanned?])
                 (found-outputs (fx/sub-ctx context discovered-devices)))
-        idn? #(= :idn (driver/projector-driver-id %))
-        hosts (frequencies (keep #(when (idn? %) (:host %)) (vals projectors)))]
+        devices (frequencies (keep #(some-> (rig/output-key %) pop) (vals projectors)))]
     (mapv (fn [id]
             (let [{:keys [host service-id tags] :as p} (get projectors id)
-                  idn (idn? p)]
+                  driver-id (driver/projector-driver-id p)
+                  idn (= :idn driver-id)
+                  output (rig/output-key p)
+                  looked-for? (or idn (and output (get-in descriptors [driver-id :discover?])))]
               {:id id
                :position (position id)
                :name (rig/projector-name {:projectors projectors} id)
                :host host
                :service-id service-id
-               :driver (driver/projector-driver-id p)
-               :driver-installed? (or (idn? p) (contains? descriptors (driver/projector-driver-id p)))
+               :driver driver-id
+               :driver-installed? (or idn (contains? descriptors driver-id))
                :host-label (driver/summary p descriptors)
                :address-lines (driver/summary-parts p descriptors)
                :enabled? (rig/enabled? p)
@@ -1401,8 +1406,9 @@
                :tags (set tags)
                :identity (rig/identity-label p)
                :selected? (= id selected)
-               :found? (or (nil? found) (not idn) (contains? found [host (or service-id 0)]))
-               :multi-output? (and idn (< 1 (get hosts host 0)))
+               :found? (or (nil? found) (not looked-for?) (contains? found output))
+               :multi-output? (< 1 (get devices (some-> output pop) 0))
+               :device-key (when-not idn (second output))
                :identifiable? (or (not idn) (not (str/blank? (str host))))
                :limit (try (:limit (safety/normalize (:safety p))) (catch Exception _ nil))}))
           (:order inputs))))

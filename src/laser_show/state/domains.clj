@@ -369,9 +369,9 @@
    :identify {:default {}
               :doc "{projector-id until-ms}: projectors whose test pattern flashes until then (Identify)"}
    :discovered-devices {:default []
-                        :doc "List of devices from last network scan"}
+                        :doc "Devices from the last scan: IDN addresses and services, or a driver's :device-key and :outputs. Each device carries :driver."}
    :scanning? {:default false
-               :doc "Whether a network scan is in progress"}
+               :doc "Whether output drivers are being scanned"}
    :broadcast-address {:default "255.255.255.255"
                        :doc "Broadcast address for device discovery"}
    :expanded-devices {:default #{}
@@ -471,7 +471,7 @@
   {:drop {:default nil
           :doc "{:projector-id :side} while a dragged card is over another (:before or :after it), so a bar shows where it would land; nil otherwise"}
    :scanned? {:default false
-              :doc "A network scan finished this session: until then, no card says the scan didn't find it"}
+              :doc "A device scan finished this session: until then, no card says the scan didn't find it"}
    :divider {:default nil
              :doc "Where the user left the divider between the strip and the inspector (0-1, the split pane's position; :rig/set-divider), for the session: New and Open keep it. nil until it is moved: the inspector gets the room its safety zone needs and the strip the rest (views/tabs/projectors.clj default-divider)"}})
 

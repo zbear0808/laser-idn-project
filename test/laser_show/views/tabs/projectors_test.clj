@@ -67,7 +67,7 @@
   (is (= "4 outputs · 3 on" (rig-strip/header-text [{:enabled? true} {:enabled? true} {:enabled? false} {:enabled? true}])))
   (is (= "1 output · 1 on" (rig-strip/header-text [{:enabled? true}])))
   (is (= "Tick On on a card to send it output." (rig-strip/header-text [{:enabled? false} {:enabled? false}])))
-  (is (= "No lasers yet: Scan Network finds them, or add one with Add Manual..." (rig-strip/header-text []))))
+  (is (= "No lasers yet: Scan finds them, or add one with Add Manual..." (rig-strip/header-text []))))
 
 (deftest parse-scan-rate-test
   (doseq [[text expected] [["25000" 25000] ["25 000" 25000] ["25,000" 25000] [" 30000 " 30000]

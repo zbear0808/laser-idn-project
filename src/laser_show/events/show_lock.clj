@@ -48,7 +48,7 @@
     ;; They rebuild or re-route the engines
     :projectors/add-manual :projectors/update-settings :projectors/update-driver-config :projectors/toggle-enabled
     :projectors/toggle-zone-group :projectors/vp-toggle-zone-group :projectors/set-service-enabled
-    :projectors/enable-all-by-ip :projectors/request-remove :projectors/remove
+    :projectors/enable-all-by-ip :projectors/enable-device :projectors/request-remove :projectors/remove
     :zone-groups/request-remove :zone-groups/remove
     ;; The rig's order, middle laser and split width, and what a laser is in
     ;; (zones plan Z2): they re-route the engines or change which cues reach

@@ -879,7 +879,7 @@
     (is (= {:l true :b true :b2 true :nova true} (by-id :identifiable? s)))
     (is (= "Added by hand: a scan doesn't look for it" (:b (by-id :identity s))))
     (is (= "Device NV-00123 · output 0" (:nova (by-id :identity s))))
-    (testing "after a scan, only an IDN laser can be not found"
+    (testing "after a scan, a driver without discovery or one that isn't installed is never marked missing"
       (let [scanned (-> s
                         (assoc-in [:rig-ui :scanned?] true)
                         (assoc-in [:projector-ui :discovered-devices] [{:address "10.0.0.9" :services []}]))]
@@ -1243,6 +1243,56 @@
     (testing "a switch of the map in use changes nothing: every map counts"
       (is (= :crowd (blocked (fx/swap-context ctx assoc-in [:zone-map :active] :map/odd-even) 2))))))
 
+
+;; Scan finds every driver's devices (output drivers D4, 01 §5.3)
+
+(def ^:private nova-descriptor
+  {:id :acme/nova :name "Acme Nova (test)" :short-name "Nova" :transport :usb :fields [] :discover? true :addon nil})
+
+(defn- nova-p [key output & {:as more}]
+  (merge {:name (str key "/" output) :driver :acme/nova :driver-config {}
+          :stable-id [:device :acme/nova key output] :enabled? false}
+         more))
+
+(def ^:private driver-rig
+  (-> base-state
+      (assoc-in [:backend :output :drivers] (assoc (laser-show.output.driver/descriptors) :acme/nova nova-descriptor))
+      (assoc :projectors {:l {:name "Laser L" :host "10.0.0.5" :service-id 1 :enabled? true}
+                          :n1a (nova-p "NV-1" 0 :enabled? true)
+                          :n1b (nova-p "NV-1" 1)
+                          :n2 (nova-p "NV-2" 0)
+                          :hand {:name "Hand" :driver :acme/nova :driver-config {} :stable-id [:manual :acme/nova :hand]}
+                          :b {:name "Bridge" :driver :lsps :driver-config {:host "127.0.0.1" :port 7266}
+                              :stable-id [:manual :lsps :b] :enabled? true}
+                          :lost {:name "Lost" :driver :lsps :driver-config {} :stable-id [:device :lsps "X" 0]}})))
+
+(deftest rig-cards-find-driver-outputs-test
+  (let [by-id #(into {} (map (juxt :id %)) (fx/sub-ctx (context %2) subs/rig-cards))
+        scanned (-> driver-rig
+                    (assoc-in [:rig-ui :scanned?] true)
+                    (assoc-in [:projector-ui :discovered-devices]
+                              [{:address "10.0.0.5" :services [{:service-id 1}] :driver :idn}
+                               {:driver :acme/nova :device-key "NV-1" :outputs [{:output-id 0 :driver-config {}}]}]))]
+    (testing "before any scan, every card is found"
+      (is (every? true? (vals (by-id :found? driver-rig)))))
+    (testing "after one: found, or not found, for a driver with :discover; never for one without"
+      (is (= {:l true :n1a true :n1b false :n2 false :hand true :b true :lost true} (by-id :found? scanned))
+          "NV-1's output 1 and NV-2 weren't found; one added by hand isn't looked for; LSPS has no :discover"))
+    (testing "a device's outputs are grouped by its driver and key"
+      (is (= {:l false :n1a true :n1b true :n2 false :hand false :b false :lost false} (by-id :multi-output? driver-rig)))
+      (is (false? (:n2 (by-id :multi-output? (assoc-in driver-rig [:projectors :lost :stable-id]
+                                                       [:device :lsps "NV-2" 0]))))
+          "the same key under a different driver does not make a group")
+      (is (= {:l nil :n1a "NV-1" :n1b "NV-1" :n2 "NV-2" :hand nil :b nil :lost "X"} (by-id :device-key driver-rig))
+          "the card knows its device, for the menu"))))
+
+(deftest enabled-outputs-cover-drivers-test
+  (is (= #{["10.0.0.5" 1] [:acme/nova "NV-1" 0] [:lsps "X" 0]}
+         (fx/sub-ctx (context (-> driver-rig
+                                  (assoc-in [:projectors :lost :enabled?] true)
+                                  (assoc-in [:projectors :hand :enabled?] true)))
+                     subs/enabled-projector-services))
+      "the found-output keys of the outputs that are on: [host service] for IDN, [driver key output] for a device; none for one added by hand"))
 
 ;; The step grid window (zones plan Z6, 08 §4, §7)
 

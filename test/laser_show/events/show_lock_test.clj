@@ -344,6 +344,19 @@
       (is (= {:text "Change Output Settings refused" :event :projectors/update-driver-config}
              (get-in s [:ui :show-lock-notice]))))))
 
+(deftest enable-device-is-refused-while-locked-test
+  (let [s0 (-> (starter)
+               (assoc-in [:projectors :n1] {:name "Nova 1" :driver :acme/nova :enabled? false :zone-groups []
+                                            :driver-config {} :stable-id [:device :acme/nova "NV-1" 0]})
+               (history/mark-clean))
+        event {:event/type :projectors/enable-device :driver :acme/nova :device-key "NV-1" :enabled? true}]
+    (is (contains? show-lock/blocked-events :projectors/enable-device) "next to :projectors/enable-all-by-ip")
+    (is (true? (get-in (run s0 event) [:projectors :n1 :enabled?])) "unlocked, it applies")
+    (let [s (:state (handle (lock s0) event))]
+      (is (= (lock s0) (without-notices s)) "locked, the only change is the notice")
+      (is (= {:text "Turn Device On or Off refused" :event :projectors/enable-device}
+             (get-in s [:ui :show-lock-notice]))))))
+
 (deftest locked-zone-pattern-edits-are-refused-test
   ;; Zones plan Z5: a pattern's or a Map cycle's edits are structure, as a
   ;; target's are (Z4-Q4 A): where the pictures go. The pattern window edits

@@ -106,12 +106,12 @@
   (let [n (count cards)
         on (count (filter :enabled? cards))]
     (cond
-      (zero? n) "No lasers yet: Scan Network finds them, or add one with Add Manual..."
+      (zero? n) "No lasers yet: Scan finds them, or add one with Add Manual..."
       (zero? on) "Tick On on a card to send it output."
       :else (str n (if (= 1 n) " output" " outputs") " · " on " on"))))
 
 (defn rig-header
-  "Scan Network, Add Manual... and what the cards hold; at the right, the
+  "Scan, Add Manual... and what the cards hold; at the right, the
    middle laser and the split width (group-matrix/rig-settings)."
   [{:keys [fx/context]}]
   (let [cards (fx/sub-ctx context subs/rig-cards)
@@ -121,7 +121,7 @@
      :alignment :center-left
      :children (into [{:fx/type :button
                        :id "projectors-scan-button"
-                       :text (if scanning? "Scanning..." "Scan Network")
+                       :text (if scanning? "Scanning..." "Scan")
                        :disable scanning?
                        :style-class ["button-primary"]
                        :on-action {:event/type :projectors/scan-network}}
@@ -345,10 +345,11 @@
 (defn- card-menu-items
   "Identify (Z1's event; off while the laser isn't outputting, as its button
    is; not there for one that can't be reached, an IDN laser with no host),
-   on a device with more outputs, turning them all on, and on a card
-   that is off, Forget this laser… (zones plan ZR: New Project keeps the
-   rig, so a laser that's gone is forgotten here)."
-  [{:keys [id host enabled? multi-output? identifiable?]} outputting?]
+   on a device with more outputs, turning them all on (an IDN device's by
+   its host, another driver's by its device key: :projectors/enable-device),
+   and on a card that is off, Forget this laser… (zones plan ZR: New
+   Project keeps the rig, so a laser that's gone is forgotten here)."
+  [{:keys [id host driver device-key enabled? multi-output? identifiable?]} outputting?]
   (cond-> []
     identifiable? (conj {:fx/type :menu-item
                          :id (str "rig-card-identify-" (id-text id))
@@ -357,8 +358,11 @@
                          :on-action {:event/type :projectors/identify :projector-id id}})
     multi-output? (conj {:fx/type :menu-item
                          :id (str "rig-card-enable-all-" (id-text id))
-                         :text (str "Turn on every output of " host)
-                         :on-action {:event/type :projectors/enable-all-by-ip :address host}})
+                         :text (str "Turn on every output of " (or device-key host))
+                         :on-action (if device-key
+                                      {:event/type :projectors/enable-device :driver driver
+                                       :device-key device-key :enabled? true}
+                                      {:event/type :projectors/enable-all-by-ip :address host})})
     (not enabled?) (conj {:fx/type :menu-item
                           :id (str "rig-card-forget-" (id-text id))
                           :text "Forget this laser…"

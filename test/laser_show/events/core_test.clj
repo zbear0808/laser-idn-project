@@ -10,10 +10,15 @@
    [laser-show.events.core :as events]
    [laser-show.events.handlers :as handlers]
    [laser-show.events.handlers.timing :as timing]
+   [laser-show.idn.hello :as idn-hello]
+   [laser-show.output.discovery :as discovery]
+   [laser-show.output.driver :as driver]
    [laser-show.output.jar-builder :as jar]
+   [laser-show.output.recording-driver :as rd]
    [laser-show.state.core :as state]
    [laser-show.state.domains :as domains])
-  (:import [java.io File]))
+  (:import [java.io File]
+           [java.util.concurrent CountDownLatch TimeUnit]))
 
 (use-fixtures :each (fn [f]
                       (state/init-state! (domains/build-initial-state))
@@ -334,3 +339,204 @@
                 {:keys [dispatched calls]} (open-folder path {:desktop true :os :macos})]
             (is (= [] calls))
             (is (= [{:event/type :addons/open-folder-failed :path path}] dispatched))))))))
+
+
+;; Scan (output drivers D4, 01 §5.3). IDN's discovery is always stubbed and
+;; every discoverer is a fake that returns data: nothing is sent on the
+;; network, and the interfaces are made up too
+
+
+(def ^:private fake-interfaces
+  [{:name "lo0" :up? true :loopback? true :broadcasts ["127.255.255.255"]}
+   {:name "en0" :up? true :loopback? false :broadcasts ["192.168.1.255"]}
+   {:name "en1" :up? true :loopback? false :broadcasts ["10.0.0.255"]}])
+
+(def ^:private idn-raw
+  "A device as idn-hello/discover-devices-with-services returns it."
+  {:address "10.0.0.5" :host-name "" :unit-id "0A 1B" :port nil :status {:ok true}
+   :protocol-version {:major 1 :minor 0} :services [{:service-id 1 :name "Out 1"}] :relays nil :extra 1})
+
+(def ^:private idn-found
+  "idn-raw as the scan reports it (as before D4, with :driver :idn)."
+  {:address "10.0.0.5" :host-name "10.0.0.5" :unit-id "0A 1B" :port 7255 :status {:ok true}
+   :protocol-version {:major 1 :minor 0} :services [{:service-id 1 :name "Out 1"}] :relays [] :driver :idn})
+
+(def ^:private nova-device
+  {:device-key "NV-00123" :name "Nova 00123"
+   :outputs [{:output-id 0 :name "Output A" :driver-config {:serial "NV-00123" :output 0}}]})
+
+(def ^:private zeta-device
+  {:device-key "0x1A2B" :name "Zeta 1A2B"
+   :outputs [{:output-id 0 :name "Left" :driver-config {:host "10.0.0.9" :port 7300}}
+             {:output-id 1 :name "Right" :driver-config {:host "10.0.0.9" :port 7301}}]})
+
+(defn- discoverer
+  "A recording driver with a fake discovery function. Warnings use its full name."
+  [id n discover]
+  (assoc (:driver (rd/recording-driver {:id id})) :name n :short-name "Test" :discover discover))
+
+(defn- scan!
+  "Run the :projectors/scan effect as Scan does, with IDN's discovery
+   replaced by idn, the interfaces by fake-interfaces and drivers
+   registered: the event it dispatched."
+  [{:keys [idn drivers timeout-ms interfaces broadcast-address]
+    :or {idn (fn [& _] []) interfaces (constantly fake-interfaces) broadcast-address "255.255.255.255"}}]
+  (assert (not-any? :discover (driver/registered)) "no real :discover is registered")
+  (let [got (promise)]
+    (with-redefs [idn-hello/discover-devices-with-services idn
+                  discovery/interfaces interfaces]
+      (run! driver/register! drivers)
+      (try
+        ((get events/effects :projectors/scan) (cond-> {:broadcast-address broadcast-address}
+                                                 timeout-ms (assoc :timeout-ms timeout-ms))
+                                               #(deliver got %))
+        (deref got 10000 ::timeout)
+        (finally
+          (run! #(driver/unregister! (:id %)) drivers))))))
+
+(deftest scan-runs-every-discoverer-test
+  (let [^CountDownLatch started (CountDownLatch. 3)
+        seen (atom {})
+        loader (clojure.lang.DynamicClassLoader. (.getContextClassLoader (Thread/currentThread)))
+        meet! (fn [k opts]
+                (.countDown started)
+                (swap! seen assoc k {:opts opts
+                                     :loader (.getContextClassLoader (Thread/currentThread))
+                                     :together? (.await started 2 TimeUnit/SECONDS)}))
+        nova (assoc (discoverer :acme/nova "Acme Nova"
+                                (fn [opts]
+                                  (meet! :nova opts)
+                                  [(update nova-device :outputs
+                                           (fn [os] (map (fn [o]
+                                                           (when-not (identical? loader (.getContextClassLoader (Thread/currentThread)))
+                                                             (throw (ex-info "outputs read outside the driver's loader" {})))
+                                                           o) os)))]))
+                    ::driver/loader loader)
+        zeta (discoverer :zeta/beam "Zeta" (fn [opts] (meet! :zeta opts) [zeta-device]))
+        event (scan! {:idn (fn [& args] (meet! :idn (vec args)) [idn-raw]) :drivers [zeta nova]})]
+    (is (= {:event/type :projectors/scan-complete
+            :devices [idn-found (assoc nova-device :driver :acme/nova) (assoc zeta-device :driver :zeta/beam)]
+            :warnings []}
+           event)
+        "IDN first, then the drivers by id, each device tagged with its :driver")
+    (is (= #{:idn :nova :zeta} (set (keys @seen))))
+    (is (every? :together? (vals @seen)) "all three ran at once")
+    (is (= ["255.255.255.255" 3000 1000] (:opts (:idn @seen))) "IDN's own scan, as before")
+    (is (= {:timeout-ms 3000 :broadcast-address "255.255.255.255" :broadcast-addresses ["192.168.1.255" "10.0.0.255"]}
+           (:opts (:nova @seen))
+           (:opts (:zeta @seen)))
+        "each discoverer gets the timeout, the scan's broadcast address and one per interface (G10)")
+    (is (identical? loader (:loader (:nova @seen))) "with the add-on's classloader")
+    (is (not (identical? loader (:loader (:zeta @seen)))))))
+
+(deftest discoverers-get-broadcast-addresses-test
+  (doseq [[networks expected] [[fake-interfaces ["192.168.1.255" "10.0.0.255"]]
+                               [[{:up? true :loopback? false :broadcasts ["10.0.255.255"]}] ["10.0.255.255"]]
+                               [[] []]]]
+    (let [reads (atom 0)
+          seen (atom [])
+          discover (fn [opts] (swap! seen conj opts) [])
+          opts {:timeout-ms 3000 :broadcast-address "192.0.2.255" :broadcast-addresses expected}]
+      (scan! {:interfaces #(do (swap! reads inc) networks) :broadcast-address "192.0.2.255"
+              :drivers [(discoverer :acme/nova "Nova" discover) (discoverer :zeta/beam "Zeta" discover)]})
+      (is (= 1 @reads) "one interface snapshot for the entire scan")
+      (is (= [opts opts] @seen) "the scan's selected broadcast is independent of the interface list"))))
+
+(deftest invalid-driver-device-is-dropped-test
+  (let [nova (discoverer :acme/nova "Acme Nova"
+                         (fn [_] [nova-device
+                                  {:name "no key" :outputs (:outputs nova-device)}
+                                  {:device-key "NV-2" :name "Nova 2"}
+                                  {:device-key "NV-3" :outputs [{:output-id 0 :driver-config {:f inc}}]}
+                                  {:device-key "NV-4" :outputs [{:name "A" :driver-config {}}]}
+                                  {:device-key "NV-5" :outputs [{:output-id 0 :driver-config {}} {:output-id 0 :driver-config {}}]}
+                                  {:device-key "NV-6" :name 6 :outputs [{:output-id 0 :driver-config {}}]}
+                                  "junk"
+                                  (assoc nova-device :name "Nova again")
+                                  {:device-key 7 :outputs [{:output-id "a" :driver-config {:n 1.5}}]}]))
+        {:keys [devices warnings]} (scan! {:drivers [nova]})]
+    (is (= [(assoc nova-device :driver :acme/nova)
+            {:driver :acme/nova :device-key 7 :outputs [{:output-id "a" :driver-config {:n 1.5}}]}]
+           devices)
+        "only the devices with a usable shape: a key, outputs with ids and plain-data configs")
+    (is (= ["Acme Nova: left out a device without a :device-key"
+            "Acme Nova: left out device NV-2: it has no :outputs"
+            "Acme Nova: left out device NV-3: an output's :driver-config isn't a map of plain data"
+            "Acme Nova: left out device NV-4: an output has no :output-id"
+            "Acme Nova: left out device NV-5: two outputs have :output-id 0"
+            "Acme Nova: left out device NV-6: its :name isn't text"
+            "Acme Nova: left out a device that isn't a map"
+            "Acme Nova: left out a second device NV-00123"]
+           warnings))))
+
+(deftest failing-discoverer-gives-warning-test
+  (let [zeta (discoverer :zeta/beam "Zeta" (fn [_] [zeta-device]))]
+    (testing "one throws: its message, the others' devices"
+      (is (= {:event/type :projectors/scan-complete
+              :devices [idn-found (assoc zeta-device :driver :zeta/beam)]
+              :warnings ["Acme Nova: libnova not found"]}
+             (scan! {:idn (fn [& _] [idn-raw])
+                     :drivers [zeta (discoverer :acme/nova "Acme Nova" (fn [_] (throw (ex-info "libnova not found" {}))))]}))))
+    (testing "an Error (a native library missing), one with no message, a result that isn't a list"
+      (is (= ["Acme Nova: no nova in java.library.path"]
+             (:warnings (scan! {:drivers [(discoverer :acme/nova "Acme Nova"
+                                                      (fn [_] (throw (UnsatisfiedLinkError. "no nova in java.library.path"))))]}))))
+      (is (= ["Acme Nova: java.lang.IllegalStateException"]
+             (:warnings (scan! {:drivers [(discoverer :acme/nova "Acme Nova" (fn [_] (throw (IllegalStateException.))))]}))))
+      (is (= ["Acme Nova: :discover returned something other than a list of devices"]
+             (:warnings (scan! {:drivers [(discoverer :acme/nova "Acme Nova" (fn [_] nova-device))]}))))
+      (is (= {:event/type :projectors/scan-complete :devices [] :warnings []}
+             (scan! {:drivers [(discoverer :acme/nova "Acme Nova" (fn [_] nil))]}))
+          "nil is no devices"))
+    (testing "IDN fails, a driver answers: its devices, and IDN's error as a warning"
+      (is (= {:event/type :projectors/scan-complete
+              :devices [(assoc zeta-device :driver :zeta/beam)]
+              :warnings ["IDN: Network is unreachable"]}
+             (scan! {:idn (fn [& _] (throw (java.net.SocketException. "Network is unreachable")))
+                     :drivers [zeta]}))))))
+
+(deftest slow-discoverer-times-out-test
+  (let [stuck (promise)]
+    (try
+      (is (= {:event/type :projectors/scan-complete :devices [idn-found]
+              :warnings ["Acme Nova: no answer within 3 s" "Zeta: no answer within 3 s"]}
+             (scan! {:idn (fn [& _] [idn-raw])
+                     :drivers [(discoverer :acme/nova "Acme Nova" (fn [_] @stuck []))
+                               (discoverer :zeta/beam "Zeta" (fn [{:keys [timeout-ms]}]
+                                                              (Thread/sleep (+ timeout-ms 300)) [zeta-device]))]}))
+          "a stalled driver and a driver that answers late both miss the same deadline")
+      (testing "IDN can time out too; an empty successful discovery still counts"
+        (is (= {:event/type :projectors/scan-complete :devices [] :warnings ["IDN: no answer within 0.2 s"]}
+               (scan! {:timeout-ms 200 :idn (fn [& _] (deref stuck 1000 nil) [])
+                       :drivers [(discoverer :acme/nova "Acme Nova" (constantly []))]}))))
+      (finally (deliver stuck true)))))
+
+(deftest all-discoverers-fail-gives-scan-failed-test
+  (let [unreachable (fn [& _] (throw (java.net.SocketException. "Network is unreachable")))
+        called (promise)]
+    (testing "IDN and every driver fail: IDN's error, as before"
+      (is (= {:event/type :projectors/scan-failed :error "Network is unreachable"}
+             (scan! {:idn unreachable
+                     :drivers [(discoverer :acme/nova "Acme Nova"
+                                           (fn [_] (deliver called true) (throw (ex-info "libnova not found" {}))))]})))
+      (is (realized? called) "a failure in IDN cannot bypass the other discoverers"))
+    (testing "one fails, one times out"
+      (let [stuck (promise)]
+        (try
+          (is (= {:event/type :projectors/scan-failed :error "Network is unreachable"}
+                 (scan! {:idn unreachable :timeout-ms 100
+                         :drivers [(discoverer :acme/nova "Acme Nova" (fn [_] @stuck []))]})))
+          (finally (deliver stuck true)))))
+    (testing "IDN alone, as before"
+      (is (= {:event/type :projectors/scan-failed :error "Network is unreachable"} (scan! {:idn unreachable}))))))
+
+(deftest idn-only-scan-unchanged-test
+  (let [calls (atom [])
+        idn (fn [& args] (swap! calls conj (vec args)) [idn-raw (assoc idn-raw :address "10.0.0.6" :host-name "Stage DAC" :port 7300)])]
+    (is (not-any? :discover (driver/registered)) "the built-in drivers have no :discover")
+    (is (= {:event/type :projectors/scan-complete
+            :devices [idn-found (assoc idn-found :address "10.0.0.6" :host-name "Stage DAC" :port 7300)]
+            :warnings []}
+           (scan! {:idn idn})))
+    (is (= [["255.255.255.255" 3000 1000]] @calls) "IDN's discovery is asked as before, once")
+    (is (= {:event/type :projectors/scan-complete :devices [] :warnings []} (scan! {})) "nothing found")))

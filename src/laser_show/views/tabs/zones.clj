@@ -244,7 +244,7 @@
                                          :children (mapv (fn [laser] {:fx/type laser-item :fx/key (:id laser) :group group :laser laser})
                                                          lasers)}}
                               {:fx/type :label
-                               :text "No lasers yet: Scan Network on the Projectors tab finds them."
+                               :text "No lasers yet: Scan on the Projectors tab finds them."
                                :style-class ["label-hint"]})
                             {:fx/type :label
                              :id "zone-group-explanation"

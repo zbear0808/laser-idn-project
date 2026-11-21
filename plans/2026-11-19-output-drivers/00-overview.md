@@ -1,6 +1,7 @@
 # Output drivers: more than IDN, from add-ons
 
-**Written:** 2026-11-19   **Status:** In progress: step 0 (skeleton) on branch `output-drivers`; D1 (the seam) done on `output-d1-seam` (3adc96f); 1D (contract additions from the first third-party add-on, `02` § 1D) done (8a5b4bf, on `output-drivers`); **D2 done**: the encoder and LSPS on `output-drivers`, the projector model and UI on `output-d2-ui` (5c5c189, eab6aa0, f61ea74; `02` § D2), with `output-drivers` (D3) merged in; D3 (add-on jars: loading at startup, Settings → Add-ons, Install add-on…) done (7bb72eb, on `output-d3-ui`, `02` § D3); `master` with zones Z3 and ZR merged in at `6f6f4df`, then again at `be72dd0` (zones Z4, Decimate) and `6f96aaf` (the Projectors tab's layout pass, Decimate's follow-up) (§7). Every question answered by 2026-11-20 (§9)   **Last verified against:** `6f96aaf` (`output-drivers` with `master` at `4b19812`, the Projectors tab's layout pass and Decimate's follow-up, merged in) for §7's intro and its last two rows; `6f6f4df` (`master` at `c067030`, zones Z0–Z3 and ZR) for the rest of §7 and the citations into files ZR and Z3 changed; §1's citations of the code D1 replaced stay at `cd10149`
+**Written:** 2026-11-19   **Status:** In progress. Step 0 through D3 and the live UI pass landed at `5a9a41c`. **D4 done** on `output-d4-discovery` (`8b6d3aa`, `0d673ea`), not merged; D5's hardware acceptance is pending. Every question is answered (§9).
+**Last verified against:** `0d673ea` for D4 (`02` § D4). The historical integration and pre-driver citations in §1 and §7 retain their original revisions.
 **Supersedes / Superseded by:** none
 **Related findings:** review 04 LE2 (one IDN-RT link per DAC, which stays inside the IDN driver), 04 #17 (flat point arrays: not needed here, see `01` §2.1). This plan needs to fit with the zones plan (`plans/2026-11-19-zones/`): Z1 safety and Z2 stable ids and the rig strip (both on master), Z3 routing core and ZR rig file (both on master, merged into `output-drivers` at `6f6f4df`). See §7.
 
@@ -26,7 +27,7 @@ Today a projector can only be an IDN DAC on the network. After this plan:
 6. **A projector's driver is fixed when the projector is created** (by Scan or Add Manual), because that's how the app first reached it. For a different connection you add a new projector (OD-11).
 7. **Cross-platform from the start**: the folder, the jar handling, Open folder and add-ons with native libraries all work on macOS, Windows and Linux, and CI checks the loader on all three (OD-12).
 
-Build order: **step 0** (the shared skeleton: the driver registry and its checks, the descriptors in app state, `:addons/loaded`) → **D1** (the seam, with no behaviour change) → **D2** (the projector model, the UI and LSPS) → **D3** (add-on loading) → **D4** (discovery for every driver) → **D5** (a check against a real Helios add-on, which is built in its own repo). D1, D2's encoder and LSPS, and D3's loader branch from step 0 and can be built side by side; they merge in the order D1 → D2 → D3.
+Build order: **step 0** (the shared skeleton: the driver registry and its checks, the descriptors in app state, `:addons/loaded`) → **D1** (the seam, with no behaviour change) → **D2** (the projector model, the UI and LSPS) → **D3** (add-on loading) → **D4** (discovery for every driver) → **D5** (a check against a real USB add-on built in its own repo). D1, D2's encoder and LSPS, and D3's loader branch from step 0 and can be built side by side; they merge in the order D1 → D2 → D3.
 
 | Phase | What you get | Size |
 |---|---|---|
@@ -34,8 +35,8 @@ Build order: **step 0** (the shared skeleton: the driver registry and its checks
 | D1 | IDN runs as a driver behind a contract. Every existing wire and lifecycle test still passes | ~1.5–2 d |
 | D2 | `:driver` and `:driver-config` on projectors, a Type picker in Add Manual, generic driver fields, the point encoder, the built-in LSPS driver | ~2 d |
 | D3 | Jar add-ons: loading, checking, the Settings → Add-ons section, Install add-on… | ~2 d |
-| D4 | Scan runs every driver's discovery, and each output it finds becomes a card on the rig strip, as IDN outputs do | ~1.5 d (zones Z2, which it waited for, has landed) |
-| D5 | Proof on real USB hardware: a Helios add-on from its own repo loads, scans, streams and stops cleanly. Only fixes to the contract or the loader land in this repo | ~1 d here (+ the add-on's own work) |
+| D4 | Scan runs every discoverer; each new output becomes a disabled card, and a known output keeps its projector when it moves | Done on `output-d4-discovery` |
+| D5 | Proof on real USB hardware: an add-on from its own repo loads, scans, streams and stops cleanly. Only fixes to the contract or the loader land in this repo | ~1 d here (+ the add-on's own work) |
 
 ## 1. Current behaviour (file:line)
 
@@ -91,7 +92,7 @@ show clock ─► frame provider (zones, projector effects, Z1 safety) ─► CO
                                               error blanking, stop       ▼
                                               backend/streaming_engine.clj   laser-show.idn.driver  (built-in :idn)
                                                                              laser-show.output.lsps (built-in :lsps)
-                                                                             <add-on jar drivers>    (:acme/nova, :helios/usb …)
+                                                                             <add-on jar drivers>    (:acme/nova, :zeta/beam …)
 ```
 
 - **Driver** (`01` §1): a map with descriptor data (id, name, transport, config fields, capabilities) and functions (`:open`, `:send-frame!`, `:close!`, plus optional `:ready?`, `:on-error`, `:discover`, `:describe` and, since 1D, `:status`). Its errors can say more in their `ex-data`: `:reopen?` (close the session and open a new one) and `:busy?` (another program has the device).
@@ -112,7 +113,7 @@ show clock ─► frame provider (zones, projector effects, Z1 safety) ─► CO
 | OD-5 | A driver only ever gets a frame after the provider (projector effects, then Z1's safety stage, `multi_engine.clj:109-124`) **and** `sanitize-frame` | Safety can't depend on add-on code |
 | OD-6 | The core keeps pacing. A device-paced DAC adds `:ready?`, and the core waits for it within one frame interval, or else skips that tick | Each driver would otherwise have to redo keepalive, stats and blanking |
 | OD-7 | A built-in `:lsps` driver: our own documented UDP point protocol (`01` §3) | It is the second real driver, the reference for add-on authors, and a bridge to out-of-process drivers |
-| OD-8 | No add-on lives in this repo, Helios included. This repo has the contract, the loader, `docs/OUTPUT_DRIVERS.md` and a tiny test fixture add-on under `test-resources/` that is never shipped | Your answer (Q-4). Native USB dependencies stay out of the core jar and its CI. D5 checks the contract against a real add-on built elsewhere |
+| OD-8 | No add-on lives in this repo. This repo has the contract, the loader, `docs/OUTPUT_DRIVERS.md` and a tiny test fixture add-on under `test-resources/` that is never shipped | Your answer (Q-4). Native USB dependencies stay out of the core jar and its CI. D5 checks the contract against a real add-on built elsewhere |
 | OD-9 | Driver ids: built-ins are unqualified (`:idn`, `:lsps`), add-ons must be qualified (`:acme/nova`) | Add-ons can't collide with the built-ins or with each other's namespaces |
 | OD-10 | A projector whose driver isn't installed is kept as it is: it loads, saves and round-trips unchanged. Its status says `Output driver :acme/nova is not installed` | Opening a show on another machine must never lose its setup |
 | OD-11 | A projector's `:driver` is set once, when Scan or Add Manual creates it, and never changes. There is no UI to change it. `:projectors/update-settings` (`projector.clj:272-297`, which `merge`s whatever it is given, `:297`) and `:projectors/update-driver-config` drop any `:driver` key. The settings panel shows the driver as a read-only label | Your answer (Q-6): a projector is registered by how the app reaches it. Another connection is another projector |
@@ -130,7 +131,7 @@ show clock ─► frame provider (zones, projector effects, Z1 safety) ─► CO
 | `[:backend :output :addons]` NEW, a vector of add-on status (`01` §4.3) | app state | `:addons/loaded` (step 0) | no/no |
 | `[:backend :output :dir]` NEW (D3), the add-ons folder's path | app state | `:addons/loaded` (D3: `app/load-addons`) | no/no |
 | `[:backend :output :pending-installs]` NEW (D3), `[{:id :name :version :file :replaced?}]` | app state | `:addons/installed`; cleared by `:addons/loaded` | no/no |
-| `[:projector-ui :discovered-devices]` (existing, `projector.clj:178`) | UI | scan-complete. Entries gain `:driver`, and non-IDN ones have `:device-key` and `:outputs` | no/no |
+| `[:projector-ui :discovered-devices]` (existing, `state/domains.clj:369`) | UI | scan-complete (`events/handlers/projector.clj:213-246`); entries carry `:driver`, and non-IDN ones have `:device-key` and `:outputs` | no/no |
 | `[:projector-ui :expanded-devices]` (existing, `projector.clj:649-656`) | UI | Not used: no view reads it since Z2 replaced the discovery panel with the rig strip. D4 leaves it alone | no/no |
 | `[:ui :dialogs :add-projector-manual]` dialog data (existing) | UI | `:ui/update-dialog-data`. Gains `:driver` and `:driver-config` text values | no/no |
 | Driver registry `!drivers` NEW | runtime atom in `laser-show.output.driver` (step 0) | built-ins when their namespace loads (D1 `:idn`, D2 `:lsps`); `laser-show.output.addons/load-all!` on the startup thread (D3) | n/a |
@@ -155,9 +156,9 @@ Nothing is `swap!`ed from outside the event flow. Add-on load results come in as
 | `:addons/open-folder` → `:system/open-folder` (effect) | NEW (`:system/open-url`, `events/core.clj:310-320`, is for URLs) | Settings button | handler pure. The effect creates the folder if it is missing, then tries `Desktop/open`, then `xdg-open` on Linux. If both fail, it dispatches its `:on-failed`, `:addons/open-folder-failed {:path}` (D3), whose handler shows the full path in a notice (`01` §4.4) |
 | `:projectors/add-manual` | exists (`projector.clj:227-243`); gains `:driver`, `:driver-config` | `views/dialogs/add_projector_manual.clj:89` | pure |
 | `:projectors/update-driver-config` | NEW `{:projector-id :key :value}` | the generic driver fields in `projector-basic-settings` (`views/tabs/projectors.clj:54-143`) | pure. Validated against the field spec in `[:backend :output :drivers]`. The show lock refuses it, like `:projectors/update-settings` (it joins `show_lock.clj:24-53`) |
-| `:projectors/scan` (effect) | exists (`events/core.clj:233-271`); also runs every driver's `:discover` | `handle-projectors-scan-network` (`projector.clj:111-116`), which the Scan Network button (`views/components/rig_strip.clj:102-107`) and `app/start!` (`app.clj:237`) dispatch | effect (future) |
-| `:projectors/scan-complete` | exists (`projector.clj:157-184`); devices carry `:driver`, and the event gains `:warnings` | the scan effect (`events/core.clj:265`) | pure |
-| `:projectors/enable-device` | NEW (D4) `{:driver :device-key}`: turns on every output of a driver's device, as `:projectors/enable-all-by-ip` (`projector.clj:199-208`) does by host | the card menu (`views/components/rig_strip.clj:289-292`) | pure. The show lock refuses it, as it does `enable-all-by-ip` (`show_lock.clj:43`) |
+| `:projectors/scan` (effect) | exists (`events/core.clj:237`); runs IDN and every driver's discovery (`output/discovery.clj:175`) | `handle-projectors-scan-network` (`events/handlers/projector.clj:127`), from Scan (`views/components/rig_strip.clj:127`) and startup (`app.clj:257`) | effect (future) |
+| `:projectors/scan-complete` | exists (`events/handlers/projector.clj:213`); devices carry `:driver`, and the event carries `:warnings` | the scan effect (`events/core.clj:237-246`) | pure |
+| `:projectors/enable-device` | D4 `{:driver :device-key :enabled?}`: sets every output of this driver's device on or off (`events/handlers/projector.clj:272`) | the card menu (`views/components/rig_strip.clj:358-365`) | pure. The show lock refuses it, as it does `enable-all-by-ip` (`events/show_lock.clj:46`) |
 | `:multi-engine/refresh` | exists (`events/core.clj:538`) | `wrap-output-sync` (`output_sync.clj:25-34`). A change of `:driver` or `:driver-config` now changes the fingerprint | effect |
 | `:output/status` | exists (`connection.clj:28-34`) | the output-status thread (`output_runtime.clj:338-351`); new states `driver missing` and `not responding` | pure |
 
@@ -195,7 +196,7 @@ Answered 2026-11-20:
 | Q-1 | Licence of closed add-ons (the repo is GPLv3) | Not a concern for now. Nothing in this plan depends on it. LSPS stays (OD-7) for its own reasons |
 | Q-2 | The add-ons folder | `~/LaserShowProjects/addons/`, made to work well on every platform: OD-12, `01` §4.4 |
 | Q-3 | Restart to load, or hot loading | Restart to load (OD-4) |
-| Q-4 | Where the Helios add-on lives | In its own repo, like every add-on (OD-8). Its USB library is that repo's choice. D5 here only checks the contract against it |
+| Q-4 | Where the USB hardware add-on lives | In its own repo, like every add-on (OD-8). Its USB library is that repo's choice. D5 here only checks the contract against it |
 | Q-5 | The LSPS default port, and discovery | Port 7266. No discovery in v1 |
 | Q-6 | Changing an existing projector's driver | No: the driver is fixed when the projector is created (OD-11) |
 | Q-7 | A trust note next to Install add-on… | Left out: no note |

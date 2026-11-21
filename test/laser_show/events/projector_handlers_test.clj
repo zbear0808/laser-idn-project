@@ -286,7 +286,7 @@
                                    :error "Network is unreachable"
                                    :state scanning})
         {:keys [id] :as notice} (get-in result [:state :ui :notice])]
-    (is (false? (get-in result [:state :projector-ui :scanning?])) "Scan Network is back")
+    (is (false? (get-in result [:state :projector-ui :scanning?])) "Scan is back")
     (is (= {:text "Could not scan the network: Network is unreachable" :level :error}
            (dissoc notice :id)))
     (is (= {:event {:event/type :ui/clear-notice :id id} :delay-ms 6000}
@@ -1168,3 +1168,187 @@
     (is (guard/outputting? live :b) "01 §5.5: wanted without a host")
     (is (= small (get-in result [:state :projectors :b :safety])) "not applied yet")
     (is (true? (get-in result [:state :ui :dialogs :confirm :open?])) "Z1 asks first")))
+
+
+;; Scan finds every driver's devices (output drivers D4, 01 §5.3)
+
+
+(def ^:private nova-descriptor
+  {:id :acme/nova :name "Acme Nova (test)" :short-name "Nova" :transport :usb
+   :fields [{:key :serial :label "Serial" :type :string :required? true :summary? true}
+            {:key :brightness :label "Brightness" :type :int :default 50}]
+   :capabilities {:scan-rate {:min 1000 :max 30000 :default 30000}}
+   :discover? true :addon nil})
+
+(def ^:private zeta-descriptor
+  {:id :zeta/beam :name "Zeta beam (test)" :transport :network
+   :fields [{:key :host :label "Host" :type :host} {:key :port :label "Port" :type :int :default 7300}]
+   :discover? true :addon nil})
+
+(def ^:private discovery-state
+  (assoc-in base-state [:backend :output :drivers]
+            (assoc (driver/descriptors) :acme/nova nova-descriptor :zeta/beam zeta-descriptor)))
+
+(defn- nova
+  "A device as the scan reports one of :acme/nova's, with these outputs."
+  [key & outputs]
+  {:driver :acme/nova :device-key key :name (str "Nova " key)
+   :outputs (mapv (fn [o] {:output-id o :name (str "Output " o) :driver-config {:serial key :output o}}) outputs)})
+
+(defn- zeta [key host]
+  {:driver :zeta/beam :device-key key :outputs [{:output-id 0 :driver-config {:host host}}]})
+
+(defn- scan-d
+  ([state devices] (scan-d state devices []))
+  ([state devices warnings]
+   (projectors/handle {:event/type :projectors/scan-complete :devices (vec devices) :warnings warnings :state state})))
+
+(def ^:private nova-id :projector-acme-nova-NV-00123-0)
+
+(deftest scan-creates-driver-projectors-test
+  (let [result (scan-d discovery-state [(nova "NV-00123" 0) (zeta "0x1A2B" "10.0.0.9") (nova "10.0.0.9" 2)])
+        ps (get-in result [:state :projectors])]
+    (is (= #{:projector-acme-nova-NV-00123-0 :projector-zeta-beam-0x1A2B-0 :projector-acme-nova-10-0-0-9-2}
+           (set (keys ps)))
+        "01 §5.3's ids")
+    (is (= {:name "Nova NV-00123" :driver :acme/nova
+            :driver-config {:serial "NV-00123" :output 0}
+            :stable-id [:device :acme/nova "NV-00123" 0]
+            :zone-groups [] :exclude-from-all? false :tags #{} :enabled? false :scan-rate 30000}
+           (get ps nova-id))
+        "01 §5.1's shape: off, the output's own config, its device identity, no :host")
+    (is (= {:name "0x1A2B" :driver-config {:host "10.0.0.9"} :scan-rate 25000}
+           (select-keys (get ps :projector-zeta-beam-0x1A2B-0) [:name :driver-config :scan-rate]))
+        "named after its key without a name; the core's scan rate without :capabilities")
+    (is (not-any? #(contains? % :host) (vals ps)))
+    (is (= 2 (count (get-in result [:state :chains :projector-effects nova-id :items]))) "the default calibration")
+    (is (= [(nova "NV-00123" 0) (zeta "0x1A2B" "10.0.0.9") (nova "10.0.0.9" 2)]
+           (get-in result [:state :projector-ui :discovered-devices])))
+    (is (some? (:history/backfill result)))
+    (testing "a device with more outputs: one projector each, named after both"
+      (is (= {:projector-acme-nova-NV-7-0 "Nova NV-7 · Output 0" :projector-acme-nova-NV-7-1 "Nova NV-7 · Output 1"}
+             (update-vals (get-in (scan-d discovery-state [(nova "NV-7" 0 1)]) [:state :projectors]) :name))))
+    (testing "unique: a taken id gets -2, -3 …"
+      (let [taken (assoc-in discovery-state [:projectors nova-id]
+                            {:name "By hand" :driver :acme/nova :driver-config {:serial "NV-00123"}
+                             :stable-id [:manual :acme/nova nova-id] :enabled? true})
+            ps (get-in (scan-d taken [(nova "NV-00123" 0) (nova "NV.00123" 0)]) [:state :projectors])]
+        (is (= #{nova-id :projector-acme-nova-NV-00123-0-2 :projector-acme-nova-NV-00123-0-3} (set (keys ps))))
+        (is (= "By hand" (get-in ps [nova-id :name])) "the one added by hand is never taken for it")))
+    (testing "not undone, not an unsaved change"
+      (let [clean (history/mark-clean discovery-state)
+            after (:state (events/handle-event-pipeline {:event/type :projectors/scan-complete
+                                                         :devices [(nova "NV-00123" 0)] :warnings [] :state clean}))]
+        (is (contains? (:projectors after) nova-id))
+        (is (= (get-in after [:projectors nova-id]) (get-in after [:project :saved-document :projectors nova-id]))
+            "new outputs are backfilled into the saved baseline")
+        (is (empty? (get-in after [:history :undo-stack])))
+        (is (false? (get-in after [:project :dirty?])))))))
+
+(defn- set-up-nova
+  "discovery-state after a scan found Nova NV-00123, then named, turned on,
+   put in Graphics, calibrated, placed and its scan rate set."
+  []
+  (-> (:state (scan-d discovery-state [(nova "NV-00123" 0) (zeta "0x1A2B" "10.0.0.9")]))
+      (assoc-in [:projectors nova-id :name] "Stage left")
+      (assoc-in [:projectors nova-id :enabled?] true)
+      (assoc-in [:projectors nova-id :zone-groups] [:graphics])
+      (assoc-in [:projectors nova-id :scan-rate] 21000)
+      (assoc-in [:projectors :projector-zeta-beam-0x1A2B-0 :name] "Stage right")
+      (assoc-in [:chains :projector-effects nova-id :items]
+                [{:id #uuid "00000000-0000-0000-0000-0000000000d1" :effect-id :rgb-curves :enabled? true
+                  :params {:r-curve-points [[0.0 0.3] [1.0 1.0]]}}])
+      (assoc-in [:rig :order] [:projector-zeta-beam-0x1A2B-0 nova-id])))
+
+(deftest rescan-keeps-driver-projector-test
+  (let [s (set-up-nova)
+        result (scan-d s [(nova "NV-00123" 0) (zeta "0x1A2B" "10.0.0.9")])
+        after (:state result)]
+    (is (= (:projectors s) (:projectors after)) "the same projectors: names, groups, on, settings")
+    (is (= (get-in s [:chains :projector-effects]) (get-in after [:chains :projector-effects])) "calibration kept")
+    (is (= (get-in s [:rig :order]) (get-in after [:rig :order])) "and the places")
+    (is (nil? (:history/backfill result)) "nothing to write")
+    (is (nil? (get-in after [:ui :notice])))))
+
+(deftest moved-driver-device-is-matched-test
+  (let [s (assoc-in (set-up-nova) [:projectors :projector-zeta-beam-0x1A2B-0 :driver-config :port] 7400)
+        result (scan-d s [(nova "NV-00123" 0) (zeta "0x1A2B" "10.0.0.20")])
+        after (:state result)
+        zeta-id :projector-zeta-beam-0x1A2B-0]
+    (is (= (assoc (get-in s [:projectors zeta-id]) :driver-config {:host "10.0.0.20"})
+           (get-in after [:projectors zeta-id]))
+        "the new config replaces the old one; everything outside :driver-config stays")
+    (is (= (dissoc (:projectors s) zeta-id) (dissoc (:projectors after) zeta-id)) "the others as they were")
+    (is (= 2 (count (:projectors after))) "no new projector")
+    (is (= {:text "Stage right moved (same device)." :level :info} (select-keys (get-in after [:ui :notice]) [:text :level])))
+    (testing "a scan's move is no undo step and leaves the show saved"
+      (let [pipeline #(:state (events/handle-event-pipeline (assoc %2 :state %1)))
+            clean (history/mark-clean s)
+            renamed (pipeline clean {:event/type :projectors/update-settings :projector-id nova-id :updates {:name "SL"}})
+            moved (pipeline renamed {:event/type :projectors/scan-complete :devices [(zeta "0x1A2B" "10.0.0.20")] :warnings []})
+            undone (pipeline moved {:event/type :history/undo})]
+        (is (= "10.0.0.20" (get-in undone [:projectors zeta-id :driver-config :host])) "Undo leaves the move")
+        (is (= {:host "10.0.0.20"} (get-in undone [:project :saved-document :projectors zeta-id :driver-config]))
+            "the baseline moved with it")
+        (is (= "Stage left" (get-in undone [:projectors nova-id :name])) "and takes back the rename")
+        (is (false? (get-in undone [:project :dirty?])))))))
+
+(deftest scan-warnings-show-a-notice-test
+  (let [scanning (assoc-in discovery-state [:projector-ui :scanning?] true)
+        result (scan-d scanning [(zeta "0x1A2B" "10.0.0.9")] ["Acme Nova: libnova not found" "Zeta: no answer within 3 s"])
+        {:keys [id] :as notice} (get-in result [:state :ui :notice])]
+    (is (= {:text "Acme Nova: libnova not found; Zeta: no answer within 3 s" :level :warning} (dissoc notice :id))
+        "one :warning notice")
+    (is (= {:event {:event/type :ui/clear-notice :id id} :delay-ms 6000} (:dispatch-later result)))
+    (is (false? (get-in result [:state :projector-ui :scanning?])))
+    (is (contains? (get-in result [:state :projectors]) :projector-zeta-beam-0x1A2B-0) "what was found is still added")
+    (testing "with a move's notice: both, as a warning"
+      (is (= {:text "Stage right moved (same device). Acme Nova: libnova not found" :level :warning}
+             (select-keys (get-in (scan-d (set-up-nova) [(zeta "0x1A2B" "10.0.0.20")] ["Acme Nova: libnova not found"])
+                                  [:state :ui :notice])
+                          [:text :level]))))
+    (testing "no warnings: no notice"
+      (is (nil? (get-in (scan-d scanning [(zeta "0x1A2B" "10.0.0.9")] []) [:state :ui :notice])))
+      (is (nil? (get-in (projectors/handle {:event/type :projectors/scan-complete :devices [] :state scanning})
+                        [:state :ui :notice]))
+          "nor without :warnings"))))
+
+(def ^:private two-novas
+  "Nova NV-1's two outputs, Nova NV-2's one and an IDN laser, all off."
+  (assoc discovery-state :projectors
+         {:n1a {:name "1A" :driver :acme/nova :driver-config {} :stable-id [:device :acme/nova "NV-1" 0] :enabled? false}
+          :n1b {:name "1B" :driver :acme/nova :driver-config {} :stable-id [:device :acme/nova "NV-1" 1] :enabled? false}
+          :n2 {:name "2" :driver :acme/nova :driver-config {} :stable-id [:device :acme/nova "NV-2" 0] :enabled? false}
+          :z1 {:name "Z" :driver :zeta/beam :driver-config {} :stable-id [:device :zeta/beam "NV-1" 0] :enabled? false}
+          :idn {:name "IDN" :host "10.0.0.5" :service-id 1 :stable-id [:host "10.0.0.5" 1] :enabled? false}}))
+
+(deftest enable-device-test
+  (let [enable (fn [state event] (projectors/handle (assoc event :event/type :projectors/enable-device :state state)))
+        on (fn [state] (into #{} (keep (fn [[id p]] (when (:enabled? p) id))) (:projectors state)))
+        turned-on (:state (enable two-novas {:driver :acme/nova :device-key "NV-1" :enabled? true}))]
+    (is (= #{:n1a :n1b} (on turned-on)) "every output of that device, and only those")
+    (is (= #{} (on (:state (enable turned-on {:driver :acme/nova :device-key "NV-1" :enabled? false})))) "and off again")
+    (testing "IDN's older enable events cannot turn a hostless driver output on"
+      (doseq [e [{:event/type :projectors/enable-all-by-ip :address nil}
+                 {:event/type :projectors/set-service-enabled :host nil :service-id 0 :enabled? true}]]
+        (is (empty? (on (:state (projectors/handle (assoc e :state two-novas))))))))
+    (doseq [event [{:driver :acme/nova :device-key "NV-9" :enabled? true}
+                   {:driver :acme/nova :device-key "NV-1" :enabled? "yes"}
+                   {:driver :acme/nova :device-key "NV-1"}
+                   {:driver :idn :device-key "10.0.0.5" :enabled? true}]]
+      (is (identical? two-novas (:state (enable two-novas event))) (str "nothing: " (pr-str event))))
+    (testing "through the pipeline: one undo step, and the engines follow while streaming"
+      (let [live (assoc-in two-novas [:backend :streaming :running?] true)
+            result (events/handle-event-pipeline {:event/type :projectors/enable-device :driver :acme/nova
+                                                  :device-key "NV-1" :enabled? true :state live})]
+        (is (= (get-in result [:state :projectors]) (get-in result [:multi-engine/refresh :projectors]))
+            "a refresh, with the new projectors")
+        (is (true? (get-in result [:multi-engine/refresh :projectors :n1b :enabled?])))
+        (is (= "Turn Device On or Off" (history/undo-label (get-in result [:state :history]))))))))
+
+(deftest remove-driver-projector-leaves-the-device-list-test
+  (let [s (:state (scan-d discovery-state [(nova "NV-7" 0 1) (zeta "0x1A2B" "10.0.0.9")]))
+        after (:state (projectors/handle {:event/type :projectors/remove :projector-id :projector-acme-nova-NV-7-0 :state s}))]
+    (is (= [(update (nova "NV-7" 0 1) :outputs #(vec (rest %))) (zeta "0x1A2B" "10.0.0.9")]
+           (get-in after [:projector-ui :discovered-devices]))
+        "its output leaves the scan's list; the device's other output and other devices stay")))
