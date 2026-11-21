@@ -1172,6 +1172,23 @@
              (fx/sub-ctx (fx/swap-context ctx assoc-in [:vibe-runtime :problem] {:why :audience-fx :cell [2 1]})
                          subs/vibe-refused-text))))))
 
+(deftest vibe-tap-hints-sub-test
+  (testing "vibe Phase 8b (plans/2026-11-19-zones/11 §12.4): why the Tap reactions menus grey a zone reaction"
+    (let [s (-> (domains/build-initial-state)
+                (templates/apply-starter-cue-chains)
+                (templates/apply-starter-vibes))
+          laser (fn [n & {:as more}] (merge {:name (str "P" n) :host (str "10.0.0." n) :zone-groups [] :enabled? true} more))
+          hints (fn [projectors] (fx/sub-ctx (context (assoc s :projectors projectors)) subs/vibe-tap-hints))
+          no-laser "needs a laser that's on and in All (Projectors tab)"
+          too-few "needs two lasers in All that don't scan the audience (Projectors tab)"]
+      (is (= {:zone-hop no-laser :zone-chase no-laser} (hints {}))
+          "no laser: the hop and the chase have nowhere to go; the swap and the shift have zones")
+      (is (= {} (hints {:p1 (laser 1)})) "one laser: its two halves")
+      (is (= {:zone-hop too-few :zone-chase too-few} (hints {:p1 (laser 1) :p2 (laser 2 :tags #{:crowd-scanning})}))
+          "a scanner in All leaves one laser")
+      (is (= {} (hints {:p1 (laser 1) :p2 (laser 2 :tags #{:crowd-scanning} :exclude-from-all? true)}))
+          "out of All, Every laser never reaches it"))))
+
 
 ;; Who uses a group (zones plan Z4, 06 §8.7)
 

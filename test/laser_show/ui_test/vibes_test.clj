@@ -343,9 +343,10 @@
     (open-vibes! robot)
     (ui/assert-text! "#vibe-reactions-hit" "none yet")
     (is (= ["HIT" "Punch: size" "Pump: brightness (35 % between hits)" "Step: colour" "Step: spin"
-            "Zone hop: next zone (one zone at a time)" "HIT, ACCENT or FLASH" "Energy: size"]
+            "Zone hop: next zone (one zone at a time) — needs a laser that's on and in All (Projectors tab)"
+            "HIT, ACCENT or FLASH" "Energy: size"]
            (menu-button-texts "#vibe-tap-menu-hit"))
-        "HIT's templates, and the one that follows any of the three")
+        "HIT's templates, and the one that follows any of the three (the hop greyed: the starter show has no laser)")
     (ui/click! robot "#vibe-tap-menu-hit")
     (ui/click! robot "#vibe-tap-punch-size")
     ;; A new project's Master holds [0 3] (05 §7), so the first empty cell is [1 3]
@@ -373,6 +374,51 @@
       (ui/assert-text! "#vibe-reactions-vibe" "Fade in"))
     (testing "the lint names a reaction whose control has no key yet (ACCENT has one)"
       (ui/wait-for! #(some #{"Shapes · Punch size listens to HIT, which has no key yet"} (texts ".vibe-lint-row"))))))
+
+(defn- greyed?
+  "Is the item with id of the menu button found by selector greyed out?"
+  [selector id]
+  (let [^MenuButton menu (first (ui/query-all selector))]
+    (ui/on-fx-thread #(.isDisable ^MenuItem (some (fn [^MenuItem item] (when (= id (.getId item)) item)) (.getItems menu))))))
+
+(deftest zone-reactions-in-the-tap-menus-test
+  (testing "vibe Phase 8b (plans/2026-11-19-zones/11 §12): the four zone reactions, under their roles"
+    (let [robot (ui/robot)]
+      (events/dispatch! {:event/type :vibe/select :vibe :vibe-1})
+      (ui/wait-for! #(= :vibe-1 (rt :current)))
+      (open-vibes! robot)
+      (testing "no laser yet: the hop is greyed, and says what it needs"
+        (is (greyed? "#vibe-tap-menu-hit" "vibe-tap-zone-hop"))
+        (is (not (greyed? "#vibe-tap-menu-hit" "vibe-tap-punch-size"))))
+      (state/swap-state! assoc :projectors {:p1 {:name "Laser 1" :host "10.0.0.1" :enabled? true :zone-groups []}
+                                            :p2 {:name "Laser 2" :host "10.0.0.2" :enabled? true :zone-groups []}})
+      (ui/wait-for! #(not (greyed? "#vibe-tap-menu-hit" "vibe-tap-zone-hop")))
+      (is (some #{"Zone hop: next zone (one zone at a time)"} (menu-button-texts "#vibe-tap-menu-hit"))
+          "two lasers: the hop, with no hint")
+      (testing "ACCENT's: Zone swap makes \"Shapes · Zone swap\", in the FX set, on at once"
+        (ui/click! robot "#vibe-slot-accent")
+        (ui/wait-for! #(ui/has-style-class? "#vibe-slot-accent" "vibe-slot-active"))
+        (is (= ["ACCENT" "Flip" "Scatter: position" "Zone swap" "Zone shift: next zone" "HIT, ACCENT or FLASH" "Energy: size"]
+               (menu-button-texts "#vibe-tap-menu-accent")))
+        (ui/click! robot "#vibe-tap-menu-accent")
+        (ui/click! robot "#vibe-tap-zone-swap")
+        ;; A new project's Master holds [0 3] (05 §7), so the first empty cell is [1 3]
+        (ui/wait-for! #(= [[1 3]] (vibes :library :vibe-1 :fx)))
+        (is (= "Shapes · Zone swap" (get-in (app-state) [:chains :effect-chains [1 3] :name])))
+        (is (= [:zone-pattern] (mapv :effect-id (get-in (app-state) [:chains :effect-chains [1 3] :items]))))
+        (ui/wait-for! #(fx-on? [1 3]))
+        (is (= "Add Tap Reaction" (undo-label)))
+        (ui/assert-text! "#vibe-reactions-accent" "Zone swap"))
+      (testing "FLASH's: the chase goes into the flash effects, off until FLASH is held"
+        (ui/click! robot "#vibe-slot-flash-cue")
+        (ui/wait-for! #(ui/has-style-class? "#vibe-slot-flash-cue" "vibe-slot-active"))
+        (is (= ["FLASH" "Swell while held" "Strobe while held" "Zone chase while held" "HIT, ACCENT or FLASH" "Energy: size"]
+               (menu-button-texts "#vibe-tap-menu-flash")))
+        (ui/click! robot "#vibe-tap-menu-flash")
+        (ui/click! robot "#vibe-tap-zone-chase")
+        (ui/wait-for! #(= [[2 3]] (vibes :library :vibe-1 :flash :fx)))
+        (is (not (fx-on? [2 3])))
+        (ui/assert-text! "#vibe-reactions-flash" "Zone chase")))))
 
 
 ;; V8 B: nothing vibe-related on the Grid tab or the Effects tab

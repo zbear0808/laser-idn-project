@@ -1962,6 +1962,23 @@
   [context]
   (reactions/reactions (fx/sub-val context lint-world) (fx/sub-ctx context vibe-edited-id) :own? true))
 
+(defn vibe-tap-hints
+  "Why the Vibes tab's Tap reactions menus grey a zone reaction (vibe Phase
+   8b, plans/2026-11-19-zones/11 §12.4): {kind hint} of each one whose
+   places on this rig are fewer than two (vibes.reactions/zone-hint), {}
+   while none is. Follows the projectors, the rig, the groups and the
+   audience groups only."
+  [context]
+  (let [rig {:projectors (fx/sub-val context :projectors)
+             :rig (fx/sub-val context :rig)
+             :zone-groups (fx/sub-val context :zone-groups)}
+        groups (fx/sub-ctx context vibe-audience-groups)]
+    (into {}
+          (keep (fn [{:keys [kind]}]
+                  (when-let [hint (reactions/zone-hint rig groups kind)]
+                    [kind hint])))
+          reactions/templates)))
+
 (defn vibe-checklist
   "What is left to set up (vibes.library/checklist)."
   [context]

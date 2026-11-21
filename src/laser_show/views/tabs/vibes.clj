@@ -179,8 +179,10 @@
 
 (defn- tap-menu
   "Tap reactions ▾: the templates (vibes.reactions) that follow roles, under
-   a heading per role. A choice makes one for the vibe (:vibe/add-reaction)."
-  [vibe menu-id roles]
+   a heading per role. A choice makes one for the vibe (:vibe/add-reaction).
+   A zone reaction the rig has too few places for is greyed, its hint after
+   its text (hints: subs/vibe-tap-hints)."
+  [vibe menu-id roles hints]
   {:fx/type :menu-button
    :id menu-id
    :style-class ["menu-button" "vibe-option"]
@@ -191,10 +193,12 @@
                                      (concat (when (pos? i) [{:fx/type :separator-menu-item}])
                                              [{:fx/type :menu-item :text (role-names role) :disable true}]
                                              (for [{:keys [kind menu] :as template} reactions/templates
-                                                   :when (= role (:role template))]
+                                                   :when (= role (:role template))
+                                                   :let [hint (get hints kind)]]
                                                {:fx/type :menu-item
                                                 :id (str "vibe-tap-" (name kind))
-                                                :text menu
+                                                :text (if hint (str menu " — " hint) menu)
+                                                :disable (some? hint)
                                                 :on-action {:event/type :vibe/add-reaction :vibe vibe :kind kind}}))))
                       cat)
                 roles)})
@@ -208,7 +212,7 @@
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
-     :children [(tap-menu vibe (str "vibe-tap-menu-" (name role)) roles)
+     :children [(tap-menu vibe (str "vibe-tap-menu-" (name role)) roles (fx/sub-ctx context subs/vibe-tap-hints))
                 {:fx/type :label
                  :id (str "vibe-reactions-" (name role))
                  :style-class (if (seq moves) "label-secondary" "label-hint")
