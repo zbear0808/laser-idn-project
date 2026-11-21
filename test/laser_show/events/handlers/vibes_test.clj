@@ -7,6 +7,7 @@
             [laser-show.state.history :as history]
             [laser-show.state.persistent :as persistent]
             [laser-show.state.templates :as templates]
+            [laser-show.vibes.library :as library]
             [laser-show.vibes.rotation :as rotation])
   (:import [javafx.scene.input MouseButton MouseEvent TouchEvent TouchPoint TouchPoint$State]))
 
@@ -563,6 +564,116 @@
       (is (= :vibe-1 (get-in s1 [:vibe-runtime :current])))
       (is (true? (get-in s1 [:chains :effect-chains [1 3] :active?])))
       (is (= [[1 3]] (get-in s1 [:vibe-runtime :fx-on])) "the FX set's, so leaving Shapes switches it off"))))
+
+
+;; Zone reactions (vibe Phase 8b, plans/2026-11-19-zones/11 §12)
+
+(def ^:private three-lasers
+  "p1, p2 and p3, on and in All, left to right."
+  {:p1 {:name "Laser 1" :host "10.0.0.1" :zone-groups [] :enabled? true}
+   :p2 {:name "Laser 2" :host "10.0.0.2" :zone-groups [] :enabled? true}
+   :p3 {:name "Laser 3" :host "10.0.0.3" :zone-groups [] :enabled? true}})
+
+(defn- playing
+  "starter on projectors, with Shapes playing (selected), saved."
+  [projectors]
+  (-> (starter)
+      (assoc :projectors projectors)
+      (run {:event/type :vibe/select :vibe :vibe-1 :input-time 1000})
+      (history/mark-clean)))
+
+(defn- new-cell
+  "The effect cell a reaction made on starter takes: [0 3] is taken."
+  [state]
+  (get-in state [:chains :effect-chains [1 3]]))
+
+(deftest add-zone-reaction-test
+  (let [s0 (playing three-lasers)]
+    (doseq [[kind cell-name slot on? zones step-on] [[:zone-hop "Shapes · Zone hop" [:fx] true [:lane/lasers] :hit]
+                                                      [:zone-swap "Shapes · Zone swap" [:fx] true [:zone/a :zone/b] :accent]
+                                                      [:zone-shift "Shapes · Zone shift" [:fx] true
+                                                       [:zone/a :zone/b :zone/c :zone/d] :accent]
+                                                      [:zone-chase "Shapes · Zone chase" [:flash :fx] false [:lane/lasers]
+                                                       :clock]]]
+      (testing (name kind)
+        (let [s1 (run s0 {:event/type :vibe/add-reaction :vibe :vibe-1 :kind kind})
+              cell (new-cell s1)
+              fx (get-in cell [:items 0])]
+          (is (= cell-name (:name cell)) "named after the vibe, in the first empty effect cell")
+          (is (= [:zone-pattern] (mapv :effect-id (:items cell))))
+          (is (uuid? (:id fx)))
+          (is (= [zones step-on] [(get-in fx [:params :zones]) (get-in fx [:params :step-on])]))
+          (is (= [[1 3]] (get-in s1 (into [:config :vibes :library :vibe-1] slot))) "its FX set, or its flash FX")
+          (is (= on? (:active? cell)) (if on? "Shapes plays: on at once" "the chase waits for FLASH"))
+          (is (= 1 (undo-count s1)) "one undo step")
+          (is (= "Add Tap Reaction" (history/undo-label (:history s1))))
+          (is (true? (get-in s1 [:project :dirty?])))
+          (let [undone (run s1 {:event/type :history/undo})]
+            (is (nil? (new-cell undone)) "undone: gone")
+            (is (= [] (get-in undone (into [:config :vibes :library :vibe-1] slot)))))
+          (testing "the show lock refuses it, as every vibe edit: only the notice changes"
+            (let [locked (assoc-in s0 [:ui :show-lock?] true)
+                  s (run locked {:event/type :vibe/add-reaction :vibe :vibe-1 :kind kind})]
+              (is (= (:chains locked) (:chains s)))
+              (is (= (:config locked) (:config s)))
+              (is (= 0 (undo-count s)))
+              (is (= :vibe/add-reaction (get-in s [:ui :show-lock-notice :event]))))))))
+    (testing "the chase comes on while FLASH is held"
+      (let [held (-> s0
+                     (run {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :zone-chase})
+                     (run {:event/type :vibe/press :role :flash :input-time 1500}))]
+        (is (true? (:active? (new-cell held))))
+        (is (false? (:active? (new-cell (run held {:event/type :vibe/release :role :flash :input-time 2500})))))))
+    (testing "for a vibe that doesn't play: off until it does"
+      (let [s1 (run s0 {:event/type :vibe/add-reaction :vibe :vibe-2 :kind :zone-swap})]
+        (is (= "Lines · Zone swap" (:name (new-cell s1))))
+        (is (false? (:active? (new-cell s1))))
+        (is (true? (:active? (new-cell (run s1 {:event/type :vibe/select :vibe :vibe-2 :input-time 2000})))))))))
+
+(deftest greyed-zone-reaction-changes-nothing-test
+  (testing "§12.4: with no laser on and in All the hop and the chase have nowhere to go, so nothing is made"
+    (let [s0 (playing {})]
+      (doseq [kind [:zone-hop :zone-chase]]
+        (let [s1 (run s0 {:event/type :vibe/add-reaction :vibe :vibe-1 :kind kind})]
+          (is (= (:chains s0) (:chains s1)) (name kind))
+          (is (= (:config s0) (:config s1)))
+          (is (= 0 (undo-count s1)) "no undo step")
+          (is (false? (get-in s1 [:project :dirty?])))))
+      (testing "the swap and the shift take zones, which every rig has"
+        (is (= "Shapes · Zone swap" (:name (new-cell (run s0 {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :zone-swap})))))))))
+
+(deftest zone-reaction-that-can-reach-the-crowd-stays-off-test
+  (testing "V10 A, as Z5 built it: a map of yours sends B to the crowd, so a Zone swap (A ⇄ B) can reach it"
+    (let [s0 (-> (playing (assoc three-lasers :p5 {:name "Scanner" :host "10.0.0.5" :zone-groups [:crowd] :enabled? true
+                                                   :tags #{:crowd-scanning} :exclude-from-all? true}))
+                 (assoc-in [:zone-maps :map/sweep] {:name "Crowd sweep" :lanes [:auto/left :crowd] :overrides {}}))
+          s1 (run s0 {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :zone-swap})
+          re-entered #(-> %
+                          (run {:event/type :vibe/select :vibe :vibe-2 :input-time 2000})
+                          (run {:event/type :vibe/select :vibe :vibe-1 :input-time 3000}))]
+      (is (= [[1 3]] (get-in s1 [:config :vibes :library :vibe-1 :fx])) "in the FX set")
+      (is (false? (:active? (new-cell s1))) "but the vibe leaves it off")
+      (is (some #(re-find #"^Shapes: D2 \(Zone pattern\) can send pictures to the crowd" (:text %)) (library/lint s1))
+          "the Vibes tab's lint says why, where the reaction was made")
+      (is (= {:why :audience-fx :cell [1 3]} (get-in (re-entered s1) [:vibe-runtime :problem]))
+          "and Perform's status line, when the vibe switches its FX set on")
+      (is (false? (:active? (new-cell (re-entered s1)))))
+      (is (true? (:active? (new-cell (run s1 {:event/type :vibe/set-option :vibe :vibe-1 :key :allow-audience? :value true}))))
+          "Allow audience cells: on at once")
+      (testing "the hop's Every laser can't reach the scanner, which is out of All: on"
+        (let [s (run s0 {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :zone-hop})]
+          (is (= [:lane/lasers] (get-in (new-cell s) [:items 0 :params :zones])))
+          (is (true? (:active? (new-cell s))))
+          (is (nil? (get-in (re-entered s) [:vibe-runtime :problem])))))))
+  (testing "a scanner left in All: the hop leaves it out of its places and comes on; the swap's zones reach it (Unison
+            sends every zone to All), so the swap stays off"
+    (let [s0 (playing (update three-lasers :p2 assoc :tags #{:crowd-scanning}))
+          hop (run s0 {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :zone-hop})
+          swap (run s0 {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :zone-swap})]
+      (is (= [:auto.laser/p1 :auto.laser/p3] (get-in (new-cell hop) [:items 0 :params :zones])))
+      (is (true? (:active? (new-cell hop))))
+      (is (false? (:active? (new-cell swap))))
+      (is (some #(re-find #"^Shapes: D2 \(Zone pattern\) can send pictures to the crowd" (:text %)) (library/lint swap))))))
 
 
 ;; The faders (Phase 5, plans/2026-11-18-vibe-mode/05)

@@ -343,7 +343,7 @@
     (open-vibes! robot)
     (ui/assert-text! "#vibe-reactions-hit" "none yet")
     (is (= ["HIT" "Punch: size" "Pump: brightness (35 % between hits)" "Step: colour" "Step: spin"
-            "HIT, ACCENT or FLASH" "Energy: size"]
+            "Zone hop: next zone (one zone at a time)" "HIT, ACCENT or FLASH" "Energy: size"]
            (menu-button-texts "#vibe-tap-menu-hit"))
         "HIT's templates, and the one that follows any of the three")
     (ui/click! robot "#vibe-tap-menu-hit")

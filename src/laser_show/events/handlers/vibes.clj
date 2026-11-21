@@ -169,12 +169,13 @@
   {:state (apply edit event f args)})
 
 (defn- handle-add-reaction
-  "A tap reaction made for a vibe (reactions/add-to-vibe), which what plays
-   follows as it does every edit of the vibes (engine/reconcile): on at once
-   in the FX set of the vibe that plays."
+  "A tap reaction made for a vibe (reactions/add-to-vibe; a zone reaction's
+   places keep clear of the audience groups), which what plays follows as it
+   does every edit of the vibes (engine/reconcile): on at once in the FX set
+   of the vibe that plays."
   [{:keys [state vibe kind] :as event}]
   (let [was (get-in state [:config :vibes])
-        state' (reactions/add-to-vibe state vibe kind)]
+        state' (reactions/add-to-vibe state vibe kind (library/audience-groups state))]
     {:state (if (= was (get-in state' [:config :vibes]))
               state
               (engine/reconcile state' was (h/current-time-ms event)))}))

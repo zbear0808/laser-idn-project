@@ -342,10 +342,10 @@
       (ui/right-click-node! robot (node "#effects-cell-2-1"))
       (ui/click! robot "#new-reaction-menu")
       (ui/wait-for! #(ui/visible? "#new-reaction-punch-size"))
-      (is (= 10 (count (filter #(let [id (str (.getId ^Node %))]
+      (is (= 14 (count (filter #(let [id (str (.getId ^Node %))]
                                   (and (.startsWith id "new-reaction-") (not= "new-reaction-menu" id)))
                                (ui/query-all ".menu-item"))))
-          "the ten templates, under their roles")
+          "the fourteen templates, the four zone reactions too, under their roles")
       (click-in-submenu! robot "#new-reaction-punch-size")
       (ui/wait-for! #(= "Punch size" (:name (cell))))
       (is (true? (:active? (cell))))

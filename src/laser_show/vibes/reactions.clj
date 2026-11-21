@@ -6,6 +6,13 @@
    vibe's FX set (add-to-vibe, :vibe/add-reaction) or straight onto the
    effects grid (:effects/new-reaction).
 
+   The zone reactions (vibe Phase 8b, plans/2026-11-19-zones/11 §12) are
+   zone patterns (routing.zone-patterns) that step on the press itself: Zone
+   hop and Zone chase move the All picture across every laser, Zone swap
+   and Zone shift trade what is drawn into zones A and B (A to D). A new
+   one's places keep clear of the audience (lane), and one the rig has too
+   few places for isn't made (zone-hint).
+
    Also which cells react to which role, for the Perform pads, the Vibes
    tab and its lint (listens-to, reactions; laser-show.vibes.library's lint
    reads them, so this namespace reads the vibes without it)."
@@ -13,7 +20,10 @@
             [laser-show.animation.modulator-registry :as reg]
             [laser-show.animation.modulators]
             [laser-show.events.helpers :as h]
-            [laser-show.routing.zone-patterns :as zone-patterns]))
+            [laser-show.routing.rig :as rig]
+            [laser-show.routing.targets :as targets]
+            [laser-show.routing.zone-patterns :as zone-patterns]
+            [laser-show.routing.zone-remap :as zone-remap]))
 
 
 ;; The templates
@@ -30,12 +40,20 @@
 
 (defn- scale [x y] {:x-scale x :y-scale y :uniform? false})
 
+(defn- zone-pattern
+  "A zone reaction's effect: Z5's preset of style for an effects cell
+   (zone-patterns/preset-instance: its lane, the show's beats, following the
+   pattern pads), stepping as press says (:step-on, :restart-on)."
+  [style press]
+  (update (zone-patterns/preset-instance style :cell) :params merge press))
+
 (def templates
   "The one-click reactions, in menu order, grouped by the role they follow:
    {:kind :menu (its menu text) :name (the cell's) :role :effects}, and
-   :into :flash-fx for the one that belongs in the flash FX, on only while
+   :into :flash-fx for those that belong in the flash FX, on only while
    FLASH is held. Each is identity at rest but Pump, whose menu says its rest
-   level."
+   level, and Zone hop, which puts the All picture on its first laser until
+   the first HIT (the zone reactions: zone-reaction?)."
   (let [punch (envelope :hit 1.0 1.25 :release 0.5)
         swell (envelope :flash 1.0 1.4 :attack 0.5 :release 1.0 :curve :linear :hold? true)
         energy {:type :energy :active? true :source :any :min 1.0 :max 1.4 :rise 0.2 :fall 0.25}]
@@ -47,10 +65,16 @@
       :effects [{:effect-id :hue-shift :params {:degrees (step :hit 0.0 180.0 4)}}]}
      {:kind :step-spin :role :hit :menu "Step: spin" :name "Step spin"
       :effects [{:effect-id :rotation :params {:angle (step :hit 0.0 360.0 8 :wrap? true :glide 0.25)}}]}
+     {:kind :zone-hop :role :hit :menu "Zone hop: next zone (one zone at a time)" :name "Zone hop"
+      :effects [(zone-pattern :chase {:step-on :hit})]}
      {:kind :flip :role :accent :menu "Flip" :name "Flip"
       :effects [{:effect-id :scale :params (scale (step :accent -1.0 1.0 2 :order :down) 1.0)}]}
      {:kind :scatter :role :accent :menu "Scatter: position" :name "Scatter"
       :effects [{:effect-id :translate :params {:x (step :accent -0.4 0.4 9 :order :scatter) :y 0.0}}]}
+     {:kind :zone-swap :role :accent :menu "Zone swap" :name "Zone swap"
+      :effects [(zone-pattern :swap {:step-on :accent})]}
+     {:kind :zone-shift :role :accent :menu "Zone shift: next zone" :name "Zone shift"
+      :effects [(zone-pattern :shift {:step-on :accent})]}
      {:kind :swell :role :flash :menu "Swell while held" :name "Swell"
       :effects [{:effect-id :scale :params (scale swell swell)}]}
      {:kind :strobe :role :flash :menu "Strobe while held" :name "Strobe" :into :flash-fx
@@ -58,6 +82,8 @@
                  :params {:amount {:type :square :active? true :min 0.0 :max 1.0 :period 0.125
                                    :time-unit :beats :loop-mode :loop :once-periods 1.0
                                    :duty-cycle 0.5 :phase 0.0 :restart-on :flash}}}]}
+     {:kind :zone-chase :role :flash :menu "Zone chase while held" :name "Zone chase" :into :flash-fx
+      :effects [(zone-pattern :chase {:restart-on :flash})]}
      {:kind :fade-in :role :vibe :menu "Fade in" :name "Fade in"
       :effects [{:effect-id :intensity :params {:amount (envelope :vibe 1.0 0.0 :release 1.0 :curve :linear)}}]}
      {:kind :energy-size :role :any :menu "Energy: size" :name "Energy size"
@@ -70,15 +96,79 @@
   [kind]
   (get by-kind kind))
 
+(defn zone-reaction?
+  "Does template t hold a zone pattern: is it a zone reaction (vibe Phase
+   8b)?"
+  [t]
+  (boolean (some #(= :zone-pattern (:effect-id %)) (:effects t))))
+
+
+;; A zone reaction's places (plans/2026-11-19-zones/11 §12.3, §12.4)
+
+(defn- template-zones
+  "The places of a zone reaction's template t (its zone pattern's :zones),
+   or nil for a template that isn't one."
+  [t]
+  (some #(when (= :zone-pattern (:effect-id %)) (get-in % [:params :zones])) (:effects t)))
+
+(defn lane
+  "The places a new zone reaction of kind moves pictures between on state's
+   rig, nil for a kind that isn't one: its template's. Every laser
+   (:lane/lasers, zones plan Z5-Q4 A) stays, unless a laser in All, on or
+   off, can reach the audience (its own group is one of groups:
+   vibes.library/audience-groups, which this namespace can't read); then it
+   is the lasers that are on and in All and can't, left to right, each by
+   its own group, so a new reaction never sweeps the crowd. Zones stay: the
+   audience rule decides for them."
+  [state groups kind]
+  (when-let [zones (template-zones (template kind))]
+    (let [inputs (rig/rig-inputs state)
+          audience? #(contains? groups (rig/laser-ref %))]
+      (if (and (some #{:lane/lasers} zones)
+               (some audience? (remove (:excluded inputs) (:order inputs))))
+        (into []
+              (mapcat #(if (= :lane/lasers %) (map rig/laser-ref (remove audience? (rig/e-order inputs))) [%]))
+              zones)
+        zones))))
+
+(defn places
+  "The places zones (a zone pattern's lane) reach on state's rig now, as the
+   zone stage reads them (zone-remap/lane): Every laser as the lasers that
+   are on and in All, in rig order (one alone as its two halves), a zone as
+   itself, a group or a laser the rig knows; the rest left out. Fewer than
+   two is Z5's \"needs two zones\" (zone-patterns/warnings)."
+  [state zones]
+  (zone-remap/lane zones #(or (targets/zone-ref? %) (rig/known-ref? state %)) (rig/e-order (rig/rig-inputs state))))
+
+(defn zone-hint
+  "Why the Tap reactions menus grey the reaction kind, or nil: a zone
+   reaction whose places (lane) on state's rig are fewer than two. Every
+   laser has none without a laser on and in All, and the lasers that can't
+   reach the audience may be too few. groups: as lane's."
+  [state groups kind]
+  (when-let [l (lane state groups kind)]
+    (when (< (count (places state l)) 2)
+      (if (some #{:lane/lasers} l)
+        "needs a laser that's on and in All (Projectors tab)"
+        "needs two lasers in All that don't scan the audience (Projectors tab)"))))
+
+
+;; Making one
+
 (defn reaction-cell
   "An effect cell for the reaction kind, off, named after the vibe
    (\"Groove · Punch size\", just the reaction's name without one); its
-   effects have no :id yet (h/ensure-item-fields). nil for no such kind."
-  [kind vibe-name]
-  (when-let [{:keys [name effects]} (template kind)]
-    {:name (if vibe-name (str vibe-name " · " name) name)
-     :active? false
-     :items (mapv #(assoc % :enabled? true) effects)}))
+   effects have no :id yet (h/ensure-item-fields). A zone reaction's pattern
+   takes zones as its places (lane), its template's without. nil for no
+   such kind."
+  ([kind vibe-name] (reaction-cell kind vibe-name nil))
+  ([kind vibe-name zones]
+   (when-let [{:keys [name effects]} (template kind)]
+     {:name (if vibe-name (str vibe-name " · " name) name)
+      :active? false
+      :items (mapv #(cond-> (assoc % :enabled? true)
+                      (and zones (= :zone-pattern (:effect-id %))) (assoc-in [:params :zones] zones))
+                   effects)})))
 
 (defn first-empty-effect-cell
   "Where a new reaction goes: the first empty effect cell from the bottom
@@ -95,22 +185,27 @@
 
 (defn add-to-vibe
   "state with the reaction kind made for the vibe: in the first empty effect
-   cell, named after it, off, and last in its FX set (the Strobe in its
-   flash FX). :vibe/add-reaction then switches it on as every edit of the
-   vibes does a cell new in the FX set of the vibe that plays
-   (engine/reconcile). Unchanged without the vibe, the kind or a free cell."
-  [state vibe-id kind]
-  (let [vibe (get-in state [:config :vibes :library vibe-id])
-        cell (first-empty-effect-cell state)
-        made (when vibe (reaction-cell kind (:name vibe)))]
-    (if (and made cell)
-      (-> state
-          (assoc-in [:chains :effect-chains cell] (update made :items #(mapv h/ensure-item-fields %)))
-          (update-in [:config :vibes :library vibe-id]
-                     #(if (= :flash-fx (:into (template kind)))
-                        (update-in % [:flash :fx] (fnil conj []) cell)
-                        (update % :fx (fnil conj []) cell))))
-      state)))
+   cell, named after it, off, and last in its FX set (the Strobe and the
+   Zone chase in its flash FX). A zone reaction takes lane's places (groups:
+   the audience groups, vibes.library/audience-groups; #{} without), and
+   isn't made while they are too few (zone-hint). :vibe/add-reaction then
+   switches it on as every edit of the vibes does a cell new in the FX set
+   of the vibe that plays (engine/reconcile). Unchanged without the vibe,
+   the kind or a free cell."
+  ([state vibe-id kind] (add-to-vibe state vibe-id kind #{}))
+  ([state vibe-id kind groups]
+   (let [vibe (get-in state [:config :vibes :library vibe-id])
+         cell (first-empty-effect-cell state)
+         made (when (and vibe (nil? (zone-hint state groups kind)))
+                (reaction-cell kind (:name vibe) (lane state groups kind)))]
+     (if (and made cell)
+       (-> state
+           (assoc-in [:chains :effect-chains cell] (update made :items #(mapv h/ensure-item-fields %)))
+           (update-in [:config :vibes :library vibe-id]
+                      #(if (= :flash-fx (:into (template kind)))
+                         (update-in % [:flash :fx] (fnil conj []) cell)
+                         (update % :fx (fnil conj []) cell))))
+       state))))
 
 
 ;; What reacts to what
