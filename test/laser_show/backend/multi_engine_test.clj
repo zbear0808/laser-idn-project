@@ -643,7 +643,9 @@
       (let [out (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:all heavy}}]))]
         (is (= [1800] @seen) "the calibration gets the thinned frame: 60% of 3,000")
         (is (= 1800 (count out)))
-        (is (= [3000 1800] ((juxt :points-in :points) (:fit (meta out)))))))))
+        (is (= [3000 1800] ((juxt :points-in :points) (:fit (meta out)))))
+        (is (not (contains? (:fit (meta out)) :effect-points))
+            "a chain that keeps the count: the load meter counts what the laser is asked for (Q-Z3-4 A)")))))
 
 (deftest frame-carries-its-fit-record-test
   (state/assoc-in-state! [:projectors :p] {:host "10.0.0.5" :enabled? true :zone-groups []})
@@ -720,6 +722,7 @@
         fit (:fit (meta out))]
     (is (= 833 (count out)) "the guard's 1,800 points, then Decimate's 833")
     (is (= [3000 833] ((juxt :points-in :points) fit)) "the record counts what Decimate left")
+    (is (= 833 (:effect-points fit)) "and so does the load meter: 833 of its 1,250 (Q-D-1 B)")
     (is (<= 30.0 (:guard-fps fit)) "25,000 / 833: 30 fps")
     (is (< 72.2 (:reduced-pct fit) 72.3) "2,167 of the 3,000 points cut")
     (is (= [1250 20 0.0 (/ 25000.0 3000)] ((juxt :budget :min-fps :dim-pct :est-fps) fit)) "the rest is the guard's")
@@ -727,8 +730,13 @@
       (let [provider (#'me/create-projector-frame-provider :p)]
         (show-time/publish! (snapshot cues))
         (let [frame (provider)]
-          (is (= 833 (count frame) (:points (:fit (meta frame)))))
-          (is (false? (:low? (:fit (meta frame))))))))
+          (is (= 833 (count frame) (:points (:fit (meta frame))) (:effect-points (:fit (meta frame)))))
+          (is (false? (:low? (:fit (meta frame))))))
+        (testing "and a dark frame (a Strobe's dark half), which Decimate can't thin, leaves its meter as it was (S-14)"
+          (show-time/publish! (snapshot [{:cell [0 0] :zone-frames {:all (mapv #(assoc % 2 0.0 3 0.0 4 0.0) heavy)}}]))
+          (let [fit (:fit (meta (provider)))]
+            (is (true? (:dark? fit)))
+            (is (= [3000 833] ((juxt :points :effect-points) fit)) "it sends the 3,000 dark points; the meter reads 833")))))
     (testing "the safety stage's crossing points aren't counted: the record says what reaches it"
       (state/assoc-in-state! [:projectors :p :safety] {:limit [-0.4 -1.0 0.4 1.0]})
       (let [out (#'me/projector-frame :p (snapshot cues))]

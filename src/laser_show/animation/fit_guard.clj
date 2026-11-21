@@ -212,9 +212,11 @@
   "guard's record for a frame that something after the guard left with
    points: a projector effect that changes the count (Decimate, zones plan
    12). :points, :guard-fps and :reduced-pct are counted for points against
-   :points-in, as guard counts them; :budget, :min-fps, :dim-pct and
-   :est-fps stay the guard's. A frame left with no point is :dark?, its fps
-   nil, as guard has it. The same record when the count is the same."
+   :points-in, as guard counts them, and :effect-points is points too: the
+   load meter counts it instead of :points-in, so it shows what the laser
+   draws (Q-D-1 B). :budget, :min-fps, :dim-pct and :est-fps stay the
+   guard's. A frame left with no point is :dark?, its fps nil, as guard has
+   it. The same record when the count is the same."
   [record points]
   (if (= points (:points record))
     record
@@ -222,6 +224,7 @@
           points (long points)]
       (cond-> (assoc record
                      :points points
+                     :effect-points points
                      :guard-fps (when (pos? points) (/ (double (:scan-rate record)) points))
                      :reduced-pct (if (pos? n) (* 100.0 (/ (- n points) (double n))) 0.0))
         (zero? points) (assoc :dark? true)))))
@@ -243,17 +246,20 @@
   "The newest record with :est-fps and :guard-fps averaged over about 10
    frames (prev: the last smoothed record, or nil) and :low?, on while the
    averaged guard fps is under the minimum and off again only at 1 fps above
-   it (S-6). A :dark? record leaves the averages and :low? as they were
-   (none yet: not low, S-14). :samples counts the frames averaged. nil for
-   no record (nothing playing)."
+   it (S-6). A :dark? record leaves the averages, :low? and the load meter's
+   :effect-points as they were (none yet: not low, S-14): Decimate can't
+   thin a dark frame, so the meter keeps what it left of the lit ones.
+   :samples counts the frames averaged. nil for no record (nothing playing)."
   [prev record]
   (when record
     (let [samples (long (or (:samples prev) 0))
           averaged? (pos? samples)]
       (if (:dark? record)
-        (if averaged?
-          (assoc record :est-fps (:est-fps prev) :guard-fps (:guard-fps prev) :low? (boolean (:low? prev)) :samples samples)
-          (assoc record :low? false :samples 0))
+        (let [record (cond-> (dissoc record :effect-points)
+                       (some? (:effect-points prev)) (assoc :effect-points (:effect-points prev)))]
+          (if averaged?
+            (assoc record :est-fps (:est-fps prev) :guard-fps (:guard-fps prev) :low? (boolean (:low? prev)) :samples samples)
+            (assoc record :low? false :samples 0)))
         (let [avg (fn [k] (let [v (double (get record k))]
                             (if averaged? (+ (* (- 1.0 alpha) (double (get prev k))) (* alpha v)) v)))
               guard-fps (avg :guard-fps)

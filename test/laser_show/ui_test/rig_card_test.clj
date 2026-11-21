@@ -134,6 +134,24 @@
             "thinned back up to its minimum: not low (Q-Z3-5 A)")
         (is (not (ui/visible? "#low-fps-chip")) "and no chip")))))
 
+(deftest decimated-laser-meters-what-it-draws-test
+  (let [robot (ui/robot)]
+    (state/swap-state! #(-> %
+                            (assoc :projectors {:a (laser)})
+                            (assoc-in [:chains :projector-effects :a :items]
+                                      [{:id (random-uuid) :effect-id :decimate :enabled? true :params {:kpps 25 :fps 30}}])))
+    (play! (circle-cue 3000))
+    (ui/click! robot "#projectors-tab")
+    (fixtures/with-clock
+      (fn [_]
+        (stream! robot)
+        (ui/wait-for! #(= "67%" (ui/node-text "#rig-card-load-pct-a")))
+        (is (not-any? #(ui/has-style-class? "#rig-card-load-a .load-meter" %) ["load-meter-near" "load-meter-over"])
+            "green: the 833 points Decimate left, of its 1,250, not the 3,000 it is asked for (Q-D-1 B)")
+        (is (= "−72% pts" (ui/node-text "#rig-card-load-note-a")) "the whole cut, the guard's and Decimate's")
+        (is (not (ui/has-style-class? "#rig-card-a" "rig-card-low")) "30 fps: not low")
+        (is (false? (:low? (status))))))))
+
 (deftest fit-guard-settings-apply-test
   (let [robot (ui/robot)
         fit #(get-in (state/get-raw-state) [:projectors :a :fit])]

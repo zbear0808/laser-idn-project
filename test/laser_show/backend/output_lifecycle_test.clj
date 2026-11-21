@@ -11,6 +11,8 @@
             [laser-show.backend.streaming-engine :as se]
             [laser-show.animation.types :as t]
             [laser-show.animation.fit-guard :as fit-guard]
+            [laser-show.animation.effects :as effects]
+            [laser-show.animation.effects.points]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.timing :as timing]
             [laser-show.idn.fake-dac :as dac]
@@ -18,7 +20,8 @@
             [laser-show.idn.stream :as stream]
             [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
-            [laser-show.state.domains :as domains])
+            [laser-show.state.domains :as domains]
+            [laser-show.views.components.load-warning :as lw])
   (:import [java.net DatagramSocket UnknownHostException]))
 
 (def ^:dynamic *dac* nil)
@@ -424,6 +427,33 @@
             (is (stop-streaming!))))
         (finally
           (remove-watch (state/get-context-atom) watch-key))))))
+
+(deftest status-load-counts-what-decimate-left-test
+  (testing "Q-D-1 B: with Decimate in a laser's calibration chain, its meter counts what Decimate left; without, what the laser is asked for"
+    (init-with-projectors! {:a (assoc (projector 1 true) :scan-rate 25000)
+                            :b (assoc (projector 2 true) :scan-rate 25000)})
+    (let [status #(get-in (state/get-raw-state) [:backend :streaming :status :projectors %])
+          heavy (vec (for [i (range 3000)] [(* 0.5 (Math/cos (* i 0.002))) (* 0.5 (Math/sin (* i 0.002))) 1.0 1.0 1.0]))
+          {thinned :frame record :fit} (fit-guard/guard heavy 25000 fit-guard/defaults)
+          ;; As multi-engine/show-frame makes them: the guard, then the laser's
+          ;; projector effects, and the record counted again when they changed the count
+          decimated (effects/apply-effect-chain thinned {:effects [{:id (random-uuid) :effect-id :decimate :enabled? true
+                                                                     :params {:kpps 25 :fps 30}}]})
+          frames {:a (with-meta decimated {:fit (assoc (fit-guard/recount record (count decimated)) :regions 0)})
+                  :b (with-meta thinned {:fit (assoc record :regions 0)})}]
+      (with-redefs-fn {#'me/projector-frame (fn [id _] (get frames id))}
+        (fn []
+          (dispatch! {:event/type :idn/start-multi-streaming})
+          (is (dac/wait-for! #(and (:load (status :a)) (:load (status :b))) 3000) (pr-str (status :a)))
+          (is (= {:points-in 3000 :points 830 :effect-points 833 :budget 1250 :min-fps 20 :scan-rate 25000 :est-fps 8
+                  :guard-fps 30 :reduced-pct 72 :dim-pct 0 :regions 0}
+                 (:load (status :a)))
+              "the count Decimate left as it is: it is its budget, so it doesn't flicker")
+          (is (= 67 (lw/load-percent (:load (status :a)))) "833 of its 1,250, green")
+          (is (false? (:low? (status :a))) "30 fps")
+          (is (not (contains? (:load (status :b)) :effect-points)))
+          (is (= 240 (lw/load-percent (:load (status :b)))) "without Decimate: the 3,000 it is asked for, as before (Q-Z3-4 A)")
+          (is (stop-streaming!)))))))
 
 
 (deftest safety-error-shows-in-status-test

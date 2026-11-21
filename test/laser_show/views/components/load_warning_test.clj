@@ -37,6 +37,10 @@
     (is (= 240 (lw/load-percent (load))))
     (is (= 31 (lw/load-percent (load :points-in 390))))
     (is (nil? (lw/load-percent (load :budget 0)))))
+  (testing "with Decimate in its calibration chain: the count it left, what the laser draws (Q-D-1 B)"
+    (let [decimated (load :points 830 :effect-points 833 :guard-fps 30 :reduced-pct 72)]
+      (is (= 67 (lw/load-percent decimated)) "833 of the 1,250, not the 3,000 it was asked for")
+      (is (= "833 points a frame. 1,250 fit 20 fps at 25,000 pts/s" (lw/meter-tooltip decimated)))))
   (is (= [:ok :near :near :over] (mapv lw/meter-level [79 80 100 101])) "green under 80%, amber to 100%, red past it")
   (is (= "3,000 points a frame. 1,250 fit 20 fps at 25,000 pts/s" (lw/meter-tooltip (load))))
   (is (= "1,234,560" (lw/grouped 1234560)) "thousands, whatever the machine's locale"))

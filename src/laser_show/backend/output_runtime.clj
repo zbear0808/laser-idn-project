@@ -177,7 +177,10 @@
 (defn- load-of
   "What a card shows of a laser's fit-guard record (smoothed by its
    provider): whole fps and percent, points to the nearest 10, so it changes
-   only when the load does."
+   only when the load does. :effect-points, the count the projector effects
+   left when they changed it (fit-guard/recount), stays exact: Decimate
+   leaves its budget, which holds still, so the meter reads 833 / 1,250 =
+   67% as Q-D-1 B has it, not 830's 66%."
   [fit]
   (cond-> {:points-in (tens (:points-in fit))
            :points (tens (:points fit))
@@ -189,6 +192,7 @@
            :reduced-pct (whole (:reduced-pct fit))
            :dim-pct (whole (:dim-pct fit))
            :regions (or (:regions fit) 0)}
+    (:effect-points fit) (assoc :effect-points (whole (:effect-points fit)))
     (:no-room? fit) (assoc :no-room? true)))
 
 (defn- engine-status [e errors id]
@@ -214,17 +218,19 @@
     :projectors {id {:state :streaming|:starting|:error :fps 59.8 :scan-limited? true
                      :warning \"Corner Pin skipped\" :error \"…\"
                      :low? false :load {:points-in :points :budget :min-fps :scan-rate
-                                        :est-fps :guard-fps :reduced-pct :dim-pct :regions}}}}
+                                        :est-fps :guard-fps :reduced-pct :dim-pct :regions
+                                        :effect-points}}}}
    :fps is how many new frames the projector draws per second
    (streaming-engine/update-stats :draw-fps); :scan-limited? is there when its
    scan rate, not the send rate, sets that; :warning names the calibration
    effects skipped because they fail (multi-engine report-skips!). :load is
    what the fit guard made of its last frame (zones plan Z3: the points it
    was asked for and sent, its budget, the fps before and after the guard,
-   what it cut and dimmed, how many halves it drew), rounded, and :low?
-   whether it is still below its minimum; both only while a frame has one. A
-   projector whose safety stage fails is {:state :error :kind :safety :error
-   \"Safety error: output off\" :detail <message>}."
+   what it cut and dimmed, how many halves it drew; and when its projector
+   effects changed the count, what they left, which the meter counts),
+   rounded, and :low? whether it is still below its minimum; both only while
+   a frame has one. A projector whose safety stage fails is {:state :error
+   :kind :safety :error \"Safety error: output off\" :detail <message>}."
   []
   (let [registry @!registry
         {:keys [wanted failed busy?]} @!intent

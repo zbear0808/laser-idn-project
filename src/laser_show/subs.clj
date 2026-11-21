@@ -408,7 +408,8 @@
 (defn projector-load
   "What the fit guard made of projector-id's frames, as its card shows it
    (zones plan Z3): {:load {:points-in :points :budget :min-fps :scan-rate
-   :est-fps :guard-fps :reduced-pct :dim-pct :regions} :low? bool}, or nil
+   :est-fps :guard-fps :reduced-pct :dim-pct :regions, and :effect-points
+   when its projector effects changed the count} :low? bool}, or nil
    while it isn't streaming a frame that has one (output-runtime/status)."
   [context projector-id]
   (let [{:keys [load low?]} (fx/sub-ctx context projector-output-status projector-id)]

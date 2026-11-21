@@ -248,17 +248,32 @@
   (let [{fit :fit} (guarded (lit-circle 3000) 25000)
         after (fg/recount fit 833)]
     (is (identical? fit (fg/recount fit 1800)) "the count the guard left: its own record")
+    (is (not (contains? fit :effect-points)) "so the load meter counts what the laser is asked for (Q-Z3-4 A)")
     (testing "what an effect after the guard left (Decimate, zones plan 12), counted against what it was asked for"
       (is (= [3000 833] ((juxt :points-in :points) after)))
       (is (close? (/ 25000.0 833) (:guard-fps after)))
       (is (close? (* 100.0 (/ 2167 3000.0)) (:reduced-pct after)))
-      (is (= (dissoc fit :points :guard-fps :reduced-pct) (dissoc after :points :guard-fps :reduced-pct))
+      (is (= 833 (:effect-points after)) "the load meter counts it too: what the laser draws (Q-D-1 B)")
+      (is (= (dissoc fit :points :guard-fps :reduced-pct) (dissoc after :points :guard-fps :reduced-pct :effect-points))
           "the budget, the minimum, the dimming and the fps before the guard stay the guard's")
       (is (false? (:low? (fg/smooth nil after))) "30 fps: not low"))
     (testing "none left: dark, so it leaves the low flag as it was (S-14)"
       (let [none (fg/recount fit 0)]
         (is (= [0 nil true] ((juxt :points :guard-fps :dark?) none)))
-        (is (true? (:low? (fg/smooth (fg/smooth nil fit) none))))))))
+        (is (true? (:low? (fg/smooth (fg/smooth nil fit) none))))
+        (is (not (contains? (fg/smooth (fg/smooth nil fit) none) :effect-points)) "and the meter as it was")))))
+
+(deftest dark-frames-leave-the-meter-as-it-was-test
+  (testing "lit frames Decimate thinned, every other one dark (a Strobe), which it can't thin: the meter keeps what it left (S-14)"
+    (let [thinned (assoc (record 30.0) :points 833 :effect-points 833)
+          rs (rest (smoothed (take 20 (cycle [thinned (record 8.3 :dark? true)]))))]
+      (is (every? #(= 833 (:effect-points %)) rs))
+      (is (every? :dark? (take-nth 2 (rest rs))) "each still says what it is")))
+  (testing "without Decimate a dark frame gets none either"
+    (is (not-any? #(contains? % :effect-points) (rest (smoothed (take 20 (cycle [(record 30.0) (record 8.3 :dark? true)])))))))
+  (testing "a lit frame the effects left as it was: what the laser is asked for again"
+    (let [thinned (assoc (record 30.0) :points 833 :effect-points 833)]
+      (is (not (contains? (fg/smooth (fg/smooth nil thinned) (record 30.0)) :effect-points))))))
 
 
 ;; Seeded properties (invariant 6)

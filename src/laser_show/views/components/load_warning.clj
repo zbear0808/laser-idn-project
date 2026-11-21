@@ -56,13 +56,23 @@
                         (pos? (or reduced-pct 0)) (conj (str "−" reduced-pct "% pts"))
                         (pos? (or dim-pct 0)) (conj (str "−" dim-pct "% bright")))))))
 
+(defn- metered
+  "The points the meter counts: what the laser draws when its projector
+   effects changed the count (:effect-points, Decimate in its calibration
+   chain: Q-D-1 B), else what it is asked for (Q-Z3-4 A)."
+  [{:keys [points-in effect-points]}]
+  (or effect-points points-in))
+
 (defn load-percent
   "The load meter (Q-Z3-4 A): the points a laser is asked for over its
    budget, the points that still reach its minimum fps, in whole percent;
-   past 100 the guard acts. nil without a budget."
-  [{:keys [points-in budget]}]
-  (when (and (number? points-in) (number? budget) (pos? budget))
-    (Math/round (* 100.0 (/ (double points-in) (double budget))))))
+   past 100 the guard acts. When its projector effects changed the count
+   (Decimate in its calibration chain), the points they left instead, what
+   it draws (metered, Q-D-1 B). nil without a budget."
+  [{:keys [budget] :as load}]
+  (let [points (metered load)]
+    (when (and (number? points) (number? budget) (pos? budget))
+      (Math/round (* 100.0 (/ (double points) (double budget)))))))
 
 (defn meter-level
   "The meter's colour for pct: :ok (green) under 80, :near (amber) to 100,
@@ -74,9 +84,10 @@
     :else :over))
 
 (defn meter-tooltip
-  "\"3,000 points a frame. 1,250 fit 20 fps at 25,000 pts/s\"."
-  [{:keys [points-in budget min-fps scan-rate]}]
-  (str (grouped points-in) " points a frame. " (grouped budget) " fit " min-fps " fps at "
+  "\"3,000 points a frame. 1,250 fit 20 fps at 25,000 pts/s\": the points
+   the meter counts (metered)."
+  [{:keys [budget min-fps scan-rate] :as load}]
+  (str (grouped (metered load)) " points a frame. " (grouped budget) " fit " min-fps " fps at "
        (grouped scan-rate) " pts/s"))
 
 
