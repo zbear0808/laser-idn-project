@@ -142,30 +142,52 @@
 (defn- clock-on?
   "Can a press wait for a beat: the clock thread runs and the transport
    plays (06 SQ-2)?"
-  [state clock]
-  (boolean (and (:running? clock) (get-in state [:playback :playing?]))))
+  [clock]
+  (boolean (and (:running? clock) (:playing? clock))))
+
+(defn schedule-slot
+  "The rule for when a live switch lands (spec §9, 06 §8.4), the map pads'
+   and the pattern pads' alike (zones plan Z5): a press of value (Shift or
+   the pad's setting: bar?) on slot {:active (the value in use) :pending (a
+   switch waiting, {:id k value :at-beat :bar?}, or nil) :key k (what the
+   waiting switch names its value by: :map, :style)}, at clock {:beats (the
+   global beats) :running? (the clock thread's) :playing? (the transport's)
+   :bpm :now-ms :input-time :id}. A waiting switch already due lands first;
+   then pressing the value in use cancels a waiting one; otherwise the press
+   lands at once (switch-at nil: no clock, no tempo; or a beat already
+   reached) or waits, replacing any other, named by :id (a new uuid
+   without). nil is a value like any other. Returns {:active :pending
+   :landed [v …]}: the slot after the press, and what landed, in order."
+  [{:keys [active pending key]} value bar? clock]
+  (let [now (double (or (:beats clock) 0.0))
+        due-first? (boolean (and pending (due? (:at-beat pending) now)))
+        landed (if due-first? [(get pending key)] [])
+        active (if due-first? (get pending key) active)]
+    (if (= value active)
+      {:active active :pending nil :landed landed}
+      (let [bpm (:bpm clock)
+            at (switch-at {:beats (press-beats clock bpm) :bpm bpm :bar? bar? :clock? (clock-on? clock)})]
+        (if (or (nil? at) (due? at now))
+          {:active value :pending nil :landed (conj landed value)}
+          {:active active
+           :pending {:id (or (:id clock) (random-uuid)) key value :at-beat at :bar? (boolean bar?)}
+           :landed landed})))))
 
 (defn schedule
   "A press of map-id (Shift or the pad's setting: bar?), from clock ({:beats
    the global beats :running? the clock thread's :now-ms :input-time :id}):
-   a pending switch already due is committed first; then pressing the map
-   in use cancels a pending one; otherwise the switch lands at once
-   (switch-at nil, or a beat already reached) or waits in [:zone-map
-   :pending] {:id :map :at-beat :bar?}, replacing any other. The tempo is
-   [:timing :bpm]. :id names the pending switch (a new uuid without)."
+   schedule-slot on [:zone-map], with the tempo [:timing :bpm] and the
+   transport [:playback :playing?]. What lands goes through commit; a
+   switch that waits is [:zone-map :pending] {:id :map :at-beat :bar?}."
   [state map-id bar? clock]
-  (let [now (double (or (:beats clock) 0.0))
-        pending (get-in state [:zone-map :pending])
-        state (if (and pending (due? (:at-beat pending) now)) (commit state (:map pending)) state)
-        active (or (get-in state [:zone-map :active]) default-map-id)]
-    (if (= map-id active)
-      (assoc-in state [:zone-map :pending] nil)
-      (let [bpm (get-in state [:timing :bpm])
-            at (switch-at {:beats (press-beats clock bpm) :bpm bpm :bar? bar? :clock? (clock-on? state clock)})]
-        (if (or (nil? at) (due? at now))
-          (commit state map-id)
-          (assoc-in state [:zone-map :pending] {:id (or (:id clock) (random-uuid)) :map map-id
-                                                :at-beat at :bar? (boolean bar?)}))))))
+  (let [{:keys [pending landed]} (schedule-slot {:active (or (get-in state [:zone-map :active]) default-map-id)
+                                                 :pending (get-in state [:zone-map :pending])
+                                                 :key :map}
+                                                map-id bar?
+                                                (assoc clock
+                                                       :bpm (get-in state [:timing :bpm])
+                                                       :playing? (boolean (get-in state [:playback :playing?]))))]
+    (assoc-in (reduce commit state landed) [:zone-map :pending] pending)))
 
 
 ;; The map editor's warnings (06 §7.5)

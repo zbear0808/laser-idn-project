@@ -139,6 +139,56 @@
     (testing "every switch lands through commit"
       (is (= {:active :map/unison :pending nil} (:zone-map (zone-maps/commit (assoc-in state [:zone-map :pending] {:map :map/odd-even}) :map/unison)))))))
 
+(deftest schedule-slot-is-the-map-rule-test
+  ;; Zones plan Z5 (07 §4.3): the rule a map pad's press follows, on any live
+  ;; switch's slot, so the pattern pads land as the map pads do
+  (let [clock (fn [beats & {:as more}]
+                (merge {:beats beats :running? true :playing? true :bpm 120.0 :now-ms 0 :id :p1} more))
+        slot {:active :alternate :pending nil :key :style}
+        press (fn [slot value & [bar? c]] (zone-maps/schedule-slot slot value bar? (or c (clock 16.5))))]
+    (testing "within 50 ms of a beat: it lands at once"
+      (is (= {:active :chase :pending nil :landed [:chase]} (press slot :chase false (clock 16.04)))))
+    (testing "otherwise it waits for the next beat, under the slot's key"
+      (is (= {:active :alternate :pending {:id :p1 :style :chase :at-beat 17.0 :bar? false} :landed []}
+             (press slot :chase))))
+    (testing "or the next bar"
+      (is (= {:id :p1 :style :off :at-beat 20.0 :bar? true} (:pending (press slot :off true (clock 17.0))))))
+    (let [waiting (press slot :chase)]
+      (testing "another press replaces the waiting one"
+        (is (= {:active :alternate :pending {:id :p2 :style :swap :at-beat 17.0 :bar? false} :landed []}
+               (press (assoc waiting :key :style) :swap false (clock 16.6 :id :p2)))))
+      (testing "pressing the value in use cancels it"
+        (is (= {:active :alternate :pending nil :landed []} (press (assoc waiting :key :style) :alternate false (clock 16.6)))))
+      (testing "one already due lands first"
+        (is (= {:active :chase :pending {:id :p1 :style :swap :at-beat 18.0 :bar? false} :landed [:chase]}
+               (press (assoc waiting :key :style) :swap false (clock 17.5))))
+        (is (= {:active :chase :pending nil :landed [:chase]} (press (assoc waiting :key :style) :chase false (clock 17.5)))
+            "and then it is the value in use: nothing more")))
+    (testing "nil is a value like any other (the pattern pads' As set)"
+      (is (= {:active nil :pending nil :landed []} (press {:active nil :key :style} nil)))
+      (is (= {:active nil :pending nil :landed [nil]} (press slot nil false (clock 16.5 :running? false)))))
+    (testing "no clock thread, the transport stopped, no tempo: at once"
+      (doseq [c [(clock 16.5 :running? false) (clock 16.5 :playing? false) (clock 16.5 :bpm 0.0) (clock 16.5 :bpm nil)]]
+        (is (= {:active :chase :pending nil :landed [:chase]} (press slot :chase false c)))))
+    (testing "a learned key's press counts from when it was played"
+      (is (= [:chase] (:landed (press slot :chase false (clock 16.2 :now-ms 1100 :input-time 1000))))))
+    (testing "a waiting switch is named: the clock's :id, else a new one"
+      (is (uuid? (get-in (press slot :chase false (dissoc (clock 16.5) :id)) [:pending :id]))))
+    (testing "the map pads' schedule is this rule on [:zone-map], with the show's tempo and transport"
+      (let [c (fn [beats] {:beats beats :running? true :now-ms 0 :id :p1})]
+        (doseq [[label s map-id bar? beats] [["at once" state :map/odd-even false 16.04]
+                                             ["the next beat" state :map/odd-even false 16.5]
+                                             ["the bar" state :map/unison true 17.0]
+                                             ["stopped" (assoc-in state [:playback :playing?] false) :map/odd-even false 16.5]
+                                             ["due first" (assoc-in state [:zone-map :pending] {:id :p0 :map :map/unison :at-beat 16.0 :bar? false})
+                                              :map/odd-even false 16.5]]]
+          (testing label
+            (let [{:keys [active pending landed]} (zone-maps/schedule-slot (assoc (:zone-map s) :key :map) map-id bar?
+                                                                           (assoc (c beats) :bpm (get-in s [:timing :bpm])
+                                                                                  :playing? (get-in s [:playback :playing?])))]
+              (is (= {:active active :pending pending} (select-keys (:zone-map (zone-maps/schedule s map-id bar? (c beats))) [:active :pending])))
+              (is (vector? landed)))))))))
+
 (deftest pin-test
   (let [lr (zone-maps/map-by-id state :map/left-right)]
     (is (= :auto/left (zone-maps/pin lr :zone/a)))
