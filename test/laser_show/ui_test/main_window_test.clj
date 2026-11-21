@@ -192,8 +192,8 @@
       (let [footer (ui/on-fx-thread #(.lookup (scene-root editor) ".dialog-footer"))
             labeled (filterv #(instance? Labeled %) (all-nodes footer))
             texts (set (map text-of labeled))]
-        (is (every? texts ["Target:" "Trigger:" "Open in Timeline Editor" "Close"])
-            "the timeline editor's short labels")
+        (is (every? texts ["Target:" "Pattern:" "None" "Trigger:" "Open in Timeline Editor" "Close"])
+            "the timeline editor's short labels, and the Pattern chip (zones plan Z5)")
         (ui/wait-for! #(every? (fn [l] (= (text-of l) (ui/shown-text l))) labeled))
         (doseq [l labeled]
           (is (= (text-of l) (ui/shown-text l))))))))
@@ -206,12 +206,16 @@
         tip (fn [^Control c] (ui/on-fx-thread #(some-> c .getTooltip .getText)))
         by-text (into {} (keep (fn [c] (when (instance? Labeled c) [(text-of c) (tip c)]))) controls)
         combos (filterv #(instance? ComboBox %) controls)
-        chip (some #(when (= "target-chip-cue" (.getId ^Control %)) %) controls)]
-    (testing "the choices say what they choose: Trigger, and the Target chip (zones plan Z4)"
+        chip (some #(when (= "target-chip-cue" (.getId ^Control %)) %) controls)
+        pattern-chip (some #(when (= "pattern-chip-cue" (.getId ^Control %)) %) controls)]
+    (testing "the choices say what they choose: Trigger, the Target chip (zones plan Z4) and the Pattern chip (Z5)"
       (is (= 1 (count combos)))
       (is (every? #(seq (tip %)) combos))
       (is (some? chip))
-      (is (= "Where the cue's content goes, unless an item, a group or a track sets its own" (tip chip))))
+      (is (= "Where the cue's content goes, unless an item, a group or a track sets its own" (tip chip)))
+      (is (some? pattern-chip))
+      (is (= "No zone pattern: the cue's pictures stay in the zones they're drawn into. Pick a style to move them on the beat or on a press."
+             (some-> pattern-chip tip))))
     (testing "and the buttons what they do; Close says it"
       (is (seq (by-text "⚡ Triggers...")))
       (is (seq (by-text "Open in Timeline Editor")))

@@ -27,6 +27,7 @@
             [laser-show.views.components.effect-bank :as effect-bank]
             [laser-show.views.components.load-warning :as load-warning]
             [laser-show.views.components.target-control :as target-control]
+            [laser-show.views.components.zone-pattern-editor :as zone-pattern-editor]
             [laser-show.routing.targets :as targets]
             [clojure.string :as str]
             [laser-show.common.util :as u])
@@ -47,7 +48,9 @@
      :item-event-template {:event/type :cue-chain/add-effect-from-bank
                            :col col
                            :row row
-                           :parent-path effects-parent-path}}))
+                           :parent-path effects-parent-path}
+     ;; An item's effects: no zone pattern (a cue has its own, zones plan Z5)
+     :scope :item}))
 
 
 ;; Parameter Editor for Effects (using shared component)
@@ -466,7 +469,7 @@
                  :col col
                  :row row}
 
-                ;; Footer with the cue's Target, trigger mode, and close button;
+                ;; Footer with the cue's Target, its zone pattern, trigger mode, and close button;
                 ;; nothing in it shrinks below its text
                 {:fx/type :h-box
                  :alignment :center-left
@@ -481,6 +484,11 @@
                                                               (fx/sub-ctx context subs/default-target) col)
                              :on-set {:event/type :cue-chain/set-target :col col :row row}
                              :tooltip cue-target-tooltip}
+                            ;; The cue's zone pattern (zones plan Z5)
+                            {:fx/type zone-pattern-editor/pattern-field
+                             :id "pattern-chip-cue"
+                             :col col
+                             :row row}
                             {:fx/type trigger-mode-dropdown
                              :col col
                              :row row

@@ -41,6 +41,7 @@
             [laser-show.routing.rig :as rig]
             [laser-show.routing.targets :as targets]
             [laser-show.routing.zone-maps :as zone-maps]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.dev-config :as dev-config]))
 
 
@@ -1127,6 +1128,44 @@
                        (fx/sub-ctx context column-target col)
                        (fx/sub-ctx context default-target)
                        col))
+
+
+;; Level 2: Zone patterns (zones plan Z5)
+
+
+(defn cue-zone-pattern
+  "The zone pattern of the cue at [col row]: the first of its
+   :zone-patterns (v1 edits one), or nil."
+  [context col row]
+  (first (fx/sub-val context get-in [:chains :cue-chains [col row] :zone-patterns])))
+
+(defn zone-pattern-at
+  "The effect at effect-path of domain's entity (:cue-zone-patterns, a
+   cue's patterns; :effect-chains, a cell's items), or nil."
+  [context domain entity-key effect-path]
+  (when (sequential? effect-path)
+    (case domain
+      :cue-zone-patterns (fx/sub-val context get-in (into [:chains :cue-chains entity-key :zone-patterns] effect-path))
+      :effect-chains (fx/sub-val context get-in (into [:chains :effect-chains entity-key :items] effect-path))
+      nil)))
+
+(defn pattern-world
+  "What a pattern's fold, lane and warnings read of the show
+   (routing.zone-patterns): the rig, the groups, the maps and the map in
+   use, the keys learned."
+  [context]
+  {:projectors (fx/sub-val context :projectors)
+   :rig (fx/sub-val context :rig)
+   :zone-groups (fx/sub-val context :zone-groups)
+   :zone-maps (fx/sub-val context :zone-maps)
+   :zone-map (fx/sub-val context :zone-map)
+   :config {:input {:trigger-map (fx/sub-val context get-in [:config :input :trigger-map])}}})
+
+(defn pattern-fold
+  "How a pattern (params) folds onto this rig under the map in use, the
+   pattern window's ⓘ line (routing.zone-patterns/fold-text)."
+  [context params]
+  (zone-patterns/fold-text (fx/sub-ctx context pattern-world) params (fx/sub-ctx context names-ctx)))
 
 
 ;; Level 2: The rig strip (views/components/rig_strip.clj)

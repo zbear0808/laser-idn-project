@@ -100,11 +100,13 @@
    - :hgap - Horizontal gap between buttons (default: 4)
    - :vgap - Vertical gap between buttons (default: 4)
    - :padding - Padding around flow pane (default: 8)
-   - :fill? - Grow with the parent instead of the fixed 80 px height"
+   - :fill? - Grow with the parent instead of the fixed 80 px height
+   - :hint, :hint-id - A line under the items (the effects grid's Zone tab
+     says what order its patterns run in), and its node's id"
  [{:keys [tab-definitions active-tab on-tab-change
           items items-by-category
           item-event-template item-name-key item-id-key button-style-class
-          drag-kind empty-text hgap vgap padding fill?]}]
+          drag-kind empty-text hgap vgap padding fill? hint hint-id]}]
   (let [active (or active-tab (:id (first tab-definitions)))
         ;; Get items either directly or from category map
         display-items (or items
@@ -123,7 +125,8 @@
      :pref-height (if fill? -1.0 h)
      :max-height (if fill? Double/MAX_VALUE h)
      :style-class "panel-primary"
-     :children [{:fx/type tabs/styled-tab-bar
+     :children (filterv some?
+               [{:fx/type tabs/styled-tab-bar
                  :tabs tab-definitions
                  :active-tab active
                  :on-tab-change on-tab-change}
@@ -149,4 +152,10 @@
                                                :drag-kind drag-kind}))
                                        [{:fx/type :label
                                          :text empty-msg
-                                         :style-class "text-muted"}])}}]}))
+                                         :style-class "text-muted"}])}}
+                (when hint
+                  (cond-> {:fx/type :label
+                           :text hint
+                           :padding {:left 8 :right 8 :bottom 4}
+                           :style-class ["label" "text-muted" "bank-hint"]}
+                    hint-id (assoc :id hint-id)))])}))

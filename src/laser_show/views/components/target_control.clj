@@ -58,12 +58,17 @@
    (the refs that reach the crowd)}.
    Scopes: :item :group :track :clip :cue :column, every row; :show, no
    Inherit (nothing set is All); :lane, All and the groups only; :preview,
-   Master (everything) for Inherit, no new zone, Combine or Pin."
-  [{:keys [scope own inherited names zone-map zones audience]}]
+   Master (everything) for Inherit, no new zone, Combine or Pin; :pattern (a
+   zone pattern's places, zones plan Z5), Every laser first, then All, the
+   zones and the groups, ticked when ctx's :lane has them, no Inherit,
+   Combine or Pin."
+  [{:keys [scope own inherited names zone-map zones audience lane]}]
   (let [own (targets/normalize-target own)
-        checked? (fn [ref] (= own ref))
+        pattern? (= :pattern scope)
+        in-lane (set lane)
+        checked? (fn [ref] (if pattern? (contains? in-lane ref) (= own ref)))
         lane? (= :lane scope)
-        zone-list (listed-zones scope zones own)
+        zone-list (listed-zones scope (concat zones (when pattern? lane)) own)
         new-zone (targets/next-zone zone-list)
         zone-text #(targets/target-text names zone-map %)
         effective (or own (:target inherited))
@@ -81,7 +86,9 @@
         (contains? (disj every-row-scopes :show) scope)
         [{:kind :inherit :text (inherit-text names zone-map inherited) :checked? (nil? own) :target nil}]
         (= :preview scope)
-        [{:kind :master :text "Master (everything)" :checked? (nil? own) :target nil}])
+        [{:kind :master :text "Master (everything)" :checked? (nil? own) :target nil}]
+        pattern?
+        [{:kind :ref :ref :lane/lasers :text "Every laser, left to right" :checked? (checked? :lane/lasers) :target :lane/lasers}])
       [{:kind :ref :ref :all :text "All" :target :all
         :checked? (if (= :show scope) (or (nil? own) (= :all own)) (checked? :all))}]
       (when-not lane?

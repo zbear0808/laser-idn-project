@@ -19,12 +19,15 @@
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
+            [laser-show.animation.chains :as chains]
             [laser-show.subs :as subs]
             [laser-show.events.core :as events]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.vibes.reactions :as reactions]
             [laser-show.views.components.load-warning :as load-warning]
             [laser-show.views.components.shortcuts :as shortcuts]
             [laser-show.views.components.target-control :as target-control]
+            [laser-show.views.components.zone-pattern-editor :as zone-pattern-editor]
             [laser-show.views.components.drag-drop-cell :as drag-drop])
   (:import [javafx.scene.input MouseEvent MouseButton]))
 
@@ -85,10 +88,13 @@
     :else (str (effect-text first-effect-id) " +" (dec effect-count))))
 
 (defn effects-tooltip
-  "Tooltip for an effects cell: its effects, one per line, or nil for none."
-  [{:keys [effect-ids]}]
-  (when (seq effect-ids)
-    (str/join "\n" (map effect-text effect-ids))))
+  "Tooltip for an effects cell: its effects, one per line (:effect-lines,
+   when a zone pattern or Map cycle says what it does, zones plan Z5), or
+   nil for none."
+  [{:keys [effect-ids effect-lines]}]
+  (cond
+    (seq effect-lines) (str/join "\n" effect-lines)
+    (seq effect-ids) (str/join "\n" (map effect-text effect-ids))))
 
 
 ;; Generic Grid Cell Component
@@ -241,18 +247,19 @@
 
 (defn- cue-tooltip
   "A cue cell's tooltip: its warning (zones plan Z3), then where it goes
-   (its badge's line, Z4)."
-  [{:keys [warning badge-line]}]
-  (some->> [(load-warning/cue-warning-text warning) badge-line]
+   (its badge's line, Z4), then its zone pattern (Z5)."
+  [{:keys [warning badge-line pattern-line]}]
+  (some->> [(load-warning/cue-warning-text warning) badge-line pattern-line]
            (remove str/blank?)
            seq
            (str/join "\n")))
 
 (defn- target-badge
   "Where the cue goes, top right (zones plan Z4, 06 §8.5): its zones, then
-   📌 and what it pins; dim when all of it is inherited. Mouse-transparent,
-   so its words are in the cell's tooltip."
-  [col row {:keys [zones pins inherited?]}]
+   📌 and what it pins; dim when all of it is inherited; then ⇄ when a zone
+   pattern moves it (Z5). Mouse-transparent, so its words are in the cell's
+   tooltip."
+  [col row {:keys [zones pins inherited? pattern?]}]
   {:fx/type :h-box
    :id (format "grid-cell-badge-%d-%d" col row)
    :stack-pane/alignment :top-right
@@ -266,7 +273,9 @@
    :children (cond-> []
                zones (conj {:fx/type :label :text zones :style-class ["label" "grid-cell-target-badge-text"]})
                pins (conj (target-control/pin-icon 8 "#E0E0E0")
-                          {:fx/type :label :text pins :style-class ["label" "grid-cell-target-badge-text"]}))})
+                          {:fx/type :label :text pins :style-class ["label" "grid-cell-target-badge-text"]})
+               pattern? (conj {:fx/type :label :id (format "grid-cell-pattern-%d-%d" col row) :text "⇄"
+                               :style-class ["label" "grid-cell-target-badge-text" "grid-cell-pattern-glyph"]}))})
 
 (defn grid-cell
   "Cue grid cell - wrapper around generic-grid-cell.
@@ -300,13 +309,19 @@
         ;; Where it goes (zones plan Z4): only a badge with a zone reads the
         ;; map in use, for its tooltip
         badge (fx/sub-ctx context subs/cell-target-badge col row)
+        ;; Its zone pattern (zones plan Z5): ⇄ on the badge, a line in the tooltip
+        pattern (fx/sub-ctx context subs/cue-zone-pattern col row)
+        pattern? (and pattern (not (false? (:enabled? pattern))))
         cell-display-data (assoc display-data
                                  :active? (and (:active? display-data) (not held?))
                                  :held? held?
                                  :has-trigger? has-trigger?
                                  :learning? learning?
                                  :warning warning
-                                 :badge-line (when badge (fx/sub-ctx context subs/cell-target-tooltip col row)))
+                                 :badge-line (when badge (fx/sub-ctx context subs/cell-target-tooltip col row))
+                                 :pattern-line (when pattern?
+                                                 (str "Zone pattern: "
+                                                      (zone-pattern-editor/chip-text pattern (fx/sub-ctx context subs/names-ctx)))))
         open-editor-event (if timeline?
                             {:event/type :timeline-cue-editor/open}
                             {:event/type :cue-chain/open-editor})
@@ -369,7 +384,7 @@
                    :on-drop {:event/type :grid/move-cell}}
      :label-fn cell-label
      :tooltip-fn cue-tooltip
-     :badge (when badge (target-badge col row badge))
+     :badge (when (or badge pattern?) (target-badge col row (assoc badge :pattern? pattern?)))
      :context-menu-items (into base-menu-items trigger-menu-items)}))
 
 
@@ -402,6 +417,42 @@
                       cat)
                 reactions/templates)})
 
+(defn- new-zone-pattern-menu
+  "New zone pattern ▸, for an empty effects cell (zones plan Z5, 07 §7.2):
+   a style, or a Map cycle. The cell becomes it, off, and its editor opens
+   (:zone-patterns/new-cell)."
+  [col row]
+  {:fx/type :menu
+   :id "new-zone-pattern-menu"
+   :text "New zone pattern"
+   :items (conj (mapv (fn [style]
+                        {:fx/type :menu-item
+                         :id (str "new-zone-pattern-" (name style))
+                         :text (zone-patterns/style-names style)
+                         :on-action {:event/type :zone-patterns/new-cell :col col :row row :style style}})
+                      zone-patterns/styles)
+                {:fx/type :separator-menu-item}
+                {:fx/type :menu-item
+                 :id "new-zone-pattern-map-cycle"
+                 :text "Map cycle"
+                 :on-action {:event/type :zone-patterns/new-cell :col col :row row :style :map-cycle}})})
+
+(defn- effect-lines
+  "An effects cell's tooltip lines when it holds a zone pattern or a Map
+   cycle (zones plan Z5): each effect in chain order, those two saying what
+   they do; nil otherwise."
+  [context col row]
+  (let [effects (chains/flatten-chain (:items (fx/sub-ctx context subs/effect-cell-chain col row)))]
+    (when (some #(contains? zone-patterns/zone-stage-ids (:effect-id %)) effects)
+      (let [names (fx/sub-ctx context subs/names-ctx)
+            zone-maps (fx/sub-val context :zone-maps)]
+        (mapv (fn [{:keys [effect-id params]}]
+                (case effect-id
+                  :zone-pattern (zone-pattern-editor/cell-tooltip params names)
+                  :zone-map-cycle (zone-patterns/describe-cycle params {:zone-maps zone-maps})
+                  (effect-text effect-id)))
+              effects)))))
+
 (defn effects-cell
   "Effects grid cell - wrapper around generic-grid-cell.
    
@@ -432,6 +483,7 @@
                       :effect-count (:effect-count display-data)
                       :first-effect-id (:first-effect-id display-data)
                       :effect-ids (:effect-ids display-data)
+                      :effect-lines (when has-effects? (effect-lines context col row))
                       :has-effects? has-effects?
                       :name (:name display-data)
                       :has-trigger? has-trigger?
@@ -448,6 +500,8 @@
                                       :on-action {:event/type :effect-chain/open-editor :col col :row row}}
                                      (when-not has-effects?
                                        (new-reaction-menu col row))
+                                     (when-not has-effects?
+                                       (new-zone-pattern-menu col row))
                                      {:fx/type :separator-menu-item}
                                      (if learning?
                                        {:fx/type :menu-item

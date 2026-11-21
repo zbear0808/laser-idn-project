@@ -34,13 +34,22 @@
 ;; Effect Category Map Builder
 
 
+(defn- offered?
+  "Does a bank of scope (:item or :global) offer effect-def: one without a
+   :scope is offered in both, a zone-stage effect (:scope #{:global}) only
+   on the effects grid (zones plan Z5)."
+  [scope effect-def]
+  (let [s (:scope effect-def)]
+    (or (nil? s) (contains? s scope))))
+
 (defn- build-effects-by-category
-  "Build a map of category -> effects vector.
+  "Build a map of category -> effects vector, of the effects a bank of
+   scope offers (offered?).
    Handles both single keyword categories and set categories.
    Effects with set categories appear in all relevant tabs. A :hidden?
    effect (the Zone Selector, zones plan Z4) is in none."
-  []
-  (let [all-effects (remove :hidden? (effects/list-effects))]
+  [scope]
+  (let [all-effects (filter #(offered? scope %) (remove :hidden? (effects/list-effects)))]
     (reduce (fn [acc effect-def]
               (let [cat (:category effect-def)
                     ;; Normalize to a set of categories
@@ -59,18 +68,27 @@
 ;; Memoized effects map - only rebuilds when registry changes
 
 
-(def ^:private last-registry-count (atom 0))
-(def ^:private cached-effects-map (atom nil))
+(def ^:private cached-effects-maps
+  "{:count n :by-scope {scope effects-map}}: the maps, for n registered effects."
+  (atom nil))
 
 (defn- get-effects-by-category
-  "Get effects map, rebuilding if registry changed.
+  "Get scope's effects map, rebuilding if registry changed.
    This provides stable identity for the map when effects haven't changed."
-  []
-  (let [current-count (count @effects/!effect-registry)]
-    (when (not= current-count @last-registry-count)
-      (reset! cached-effects-map (build-effects-by-category))
-      (reset! last-registry-count current-count))
-    @cached-effects-map))
+  [scope]
+  (let [current-count (count @effects/!effect-registry)
+        cached @cached-effects-maps]
+    (or (when (= (:count cached) current-count) (get-in cached [:by-scope scope]))
+        (let [m (build-effects-by-category scope)]
+          (swap! cached-effects-maps
+                 (fn [c] (if (= current-count (:count c))
+                           (assoc-in c [:by-scope scope] m)
+                           {:count current-count :by-scope {scope m}})))
+          m))))
+
+(def ^:private zone-hint
+  "The effects grid's Zone tab: the order zone patterns run in (07 §7.2)."
+  "Zone patterns run after each cue's own pattern, cell by cell, row by row, left to right.")
 
 
 ;; Helper to build default params for an effect
@@ -98,18 +116,24 @@
    - :on-tab-change - Event map for tab changes
    - :item-event-template - Event map template for adding effects
                           Will receive :item-id (effect-id) and :item (effect-def)
-   - :include-zone? - Include the Zone category, while it has an effect
-                      (default: false)
+   - :scope - :item (the default: a cue's items, the timeline's clips and
+              tracks) or :global (the effects grid): the effects it offers
+              (offered?); the Zone tab shows while it offers one, with its
+              hint (zones plan Z5)
    - :fill? - Grow with the parent (default: fixed 80 px)
    - :drag-kind - :effect to make the buttons drag sources (timeline browser)"
-  [{:keys [active-tab on-tab-change item-event-template include-zone? fill? drag-kind]}]
-  (let [effects-map (get-effects-by-category)
-        tabs (if (and include-zone? (seq (:zone effects-map)))
+  [{:keys [active-tab on-tab-change item-event-template scope fill? drag-kind]}]
+  (let [effects-map (get-effects-by-category (or scope :item))
+        zone? (seq (:zone effects-map))
+        tabs (if zone?
                effect-bank-tab-definitions-with-zone
-               effect-bank-tab-definitions)]
+               effect-bank-tab-definitions)
+        active-tab (or active-tab :shape)]
     {:fx/type tabbed-bank/tabbed-bank
      :tab-definitions tabs
-     :active-tab (or active-tab :shape)
+     :hint (when (and zone? (= :zone active-tab)) zone-hint)
+     :hint-id "effect-bank-hint"
+     :active-tab active-tab
      :on-tab-change on-tab-change
      ;; Data-driven: pass pre-computed items map
      :items-by-category effects-map

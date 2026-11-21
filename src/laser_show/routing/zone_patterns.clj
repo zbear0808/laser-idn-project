@@ -314,6 +314,63 @@
              [{:level :info :text (str subject " steps on the Zone step key, which has no key yet")}]))))))
 
 
+;; How a pattern folds onto the rig (07 §7.1, §8.5)
+
+(defn- laser-count [n]
+  (str n (if (= 1 n) " laser" " lasers")))
+
+(defn- and-list [xs]
+  (case (count xs)
+    0 "nothing"
+    1 (first xs)
+    (str (str/join ", " (butlast xs)) " and " (last xs))))
+
+(defn- entry-text
+  "One entry of a place [projector region]: a laser, or a half of one; with
+   one laser, \"its left half\"."
+  [state one? [id region]]
+  (let [n (rig/projector-name state id)]
+    (case region
+      :L (if one? "its left half" (str "the left half of " n))
+      :R (if one? "its right half" (str "the right half of " n))
+      (if one? "all of it" n))))
+
+(defn fold-text
+  "How a pattern (params) folds onto state's rig under the map in use (the
+   pattern window's ⓘ line): \"This rig (3 lasers, Left / Right): A is
+   Laser 1 and the left half of Laser 2; B the right half of Laser 2 and
+   Laser 3.\"; Every laser by its lasers, left to right; under Unison a
+   lane of zones doesn't move; no laser on. names: routing.targets/names."
+  [state params names]
+  (let [e (e-lasers state)
+        n (count e)
+        one? (= 1 n)
+        routing (routing-now state)
+        refs (vec (distinct (filter keyword? (:zones params))))
+        l (zone-remap/lane refs #(known-ref? state %) e)
+        place (fn [ref] (if (targets/zone-ref? ref) (targets/zone-letter ref) (targets/ref-name names ref)))
+        reaches (fn [ref]
+                  (and-list (into [] (comp (map #(subvec (vec %) 0 2)) (distinct) (map #(entry-text state one? %)))
+                                  (rig/resolve-ref routing ref))))]
+    (cond
+      (zero? n) "No laser is on, so this pattern has nowhere to send anything."
+      (and (= :map/unison (:map routing)) (seq l) (every? targets/zone-ref? l))
+      "Under Unison every zone is All, so this pattern doesn't move."
+      (= [:lane/lasers] refs)
+      (str "This rig (" (laser-count n) "): "
+           (if one?
+             "its left half, then its right half"
+             (str (and-list (mapv #(rig/projector-name state %) e)) ", left to right"))
+           ".")
+      :else
+      (str "This rig (" (laser-count n)
+           (when (some targets/zone-ref? l) (str ", " (:name (zone-maps/map-by-id state (:map routing)))))
+           "): "
+           (str/join (if one? ", " "; ")
+                     (map-indexed (fn [i ref] (str (place ref) (when (zero? i) " is") " " (reaches ref))) l))
+           "."))))
+
+
 ;; The pattern pads (07 §7.3)
 
 (def pad-ids

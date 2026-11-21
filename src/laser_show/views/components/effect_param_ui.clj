@@ -18,6 +18,7 @@
             [laser-show.views.components.visual-editors.custom-param-renderers :as custom-renderers]
             [laser-show.views.components.visual-editors.hue-shift-canvas :as hue-shift-canvas]
             [laser-show.views.components.modulator-param-control :as mod-param]
+            [laser-show.views.components.zone-pattern-editor :as zone-pattern-editor]
             [clj-font-awesome.core :as fa]))
 
 
@@ -47,6 +48,8 @@
    3. Corner Pin (corner-pin-2d) - Drag 4 corners for perspective mapping
    4. Rotation (rotation-dial) - Circular dial for angle adjustment
    5. Scale (scale-2d) - Rectangle with edge/corner handles for X/Y scaling
+   6. Zone pattern and Map cycle (zones plan Z5) - The rows their style
+      uses, each with its own modulator toggle, so they stay visual
    
    Props:
    - :effect-def - Effect definition with :ui-hints {:renderer :spatial-2d ...}
@@ -89,8 +92,9 @@
         has-modulators? (boolean (some (fn [[_k v]] (reg/active-modulator? v)) current-params))
         ;; Single-param visual editors handle their own modulator UI, so they can
         ;; display in either mode even when modulators are active
+        ;; (a zone pattern's and a Map cycle's rows have their own ∿, zones plan Z5)
         single-param-visual-editor? (contains? #{:rotation-dial :hue-slider :hue-shift-strip
-                                                 :oklab-hue-shift-strip}
+                                                 :oklab-hue-shift-strip :zone-pattern :map-cycle}
                                                renderer-type)
         ;; Determine actual mode: respect user's choice for single-param visual editors,
         ;; force numeric mode for other editors with modulators
@@ -261,6 +265,17 @@
                                          :current-params current-params
                                          :event-template on-color-change-event
                                          :fx-key canvas-fx-key}
+
+                      ;; Zone pattern and Map cycle: the rows their style uses (zones plan Z5)
+                      (:zone-pattern :map-cycle) {:fx/type (if (= :zone-pattern renderer-type)
+                                                             zone-pattern-editor/pattern-visual
+                                                             zone-pattern-editor/map-cycle-visual)
+                                                  :current-params current-params
+                                                  :params-map params-map
+                                                  :on-change-event on-change-event
+                                                  :on-text-event on-text-event
+                                                  :modulator-event-base (when enable-modulators? modulator-event-base)
+                                                  :effect-keys spatial-event-keys}
 
                       ;; Fallback to standard params (with optional modulator support)
                       {:fx/type param-list-type

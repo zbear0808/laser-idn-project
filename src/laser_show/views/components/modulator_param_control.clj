@@ -528,18 +528,106 @@
                             :param-spec param-spec})])}))
 
 
+;; A choice that follows a modulator (zones plan Z5, 07 S-8)
+
+
+(defn- choice-value
+  "What a choice param shows while static: its keyword, or for a modulator
+   that is off, its static value, a choice or an index (as a modulator's
+   value picks one: ⌊v + 1e-9⌋, clamped)."
+  [{:keys [choices default]} v]
+  (let [s (reg/get-static-value v default)
+        n (count choices)]
+    (cond
+      (keyword? s) s
+      (and (number? s) (pos? n)) (nth (vec choices) (max 0 (min (dec n) (long (Math/floor (+ (double s) 1e-9))))))
+      :else default)))
+
+(defn index-spec
+  "A modulatable choice as a number spec: its indices 0 to n − 1, so a new
+   modulator spans every choice, and Min and Max stay in range."
+  [{:keys [choices] :as param-spec} v]
+  (let [choices (vec choices)
+        i (max 0 (.indexOf ^java.util.List choices (choice-value param-spec v)))]
+    (assoc param-spec :type :float :min 0.0 :max (double (max 0 (dec (count choices)))) :default (double i))))
+
+(defn index-labels
+  "\"0 Alternate · 1 Chase · …\": the choice each index picks."
+  [param-spec]
+  (str/join " · " (map-indexed (fn [i c] (str i " " (param-controls/choice-text param-spec c))) (:choices param-spec))))
+
+(defn modulator-choice-control
+  "A :choice that says :modulatable? (zones plan Z5): a combo box while
+   static, and ∿ to follow a modulator, whose value picks a choice by index
+   (animation.effects/choice-at): its Min and Max are indices, labelled
+   \"0 Alternate · 1 Chase …\", and a new one spans every choice. Props:
+   modulator-param-control's."
+  [{:keys [param-key param-spec current-value on-change-event modulator-event-base label-width]}]
+  (let [modulated? (reg/active-modulator? current-value)
+        inactive? (and (reg/modulated? current-value) (not modulated?))
+        spec (index-spec param-spec current-value)
+        event (fn [type & {:as more}] (merge modulator-event-base {:event/type type :param-key param-key} more))
+        text #(param-controls/choice-text param-spec %)]
+    {:fx/type :v-box
+     :spacing 4
+     :children (filterv some?
+                        [{:fx/type :h-box
+                          :spacing 8
+                          :alignment :center-left
+                          :children [{:fx/type :label
+                                      :text (or (:label param-spec) (name param-key))
+                                      :pref-width (or label-width 80)
+                                      :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
+                                     {:fx/type :toggle-button
+                                      :text "∿"
+                                      :selected modulated?
+                                      :focus-traversable false
+                                      :style-class [(if modulated? "modulator-toggle-active" "modulator-toggle")]
+                                      :tooltip {:fx/type :tooltip :text (if modulated? "Stop modulating" "Follow a modulator")}
+                                      :on-selected-changed (event :modulator/toggle :param-spec spec :current-value current-value)}
+                                     (if modulated?
+                                       {:fx/type modulator-type-selector
+                                        :current-type (:type current-value)
+                                        :on-select-event (event :modulator/set-type :param-spec spec :current-value current-value)}
+                                       {:fx/type :combo-box
+                                        :id (str "choice-" (name param-key))
+                                        :items (vec (:choices param-spec))
+                                        :value (choice-value param-spec current-value)
+                                        :pref-width 150
+                                        :button-cell (fn [item] {:text (text item)})
+                                        :cell-factory {:fx/cell-type :list-cell :describe (fn [item] {:text (text item)})}
+                                        :on-value-changed (if inactive?
+                                                            (event :modulator/update-static-value :current-value current-value)
+                                                            (assoc on-change-event :param-key param-key))})]}
+                         (when modulated?
+                           {:fx/type :label
+                            :text (index-labels param-spec)
+                            :wrap-text true
+                            :padding {:left 12}
+                            :style-class ["label" "label-hint" "choice-index-labels"]})
+                         (when modulated?
+                           {:fx/type modulator-params-editor
+                            :modulator-config current-value
+                            :on-param-change-event (event :modulator/update-param :current-value current-value)
+                            :on-retrigger-event (event :modulator/retrigger)
+                            :param-spec spec})])}))
+
+
 ;; Integration with param-controls-list
 
 
 (defn modulatable-param-control
   "Like param-control but with modulator support for numeric types.
    
-   Routes to modulator-param-control for :float/:int, otherwise delegates
+   Routes to modulator-param-control for :float/:int and to
+   modulator-choice-control for a :modulatable? :choice, otherwise delegates
    to the standard param-control from parameter-controls namespace.
    
    Props: same as modulator-param-control plus support for non-numeric types."
   [{:keys [param-spec] :as props}]
-  (case (:type param-spec :float)
+  (case (if (and (= :choice (:type param-spec)) (:modulatable? param-spec)) :modulatable-choice (:type param-spec :float))
+    ;; A choice that may follow a modulator (zones plan Z5)
+    :modulatable-choice (assoc props :fx/type modulator-choice-control)
     ;; Numeric types: use modulator-capable control
     (:float :int) {:fx/type modulator-param-control
                    :param-key (:param-key props)

@@ -92,7 +92,17 @@
       (is (= {:kind :master :text "Master (everything)" :checked? true :target nil} (first rows)))
       (is (some #{:zone} (kinds rows)))
       (is (not-any? #{:combine :pin :inherit} (kinds rows)))
-      (is (not-any? :new? (filter #(= :zone (:kind %)) rows)) "no new zone: nothing draws into it"))))
+      (is (not-any? :new? (filter #(= :zone (:kind %)) rows)) "no new zone: nothing draws into it")))
+  (testing "a zone pattern's places (zones plan Z5): Every laser first, then All, the zones and the groups, ticked by the lane"
+    (let [rows (target-control/menu-model (assoc ctx :scope :pattern :lane [:zone/a :zone/d :graphics]))]
+      (is (= {:kind :ref :ref :lane/lasers :text "Every laser, left to right" :checked? false :target :lane/lasers} (first rows)))
+      (is (= :all (:ref (second rows))))
+      (is (not-any? #{:combine :pin :inherit} (kinds rows)))
+      (is (= [["A · Beams → Left" true] ["B → Right" false] ["D → Right" true] ["New zone (C → Left)" false]]
+             (mapv (juxt :text :checked?) (filter #(= :zone (:kind %)) rows)))
+          "the lane's zones are listed, ticked")
+      (is (:checked? (row rows :group :graphics)))
+      (is (not (:checked? (row rows :group :crowd)))))))
 
 (deftest combine-rows-toggle-test
   (let [combine (fn [own] (:rows (some #(when (= :combine (:kind %)) %) (target-control/menu-model (assoc ctx :own own)))))]

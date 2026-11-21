@@ -6,7 +6,7 @@
    
    Provides:
    - Timeline view for sequencing items with start/duration
-   - The cue's Target (zones plan Z4)
+   - The cue's Target (zones plan Z4) and its zone pattern (Z5)
    - Trigger mode picker
    - Editable chain name"
   (:require [cljfx.api :as fx]
@@ -17,6 +17,7 @@
             [laser-show.views.components.visual-editors.timeline-editor :as timeline-editor]
             [laser-show.views.components.load-warning :as load-warning]
             [laser-show.views.components.target-control :as target-control]
+            [laser-show.views.components.zone-pattern-editor :as zone-pattern-editor]
             [laser-show.routing.targets :as targets]
             [laser-show.common.util :as u])
   (:import [javafx.scene.input KeyCode KeyEvent]))
@@ -60,7 +61,7 @@
 (defn- timeline-cue-editor-content
   "Main content of the timeline-based cue chain editor.
    Center: timeline-editor (its toolbar starts with the editable name)
-   Footer: the cue's Target, trigger mode, close button"
+   Footer: the cue's Target and zone pattern, trigger mode, close button"
   [{:keys [fx/context]}]
   (let [dialog-data (fx/sub-ctx context subs/dialog-data :timeline-cue-editor)
         {:keys [col row]} dialog-data
@@ -128,6 +129,11 @@
                                                     (fx/sub-ctx context subs/default-target) col)
                    :on-set {:event/type :cue-chain/set-target :col col :row row}
                    :tooltip "Where the cue's content goes, unless a clip, a group or a track sets its own"}
+                  ;; The cue's zone pattern (zones plan Z5)
+                  {:fx/type zone-pattern-editor/pattern-field
+                   :id "pattern-chip-cue"
+                   :col col
+                   :row row}
                   {:fx/type trigger-mode-dropdown
                    :col col
                    :row row

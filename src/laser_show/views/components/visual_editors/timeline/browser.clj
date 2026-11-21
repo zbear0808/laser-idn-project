@@ -58,6 +58,7 @@
          :v-box/vgrow :always
          :fill? true
          :drag-kind :effect
+         :scope :item
          ;; Where content goes is its Target, not an effect (zones plan Z4)
          :active-tab (if (= :zone effect-tab) :shape (or effect-tab :shape))
          :on-tab-change {:event/type :timeline/set-add-panel-tab :panel :effect}

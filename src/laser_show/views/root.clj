@@ -27,6 +27,7 @@
    [laser-show.views.dialogs.effect-chain-editor :as effect-chain-editor]
    [laser-show.views.dialogs.cue-chain-editor :as cue-chain-editor]
    [laser-show.views.dialogs.timeline-cue-editor :as timeline-cue-editor]
+   [laser-show.views.dialogs.zone-pattern-editor :as zone-pattern-editor]
    [laser-show.views.dialogs.add-projector-manual :as add-projector-dialog]
    [laser-show.views.dialogs.zone-group-editor :as zone-group-editor]
    [laser-show.views.dialogs.cell-trigger-editor :as cell-trigger-editor]
@@ -182,6 +183,7 @@
         effect-editor-open? (fx/sub-ctx context subs/dialog-open? :effect-chain-editor)
         cue-editor-open? (fx/sub-ctx context subs/dialog-open? :cue-chain-editor)
         timeline-editor-open? (fx/sub-ctx context subs/dialog-open? :timeline-cue-editor)
+        zone-pattern-editor-open? (fx/sub-ctx context subs/dialog-open? :zone-pattern-editor)
         add-projector-open? (fx/sub-ctx context subs/dialog-open? :add-projector-manual)
         zone-group-editor-open? (fx/sub-ctx context subs/dialog-open? :zone-group-editor)
         trigger-editor-open? (fx/sub-ctx context subs/dialog-open? :trigger-editor)
@@ -228,6 +230,10 @@
                     (when timeline-editor-open?
                       {:fx/type timeline-cue-editor/timeline-cue-editor-dialog
                        :fx/key :timeline-cue-editor-dialog})
+                    ;; A cue's zone pattern (zones plan Z5)
+                    (when zone-pattern-editor-open?
+                      {:fx/type zone-pattern-editor/zone-pattern-editor-dialog
+                       :fx/key :zone-pattern-editor-dialog})
                     ;; Add projector manually dialog
                     (when add-projector-open?
                       {:fx/type add-projector-dialog/add-projector-manual-dialog

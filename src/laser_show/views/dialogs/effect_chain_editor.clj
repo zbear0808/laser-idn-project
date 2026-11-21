@@ -41,7 +41,8 @@
    :item-event-template {:event/type :effect-chain/add-effect-from-bank
                          :col col
                          :row row}
-   :include-zone? true})
+   ;; The effects grid's bank: Zone pattern and Map cycle too (zones plan Z5)
+   :scope :global})
 
 
 ;; Right Bottom: Parameter Editor (using shared component)

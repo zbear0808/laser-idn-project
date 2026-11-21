@@ -4,7 +4,9 @@
    headers), the grid cells' badges and the
    column numbers that set a column's target, the zone map pads
    (views/components/zone_map_pads.clj) and the zones and maps under the
-   Zone Groups tab (views/components/zone_maps_panel.clj).
+   Zone Groups tab (views/components/zone_maps_panel.clj); zone patterns'
+   chip, places and window (zones plan Z5,
+   views/components/zone_pattern_editor.clj).
 
    cljfx.css writes a map of more than eight rules in hash order, so a state
    rule has one class more than the rule it overrides.
@@ -164,4 +166,49 @@
        ".zone-maps-section-title"
        {:-fx-text-fill text-secondary
         :-fx-font-size 11
-        :-fx-font-weight "bold"}})))
+        :-fx-font-weight "bold"}
+
+       ;; Zone patterns (zones plan Z5): the Pattern chip, dim with none
+       ".target-chip.pattern-chip.pattern-chip-none"
+       {:-fx-background-color "transparent"
+        :-fx-border-color border
+        :-fx-text-fill text-muted}
+       ;; A lane's places, and a Map cycle's maps
+       ".zone-pattern-place"
+       {:-fx-background-color (str blue "30")
+        :-fx-background-radius 9
+        :-fx-padding [1 2 1 8]}
+       ".zone-pattern-place .zone-pattern-place-name"
+       {:-fx-text-fill blue
+        :-fx-font-size 11}
+       ".zone-pattern-place .zone-pattern-place-remove"
+       {:-fx-background-color "transparent"
+        :-fx-text-fill text-secondary
+        :-fx-padding [0 4 0 4]
+        :-fx-font-size 11
+        :-fx-cursor "hand"}
+       ".zone-pattern-arrow"
+       {:-fx-text-fill text-secondary}
+       ;; The window's hints, Now, the fold line and warnings
+       ".zone-pattern-hint"
+       {:-fx-text-fill text-muted
+        :-fx-font-size 11}
+       ".zone-pattern-now"
+       {:-fx-text-fill text-primary
+        :-fx-font-weight "bold"}
+       ".zone-pattern-fold"
+       {:-fx-text-fill text-secondary
+        :-fx-font-size 11
+        :-fx-graphic-text-gap 6}
+       ".zone-pattern-fold .zone-pattern-fold-icon"
+       {:-fx-text-fill blue}
+       ".zone-pattern-warning"
+       {:-fx-text-fill text-secondary
+        :-fx-font-size 11}
+       ".zone-pattern-warning.zone-pattern-warning-warn"
+       {:-fx-text-fill orange}
+       ".zone-pattern-warning.zone-pattern-warning-error"
+       {:-fx-text-fill red}
+       ;; The ⇄ on a cue's badge
+       ".grid-cell-target-badge .grid-cell-pattern-glyph"
+       {:-fx-text-fill blue}})))
