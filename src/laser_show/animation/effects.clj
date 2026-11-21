@@ -88,8 +88,21 @@
                        :default default-value
                        :min min-value (optional)
                        :max max-value (optional)
-                       :choices [...] (for :choice type)}]
-    :apply-transducer (fn [time-ms bpm params frame-ctx] transducer)}"
+                       :choices [...] (for :choice type)
+                       :modulatable? true (optional, a :choice: a modulator's
+                                           value picks a choice by index, choice-at)}]
+    :apply-transducer (fn [time-ms bpm params frame-ctx] transducer)}
+   
+   Optional keys, kept and read elsewhere:
+   - :hidden? true: registered (an old show's effect still reads) but offered
+     nowhere (zones plan Z4's Zone Selector)
+   - :scope: where the effect banks offer it, a set of :item and :global
+     (absent means both); a zone-stage effect is :global (vibe Phase 8)
+   - :apply-zones (fn [frames params ctx] frames'): a zone-stage effect that
+     moves a cue's frames between places (routing.zone-remap, zones plan Z5);
+     its :apply-transducer is identity
+   - :select-map (fn [params pulses beats maps] map-id): a zone-stage effect
+     the show clock asks for the zone map (the Map cycle, zones plan Z5)"
   [effect-def]
   {:pre [(keyword? (:id effect-def))
          (string? (:name effect-def))
@@ -472,6 +485,47 @@
 (def resolve-param-fn
   "Alias for make-param-resolver for compatibility with modulation architecture."
   make-param-resolver)
+
+
+;; Zone-stage effects (zones plan Z5, 07 §4.3)
+
+(defn zone-stage-effect?
+  "Is effect-def (a registered effect) a zone-stage one: it moves frames
+   between places (:apply-zones) or picks the zone map (:select-map), and
+   never touches a point?"
+  [effect-def]
+  (boolean (or (:apply-zones effect-def) (:select-map effect-def))))
+
+(defn choice-at
+  "The choice a modulated :choice parameter's value v picks: the one at
+   index ⌊v + 1e-9⌋, clamped to choices; nil for none."
+  [choices v]
+  (let [n (count choices)]
+    (when (pos? n)
+      (nth choices (max 0 (min (dec n) (long (Math/floor (+ (double v) 1e-9)))))))))
+
+(defn resolve-effect-params
+  "An effect instance's parameters at timing-ctx, as its transducer would
+   get them (make-effect-transducer, without a spatial driver): an enabled
+   keyframe animation's, else its params, over the effect's defaults, each
+   modulator resolved once (resolve-params-global); then each :modulatable?
+   choice a modulator gave a number picks its choice by index (choice-at).
+   For a zone-stage effect, which no transducer reads (vibe Phase 8)."
+  [effect-instance timing-ctx]
+  (let [effect-id (:effect-id effect-instance)
+        km (:keyframe-modulator effect-instance)
+        user-params (if (and km (:enabled? km))
+                      (kf/eval-keyframe km (mod-context timing-ctx (:time-ms timing-ctx) (:bpm timing-ctx)))
+                      (:params effect-instance))
+        resolved (resolve-params-global (merge-with-defaults effect-id user-params)
+                                        (:time-ms timing-ctx) (:bpm timing-ctx) timing-ctx)]
+    (reduce (fn [params {:keys [key type choices modulatable?]}]
+              (let [v (get params key)]
+                (if (and modulatable? (= :choice type) (number? v))
+                  (assoc params key (choice-at choices v))
+                  params)))
+            resolved
+            (:parameters (get-effect effect-id)))))
 
 (set! *warn-on-reflection* false)
 (set! *unchecked-math* false)

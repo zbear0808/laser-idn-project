@@ -29,7 +29,28 @@
    ;; The 6-point test frame is under every budget the limits allow (1 kpps at
    ;; 120 fps is 8 points), so Decimate leaves it whole; points-test varies them.
    [:decimate :kpps] "the test frame is under every budget"
-   [:decimate :fps] "the test frame is under every budget"})
+   [:decimate :fps] "the test frame is under every budget"
+   ;; Zones plan Z5: a zone pattern and a Map cycle are routing parameters,
+   ;; read by the zone stage (routing.zone-remap) and the show clock, never by
+   ;; a point transducer, which is identity (zone-remap-test, zone-patterns-test)
+   [:zone-pattern :style] "a routing param: the zone stage reads it"
+   [:zone-pattern :zones] "a routing param: the zone stage reads it"
+   [:zone-pattern :source] "a routing param: the zone stage reads it"
+   [:zone-pattern :from] "a routing param: the zone stage reads it"
+   [:zone-pattern :rate] "a routing param: the zone stage reads it"
+   [:zone-pattern :offset] "a routing param: the zone stage reads it"
+   [:zone-pattern :step-on] "a routing param: the zone stage reads it"
+   [:zone-pattern :clock] "a routing param: the zone stage reads it"
+   [:zone-pattern :restart-on] "a routing param: the zone stage reads it"
+   [:zone-pattern :path] "a routing param: the zone stage reads it"
+   [:zone-pattern :width] "a routing param: the zone stage reads it"
+   [:zone-pattern :seed] "a routing param: the zone stage reads it"
+   [:zone-pattern :follow-pads?] "a routing param: the zone stage reads it"
+   [:zone-map-cycle :maps] "a routing param: the show clock reads it"
+   [:zone-map-cycle :rate] "a routing param: the show clock reads it"
+   [:zone-map-cycle :offset] "a routing param: the show clock reads it"
+   [:zone-map-cycle :path] "a routing param: the show clock reads it"
+   [:zone-map-cycle :step-on] "a routing param: the show clock reads it"})
 
 (def ^:private expected-effect-ids
   "Guard so this test fails loudly if an effect namespace stops loading."
@@ -38,7 +59,8 @@
     :intensity :blackout :threshold :trace-fade
     :rgb-curves :axis-transform
     :decimate
-    :zone-selector})
+    :zone-selector
+    :zone-pattern :zone-map-cycle})
 
 (def ^:private test-frame
   "Small frame: varied positions well inside [-1, 1] and saturated, non-white

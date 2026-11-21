@@ -5,9 +5,13 @@
             [laser-show.animation.effects :as effects]
             [laser-show.animation.effects.color]      ;; Load color effects
             [laser-show.animation.effects.intensity]  ;; Load intensity effects
+            [laser-show.animation.effects.shape]
+            [laser-show.animation.effects.zone]
             [laser-show.animation.modulation :as mod]
             [laser-show.animation.types :as t]
-            [laser-show.backend.output-errors :as oe]))
+            [laser-show.backend.output-errors :as oe]
+            [laser-show.routing.zone-patterns :as zone-patterns]
+            [laser-show.routing.zone-remap :as zone-remap]))
 
 (def sample-effect-1
   {:effect-id :scale :params {:x-scale 1.5} :enabled? true})
@@ -513,3 +517,84 @@
         (is (= (each-param-its-own-context frame shift nil)
                (effects/apply-effect-chain frame shift)))
         (is (not= frame (effects/apply-effect-chain frame shift)))))))
+
+
+;; A zone-stage effect's parameters (zones plan Z5, 07 §4.3): resolved once
+;; per tick, keyframes or params, the defaults under them, and a choice may
+;; follow a modulator by index
+
+(deftest resolve-effect-params-keyframes-then-params-test
+  (let [pattern {:effect-id :zone-pattern :enabled? true
+                 :params {:style :chase :zones [:lane/lasers] :offset (sine 0.0 2.0 4.0)}}
+        at (fn [instance timing-ctx] (effects/resolve-effect-params instance timing-ctx))]
+    (testing "the params, the defaults under them, modulators read at the context's time"
+      (let [p (at pattern half-a-beat-in)]
+        (is (= :chase (:style p)))
+        (is (= [:lane/lasers] (:zones p)))
+        (is (= 1.0 (:rate p)) "a default")
+        (is (= :all (:from p)) "a default")
+        (is (number? (:offset p)) "the sine, resolved")
+        (is (= (mod/resolve-param (sine 0.0 2.0 4.0) (mod/make-context half-a-beat-in)) (:offset p)))))
+    (testing "an enabled keyframe animation wins over the params"
+      (let [keyed (assoc pattern :keyframe-modulator
+                         {:enabled? true :period 4.0 :time-unit :beats
+                          :keyframes [{:position 0.0 :params {:style :shift :offset 0.0 :zones [:zone/a :zone/b]} :interpolation :linear}
+                                      {:position 1.0 :params {:style :swap :offset 4.0 :zones [:zone/a :zone/b]} :interpolation :linear}]})
+            p (at keyed {:accumulated-beats 2.0 :accumulated-ms 1000.0 :phase-offset 0.0 :effective-beats 2.0 :time-ms 1000.0 :bpm 120.0})]
+        (is (= :shift (:style p)) "a choice holds the earlier keyframe's")
+        (is (= [:zone/a :zone/b] (:zones p)))
+        (is (< 1.9 (double (:offset p)) 2.1) "numbers between keyframes interpolate: half way")
+        (is (= 1.0 (:rate p)) "what no keyframe sets is the default")
+        (is (= (:offset (at pattern half-a-beat-in))
+               (:offset (at (assoc-in keyed [:keyframe-modulator :enabled?] false) half-a-beat-in)))
+            "a disabled one is ignored")))
+    (testing "an unknown effect: its params as they are"
+      (is (= {:x 1} (at {:effect-id :nope :params {:x 1}} half-a-beat-in))))))
+
+(deftest modulated-choice-picks-by-index-test
+  (testing "choice-at: the index ⌊v + 1e-9⌋, clamped"
+    (let [choices [:alternate :chase :ping-pong :random :shift :swap]]
+      (is (= [:alternate :chase :ping-pong :random] (mapv #(effects/choice-at choices %) [0.0 1.2 2.5 2.9999999999])))
+      (is (= [:alternate :swap :swap] (mapv #(effects/choice-at choices %) [-3.0 5.0 99.0])) "clamped to the list")
+      (is (nil? (effects/choice-at [] 1.0)))))
+  (testing "a Step on Style following HIT moves to the next style on each press (07 §8.3)"
+    (let [step {:type :step :active? true :source :hit :min 0.0 :max 5.0 :steps 6 :order :up :wrap? false :glide 0.0 :values []}
+          pattern {:effect-id :zone-pattern :enabled? true :params {:style step}}
+          after (fn [n] (:style (effects/resolve-effect-params pattern (assoc half-a-beat-in :pulses (when (pos? n) {:hit {:count n :beats 0.1}})))))]
+      (is (= [:alternate :chase :ping-pong :random :shift :swap :alternate] (mapv after [0 1 2 3 4 5 6])))))
+  (testing "Moves and Path follow one too; a choice that doesn't say so keeps its value"
+    (let [p (effects/resolve-effect-params {:effect-id :zone-pattern
+                                            :params {:source {:type :sine :active? false :value 1.0}
+                                                     :path {:type :sine :active? false :value 1.0}
+                                                     :step-on :hit}}
+                                           half-a-beat-in)]
+      (is (= :picture (:source p)))
+      (is (= :bounce (:path p)))
+      (is (= :hit (:step-on p)))))
+  (testing "a static choice is its own value"
+    (is (= :swap (:style (effects/resolve-effect-params {:effect-id :zone-pattern :params {:style :swap}} half-a-beat-in))))))
+
+(deftest zone-stage-effects-register-test
+  (let [pattern (effects/get-effect :zone-pattern)
+        cycle (effects/get-effect :zone-map-cycle)
+        frame [[0.1 0.2 1.0 0.5 0.0] [0.3 0.4 0.0 1.0 1.0]]]
+    (is (= "Zone pattern" (:name pattern)))
+    (is (= "Map cycle" (:name cycle)))
+    (doseq [fx [pattern cycle]]
+      (testing (:name fx)
+        (is (= :zone (:category fx)))
+        (is (= :bpm (:timing fx)))
+        (is (= #{:global} (:scope fx)) "offered on the effects grid only")
+        (is (not (:hidden? fx)))
+        (is (effects/zone-stage-effect? fx))
+        (is (= frame (into [] ((:apply-transducer fx) 0.0 120.0 {} {:point-count 2}) frame))
+            "as a point effect it is identity: nothing reads it there")))
+    (is (= zone-patterns/pattern-parameters (:parameters pattern)))
+    (is (= zone-patterns/cycle-parameters (:parameters cycle)))
+    (is (= zone-remap/apply-pattern (:apply-zones pattern)) "the stage runs it")
+    (is (= zone-patterns/cycle-pick (:select-map cycle)) "the show clock picks the map with it")
+    (is (= {:renderer :zone-pattern} (:ui-hints pattern)))
+    (is (= {:renderer :map-cycle} (:ui-hints cycle)))
+    (is (not (effects/zone-stage-effect? (effects/get-effect :scale))))
+    (is (not (effects/zone-stage-effect? (effects/get-effect :zone-selector))) "the hidden selector routes nothing")
+    (is (not (effects/zone-stage-effect? nil)))))

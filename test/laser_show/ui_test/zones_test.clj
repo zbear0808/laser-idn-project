@@ -505,10 +505,12 @@
 ;; The Zone Selector leaves the bank (06 §4.5, invariant 13)
 
 (deftest bank-offers-no-zone-selector-test
-  (testing "the effects grid's editor: no Zone tab"
+  (testing "the effects grid's editor: its Zone tab offers Zone pattern and Map cycle (zones plan Z5), never the selector"
     (events/dispatch! {:event/type :effect-chain/open-editor :col 0 :row 0})
-    (ui/wait-for! #(seq (ui/query-all "#shape-tab")))
-    (is (empty? (ui/query-all "#zone-tab")))
+    (ui/wait-for! #(seq (ui/query-all "#zone-tab")))
+    (ui/click! (ui/robot) "#zone-tab")
+    (ui/wait-for! #(seq (filter #{"Zone pattern"} (texts ".bank-item-btn"))))
+    (is (= ["Map cycle" "Zone pattern"] (sort (texts ".bank-item-btn"))))
     (events/dispatch! {:event/type :ui/close-dialog :dialog-id :effect-chain-editor})
     (ui/wait-for! #(empty? (ui/query-all "#shape-tab"))))
   (testing "the cue chain editor: none either"
