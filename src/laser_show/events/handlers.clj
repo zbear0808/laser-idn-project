@@ -10,6 +10,7 @@
    [laser-show.events.handlers.zone-groups :as zone-groups]
    [laser-show.events.handlers.zone-maps :as zone-maps]
    [laser-show.events.handlers.zone-patterns :as zone-patterns]
+   [laser-show.events.handlers.step-grid :as step-grid]
    [laser-show.events.handlers.timing :as timing]
    [laser-show.events.handlers.ui :as ui]
    [laser-show.events.handlers.files :as project]
@@ -52,6 +53,7 @@
       "zone-map" (zone-maps/handle event)  ; A map switch: pads, their timing and keys
       "zone-patterns" (zone-patterns/handle event)  ; A cue's zone pattern, a new pattern cell
       "pattern-pads" (zone-patterns/handle event)  ; The pattern pads, STEP, their timing and keys
+      "step-grid" (step-grid/handle event)  ; A zone pattern's step grid (zones plan Z6)
       "timing" (timing/handle event)
       "transport" (timing/handle event)  ; Transport grouped with timing
       "show-clock" (timing/handle event)  ; What the show clock reports back

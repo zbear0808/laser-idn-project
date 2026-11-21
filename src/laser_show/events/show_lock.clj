@@ -12,7 +12,9 @@
    key, Use now), and Exit, which still asks about unsaved changes. Where
    content goes is structure (zones plan Z4): the targets, the zones' labels
    and the maps are refused too, and so are the zone patterns' and Map
-   cycles' edits (Z5, pattern-edit?); the pattern pads, STEP and CYCLE are
+   cycles' edits (Z5, pattern-edit?) and a step grid's (Z6: opening its
+   window, its cursor and Copy go through, and so does a drag's release);
+   the pattern pads, STEP and CYCLE are
    a performer's. A safety zone edit goes through while it
    makes no zone larger, so the lock never stands between you and a safer
    show, and is refused when it would let light somewhere new (zones plan
@@ -81,7 +83,14 @@
     ;; pad's setting and its key, as a map pad's. A pad's press, STEP, CYCLE,
     ;; their keys and a due switch are a performer's, and go through
     :zone-patterns/set-cue-pattern :zone-patterns/new-cell
-    :pattern-pads/set-pad-bar :pattern-pads/clear-control})
+    :pattern-pads/set-pad-bar :pattern-pads/clear-control
+    ;; A step grid's edits (zones plan Z6): a zone pattern's, as its
+    ;; parameters' are (pattern-edit?). Opening its window, the cursor, Copy
+    ;; and a drag's release (it only lets go) are no edits, and go through
+    :step-grid/toggle :step-grid/paint-start :step-grid/paint :step-grid/set-length
+    :step-grid/add-row :step-grid/remove-row :step-grid/set-row :step-grid/move-row
+    :step-grid/fill-row :step-grid/clear-row :step-grid/clear :step-grid/clear-step
+    :step-grid/fill-step :step-grid/rotate :step-grid/start-from :step-grid/paste})
 
 (def ^:private chain-edit-namespaces
   "The events that edit an effect's parameters, modulators and keyframes
