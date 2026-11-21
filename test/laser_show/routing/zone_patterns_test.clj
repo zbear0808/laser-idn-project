@@ -232,3 +232,38 @@
     (is (nil? (zp/live-style {} 3.0)) "nothing set")
     (testing "a commit lands it"
       (is (= {:style :off :pending nil} (:pattern-pads (zp/commit-style s :off)))))))
+
+
+;; What a pattern's step counts (07 §8.3, S-11)
+
+(defn- press
+  "A pulse view's entry: n presses, the newest beats ago."
+  [n beats]
+  {:count n :beats beats :ms (* 500.0 beats) :held? false :since-release beats :recent [beats]})
+
+(deftest pattern-t-test
+  (let [ctx {:beats {:cue 3.5 :global 18.25} :pulses nil}]
+    (is (= 3.5 (zp/pattern-t {:step-on :clock :clock :cue} ctx)) "the cue's beats from its start")
+    (is (= 18.25 (zp/pattern-t {:step-on :clock :clock :global} ctx)) "the show's beats")
+    (is (= 18.25 (zp/pattern-t {} ctx)) "the beat, on the show's beats, when it doesn't say"))
+  (testing "a pulse source: its press count in the tick's view"
+    (let [view {:hit (press 31 0.4) :accent (press 2 1.0) :flash (press 1 3.0) :zone-step (press 7 0.1)}
+          ctx {:beats {:cue 3.5 :global 18.25} :pulses (assoc view :any (assoc (press 34 0.4) :count 34))}]
+      (is (= 31.0 (zp/pattern-t {:step-on :hit} ctx)))
+      (is (= 7.0 (zp/pattern-t {:step-on :zone-step} ctx)) "the Zone step key")
+      (is (= 34.0 (zp/pattern-t {:step-on :any} ctx)) ":any, the three summed (pulses/view)")
+      (is (= 0.0 (zp/pattern-t {:step-on :vibe} ctx)) "0 before its first press")
+      (is (= 0.0 (zp/pattern-t {:step-on :cue} {:beats {:cue 1.0}})) "no presses at all"))))
+
+(deftest restart-on-rebases-test
+  (let [beats {:cue 3.5 :global 18.25}]
+    (is (= 0.75 (zp/pattern-t {:step-on :clock :clock :global :restart-on :flash} {:beats beats :pulses {:flash (press 2 0.75)}}))
+        "the beats since the newest FLASH (pulses/rebase)")
+    (is (= 18.25 (zp/pattern-t {:step-on :clock :clock :global :restart-on :flash} {:beats beats :pulses {:hit (press 1 0.5)}}))
+        "its own clock before the first press, as a looping modulator")
+    (is (= 3.5 (zp/pattern-t {:step-on :clock :clock :cue :restart-on :own} {:beats beats :pulses {:flash (press 2 0.75)}}))
+        ":own: no restart")
+    (is (= 2.0 (zp/pattern-t {:step-on :hit :restart-on :flash} {:beats beats :pulses {:hit (press 2 0.5) :flash (press 1 0.25)}}))
+        "Restart on is for the beat; a press source counts its presses")
+    (testing "the step lands at the first tick after the press: step 0 then"
+      (is (= 0 (zp/pattern-step {:step-on :clock :restart-on :flash :rate 1.0} {:beats beats :pulses {:flash (press 1 0.0)}}))))))

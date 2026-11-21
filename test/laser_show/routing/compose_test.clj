@@ -5,7 +5,8 @@
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.animation.frames :as frames]
             [laser-show.routing.compose :as compose]
-            [laser-show.routing.rig :as rig]))
+            [laser-show.routing.rig :as rig]
+            [laser-show.routing.zone-remap :as zone-remap]))
 
 (defn- pid [k] (keyword (str "p" k)))
 
@@ -484,3 +485,86 @@
                       kept)]
       (is (< 50 (count kept)) "enough cases where Decimate keeps the count and the laser is too slow")
       (is (empty? bad) (pr-str (take 3 bad))))))
+
+;; Zones plan Z5: what a zone pattern's frames draw on each rig (07 §8.4,
+;; §8.5; spec 01 §6.2 a)
+
+(defn- stage
+  "zone-frames after one zone pattern (params) at step t (both clocks), on
+   routing's rig."
+  [zone-frames params t r]
+  (zone-remap/apply-pattern zone-frames params (merge (zone-remap/routing-ctx r) {:beats {:cue t :global t}})))
+
+(defn- where-drawn
+  "{laser region} of the lasers that draw zone-frames, region :L, :R or
+   :whole; each draws its one picture once, or the test fails."
+  [zone-frames r n]
+  (into {}
+        (keep (fn [k]
+                (when-let [plan (compose/cue-plan zone-frames r (pid k) false)]
+                  (is (= 1 (count (concat (:L plan) (:whole plan) (:R plan)))) (str "laser " k " draws it once"))
+                  [(pid k) (some #(when (seq (get plan %)) %) [:L :whole :R])])))
+        (range 1 (inc n))))
+
+(deftest example-a-alternate-on-one-laser-test
+  (testing "spec §6.2 a: the All picture alternating A ⇄ B on one laser draws in its left half, then its right"
+    (let [r (routing-on (rig-state 1) :map/left-right)
+          alternate {:style :alternate :zones [:zone/a :zone/b]}]
+      (is (= {:zone/a A} (stage {:all A} alternate 0.0 r)))
+      (is (= [(fit A L1) 1] (draws [(cue (stage {:all A} alternate 0.0 r))] r :p1)) "beat 0: :L")
+      (is (= [(fit A R1) 1] (draws [(cue (stage {:all A} alternate 1.0 r))] r :p1)) "beat 1: :R")
+      (is (= [(fit A L1) 1] (draws [(cue (stage {:all A} alternate 2.0 r))] r :p1)) "beat 2: :L again"))))
+
+(def ^:private fold-alternate
+  "07 §8.5's Alternate table over A-D, the All picture: {n {map [even odd]}},
+   each {laser region}."
+  {1 {:map/left-right [{:p1 :L} {:p1 :R}] :map/odd-even [{:p1 :L} {:p1 :R}] :map/unison [{:p1 :whole} {:p1 :whole}]}
+   2 {:map/left-right [{:p1 :whole} {:p2 :whole}] :map/odd-even [{:p1 :whole} {:p2 :whole}]
+      :map/unison [{:p1 :whole :p2 :whole} {:p1 :whole :p2 :whole}]}
+   3 {:map/left-right [{:p1 :whole :p2 :L} {:p2 :R :p3 :whole}] :map/odd-even [{:p1 :whole :p3 :whole} {:p2 :whole}]
+      :map/unison [{:p1 :whole :p2 :whole :p3 :whole} {:p1 :whole :p2 :whole :p3 :whole}]}
+   4 {:map/left-right [{:p1 :whole :p2 :whole} {:p3 :whole :p4 :whole}]
+      :map/odd-even [{:p1 :whole :p3 :whole} {:p2 :whole :p4 :whole}]
+      :map/unison [{:p1 :whole :p2 :whole :p3 :whole :p4 :whole} {:p1 :whole :p2 :whole :p3 :whole :p4 :whole}]}
+   5 {:map/left-right [{:p1 :whole :p2 :whole :p3 :L} {:p3 :R :p4 :whole :p5 :whole}]
+      :map/odd-even [{:p1 :whole :p3 :whole :p5 :whole} {:p2 :whole :p4 :whole}]
+      :map/unison [(zipmap [:p1 :p2 :p3 :p4 :p5] (repeat :whole)) (zipmap [:p1 :p2 :p3 :p4 :p5] (repeat :whole))]}})
+
+(deftest fold-tables-test
+  (let [abcd [:zone/a :zone/b :zone/c :zone/d]]
+    (doseq [[n by-map] fold-alternate
+            [map-id [even odd]] by-map]
+      (let [r (routing-on (rig-state n) map-id)]
+        (testing (str n " lasers, " map-id)
+          (testing "Alternate over A-D: A C on even steps, B D on odd ones"
+            (is (= even (where-drawn (stage {:all A} {:style :alternate :zones abcd} 0.0 r) r n)))
+            (is (= odd (where-drawn (stage {:all A} {:style :alternate :zones abcd} 1.0 r) r n))))
+          (testing "Chase over A-D: A, B, C, D in turn, per laser the Alternate table again"
+            (is (= [even odd even odd] (mapv #(where-drawn (stage {:all A} {:style :chase :zones abcd} % r) r n) [0.0 1.0 2.0 3.0])))))))
+    (testing "Chase across Every laser: the map doesn't matter"
+      (doseq [n [1 2 3 4 5]
+              map-id [:map/left-right :map/odd-even :map/unison]]
+        (let [r (routing-on (rig-state n) map-id)
+              steps (mapv #(where-drawn (stage {:all A} {:style :chase :zones [:lane/lasers]} (double %) r) r n) (range n))]
+          (is (= (if (= 1 n) [{:p1 :L}] (mapv (fn [k] {(pid (inc k)) :whole}) (range n))) (if (= 1 n) [(first steps)] steps))
+              (str n " lasers, " map-id))
+          (when (= 1 n)
+            (is (= {:p1 :R} (where-drawn (stage {:all A} {:style :chase :zones [:lane/lasers]} 1.0 r) r 1)) "one laser: its halves")))))
+    (testing "the middle on :both is in Left and Right whole, so it draws on every step, never split"
+      (let [r (routing-on (rig-state 3 :middle :both) :map/left-right)]
+        (is (= {:p1 :whole :p2 :whole} (where-drawn (stage {:all A} {:style :alternate :zones abcd} 0.0 r) r 3)))
+        (is (= {:p2 :whole :p3 :whole} (where-drawn (stage {:all A} {:style :alternate :zones abcd} 1.0 r) r 3)))))
+    (testing "a two-wide Chase under a two-lane map lights both lanes each step: each laser draws A once"
+      (let [r (routing-on (rig-state 2) :map/left-right)]
+        (is (= {:p1 :whole :p2 :whole} (where-drawn (stage {:all A} {:style :chase :zones abcd :width 2} 1.0 r) r 2)))))))
+
+(deftest copy-is-drawn-once-per-laser-test
+  (testing "07 §8.4: three lasers, Left / Right, the middle split; X in A and the All picture P, Alternate over A-D"
+    (let [r (routing-on (rig-state 3) :map/left-right)
+          X (circle 33) P (into [] (circle 33))
+          frames (stage {:zone/a X :all P} {:style :alternate :zones [:zone/a :zone/b :zone/c :zone/d] :source :picture} 0.0 r)]
+      (is (= {:zone/a X [:zone/a :zone/c] P} frames) "the copy is one frame under A and C")
+      (is (= 68 (compose/plan-points (compose/cue-plan frames r :p1 false))) "p1 draws X and P: 68 points, not 103")
+      (is (= [(join X P) 0] (draws [(cue frames)] r :p1)))
+      (is (= {:L [X P] :whole [] :R []} (compose/cue-plan frames r :p2 false)) "p2: X and P in its left half")
+      (is (nil? (compose/cue-plan frames r :p3 false)) "p3 is Right: neither"))))

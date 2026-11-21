@@ -46,6 +46,8 @@
             [laser-show.routing.targets :as targets]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.routing.zone-maps :as zone-maps]
+            [laser-show.routing.zone-patterns :as zone-patterns]
+            [laser-show.routing.zone-remap :as zone-remap]
             [laser-show.input.store :as input-store]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.timeline.model :as model]
@@ -88,24 +90,70 @@
   (or (nil? preview-zone)                    ;; nil = show all (master view)
       (contains? final-targets preview-zone))) ;; direct match only
 
+(defn- zone-stage?
+  "Is fx (an effect, not a group) a zone-stage one (animation.effects/
+   zone-stage-effect?): a zone pattern or a Map cycle?"
+  [fx]
+  (and (not (chains/group? fx)) (effects/zone-stage-effect? (effects/get-effect (:effect-id fx)))))
+
+(defn- point-effects
+  "items without their zone-stage effects (in groups too): the zone stage
+   runs those (zones plan Z5), so the point chain gains no identity stage."
+  [items]
+  (into []
+        (keep (fn [item]
+                (cond
+                  (chains/group? item) (update item :items point-effects)
+                  (zone-stage? item) nil
+                  :else item)))
+        items))
+
 (defn get-active-global-effects
-  "The active effects of the effects grid in state, as one effect chain, or
-   nil if there are none.
+  "The active point effects of the effects grid in state, as one effect
+   chain, or nil if there are none. Its zone patterns and Map cycles aren't
+   point effects (get-active-zone-effects, the show clock's cycle).
    
    Performance: Uses eager collection operations to avoid lazy evaluation overhead."
   [state]
   (let [effect-chains (get-in state [:chains :effect-chains] {})]
     (when (seq effect-chains)
       ;; Use eager operations: into with transducer (comp filter mapcat)
-      (let [active-effects (into []
-                                 (comp (filter :active?)
-                                       (mapcat :items))
-                                 (vals effect-chains))]
+      (let [active-effects (point-effects
+                            (into []
+                                  (comp (filter :active?)
+                                        (mapcat :items))
+                                  (vals effect-chains)))]
         (when (seq active-effects)
           ;; Debug logging - uncomment to trace effect chain construction
           ;; (println "[DEBUG get-active-effects] Found" (count active-effects) "effects:"
           ;;          (mapv :effect-id active-effects))
           {:effects active-effects})))))
+
+(defn get-active-zone-effects
+  "The effects grid's zone patterns that run (zones plan Z5, 07 §4.4):
+   [{:cell :effect} …], each enabled one (:apply-zones) in a cell that is
+   on, in reading order: row, then column, then chain order (vibe Phase 8
+   §7, probe v24), so the order never depends on the grid map's."
+  [state]
+  (into []
+        (for [[cell chain] (sort-by (fn [[[col row]]] [row col]) (get-in state [:chains :effect-chains]))
+              :when (:active? chain)
+              fx (chains/flatten-chain (:items chain))
+              :when (:apply-zones (effects/get-effect (:effect-id fx)))]
+          {:cell cell :effect fx})))
+
+(defn zone-ctx
+  "What every cue's zone stage shares in one tick (zones plan Z5): the
+   rig's refs and lasers from the tick's routing (zone-remap/routing-ctx)
+   and the pattern pads' live style (nil As set, :off, a style)."
+  [routing live-style]
+  (assoc (zone-remap/routing-ctx routing) :live-style live-style))
+
+(defn- state-zone-ctx
+  "zone-ctx from app state alone, for a render the show clock didn't set
+   up: the rig's routing, the pads' style at beats."
+  [state beats]
+  (zone-ctx (rig/routing (rig/routing-inputs state nil)) (zone-patterns/live-style state beats)))
 
 (defn render-context
   "What every cue's render in one tick shares. The show clock makes it once
@@ -115,7 +163,10 @@
      slot]: the value of the control learned for it now ([:config :input
      :macro-map], vibes.faders/with-faders), never a stored copy;
    - :pulses: the presses, which the clock puts on each cue's timing context;
-   - :global-effects: the effects grid's active chain in state, or nil;
+   - :global-effects: the effects grid's active point chain in state, or nil;
+   - :zone-effects: its zone patterns that run, in reading order
+     (get-active-zone-effects), and :zone-ctx, what their stage reads of the
+     tick (zone-ctx: the clock's, from its routing, else app state's);
    - :column-targets and :show-target: the grid columns' default targets and
      the show's (zones plan Z4); each cue's render takes its column's
      (:column-target, show-clock's render-cue);
@@ -126,12 +177,17 @@
   ([state input-values global-clock]
    (render-context state input-values global-clock nil))
   ([state input-values global-clock pulses]
+   (render-context state input-values global-clock pulses
+                   (state-zone-ctx state (double (or (:effective-beats global-clock) 0.0)))))
+  ([state input-values global-clock pulses zone-ctx]
    (let [input-values (faders/with-faders input-values (get-in state [:config :input :macro-map]))]
      {:input-values input-values
       :pulses pulses
       :column-targets (get-in state [:grid :column-targets])
       :show-target (get-in state [:config :default-target])
       :global-effects (get-active-global-effects state)
+      :zone-effects (get-active-zone-effects state)
+      :zone-ctx zone-ctx
       :global-ctx (assoc (cue-timing/get-global-timing-context global-clock (get-in state [:timing :bpm]))
                          :input-values input-values
                          :pulses pulses)})))
@@ -341,31 +397,73 @@
                inner)))
          tracks)))
 
+(defn- stage-patterns
+  "The zone patterns a cue's render runs (zones plan Z5, 07 §8.7), in
+   order: the cue's own enabled ones (:zone-patterns), their parameters at
+   the cue's timing context, then the effects grid's (zone-effects, reading
+   order), at the global clock with the cue's tempo (global-ctx). Each
+   {:id :key (where an error is reported) :effect :timing}."
+  [cue-chain timing-ctx zone-effects global-ctx]
+  (into (into []
+              (comp (filter chains/item-enabled?)
+                    (map (fn [fx] {:id (:id fx) :key [:zone-patterns :cue (:id fx)] :effect fx :timing timing-ctx})))
+              (:zone-patterns cue-chain))
+        (map (fn [{:keys [effect]}]
+               {:id (:id effect) :key [:zone-patterns :effects (:id effect)] :effect effect :timing global-ctx}))
+        zone-effects))
+
+(defn- run-zone-stage
+  "patterns (stage-patterns) on a cue's frames, in order, at ctx
+   (zone-remap/run-pattern), each with its parameters resolved once
+   (effects/resolve-effect-params): {:frames :steps {id step} :fs [key
+   function …]}. One that throws is reported under its :key and leaves the
+   frames as they were; the next one runs."
+  [frames patterns ctx]
+  (reduce (fn [acc {:keys [id key effect timing]}]
+            (try
+              (let [params (effects/resolve-effect-params effect timing)
+                    {:keys [frames step f]} (zone-remap/run-pattern (:frames acc) params ctx)]
+                (output-errors/ok! key)
+                (cond-> (assoc acc :frames frames)
+                  (some? id) (assoc-in [:steps id] step)
+                  f (update :fs conj f)))
+              (catch Throwable e
+                (output-errors/report! key e)
+                acc)))
+          {:frames frames :steps {} :fs []}
+          patterns))
+
 (defn generate-frames-by-zone
   "Generate a cue's frames by target (zones plan Z4).
    
    Each item goes where it resolves to (routing.targets/resolve-item, spec 01
    §2): its own :target, its track's (walking up its folders), its group's,
    else the cue's fallback: the cue's :target, its grid column's default,
-   the show's, All. Preset- and group-level effects run at each level, then
-   the global effects on each frame. The keys never depend on the zone map
-   (06 §8.8 invariant 2): a map switch re-routes these same frames.
+   the show's, All. Preset- and group-level effects run at each level. Then
+   the zone stage (zones plan Z5, routing.zone-remap): the cue's own zone
+   patterns, then the effects grid's, move its frames between places; then
+   the global point effects on each frame. The keys never depend on the zone
+   map (06 §8.8 invariant 2): a map switch re-routes these same frames.
    
    Args:
-   - cue-chain: The cue chain data with :items, :target, and optional :tracks
+   - cue-chain: The cue chain data with :items, :target, optional :tracks
+     and :zone-patterns
    - timing-ctx: The cue's timing context (cue-timing/get-cue-timing-context),
      which every modulator, keyframe and clip window reads. Its :bpm is the
      cue's tempo.
    - render-ctx: What the tick's cues share (render-context). Without it, it
      is made from app state, the input store and the show clock as they are.
      :column-target and :show-target are the cue's column's default and the
-     show's. With :item-points? true (the show clock sets it for a cue whose
-     editor is open), the result's metadata has :item-points [[item-id {key
-     points}] …]: each top-level item's (or clip's) points by key, before
-     track and global effects, for the cue warnings (routing.compose).
+     show's; :zone-effects and :zone-ctx the effects grid's zone patterns and
+     what their stage reads (zone-ctx). With :item-points? true (the show
+     clock sets it for a cue whose editor is open), the result's metadata has
+     :item-points [[item-id {key points}] …]: each top-level item's (or
+     clip's) points by key, before track and global effects, after the zone
+     stage, for the cue warnings (routing.compose).
    
    Returns:
-   Map of target → frame, where each frame is a vector of points.
+   Map of target → frame, where each frame is a vector of points, its
+   metadata :zone-steps {pattern-id step} when zone patterns ran.
    Only targets with rendered content are included.
    Empty map if no items render successfully."
   ([cue-chain timing-ctx]
@@ -373,7 +471,7 @@
                             (render-context (state/get-raw-state)
                                             (input-store/get-all-continuous-values)
                                             (show-time/global-clock))))
-  ([cue-chain timing-ctx {:keys [global-effects global-ctx item-points? column-target show-target]}]
+  ([cue-chain timing-ctx {:keys [global-effects global-ctx item-points? column-target show-target zone-effects zone-ctx]}]
    (ze/log-once :frame-service-generate
                 (format "[zone-debug] generate-frames-by-zone: target=%s effective-beats=%.2f item-count=%d"
                         (pr-str (:target cue-chain))
@@ -409,14 +507,27 @@
                                      ;; Clips without a known track: no track effects
                                      (mapcat val (remove #(contains? leaf-ids (key %)) clips-by-track)))))
                             (merge-zone-maps item-zone-maps))
-         ;; The global effects run at the cue's tempo
-         global-ctx (when global-effects (assoc global-ctx :bpm bpm))]
-     (cond-> (apply-global-effects-once combined-by-zone global-effects global-ctx)
-       item-points? (with-meta {:item-points (into []
-                                                   (keep (fn [[item by-zone]]
-                                                           (when (seq by-zone)
-                                                             [(:id item) (update-vals by-zone count)])))
-                                                   (map vector items item-zone-maps))})))))
+         ;; The effects grid's effects run at the cue's tempo
+         grid-ctx (when (or global-effects (seq zone-effects)) (assoc global-ctx :bpm bpm))
+         patterns (stage-patterns cue-chain timing-ctx zone-effects grid-ctx)
+         stage (when (seq patterns)
+                 (run-zone-stage combined-by-zone patterns
+                                 (assoc zone-ctx
+                                        :beats {:cue (window-beats timing-ctx)
+                                                :global (double (or (:effective-beats global-ctx) 0.0))}
+                                        :pulses (or (:pulses timing-ctx) (:pulses global-ctx)))))
+         steps (:steps stage)]
+     (cond-> (apply-global-effects-once (if stage (:frames stage) combined-by-zone) global-effects grid-ctx)
+       (or item-points? (seq steps))
+       (with-meta (cond-> {}
+                    item-points? (assoc :item-points (reduce zone-remap/rekey-item-points
+                                                             (into []
+                                                                   (keep (fn [[item by-zone]]
+                                                                           (when (seq by-zone)
+                                                                             [(:id item) (update-vals by-zone count)])))
+                                                                   (map vector items item-zone-maps))
+                                                             (:fs stage)))
+                    (seq steps) (assoc :zone-steps steps)))))))
 
 (defn- key-reaches
   "The refs a frame key sends to: each ref it names, and for a zone its lane

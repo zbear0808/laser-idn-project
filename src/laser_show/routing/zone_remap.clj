@@ -335,3 +335,13 @@
   (if (empty? patterns)
     frames
     (:frames (run-stage frames patterns ctx))))
+
+(defn routing-ctx
+  "What the stage reads of a tick's routing (routing.rig/routing), the rig
+   alone (07 invariant 9): {:known? (a ref a lane may name: a zone, or any
+   ref the rig knows) :lasers (E's ids, in rig order: Every laser)}."
+  [routing]
+  (let [refs (:refs routing)]
+    {:known? (fn [ref] (or (targets/zone-ref? ref) (contains? refs ref)))
+     :lasers (into [] (comp (filter (comp some? :index val)) (map key))
+                   (sort-by (comp :index val) (:outputs routing)))}))

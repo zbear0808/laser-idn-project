@@ -38,6 +38,24 @@
    Phase 4a's pulse sources (and the Zone step key, :zone-step)."
   (into [:clock] pulses/sources))
 
+(def ^{:arglists '([params ctx])
+       :doc "routing.zone-remap/pattern-t: what a pattern's step counts at ctx {:beats {:cue
+   :global} :pulses}: its clock's beats (since a :restart-on press), or a pulse
+   source's press count, 0 before its first (07 §8.3)."}
+  pattern-t
+  zone-remap/pattern-t)
+
+(def ^{:arglists '([params ctx])
+       :doc "routing.zone-remap/pattern-step: the step ⌊offset + rate·t + 1e-9⌋ a pattern is at."}
+  pattern-step
+  zone-remap/pattern-step)
+
+(def ^{:arglists '([params live])
+       :doc "routing.zone-remap/effective-style: the pads' live style for a pattern that
+   follows them (:off: it doesn't move), else its own."}
+  effective-style
+  zone-remap/effective-style)
+
 (def ^:private source-words
   "The pulse sources as the pattern editor says them (Phase 4a's words)."
   (dissoc modulators/source-labels :own))

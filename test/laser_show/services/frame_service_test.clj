@@ -9,8 +9,11 @@
             [laser-show.animation.cue-timing :as ct]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.fit-guard :as fit-guard]
+            [laser-show.backend.output-errors :as oe]
             [laser-show.routing.compose :as compose]
             [laser-show.routing.rig :as rig]
+            [laser-show.routing.zone-patterns :as zone-patterns]
+            [laser-show.routing.zone-remap :as zone-remap]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]))
@@ -496,3 +499,164 @@
                      :p1))))
     (testing "without routing: none"
       (is (= {} (:projector-frames (frame-service/preview-data cues)))))))
+
+
+;; Zones plan Z5: the zone stage in the render (07 §4.4, §8.7, §8.9)
+
+(defn- pattern-fx
+  "A zone pattern effect instance: its preset for style, with more params."
+  [id style where & {:as more}]
+  (-> (zone-patterns/preset-instance style where)
+      (assoc :id id)
+      (update :params merge more)))
+
+(defn- circle-cue
+  "A cue drawing one circle into its own target (nil: All), with patterns."
+  [& patterns]
+  {:items [{:id :c :type :preset :preset-id :circle :enabled? true :effects []}]
+   :zone-patterns (vec patterns)})
+
+(defn- at-beats
+  "A cue's timing context at beats, 120 BPM."
+  [beats]
+  {:accumulated-beats beats :effective-beats beats :phase-offset 0.0 :accumulated-ms (* 500.0 beats)
+   :time-ms (* 500.0 beats) :bpm 120.0})
+
+(def ^:private every-ref-ctx
+  "The stage's rig context: every ref known, three lasers."
+  {:known? (constantly true) :lasers [:p1 :p2 :p3]})
+
+(defn- render-with
+  "The cue's frames at cue beats and global beats, the effects grid's zone
+   patterns (cells [{:cell :effect}]) and point chain."
+  [cue cue-beats global-beats & {:keys [cells global-effects zone-ctx pulses]}]
+  (frame-service/generate-frames-by-zone
+   cue (cond-> (at-beats cue-beats) pulses (assoc :pulses pulses))
+   {:zone-effects cells
+    :global-effects global-effects
+    :global-ctx (cond-> (at-beats global-beats) pulses (assoc :pulses pulses))
+    :zone-ctx (or zone-ctx every-ref-ctx)}))
+
+(defn- the-circle []
+  (:all (frame-service/generate-frames-by-zone (circle-cue) (at-beats 0.0) {})))
+
+(deftest cue-pattern-runs-before-grid-patterns-test
+  (testing "07 §8.7: the cue's Alternate takes the All picture to A or B, then the cell's Swap trades A and B"
+    (let [P (the-circle)
+          cue (circle-cue (pattern-fx :cue-p :alternate :cue))
+          cells [{:cell [0 1] :effect (pattern-fx :cell-p :swap :cell)}]]
+      (is (= {:zone/a P} (render-with cue 0.0 0.0)) "the cue's alone, step 0")
+      (is (= {:zone/b P} (render-with cue 0.0 1.0 :cells cells)) "cue step 0, cell step 1: A, then traded to B")
+      (is (= {:zone/a P} (render-with cue 1.0 1.0 :cells cells)) "cue step 1, cell step 1: B, then traded to A")
+      (is (= {:zone/a P} (render-with cue 0.0 2.0 :cells cells)) "the cell's even step changes nothing"))))
+
+(deftest grid-patterns-run-in-reading-order-test
+  (testing "probe v24's twelve cells, put in out of order: the stage reads them row by row, left to right"
+    (let [order [13 10 12 2 1 11 20 21 23 22 3 0]
+          chains (reduce (fn [m n] (assoc m [(mod n 10) (quot n 10)]
+                                          {:active? true :items [(pattern-fx (keyword (str "p" n)) :shift :cell)]}))
+                         {} order)
+          cells (frame-service/get-active-zone-effects {:chains {:effect-chains chains}})]
+      (is (= [[0 0] [1 0] [2 0] [3 0] [0 1] [1 1] [2 1] [3 1] [0 2] [1 2] [2 2] [3 2]] (mapv :cell cells)))
+      (is (= :p0 (get-in cells [0 :effect :id])))))
+  (testing "a Swap in row 0 runs before a Shift in row 1, whichever was put in first"
+    (let [X (the-circle)
+          swap {:active? true :items [(pattern-fx :s :swap :cell)]}
+          shift {:active? true :items [(pattern-fx :t :shift :cell :zones [:zone/a :zone/b :zone/c])]}
+          state {:chains {:effect-chains (array-map [0 1] shift [1 0] swap)}}
+          cells (frame-service/get-active-zone-effects state)
+          cue {:target :zone/a :items [{:id :c :type :preset :preset-id :circle :enabled? true :effects []}]}]
+      (is (= [[1 0] [0 1]] (mapv :cell cells)))
+      (is (= {:zone/c X} (render-with cue 0.0 1.0 :cells cells)) "A swapped to B, then shifted on to C")))
+  (testing "only enabled patterns of cells that are on, in chain order, through groups; no Map cycle, no point effect"
+    (let [state {:chains {:effect-chains {[0 0] {:active? true :items [{:type :group :enabled? true
+                                                                        :items [(pattern-fx :a :chase :cell)
+                                                                                (assoc (pattern-fx :b :chase :cell) :enabled? false)]}
+                                                                       (zone-patterns/cycle-instance)
+                                                                       {:id :sc :effect-id :scale :enabled? true :params {}}
+                                                                       (pattern-fx :c :swap :cell)]}
+                                          [1 0] {:active? false :items [(pattern-fx :d :swap :cell)]}}}}]
+      (is (= [:a :c] (mapv (comp :id :effect) (frame-service/get-active-zone-effects state)))))))
+
+(deftest stage-runs-before-point-effects-test
+  (let [P (the-circle)
+        half {:effects [{:id :half :effect-id :scale :enabled? true :params {:x-scale 0.5 :y-scale 1.0}}]}
+        cue (circle-cue (pattern-fx :p :chase :cue :zones [:zone/a :zone/b]))
+        out (render-with cue 1.0 1.0 :global-effects half)]
+    (is (= [:zone/b] (keys out)) "moved first")
+    (is (= (effects/apply-effect-chain P half (at-beats 1.0)) (:zone/b out)) "then the point effect on the moved picture"))
+  (testing "the point chain leaves the zone-stage effects out"
+    (let [state {:chains {:effect-chains {[0 0] {:active? true :items [(pattern-fx :p :chase :cell) (zone-patterns/cycle-instance)
+                                                                       {:id :sc :effect-id :scale :enabled? true :params {}}]}}}}]
+      (is (= [:sc] (mapv :id (:effects (frame-service/get-active-global-effects state)))))
+      (is (nil? (frame-service/get-active-global-effects {:chains {:effect-chains {[0 0] {:active? true :items [(pattern-fx :p :chase :cell)]}}}}))
+          "a cell of patterns only: no point chain at all")
+      (is (= [:p] (mapv (comp :id :effect) (:zone-effects (frame-service/render-context state {} {:effective-beats 0.0}))))
+          "the render context carries them apart"))))
+
+(deftest copy-gets-point-effects-once-test
+  (let [half {:effects [{:id :half :effect-id :scale :enabled? true :params {:x-scale 0.5 :y-scale 1.0}}]}
+        cue (circle-cue (pattern-fx :p :alternate :cue :zones [:zone/a :zone/b :zone/c :zone/d] :source :picture))
+        [out calls] (counting-chains #(render-with cue 0.0 0.0 :global-effects half))]
+    (is (= [[:zone/a :zone/c]] (keys out)) "A and C lit: one frame under both (S-1)")
+    (is (= 1 calls) "one picture, one run of the point chain")))
+
+(deftest throwing-pattern-leaves-the-frames-test
+  (let [P (the-circle)
+        broken (pattern-fx :broken :chase :cue :zones :zone/a)
+        good (pattern-fx :good :chase :cue :zones [:zone/a :zone/b])]
+    (oe/clear!)
+    (is (= {:zone/b P} (render-with (circle-cue broken good) 1.0 1.0)) "the broken one is skipped, the next one runs")
+    (is (some? (get (oe/snapshot) [:zone-patterns :cue :broken])) "reported under its id")
+    (is (= {:all P} (render-with (circle-cue broken) 1.0 1.0)) "alone: the frames as they were")
+    (testing "a cell's too"
+      (is (= {:all P} (render-with (circle-cue) 1.0 1.0 :cells [{:cell [2 1] :effect (assoc broken :id :cell-broken)}])))
+      (is (some? (get (oe/snapshot) [:zone-patterns :effects :cell-broken]))))
+    (oe/clear!)))
+
+(deftest timeline-cue-pattern-loops-with-the-cue-test
+  (let [cue (assoc (timeline-cue {:items [(clip-at 0.0)]})
+                   :loop {:enabled? true :start 0.0 :duration 4.0}
+                   :zone-patterns [(pattern-fx :p :chase :cue :zones [:zone/a :zone/b :zone/c :zone/d])])
+        zone (fn [beats] (first (keys (render-with cue beats beats))))]
+    (is (= [:zone/a :zone/b :zone/c :zone/d] (mapv zone [0.0 1.0 2.0 3.0])) "a zone a beat")
+    (is (= [:zone/a :zone/b :zone/c] (mapv zone [4.0 5.0 6.0])) "the loop starts it again with the cue")))
+
+(deftest cue-and-global-clock-test
+  (let [P (the-circle)
+        on (fn [clock] (render-with (circle-cue (pattern-fx :p :alternate :cue :clock clock)) 1.0 6.0))]
+    (is (= {:zone/b P} (on :cue)) "the cue's start: beat 1 is step 1 (Z5-Q6 A)")
+    (is (= {:zone/a P} (on :global)) "the show's beats: beat 6 is step 6")))
+
+(deftest pattern-steps-on-a-press-test
+  (let [P (the-circle)
+        cue (circle-cue (pattern-fx :p :chase :cue :zones [:zone/a :zone/b :zone/c] :step-on :hit))
+        press (fn [n] {:hit {:count n :beats 0.25 :ms 125.0 :held? false :since-release 0.25 :recent [0.25]}})]
+    (is (= {:zone/a P} (render-with cue 7.3 7.3)) "no press: step 0, whatever the beat")
+    (is (= {:zone/b P} (render-with cue 7.3 7.3 :pulses (press 1))) "one HIT: one step")
+    (is (= {:zone/a P} (render-with cue 7.3 7.3 :pulses (press 3))) "three: round to A again")
+    (testing "a cell's pattern sees the same presses"
+      (is (= {:zone/c P} (render-with (circle-cue) 7.3 7.3 :pulses (press 2)
+                                      :cells [{:cell [0 0] :effect (pattern-fx :q :chase :cell :zones [:zone/a :zone/b :zone/c] :step-on :hit)}]))))
+    (testing "the steps the patterns are at go with the frames"
+      (is (= {:p 1} (:zone-steps (meta (render-with cue 7.3 7.3 :pulses (press 1)))))))))
+
+(deftest no-pattern-renders-as-before-test
+  (let [cue (circle-cue)
+        plain (frame-service/generate-frames-by-zone (dissoc cue :zone-patterns) (at-beats 1.0) {})
+        stage-calls (atom 0)
+        run-pattern zone-remap/run-pattern]
+    (with-redefs [zone-remap/run-pattern (fn [& args] (swap! stage-calls inc) (apply run-pattern args))]
+      (is (= plain (render-with cue 1.0 1.0)) "no pattern on the cue, none in a cell")
+      (is (= plain (render-with (circle-cue (assoc (pattern-fx :p :alternate :cue) :enabled? false)) 1.0 1.0))
+          "a disabled pattern is none")
+      (is (zero? @stage-calls) "the stage doesn't even run")
+      (is (nil? (meta (render-with cue 1.0 1.0))) "and nothing new rides on the frames"))
+    (is (= plain (render-with cue 1.0 1.0 :zone-ctx nil)) "no zone context: the same")))
+
+(deftest item-points-follow-the-stage-test
+  (let [cue (assoc (circle-cue (pattern-fx :p :chase :cue :zones [:zone/a :zone/b])) :items
+                   [{:id :ring :type :preset :preset-id :circle :enabled? true :effects []}])
+        out (frame-service/generate-frames-by-zone cue (at-beats 1.0) {:item-points? true :zone-ctx every-ref-ctx})]
+    (is (= [[:ring {:zone/b (count (:zone/b out))}]] (:item-points (meta out)))
+        "an editor's \"Most points\" finds the item where the pattern put it")))

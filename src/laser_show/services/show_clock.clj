@@ -49,6 +49,7 @@
             [laser-show.routing.compose :as compose]
             [laser-show.routing.rig :as rig]
             [laser-show.routing.zone-maps :as zone-maps]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
             [laser-show.state.extractors :as ex]
@@ -109,16 +110,17 @@
    playing: {:cues [{:cell :run :zone-frames}] :projector-ctx :render-us}.
    Every cue shares one render context (frame-service/render-context): the
    tick's input values with the faders' slots derived from their bindings,
-   its presses (pulses, show-time/pulse-view), its global effects and
-   global-clock's timing; a cue whose editor is open also counts its items'
-   points (:item-points?). Calibration gets the same input values and no
-   presses."
-  [state input-values global-clock runs pulses]
+   its presses (pulses, show-time/pulse-view), its global effects,
+   global-clock's timing, and what the zone stage reads of the tick
+   (zone-ctx: the routing's refs and lasers, the pattern pads' style); a cue
+   whose editor is open also counts its items' points (:item-points?).
+   Calibration gets the same input values and no presses."
+  [state input-values global-clock runs pulses zone-ctx]
   (if (empty? runs)
     {:cues [] :projector-ctx nil :render-us 0.0}
     (let [bpm (double (or (ex/bpm state) 120.0))
           t0 (System/nanoTime)
-          render-ctx (frame-service/render-context state input-values global-clock pulses)
+          render-ctx (frame-service/render-context state input-values global-clock pulses zone-ctx)
           edited (edited-cells state)
           cues (mapv (fn [run]
                        {:cell (:cell run) :run (:run run)
@@ -244,16 +246,20 @@
         now-ms (/ (- (long now-ns) (long t0)) 1e6)
         {:keys [runtime reports]} (show-time/step before state mtc-pos now-ms)
         pulses (show-time/pulse-view runtime)
+        beats (show-time/global-beats runtime)
         ;; The map in use at this tick's beats: a pending switch from the
         ;; tick that reaches its beat (zones plan Z4, spec §4); Z5's Map
         ;; cycle passes its pick here
-        map-id (zone-maps/effective-map-id state (show-time/global-beats runtime) nil)
+        map-id (zone-maps/effective-map-id state beats nil)
         [routing-cache routing] (routing-step (:routing-cache runtime) state map-id)
+        ;; What the zone stage reads (zones plan Z5): the routing's rig, the
+        ;; pattern pads' style at this tick's beats
+        zone-ctx (frame-service/zone-ctx routing (zone-patterns/live-style state beats))
         runtime (assoc runtime :t0-ns t0 :routing-cache routing-cache)
         _ (reset! show-time/!runtime runtime)
         playing? (boolean (get-in state [:playback :playing?]))
         {:keys [cues] :as rendered} (render state input-values (:global runtime)
-                                            (when playing? (show-time/active-runs state runtime)) pulses)
+                                            (when playing? (show-time/active-runs state runtime)) pulses zone-ctx)
         snapshot (show-time/publish! (assoc rendered
                                             :at-ns (System/nanoTime)
                                             :playing? playing?
