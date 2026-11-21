@@ -1,6 +1,6 @@
 # Output drivers: the contract
 
-**Status:** API 1 through D3 landed at `5a9a41c`. **D4 built** on `output-d4-discovery`; D5 hardware acceptance is pending. **Last verified against:** `0d673ea` for discovery (§1, §5.3). Earlier implementation notes retain their historical revisions (`02` and `00` §7).
+**Status:** API 1 through D3 landed at `5a9a41c`. **D4 landed** at `4b22368`; D5 hardware acceptance is pending. **Last verified against:** `0d673ea` for discovery (§1, §5.3). Earlier implementation notes retain their historical revisions (`02` and `00` §7).
 This doc is the contract every phase in `02-phases.md` builds and tests against. "API 1" is the version that `laser-show.output.api/api-version` (NEW) reports. Step 0's `laser-show.output.driver/validate` checks the table below.
 
 ## 1. The driver map (API 1)

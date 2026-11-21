@@ -1,6 +1,6 @@
 # Output drivers: phases D1–D5
 
-**Status:** In progress. Step 0 through D3 and the live UI pass landed at `5a9a41c`. **D4 done** on `output-d4-discovery` (`8b6d3aa`, `0d673ea`), not merged. D5 is pending. **Last verified against:** `0d673ea` for D4; earlier phase sections cite the code at their own revisions. Re-check the current tree before starting a phase.
+**Status:** In progress. Step 0 through D3 and the live UI pass landed at `5a9a41c`. **D4 landed** at `4b22368`. D5 is pending. **Last verified against:** `0d673ea` for D4; earlier phase sections cite the code at their own revisions. Re-check the current tree before starting a phase.
 The contract is in `01-driver-contract.md` (referred to as `01` §n). Test commands follow the `:test` alias (`deps.edn`), e.g. `clj -M:mac-arm:test streaming-engine output-lifecycle`.
 
 Every phase starts the same way: write the failing tests first, against the fake DAC (`test/laser_show/idn/fake_dac.clj`), the recording driver (D1) or the LSPS receiver (D2).

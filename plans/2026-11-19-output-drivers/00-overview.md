@@ -1,6 +1,6 @@
 # Output drivers: more than IDN, from add-ons
 
-**Written:** 2026-11-19   **Status:** In progress. Step 0 through D3 and the live UI pass landed at `5a9a41c`. **D4 done** on `output-d4-discovery` (`8b6d3aa`, `0d673ea`), not merged; D5's hardware acceptance is pending. Every question is answered (§9).
+**Written:** 2026-11-19   **Status:** In progress. Step 0 through D3 and the live UI pass landed at `5a9a41c`. **D4 landed** at `4b22368`; D5's hardware acceptance is pending. Every question is answered (§9).
 **Last verified against:** `0d673ea` for D4 (`02` § D4). The historical integration and pre-driver citations in §1 and §7 retain their original revisions.
 **Supersedes / Superseded by:** none
 **Related findings:** review 04 LE2 (one IDN-RT link per DAC, which stays inside the IDN driver), 04 #17 (flat point arrays: not needed here, see `01` §2.1). This plan needs to fit with the zones plan (`plans/2026-11-19-zones/`): Z1 safety and Z2 stable ids and the rig strip (both on master), Z3 routing core and ZR rig file (both on master, merged into `output-drivers` at `6f6f4df`). See §7.
