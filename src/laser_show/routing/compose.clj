@@ -223,17 +223,23 @@
             nil
             (:item-points (meta zone-frames)))))
 
-(defn- decimate-fixes
-  "What to change of the laser's Decimate when it keeps a cue's count and
-   the laser is still under its minimum: :scan-rate when its scan rate is
-   over the laser's (at the laser's, the laser draws at Decimate's target or
-   faster), :fps when its target is under the minimum, or both. With
-   neither, Decimate never leaves a laser under its minimum; nor without its
-   numbers (#{})."
+(defn- decimate-settings
+  "What to set the laser's Decimate to when it keeps a cue's count and the
+   laser is still under its minimum, in the whole numbers Decimate takes:
+   :kpps, the laser's scan rate in kpps rounded down, when Decimate's is over
+   it (at the laser's or under, the laser draws at Decimate's target or
+   faster); :fps, the minimum rounded up, when Decimate's target is under
+   it; or both. Rounded so, neither can leave the laser under its minimum.
+   {} when neither is off, as Decimate can't leave the laser under its
+   minimum then, or without Decimate's numbers."
   [{:keys [scan-rate fit decimate-kpps decimate-fps]}]
-  (cond-> #{}
-    (and decimate-kpps (> (* 1000.0 (double decimate-kpps)) (double scan-rate))) (conj :scan-rate)
-    (and decimate-fps (< (double decimate-fps) (double (:min-fps fit)))) (conj :fps)))
+  (let [min-fps (double (:min-fps fit))]
+    (cond-> {}
+      (and decimate-kpps (> (* 1000.0 (double decimate-kpps)) (double scan-rate)))
+      (assoc :kpps (long (Math/floor (/ (double scan-rate) 1000.0))))
+
+      (and decimate-fps (< (double decimate-fps) min-fps))
+      (assoc :fps (long (Math/ceil min-fps))))))
 
 (defn cue-warnings
   "Spec §8's cue warnings: {cell {:projector :points :fps :min-fps :scan-rate
@@ -246,8 +252,8 @@
    :item {:id :points} is the top-level item with the most points on that
    laser, when the cue's frames carry :item-points (an edited cue's,
    frame-service). :decimate, when that laser's Decimate is what keeps the
-   count (its budget under the cue's points), is what to change of it
-   (decimate-fixes, Q-D-4 B)."
+   count (its budget under the cue's points), is what to set it to
+   ({:kpps n :fps n}, either or both: decimate-settings, Q-D-4 B)."
   [cues routing]
   (into {}
         (keep (fn [{:keys [cell zone-frames]}]
@@ -258,10 +264,10 @@
                                                     points (if decimated? (long decimate-budget) own)
                                                     fps (when (pos? points) (/ (double scan-rate) points))]
                                                 (when (and fps (< fps (double (:min-fps fit))))
-                                                  (let [fixes (when decimated? (decimate-fixes out))]
+                                                  (let [settings (when decimated? (decimate-settings out))]
                                                     (cond-> {:projector pid :points points :fps fps :min-fps (:min-fps fit)
                                                              :scan-rate scan-rate :index index}
-                                                      (seq fixes) (assoc :decimate fixes)))))))
+                                                      (seq settings) (assoc :decimate settings)))))))
                                       (sort-by (juxt :fps #(or (:index %) Long/MAX_VALUE) (comp str :projector)))
                                       first)]
                   [cell (let [item (heaviest-item zone-frames routing (:projector worst))]

@@ -101,16 +101,21 @@
 
 (defn- decimate-advice
   "What the line and the tooltip say when the laser's Decimate keeps the
-   cue's count (:decimate, Q-D-4 B): \"Laser C's Decimate keeps ~830 points:
-   set its scan rate to Laser C's 12 kpps, or lower Laser C's minimum.\",
-   \"raise its target fps to 20\" when its target is under the minimum, and
+   cue's count (Q-D-4 B), from :decimate, the settings to suggest, whole
+   numbers that work (routing.compose/cue-warnings): \"Laser C's Decimate
+   keeps ~830 points: set its scan rate to Laser C's 12 kpps, or lower
+   Laser C's minimum.\"; \"27 kpps\" alone for a 27.5 kpps laser, as 27 isn't
+   its own; \"raise its target fps to 23\" for a target under the minimum;
    both joined by \"and\"."
-  [{:keys [laser points scan-rate min-fps decimate]}]
-  (str laser "'s Decimate keeps ~" (grouped points) " points: "
-       (str/join " and " (cond-> []
-                           (contains? decimate :scan-rate) (conj (str "set its scan rate to " laser "'s " (kpps scan-rate) " kpps"))
-                           (contains? decimate :fps) (conj (str "raise its target fps to " min-fps))))
-       ", or lower " laser "'s minimum."))
+  [{:keys [laser points scan-rate decimate]}]
+  (let [{:keys [kpps fps]} decimate]
+    (str laser "'s Decimate keeps ~" (grouped points) " points: "
+         (str/join " and " (cond-> []
+                             kpps (conj (str "set its scan rate to "
+                                             (when (== (* 1000.0 (double kpps)) (double scan-rate)) (str laser "'s "))
+                                             kpps " kpps"))
+                             fps (conj (str "raise its target fps to " fps))))
+         ", or lower " laser "'s minimum.")))
 
 (defn cue-warning-text
   "A cue cell's tooltip: \"Too heavy for Laser C: about 12 fps (minimum
