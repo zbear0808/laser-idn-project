@@ -18,7 +18,7 @@
 ;; These are copied from modulator-defs to avoid circular dependency
 
 
-(def ^:private source-labels
+(def source-labels
   "How the editor names what a reaction follows (a :choice param's :labels)."
   {:own "Its cue's start"
    :hit "HIT"
