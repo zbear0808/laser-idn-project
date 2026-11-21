@@ -1,7 +1,7 @@
 # Phase 8: zone effects (chase, swap, shift)
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`; the files cited are the same at `67735d0`, and `state/domains.clj` and `events/handlers/effects.clj` are cited at `b1da0f2` because Phase 1 is editing both)
-**Status:** Done in zones Phase Z5 (`1d3d3b8`..`376d5f6`, on `master`; what it covers is §12.1), except 8b's four tap reactions, which are being built on `vibe-8b` (§12, 2026-11-20). V10 is answered A (§11; it was the vibe overview's §7)   **Last verified against:** `ea4d153` (§12); `b1da0f2` for §1–§9 (probes v19–v24, §11; they were the vibe overview's §3)
+**Status:** Done. 8a and most of 8b in zones Phase Z5 (`1d3d3b8`..`376d5f6`, on `master`; §12.1), and 8b's four tap reactions on `vibe-8b` (`6544efb`..`cdf1d57`, 2026-11-20; as built in §13), not merged yet. Still owed: the checks on a real projector. V10 is answered A (§11; it was the vibe overview's §7)   **Last verified against:** `ea4d153` (§12, §13); `b1da0f2` for §1–§9 (probes v19–v24, §11; they were the vibe overview's §3)
 **Supersedes / Superseded by:** none   **Related findings:** V6 and R-4 (a random pick must not scan the crowd), extended here to effects that move a picture. The effects-grid editor offering the zone selector, which does nothing there, is fixed on the way. The zones plan (`plans/2026-11-18-zones-ux/00-overview.md`, a draft written after this phase) asks for the same effects in its §4.5 and question 20; §9 says how the two fit
 
 > **Moved 2026-11-20.** This was Phase 8 of the vibe-mode plan, `plans/2026-11-18-vibe-mode/`, which was deleted when its Phases 1–7 were done (the folder is in git history at `8b4b7d7`). It lives here because the zones plan builds the same effects (Z5, `07-phase-z5-zone-patterns.md`). In this doc, `00-overview.md` and `01-…` to `07-…` mean that plan's docs, not this folder's: the parts it relies on are copied in §11 below (V10, still open, and probes v19–v24). The probes moved with it: `probes/vibe_probes_test.clj` in this folder.
@@ -435,3 +435,64 @@ Run: `clj -M:mac-arm:test reactions vibes-test subs-test library engine show-loc
 > **Z8b-Q4 · Do the four follow the pattern pads?**
 > - **A ★** Yes, as every zone pattern does (Z5's default): Off stops them, a style pad switches them, As set gives them back.
 > - **B** No (`:follow-pads? false`, as Z6's grid): a tap reaction keeps its own style whatever the pads say.
+
+**Raised by the build** (2026-11-20; built as its ★, and in §13)
+
+> **Z8b-Q5 · Perform's line when an edit leaves a reaction off.** An edit of the vibe that plays (adding a reaction, unticking Allow audience cells) leaves a cell that can reach the crowd off without setting `[:vibe-runtime :problem]`: `engine/refresh-fx` hands `take-fx` only the cells the vibe may switch on (`vibes/engine.clj:655-664`, as Z5 built it).
+> - **A ★ (built)** As it is: the Vibes tab's lint says it at once, where the edit is made, and Perform's status line says it when the vibe next switches its FX set on, or FLASH leaves a flash FX cell off.
+> - **B** `refresh-fx` reports it too, so Perform says it at once (an engine change: Z5's `refused-cell-is-reported-test` would gain the edit's case).
+
+## 13. As built (2026-11-20, `6544efb`..`cdf1d57`, on `vibe-8b`)
+
+Built in worktree `vibe-8b` off `ea4d153` (`master`: Z5 as it landed, its code `376d5f6`'s), while zones Z6 was built beside it on `zones-z6`. The ★ answers are built: Z8b-Q1 A (the Effects grid's New tap reaction ▸ offers the four, made as their templates are), Z8b-Q2 A (the swap and the shift over zones), Z8b-Q3 A (§7's two info rows later) and Z8b-Q4 A (they follow the pattern pads), and the build's Z8b-Q5 A (§12.10). The audience rule is Z5's (V10 A). **Not done: seeing them on a real projector**: a hop across three lasers on HIT, a swap of A and B on ACCENT under Left / Right, a chase while FLASH is held.
+
+### Where it landed
+
+| # | Commit | Step (§12.9) |
+|---|---|---|
+| 1 | `6544efb` | §12, and the Status line |
+| 2 | `e97e8f0` | `vibes/reactions.clj`: the four templates (each Z5's preset of its style with its press, private `zone-pattern`), `zone-reaction?`, `lane`, `places`, `zone-hint` (private `template-zones`), `reaction-cell`'s places, `add-to-vibe`'s audience groups; `events/handlers/vibes.clj`'s `handle-add-reaction` passes `library/audience-groups`; README's Tap reactions and Safety lines |
+| 3 | `cdf1d57` | `subs/vibe-tap-hints`; the Vibes tab's `tap-menu` greys an entry and adds its hint |
+| 4 | this commit | this section, Z8b-Q5, the Status line |
+
+### Deviations from the plan
+
+- **Perform's line after an edit** (Z8b-Q5). §12.5 and §12.7 had `:vibe/add-reaction` set `[:vibe-runtime :problem]` when it leaves a cell off. It doesn't, and nor does unticking Allow audience cells: `engine/refresh-fx` hands `take-fx` only the cells the vibe may switch on, so an edit reports none (as Z5 built it). The Vibes tab's lint says it at once, where the edit is made ("Shapes: D2 (Zone pattern) can send pictures to the crowd (Crowd), so this vibe never switches it on. Allow audience cells, or take B out of its zones"), and Perform says it when the vibe next switches its FX set on, or when FLASH leaves a flash FX cell off. `zone-reaction-that-can-reach-the-crowd-stays-off-test` asserts both; the engine isn't changed.
+- Names: `reaction-cell`'s third argument is the zones (`[kind vibe-name zones]`); the private helpers are `zone-pattern` and `template-zones`.
+- Otherwise as §12.2–§12.6 say: the templates, their places, the greying and its hints, the audience rule, and nothing changed on the Effects grid's side.
+
+### Tests added
+
+- `laser-show.vibes.reactions-test`: `every-template-is-valid-test` (fourteen kinds) and `templates-are-identity-at-rest-test` (the point effects) changed; NEW `zone-templates-are-zone-patterns-test`, `zone-reactions-at-rest-test`, `zone-hop-moves-the-picture-on-each-hit-test`, `zone-swap-and-shift-on-each-accent-test`, `zone-chase-restarts-on-each-flash-test`, `lane-leaves-a-scanner-out-test`, `zone-reactions-need-two-places-test`.
+- `laser-show.events.handlers.vibes-test`: NEW `add-zone-reaction-test` (the show lock's refusal included), `greyed-zone-reaction-changes-nothing-test`, `zone-reaction-that-can-reach-the-crowd-stays-off-test`.
+- `laser-show.subs-test`: NEW `vibe-tap-hints-sub-test`.
+- UI: `laser-show.ui-test.vibes-test`'s `tap-reaction-menu-adds-a-cell-to-the-vibe-test` (HIT's list has the hop, greyed with its hint) and NEW `zone-reactions-in-the-tap-menus-test`; `laser-show.ui-test.grid-test/new-tap-reaction-on-an-effects-cell-test` counts fourteen.
+
+### Red first
+
+Where the code didn't exist yet, the run was first made to compile with stubs (nil, `{}`, `[]`, false), so the tests below were seen failing unless it says otherwise.
+
+| Step | Before the change |
+|---|---|
+| 2 | `reactions-test` and the handlers' `vibes-test` against a stub `zone-reaction?` (false), `lane` (nil), `places` (`[]`), `zone-hint` (nil), a `reaction-cell` and an `add-to-vibe` that ignored the places and the groups, and no templates: 59 tests, 697 assertions, 125 failures, 0 errors; all ten new tests failed, and `every-template-is-valid-test`. **Not seen red:** `greyed-zone-reaction-changes-nothing-test`'s "nothing made" (an unknown kind makes nothing too; its Zone swap row failed). UI, on `ea4d153`'s code: `grid-test/new-tap-reaction-on-an-effects-cell-test` and `vibes-test/tap-reaction-menu-adds-a-cell-to-the-vibe-test`, 2 tests, 19 assertions, 2 failures. The first run with the code had 2 failures, both the crowd test's own expectation of Perform's problem at once (above) |
+| 3 | `subs-test/vibe-tap-hints-sub-test` against a stub sub (`{}`): 1 test, 4 assertions, 2 failures (its two `{}` rows not seen red). UI, on step 2's code: `tap-reaction-menu-adds-a-cell-to-the-vibe-test` and `zone-reactions-in-the-tap-menus-test`, 2 tests, 25 assertions, 2 failures |
+
+### Verification
+
+| Where | Unit suite (`clj -M:mac-arm:test`) | UI suite (`clj -M:test-ui:mac-arm:test-ui-headless`) |
+|---|---|---|
+| `ea4d153`, the base (Z5 §13's last row: the same code) | 1,766 tests, 569,486 assertions, 0 failures | 254 tests, 1,370 assertions, 0 failures |
+| **`cdf1d57`, the branch's last code** | **1,777 tests, 569,729 assertions, 0 failures, 0 errors** | **255 tests, 1,382 assertions, 0 failures, 0 errors** |
+
+Each step also ran its namespaces: step 2 `reactions-test` and the handlers' `vibes-test` (59 tests, 758 assertions), then `laser-show.vibes`, `show-lock-test`, `history-handlers-test` (`history-labels-name-real-events-test` among them), `effects-handlers-test`, `subs-test` and the handlers' `vibes-test` (257 tests, 2,532 assertions); step 3 the sub's test, then the UI's `-n vibes-test -n grid-test -n perform-test` (47 tests, 357 assertions); all with 0 failures. Screenshots (headless, 1200 × 800, from a throwaway test that wasn't committed) showed HIT's menu with the hop greyed and its hint, ACCENT's menu, and the Vibes tab after Zone swap ("Tap reactions ▾ Zone swap", "FX set 1"). `~/LaserShowProjects` didn't exist before the work and doesn't after both suites: no test wrote under the home folder.
+
+### For the merge
+
+- `git merge-tree --write-tree master vibe-8b`, at `cdf1d57`: tree `67a61cb`, no conflict (`master` is still `ea4d153`, so `vibe-8b` is ahead of it). Against `zones-z6` at `dcc1449` (Z6's first two commits): no conflict and no file in common (Z6 edits `animation/effects/zone.clj`, `routing/`, `events/handlers.clj`, `events/handlers/history.clj`, `events/show_lock.clj`, `grid_cell.clj`, `parameter_controls.clj`, `zone_pattern_editor.clj`, its new step-grid namespaces and their tests). Z6's new `:steps` parameter (default `[]`) reaches these templates through `preset-instance`, which `zone-templates-are-zone-patterns-test` compares with, so it holds with both: in that merged tree (`caf6d56`, unpacked with `git archive` into a temporary folder, deleted after), `laser-show.vibes`, the handlers' `vibes-test`, `vibe-tap-hints-sub-test` and `zone-patterns-test` pass (164 tests, 1,860 assertions, 0 failures).
+- **Every file the branch edits:** `plans/2026-11-19-zones/11-vibe-phase8-zone-effects.md`, `README.md`; `src/laser_show/vibes/reactions.clj`, `src/laser_show/events/handlers/vibes.clj`, `src/laser_show/subs.clj` (one sub, after `vibe-edited-reactions`), `src/laser_show/views/tabs/vibes.clj`; `test/laser_show/vibes/reactions_test.clj`, `test/laser_show/events/handlers/vibes_test.clj`, `test/laser_show/subs_test.clj` (one test, after `vibe-pick-fx-blocks-audience-cells-test`), `test/laser_show/ui_test/vibes_test.clj`, `test/laser_show/ui_test/grid_test.clj` (one count).
+
+### Found on the way
+
+- **An edit never reports a refused cell on Perform** (Z8b-Q5, above): neither a new reaction that can reach the crowd nor unticking Allow audience cells sets the problem; the lint says it.
+- **A swap or a shift does nothing while every cue draws into All** (§12.3: they trade what is in zones). Nothing says so yet (Z8b-Q3).
+- **The worktree's folder went away** with the temp folder it lived in (`…/T/opencode/` was emptied at 20:28, while this run was stopped). Nothing was lost (`vibe-8b` had no commits yet); `git worktree add --force` at the same path put it back, which drops only that path's stale registration.
