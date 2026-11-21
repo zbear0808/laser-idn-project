@@ -173,11 +173,11 @@ Either way, Escape during a drag puts the old zone back without asking.
 
 ## Decimate (`12-decimate-effect.md`)
 
-**Q-D-1 · The load meter with Decimate in a laser's calibration chain.**
+**Q-D-1 · The load meter with Decimate in a laser's calibration chain.** **Answered B** (2026-11-20); built in the follow-up on branch `decimate-b`.
 - **A ★ (built)** What the laser is asked for over the guard's budget: a 3,000-point cue reads 240%, red, while the laser draws 30 fps; the note's "−72% pts" says what was cut.
 - **B** What Decimate left over the budget: 833 points read 67%, so the meter, the fps and LOW FPS all describe what the laser draws.
 
-**Q-D-2 · A cue's ⚠ for a laser that decimates it.**
+**Q-D-2 · A cue's ⚠ for a laser that decimates it.** **Answered B** (2026-11-20); built in the follow-up on branch `decimate-b`.
 - **A ★ (built)** Keep warning: the cue is heavy, and the laser thins it.
 - **B** Count each laser's calibration chain: a laser with Decimate counts a cue at no more than Decimate's budget.
 
