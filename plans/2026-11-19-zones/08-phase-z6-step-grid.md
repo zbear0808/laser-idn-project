@@ -1,7 +1,7 @@
 # Phase Z6: the step grid
 
 **Written:** 2026-11-19   **Written for commit:** `f178f56` (`master`; first written at `739bd74`, then re-verified here: `src/` is as vibe Phase 5 left it in `9f5d78a`, after vibe Phase 4b (`f5a4f84`), 4a (`6715fb4`) and UX Phase 3 (`b9b9d55`), and `test/` as `43fa00d` left it; every line below is at that source). Z2–Z5 change several of these files first, so **re-check every path and line at HEAD before starting.**
-**Status:** Proposed. Not to be built yet (D-8).   **Needs:** Z5 (`07`): the zone stage (`routing/zone_remap.clj`), the `:zone-pattern` effect, a cue's `:zone-patterns`, the pattern window, and `:zone-steps` in the snapshot. Vibe **Phase 4 has landed** (4a `6715fb4`, 4b `f5a4f84`), so a grid steps on HIT, ACCENT, FLASH, a vibe change or any cue start from the start, and can restart on one, through Z5's `:step-on` and `:restart-on` (`07` §4.2). Vibe **Phase 5 has landed** (`9f5d78a`): its Fader modulator can scrub a grid (§8).
+**Status:** **Built on branch `zones-z6`, not merged** (`67f2718`..`265c2ad`, 2026-11-20; as built in §13). Still owed: seeing it on a real projector.   **Needs:** Z5 (`07`): the zone stage (`routing/zone_remap.clj`), the `:zone-pattern` effect, a cue's `:zone-patterns`, the pattern window, and `:zone-steps` in the snapshot. Vibe **Phase 4 has landed** (4a `6715fb4`, 4b `f5a4f84`), so a grid steps on HIT, ACCENT, FLASH, a vibe change or any cue start from the start, and can restart on one, through Z5's `:step-on` and `:restart-on` (`07` §4.2). Vibe **Phase 5 has landed** (`9f5d78a`): its Fader modulator can scrub a grid (§8).
 **Implements:** D-6; overview "Start here" 4 ("a drum-machine step grid comes later"); needs `06`'s "Custom step grid". Spec §6 steps 1–3, for a step that lights several zones (spec §6.1's pattern copies, from Z5's S-1).   **Size:** ~3 d
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks what doesn't exist yet. Z5's names are the ones `07` proposes.
@@ -278,3 +278,120 @@ About 2.75 days.
 > **Z6-Q5 · Where the grid opens.**
 > - **A ★** Its own window, from the pattern window, the Pattern chip and an effects cell's editor.
 > - **B** Inside the pattern window, which grows to fit it.
+
+**Questions the build raised** (2026-11-20; each is built as its ★, and listed in §13)
+
+> **Z6-Q6 · A pattern that was a grid, its style switched since** (from the Pattern chip, the pattern window or a modulator).
+> - **A ★ (built)** Step grid… brings its steps back: they stay in the pattern when the style changes.
+> - **B** It becomes a new grid of its current style's first 8 steps, as a pattern that never was one does.
+
+> **Z6-Q7 · What Shift and Swap become as a grid.** A grid lights places; it can't trade what's in them.
+> - **A ★ (built)** A new grid's start: Alternate over the pattern's zones.
+> - **B** A Chase over its zones (where A's content goes under Shift).
+
+> **Z6-Q8 · The show lock in the grid's window.**
+> - **A ★ (built)** The editing part (the toolbar, the grid, Moves, Follows) is greyed out with a line that says why, as for the keyframes; opening it, its cursor and the playhead go on. Copy is greyed with the rest.
+> - **B** Everything stays live and each click is refused with a notice, as in the pattern window (a drag would bring one refusal per mouse move).
+
+> **Z6-Q9 · A new modulator on a pattern's Style spans Steps too.**
+> - **A ★ (built)** 0 to 6, Steps last, so an old show's modulator from 0 to 5 keeps its six styles.
+> - **B** A new one spans the six rule styles only; Steps is picked by hand.
+
+## 13. As built (2026-11-20, `67f2718`..`265c2ad`, on branch `zones-z6`, not merged)
+
+Built in worktree `zones-z6` off `ea4d153` (Z5 on `master`), while vibe Phase 8's zone reactions (`6544efb`..`cdf1d57`) landed on `master` (`734e411` at the end). The ★ answers are built: Z6-Q1 A (a new grid is 8 steps at 2 a beat), Z6-Q2 A (a grid doesn't follow the pattern pads until it is ticked), Z6-Q3 A (the first cell of a drag decides), Z6-Q4 A (1 to 64 steps, 8, 16 and 32 one click away) and Z6-Q5 A (its own window); and Z5's Z5-Q1 to Z5-Q10 A as Z5 built them (the pads switch a grid that follows them to their style; As set gives it its steps back). The build raised Z6-Q6 to Z6-Q9 (§12), each built as its ★. `legacy-shows` ran in every step. **Not done: seeing it on a real projector** (00 R-1): §8's grid on one laser's halves and on four lasers, and a grid stepped by HIT.
+
+The worktree's folder was emptied once, before step 1's first edit, by something outside the work (the temporary folder, at about 20:28), so nothing was lost. The worktree was put back at the same path with `git worktree add -f … zones-z6`, and each step was committed as soon as its tests passed.
+
+### Where it landed
+
+| # | Commit | Step (§10) |
+|---|---|---|
+| 1 | `67f2718` | `:steps` a lit style of `routing.zone-remap` (NEW `grid-steps`, `grid-step`; `lit-set` is step k mod L of the steps, those in the lane; no steps is the identity); `routing.zone-patterns`: NEW `rule-styles` (the six), `styles` with `:steps` last, the `:steps` parameter (`:step-list`), the grid's preset, `describe`, `lane-text`, `warnings` (a grid needs one row), pads from the rules only; the pattern chip and New zone pattern ▸ list the rules; the numeric list's `:step-list` control; the coverage exemption |
+| 2 | `dcc1449` | NEW `routing/step_grid.clj` (the edits, `as-grid`, `from-style`, `center-out`, `grid-rows`, `copy`, `paste`, `cell-at`, `line-cells`, `normalize`); NEW `events/handlers/step_grid.clj` routed for `"step-grid"`; the labels; the show lock's refused events |
+| 3 | `5f6cc2b` | NEW `views/components/step_grid.clj` (the body, the rows and numbers, + Row, the toolbar, Moves and Follows, `key-event`), NEW `views/dialogs/step_grid_editor.clj` (mounted in `root.clj`); `subs/step-grid`, `step-grid-clipboard`; Step grid… on the chip and in the pattern renderer, Edit grid… in the numeric list; `css/zones.clj`; `as-grid` brings a former grid's steps back (Z6-Q6) |
+| 4 | `265c2ad` | the playhead and the Now line (`ext-clock-redraw` on `:zone-steps`); the pattern window's small grid and Edit grid… for Steps, in place of Zones |
+| 5 | this commit | this note and §12's new questions |
+
+### Deviations from the plan
+
+- **Styles.** `zone-patterns/styles` is the six rules then `:steps`, last, so a modulator's indices for the rules are unchanged (Z6-Q9). NEW `rule-styles` is the six: the pattern pads (`pad-ids`), the Pattern chip's style items and New zone pattern ▸ list them only; a grid starts from Step grid… (the chip, the pattern window, an effects cell's editor). The `:steps` parameter comes right after `:zones` in the parameter list.
+- **`routing.step-grid` has more than §4 lists:** `rows`, `length`, `grid?`, `lit?`, `next-row` (+ Row's letter), `clear-row`, `fill-step` (a step number's Light every row), `grid-rows` and `became-zones` (Every laser as zones, S-4), `as-grid` (any pattern as a grid), `line-cells` (a quick drag paints every cell between two mouse events, so "every cell crossed" holds however fast it moves) and `start-styles`. Every edit returns normalized params, and one that can't apply returns them unchanged (no undo step).
+- **What a pattern becomes as a grid** (`as-grid`, used by `:step-grid/open`, the window's view and every edit): its rows from its zones, Every laser as that many zones (at least 2, the first letters it doesn't use), and 8 steps of its own style with its own Width, Path and Seed, at its own rate, Step on and clock, not following the pads (Z6-Q2 A). Shift, Swap, a style a modulator picks and Steps with no steps start as Alternate (Z6-Q7). A pattern that was a grid gets its steps back (Z6-Q6). An edit on a pattern that isn't a grid yet (an undo of the conversion with the window still open) makes it one in the same undo step. Start from uses the pattern's own Width, Path and Seed too (a new grid's are 1, Loop and 0: §8's table).
+- **The mouse.** `:step-grid/pointer` (the body's press, drag and release, with `:cell-w :cell-h`) only reads the JavaFX event and dispatches NEW `:step-grid/paint-start` (begins the history transaction and paints, `:history/skip?` so the press isn't a step of its own), `:step-grid/paint` (each cell from the last one) and `:step-grid/paint-end` (commits), so the lock can refuse the painting and still let a held drag go (below). A press that is a popup trigger paints too: the body has no menu, and the headless robot's presses all are. The press is consumed, so the scroll pane around the grid can't take the focus from it.
+- **The cursor and the keys.** `:step-grid/cursor` takes `:row :step` (a click), `:move [rows steps]` (the arrows, against the cursor in app state, so two quick keys never read an old one) and `:to :first` or `:last` (Home, End); `:toggle`, `:clear-step` and `:fill-step` without a cell take the cursor's. A row in an event is a ref or an index. `views.components.step-grid/key-event` (pure) maps a key to its event; the body's handler consumes the keys it uses; undo and redo are the scene's, as in the chain editors. The body takes the focus when the window opens and on a press. A shorter grid takes the cursor with it.
+- **The window** (`views/dialogs/step_grid_editor.clj`, 940 × 600):
+  - Rate is Z5's control (a slider with ∿ and its words), not a "[2 ▾]" combo, and so are Step on, Restart on (while Step on is the beat) and Offset; Moves and Follows the pattern pads are Z5's too (`zone-pattern-editor/control` and `moves-radios` went public). The length field is the app's commit field.
+  - + Row is a split menu button: a click adds the next zone letter, its menu the Target menu's `:pattern` rows without Every laser, a row already in the grid ticked and greyed.
+  - Cells are 22 × 26 px, so 32 steps fit; more scroll sideways. Beat and bar lines are drawn under the cells (every `rate` steps, every 4 × `rate`, from the offset) while the grid steps on the beat at a whole number of steps a beat and a whole offset; a bar's number is bold.
+  - Lines under the grid: the guard (keyframes, or the show lock: NEW text "The show lock is on. Unlock it on the Perform tab to edit this grid."), the Every laser note after a conversion (two zones read "A and B", a run "A–D", else a list), the wrap note for each lane two or more zone rows share ("A, C and E all go to Left; B and D both go to Right under Left / Right.", none under Unison, whose fold line says it), and Z5's fold line.
+  - The Now line in the footer says "Step 5 of 8" (NEW text) while the pattern plays and "Not playing" while it doesn't.
+  - A target that holds no zone pattern (the Master's cell, a pattern since removed) opens no window, or says "There's no zone pattern here to draw on a grid."
+- **The pattern window**, with the style Steps: a "Grid" row in place of Zones (the grid's rows are edited in its window), its small read-only grid (9 px cells), "8 steps over A B C" and Edit grid…; any other style a "Grid  [Step grid…]" row. The numeric list's Steps says "8 steps" and has Edit grid…. The chip's menu has Step grid… between the separator and Edit pattern…, and a cue without a pattern gets the new grid from it.
+- **Words.** The chip says a grid as `describe` does, "Steps · 8 · A B"; its tooltip "Zone pattern: Steps. Moves the All picture on 8 steps over A B, 2 steps a beat, from the cue's start."; an effects cell's tooltip "Zone pattern: Steps on 8 steps over A B, 2 steps a beat (show beats)". The Start from tooltips are §7's ("Replaces the grid with the first 8 steps of Chase over these rows", the grid's own length), and All on's is "Lights every row on every step".
+- **Warnings.** A grid needs one row, not two: one row is a rhythm in one zone. With none: "This pattern needs a zone (it has none)" (the lint names its cell, as for the others).
+
+### The show lock (Z6-Q8)
+
+- Refused as structure, each in `blocked-events` with the label "Edit Step Grid" ("Edit Step Grid refused"): `:step-grid/toggle`, `paint-start`, `paint`, `set-length`, `add-row`, `remove-row`, `set-row`, `move-row`, `fill-row`, `clear-row`, `clear`, `clear-step`, `fill-step`, `rotate`, `start-from`, `paste`. Its example in `show-lock-test`'s `structure-edits` is `:step-grid/toggle` on B1's grid; `locked-zone-pattern-edits-are-refused-test` adds the steps edited as any parameter (`:chain/update-param :steps`, refused by Z5's `pattern-edit?` as "Zone pattern edit refused") and the grid's own edits on an effects cell's grid, with their label. The toolbar's Rate, Offset, Step on, Restart on, Moves and Follows are `:chain/update-param` on the pattern, so `pattern-edit?` refuses them as for Z5.
+- Let through: `:step-grid/open` (it opens the window, and while locked makes no grid: the window shows the grid the pattern would become, greyed), `:step-grid/cursor`, `:step-grid/copy`, `:step-grid/pointer` (it only reads the mouse) and `:step-grid/paint-end`: a drag held when the lock goes on still lets go, its transaction committed as one undo step, as a held key's release goes through (NEW `locked-step-grid-opens-and-a-drag-lets-go-test`). The playhead reads the snapshot only.
+- The window greys the editing part while the lock is on, with the line above, so a drag can't bring a refusal per mouse move; Copy is greyed with it (Z6-Q8).
+
+### Beyond §9
+
+- `routing.step-grid-test`: `lit-test`, `clear-row-step-and-grid-test`, `as-grid-test` (a pattern plays the same for 8 steps; Every laser; Shift and Swap; a former grid's steps), `line-cells-test`.
+- `events.step-grid-handlers-test`: `row-and-step-menus-test`, `cursor-moves-and-stays-in-the-grid-test`.
+- `events.show-lock-test`: `locked-step-grid-opens-and-a-drag-lets-go-test`.
+- UI `step-grid-test`: `pattern-window-shows-a-small-grid-test`; the keyframe guard in `rows-say-where-they-go-test`.
+- `routing.zone-patterns-test`: the grid's preset, `describe` and warnings. `views.components.zone-pattern-editor-test`: the chip's words and the rows for Steps. `zone-remap-test/remap-invariants-test` generates grids too (their steps from a generator of their own, so the other styles' cases keep their draws).
+
+### §9 said these pass unchanged; they don't
+
+- UI `zone-patterns-test/offset-takes-a-modulator-test`: a new modulator on Style spans 0 to 6 ("… · 5 Swap · 6 Steps", Z6-Q9).
+- UI `zone-patterns-test/footer-chip-adds-a-pattern-test`: the chip's items gain "Step grid…".
+- `zone-patterns-test/presets-are-valid-test`: `styles` gains `:steps`, the default lanes a seventh, and a parameter of type `:step-list`.
+
+### Tests added
+
+- `laser-show.routing.step-grid-test` (NEW): the sixteen §9 tests and the four above.
+- `laser-show.routing.zone-remap-test`: the nine §9 tests; the invariants' generator. `laser-show.routing.compose-test`: `step-grid-on-one-laser-test` (§8's table on 1 and 4 lasers, both halves whole once, and What's already in the zones). `laser-show.animation.effects-coverage-test`: the `:steps` exemption.
+- `laser-show.events.step-grid-handlers-test` (NEW): the seven §9 tests and the two above. `laser-show.events.show-lock-test`: as above.
+- `laser-show.services.show-clock-test`: `zone-steps-follow-a-grid-test` (with a grid edited while it plays, invariant 8). `laser-show.subs-test`: `step-grid-sub-test`.
+- UI `laser-show.ui-test.step-grid-test` (NEW): the twelve §9 tests and `pattern-window-shows-a-small-grid-test`.
+
+### Red first
+
+Where the new code didn't exist yet, the run was first made to compile with stubs (an inert namespace, nil subs), so the tests below were seen failing unless it says otherwise.
+
+| Step | Before the change |
+|---|---|
+| 1 | `zone-remap-test`, `compose-test`, `effects-coverage-test` and `zone-patterns-test` with `rule-styles` stubbed as `styles`: 79 tests, 72 failures, 0 errors. **Not seen red:** `no-steps-is-the-identity-test` (an unknown style was the identity already) and `remap-invariants-test`'s grids (identity on the old stage). The first green run had 1 failure, the test's own (normal form puts `:graphics` before `:auto.laser/p2`) |
+| 2 | `step-grid-test`, `step-grid-handlers-test`, `show-lock-test` and `history-handlers-test` (the pattern ran `compose-test` and `subs-test` too) against an inert `routing.step-grid` and no `"step-grid"` route: 79 tests, 177 failures, 0 errors. **Not seen red:** the "nothing changes" parts of `keyframed-pattern-is-not-edited-test` (an unrouted event changes nothing either). The first green run had 1 failure and 1 error: a test's `'(B)` (a symbol, not the zone) and a handler bug (a cue's new grid put at index 0 of no vector made a map) |
+| 3 | `step-grid-sub-test` against nil subs, and `as-grid-test`'s former-grid case against the step-2 `as-grid`: 2 tests, 18 failures. UI, before any view code (a stub namespace with the cell size only): `step-grid-test` 11 tests, 1 failure, 11 errors (each waited for the window); Z5's chip test with Step grid… expected: 1 failure. The first green UI run had 5 errors: four were the test's own (a message passed to `wait-for!` as its timeout) and one a robot click on a window behind another (now fired at the node); then two real bugs: the grid ignored a press that is a popup trigger (every headless robot press is) and the scroll pane took the focus on a click |
+| 4 | `zone-steps-follow-a-grid-test` and `zone-pattern-editor-test`: 4 tests, 2 failures (the rows for Steps). **Not seen red:** `zone-steps-follow-a-grid-test` (the clock's `:zone-steps` is Z5's and the grid's stage step 1's) and the chip's words for Steps (step 3 had built them). UI `playhead-follows-the-clock-test` and `pattern-window-shows-a-small-grid-test`: 2 tests, 2 errors. The first green run of the playhead test failed on its own clock jump of 1.25 s: the clock skips a jump of more than a second (below); it moves 0.75 s now |
+
+### Verification
+
+| Where | Unit suite (`clj -M:mac-arm:test`) | UI suite (`clj -M:test-ui:mac-arm:test-ui-headless`) |
+|---|---|---|
+| `ea4d153` (the base: Z5 as landed; 07 §13's rebase row, not re-run) | 1,766 tests, 569,486 assertions, 0 failures | 254 tests, 1,370 assertions, 0 failures |
+| **`265c2ad`, the branch's last code** | **1,808 tests, 569,949 assertions, 0 failures, 0 errors** | **267 tests, 1,424 assertions, 0 failures, 0 errors** |
+| the trial merge onto `master` `734e411` (vibe Phase 8's zone reactions in), tree `8aaabe8` | 1,819 tests, 570,197 assertions, 0 failures, 0 errors | 268 tests, 1,436 assertions, 0 failures, 0 errors |
+
+Each step also ran its targeted namespaces (§9's run list) and the UI namespaces whose views it changed (`step-grid-test`, Z5's `zone-patterns-test`), and `legacy-shows` every time. Screenshots were checked with the window at 940 × 640: 8 steps over three rows, 32 steps (they fit), the show lock's greyed grid, the playhead while the cue plays, and the pattern window at 800 × 640 with a grid's small grid. `~/LaserShowProjects` didn't exist before the work and doesn't after it: no test wrote under the home folder.
+
+### For the merge
+
+- **Into `master` at `734e411`** (vibe Phase 8's zone reactions `6544efb`..`cdf1d57` and their plans in): `git merge-tree` merges cleanly, tree `8aaabe8`. The merged tree was unpacked with `git archive` into a folder of the worktree's (git-ignored) `test-results/`, its suites run there (the table above), and the folder deleted. Both sides edit `src/laser_show/subs.clj` (the step grid's block after the Map cycle's; vibe 8b's beside its vibe subs) and `test/laser_show/subs_test.clj` (each appends a test): both merge cleanly.
+- **With the zone reactions** (`vibes/reactions.clj`): they make their patterns with `zone-patterns/preset-instance`, whose params now carry `:steps []`; their test compares with `preset-instance` itself, so it passes on the merge. A zone reaction's cell opens in the grid window like any cell pattern: it keeps its Step on HIT or ACCENT, and its Every laser becomes zones. Z6 doesn't edit `reactions.clj`, `events/handlers/vibes.clj` or `views/tabs/vibes.clj`.
+- **Every file the branch edits** (28 in `src/` and `test/`, and this doc):
+  - NEW: `routing/step_grid.clj`, `events/handlers/step_grid.clj`, `views/components/step_grid.clj`, `views/dialogs/step_grid_editor.clj`; the tests `routing/step_grid_test.clj`, `events/step_grid_handlers_test.clj`, `ui_test/step_grid_test.clj`.
+  - `routing/zone_remap.clj`, `routing/zone_patterns.clj`, `animation/effects/zone.clj` (its doc), `events/handlers.clj` (the route), `events/handlers/history.clj` (the labels), `events/show_lock.clj`, `subs.clj`, `css/zones.clj`, `views/root.clj`, `views/components/grid_cell.clj` (one line: the rules), `views/components/parameter_controls.clj`, `views/components/zone_pattern_editor.clj`.
+  - tests: `animation/effects_coverage_test.clj`, `events/show_lock_test.clj`, `routing/compose_test.clj`, `routing/zone_patterns_test.clj`, `routing/zone_remap_test.clj`, `services/show_clock_test.clj`, `subs_test.clj`, `ui_test/zone_patterns_test.clj`, `views/components/zone_pattern_editor_test.clj`.
+- Files other work often touches, where Z6's edits are small and local: `subs.clj` (one new block), `events/handlers.clj` (one route), `events/handlers/history.clj` and `events/show_lock.clj` (one block each), `views/root.clj` (one dialog), `css/zones.clj` (rules appended). `00-overview.md` and `10-questions.md` are `master`'s alone: Z6-Q6 to Z6-Q9 are in §12 here, for the questions file.
+
+### Found on the way
+
+- **A jump of more than a second doesn't move the clock:** `cue-timing/update-global-clock` and the cue timing skip a tick that comes more than 1,000 ms after the last one (a stall), so a test that moves `fixtures/with-clock`'s fake time must step under a second.
+- **Every zone pattern now has the `:steps` parameter,** so its Numeric mode needed a `:step-list` control: `param-control` falls back to a slider, which a parameter with no Min or Max breaks.
+- **Test helpers:** `ui/query` looks in the topmost window only (a window behind another needs `query-all`), and a robot click lands on the window on top at that place; the headless robot's presses are popup triggers, so a control that ignores those can't be clicked by it.
