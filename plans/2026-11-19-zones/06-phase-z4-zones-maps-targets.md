@@ -1,7 +1,7 @@
 # Phase Z4: zones, zone maps and one Target control
 
 **Written:** 2026-11-19   **Written for commit:** `6aaad7d` (`master`; first written at `90e35c7`, then re-verified here: `src/` is as vibe Phase 6 left it in `4a4a10a`, after vibe Phases 3 (`38f92ad`), 4a (`6715fb4`), 4b (`f5a4f84`) and 5 (`9f5d78a`, with the fader fix `0faa18c`) and UX Phase 3 (`b9b9d55`); every line below is at that source). Z0, Z2 and Z3 edit several of these files first, so **re-check every path and line at HEAD before starting.**
-**Status:** Built on branch `zones-z4`, not merged (`6f9672d`..`ce40841`, §13)   **Needs:** Z3 (`05`), and through it Z2's automatic groups (`04`) and Z0's reference walker and confirm dialog (`02`). Vibe Phases 2–6 are in: the Perform tab (`94f905e`), the Vibes tab and its lint (Phase 3), pulses and tap reactions (4a, 4b), the faders with the Master (5), and auto-advance with one tap tempo (6)   **Size:** ~6 d
+**Status:** **Done in code, on `master`** (`64fab99`..`b44e388`, §13). Still owed: the checks on a real projector (§13).   **Needs:** Z3 (`05`), and through it Z2's automatic groups (`04`) and Z0's reference walker and confirm dialog (`02`). Vibe Phases 2–6 are in: the Perform tab (`94f905e`), the Vibes tab and its lint (Phase 3), pulses and tap reactions (4a, 4b), the faders with the Master (5), and auto-advance with one tap tempo (6)   **Size:** ~6 d
 **Implements spec** (`01-model-and-routing-spec.md`): §1 (zone refs, the normal form of a target, zone labels), §2 (inheritance, with `:from`), §4 (built-in and custom maps, wrap, overrides, active, pending, effective, with the slot and the pause the Map cycle fills in Z5), §5's order within a tick (the effective map before the routing), §9 (switch timing), §11 (the rows for item and track zones, `:destination-zone`, the Zone Selector and preview cells), §12 (the show-side rows and `[:zone-map]`). Overview questions planned with ★: Q-Z1 A (wrap), Q-Z4 A (grid column and show default), Q-Z5 A (direct and through the current map), Q-Z6 A (letters, optional labels).
 **Merge risk:** vibe Phase 6 landed while this was being re-verified (`4a4a10a`), and the lines below are after it. It dropped `:timing/calculate-bpm` from `events/core.clj`, gave tap tempo an `:input-time` and took `:tap-history` out of `update-runtime` (`events/handlers/triggers.clj`), made `show-time/due-reports` public with a sent map, added a `rotation-step` to `tick!`, and put an AUTO switch in the Perform header. None of it changes what Z4 relies on: the map-due report goes through `due-reports` with the step's `:sent`, and a map press dates itself by `:input-time` as tap tempo now does. Vibe Phase 7 (safety and hardening, proposed) edits `events/core.clj`, `events/handlers/input.clj`, `events/handlers/grid.clj`, `views/tabs/perform.clj`, `services/show_clock.clj`, `animation/show_time.clj`, `state/domains.clj` and `subs.clj`, which Z4 edits too, so whichever lands second merges those by hand (00 §6).
 
@@ -538,7 +538,7 @@ About 6.25 days; if it runs long, map overrides (UI only) and the through-the-ma
 > - **A ★** Keep them until Z5, then take them out with the fixtures that use them (`zone_groups_handlers_test`).
 > - **B** Take them out now.
 
-## 13. As built (2026-11-20, `6f9672d`..`ce40841`, on branch `zones-z4`, not merged)
+## 13. As built (2026-11-20, `64fab99`..`b44e388`, on `master`)
 
 Built in worktree `zones-z4` off `c067030` (Z3 and ZR on `master`), while the output drivers were built in worktrees of their own. The ★ answers are built: Z4-Q1 A (the pads show while the show uses a zone anywhere), Z4-Q2 A (learning a pad's key again moves it), Z4-Q3 A (the menu lists A, B, the show's zones and New zone), and from `10-questions.md` Q-Z1 A (zones wrap over the lanes), Q-Z4 A (a column and the show can give a default), Q-Z5 A (Used by counts direct and through the map in use, apart) and Q-Z6 A (letters, with a label per show). SQ-13 is built as chosen: a deleted group's map lane is left empty, never taken out. Step 13 follows V10 A. Z5's Map cycle argument of `effective-map-id` stays nil. `legacy-shows` ran in every step, and `golden.edn` was recorded once, at `c067030`, before any Z4 change. **Not done: seeing it on a real projector** (00 R-1): a map switch on the beat, and a zone cue under each built-in map, at 25 and 40 kpps.
 
@@ -546,20 +546,20 @@ Built in worktree `zones-z4` off `c067030` (Z3 and ZR on `master`), while the ou
 
 | # | Commit | Step (§10) |
 |---|---|---|
-| 1 | `6f9672d` | NEW `routing/legacy_shows_test.clj` and six fixture shows (`destination`, `item-zones`, `selectors`, `timeline`, `preview`, `starter`), with `golden.edn` recorded at `c067030` by `record-golden!` |
-| 2 | `9d32c75` | NEW `routing/targets.clj`: normal form, zones and their letters, `cue-fallback`, `resolve-item`, `inherited`, `track-targets` (cached by identity), `explain-cue`, `cue-refs`, `toggle`, `zone-lane`, `pin`, names and texts, badges; NEW `views/components/target_control.clj` with `menu-model` only |
-| 3 | `5f34388` | NEW `routing/zone_maps.clj`: the built-ins, `all-maps`, `map-by-id`, `effective-map-id`, `switch-at`, `press-beats`, `schedule`, `commit`, `map-warnings`, `next-custom-id` |
-| 4 | `e06b252` | `:target` everywhere: the render (`targets/resolve-item`), the cue chain and timeline handlers and ops, `state.migration/cue-z4`, `zones-z4`, `items-z4`, `effects-z4` on load and paste, Z0's walker (`routing/refs.clj`) learning targets, unions and the new places, the templates; the old views send the new events |
-| 5 | `d1dede8` | `[:grid :column-targets]` and `[:config :default-target]` through `render-context` and `render-cue`; `:grid/set-column-target`, `:zones/set-default-target`; NEW `events/handlers/zone_maps.clj`; Z0's delete question names columns and the show default |
-| 6 | `ff7d706` | NEW `zones`, `zone-maps` and `zone-map` domains, their history and saving; `effective-map-id` in `tick!` before the routing; `rig/routing` carries the map's `:lanes` and `:overrides`, and `resolve-ref` resolves a zone; the preview counts a zone for its lane |
-| 7 | `623b819` | NEW inline effect `:show-clock/read`; `:zone-map/pointer`, `press`, `schedule`, `set-pad-bar`, `clear-control`, `:zone-maps/use-now`, `:show-clock/zone-map-due`; Stop and Retrigger commit a pending switch; the trigger action `{:type :zone-map}`; learning moves a pad's key |
-| 8 | `042f73b` | `target-control`'s `menu-items`, `target-chip`, `target-field`; NEW `css/zones.clj`; the zone subs; the Cue Chain Editor's item, group and cue chips, Target ▸ and its labels; the timeline cue editor's footer |
-| 9 | `6ce6770` | the timeline's header chips (compact) and Target ▸, the inspector's clip and track fields; `explain-cue`'s `:item-inherits` and `:track-inherits` |
-| 10 | `014ed6c` | the cells' badges and their tooltip line (`subs/cell-target-badge`, `cell-target-tooltip`); `grid-tab`'s `:column-component`, `target-control/column-target-header` |
-| 11 | `c9fe903` | NEW `views/components/zone_map_pads.clj`: the Grid tab's strip (`grid-tab`'s `:header-extra`) and Perform's ZONE MAP row; `subs/map-pad`, `map-pad-ids`, `map-pad-bindings` |
-| 12 | `fdd2c6e` | NEW `views/components/zone_maps_panel.clj` on the Zone Groups tab; the `:zones/set-label` and `:zone-maps/*` edits, delete asking first; Used by through the map (`zone-maps/usage`, `subs/ref-usage`); the preview picker's Zones; a group's delete names the maps that use it |
-| 13 | `20ee5b9` | `vibes.library/audience-ref?`; `audience-cue?`, `unplayable` and `playable-cells` over `targets/cue-refs` and every map; the lint names the zone and its map |
-| 14 | `ce40841` | the Zone Selector hidden (its id registered), the bank's Zone tab only while it has an effect; `routing/zone_effects.clj:58-187` gone; `frame-keys-ignore-the-map-test` |
+| 1 | `64fab99` | NEW `routing/legacy_shows_test.clj` and six fixture shows (`destination`, `item-zones`, `selectors`, `timeline`, `preview`, `starter`), with `golden.edn` recorded at `c067030` by `record-golden!` |
+| 2 | `f16c001` | NEW `routing/targets.clj`: normal form, zones and their letters, `cue-fallback`, `resolve-item`, `inherited`, `track-targets` (cached by identity), `explain-cue`, `cue-refs`, `toggle`, `zone-lane`, `pin`, names and texts, badges; NEW `views/components/target_control.clj` with `menu-model` only |
+| 3 | `2133372` | NEW `routing/zone_maps.clj`: the built-ins, `all-maps`, `map-by-id`, `effective-map-id`, `switch-at`, `press-beats`, `schedule`, `commit`, `map-warnings`, `next-custom-id` |
+| 4 | `76b7790` | `:target` everywhere: the render (`targets/resolve-item`), the cue chain and timeline handlers and ops, `state.migration/cue-z4`, `zones-z4`, `items-z4`, `effects-z4` on load and paste, Z0's walker (`routing/refs.clj`) learning targets, unions and the new places, the templates; the old views send the new events |
+| 5 | `ef2aae9` | `[:grid :column-targets]` and `[:config :default-target]` through `render-context` and `render-cue`; `:grid/set-column-target`, `:zones/set-default-target`; NEW `events/handlers/zone_maps.clj`; Z0's delete question names columns and the show default |
+| 6 | `408dbc1` | NEW `zones`, `zone-maps` and `zone-map` domains, their history and saving; `effective-map-id` in `tick!` before the routing; `rig/routing` carries the map's `:lanes` and `:overrides`, and `resolve-ref` resolves a zone; the preview counts a zone for its lane |
+| 7 | `ae1e39b` | NEW inline effect `:show-clock/read`; `:zone-map/pointer`, `press`, `schedule`, `set-pad-bar`, `clear-control`, `:zone-maps/use-now`, `:show-clock/zone-map-due`; Stop and Retrigger commit a pending switch; the trigger action `{:type :zone-map}`; learning moves a pad's key |
+| 8 | `2a48f48` | `target-control`'s `menu-items`, `target-chip`, `target-field`; NEW `css/zones.clj`; the zone subs; the Cue Chain Editor's item, group and cue chips, Target ▸ and its labels; the timeline cue editor's footer |
+| 9 | `79f9509` | the timeline's header chips (compact) and Target ▸, the inspector's clip and track fields; `explain-cue`'s `:item-inherits` and `:track-inherits` |
+| 10 | `ca0f08b` | the cells' badges and their tooltip line (`subs/cell-target-badge`, `cell-target-tooltip`); `grid-tab`'s `:column-component`, `target-control/column-target-header` |
+| 11 | `d51b309` | NEW `views/components/zone_map_pads.clj`: the Grid tab's strip (`grid-tab`'s `:header-extra`) and Perform's ZONE MAP row; `subs/map-pad`, `map-pad-ids`, `map-pad-bindings` |
+| 12 | `23639b8` | NEW `views/components/zone_maps_panel.clj` on the Zone Groups tab; the `:zones/set-label` and `:zone-maps/*` edits, delete asking first; Used by through the map (`zone-maps/usage`, `subs/ref-usage`); the preview picker's Zones; a group's delete names the maps that use it |
+| 13 | `41640d1` | `vibes.library/audience-ref?`; `audience-cue?`, `unplayable` and `playable-cells` over `targets/cue-refs` and every map; the lint names the zone and its map |
+| 14 | `b44e388` | the Zone Selector hidden (its id registered), the bank's Zone tab only while it has an effect; `routing/zone_effects.clj:58-187` gone; `frame-keys-ignore-the-map-test` |
 | 15 | this commit | this note |
 
 ### Deviations from the plan
@@ -649,13 +649,14 @@ Where the new code didn't exist yet, the run was first made to compile with stub
 | Where | Unit suite (`clj -M:mac-arm:test`) | UI suite (`clj -M:test-ui:mac-arm:test-ui-headless`) |
 |---|---|---|
 | `c067030` (the base) | 1,437 tests, 541,737 assertions, 0 failures (05 §13's run of the same `src/` and `test/`) | 194 tests, 879 assertions, 0 failures (the same) |
-| step 4, `e06b252` | 1,475 tests, 542,412 assertions, 0 failures | 10 namespaces (rig-report, setup-dialogs, perform, preview, streaming-status, cue-load, timeline-editor, main-window, cue-chain-list, rig-card): 114 tests, 503 assertions, 0 failures |
-| step 5, `d1dede8` | 1,481 tests, 542,464 assertions, 0 failures | – |
-| step 6, `ff7d706` | 1,496 tests, 542,557 assertions, 0 failures | – |
-| step 7, `623b819` | 1,511 tests, 542,633 assertions, 0 failures | – |
+| step 4, `76b7790` | 1,475 tests, 542,412 assertions, 0 failures | 10 namespaces (rig-report, setup-dialogs, perform, preview, streaming-status, cue-load, timeline-editor, main-window, cue-chain-list, rig-card): 114 tests, 503 assertions, 0 failures |
+| step 5, `ef2aae9` | 1,481 tests, 542,464 assertions, 0 failures | – |
+| step 6, `408dbc1` | 1,496 tests, 542,557 assertions, 0 failures | – |
+| step 7, `ae1e39b` | 1,511 tests, 542,633 assertions, 0 failures | – |
 | step 14's code, before its last unit test (`frame-keys-ignore-the-map-test`) | 1,511 tests, 542,799 assertions, 0 failures, 0 errors | 210 tests, 1,010 assertions, 0 failures, 0 errors |
-| **`ce40841`, the branch's last code** | **1,512 tests, 542,801 assertions, 0 failures, 0 errors** | **the row above: the one test added since is a unit test, which the UI suite doesn't load** |
+| **`b44e388`, the branch's last code** | **1,512 tests, 542,801 assertions, 0 failures, 0 errors** | **the row above: the one test added since is a unit test, which the UI suite doesn't load** |
 | the trial merge onto `master` `cc9e000` (tree `b536aaa`, below) | 1,522 tests, 542,856 assertions, 0 failures, 0 errors | 211 tests, 1,015 assertions, 0 failures, 0 errors |
+| **rebased onto `cc9e000`, as landed** | **the same `src/`, `test/`, `deps.edn` and QUICKSTART trees as the trial merge (`b536aaa`), so its run above stands** | **the same** |
 
 Each step also ran its targeted namespaces (§9's run list) and the UI namespaces whose views it changed, and `legacy-shows` every time. The full UI runs had no failure, so no screenshot to look at. Screenshots were checked for the Cue Chain Editor (step 8) and the timeline editor (9), and at 1200 × 800 for the grid's badges and column numbers (10), the Grid tab's strip and Perform's row (11), and the Zone Groups tab with and without lasers and the Projectors tab (12). `~/LaserShowProjects` didn't exist before the work and doesn't after it: no test or app start wrote under the home folder.
 

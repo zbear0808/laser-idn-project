@@ -153,6 +153,24 @@ Either way, Escape during a drag puts the old zone back without asking.
 - **B** Always A–D.
 - **C** As many as the active map has lanes.
 
+**Raised while building Z4** (2026-11-20; 06 §12 has the context; built as ★ A):
+
+**Z4-Q4 · The show lock and targets.**
+- **A ★ (built)** Refuse every target edit (a cue's, an item's, a track's, a clip's, a column's, the show's), zone labels and every map edit; a pad, its key, a due switch, Use now and selecting a map go through.
+- **B** Refuse only the column and show defaults and the maps; a cue's own target goes through like its other edits.
+
+**Z4-Q5 · Where ZONES AND MAPS sits on the Zone Groups tab.**
+- **A ★ (built)** Under the lasers and the details, so the groups list keeps the tab's height.
+- **B** Under all three columns. **C** A tab of its own, "Zones".
+
+**Z4-Q6 · How loud the Vibes tab is about a zone cue that can reach the crowd.**
+- **A ★ (built)** A warning, like the other audience rows.
+- **B** An error, as V10 makes it for a zone effect.
+
+**Z4-Q7 · Z0's walker still reads the old zone keys.**
+- **A ★ (built)** Keep them until Z5, then take them out with their fixtures.
+- **B** Take them out now.
+
 ## Decimate (`12-decimate-effect.md`)
 
 **Q-D-1 · The load meter with Decimate in a laser's calibration chain.**
