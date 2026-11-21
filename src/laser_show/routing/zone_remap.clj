@@ -22,7 +22,12 @@
 
    The step is ⌊offset + rate·t + 1e-9⌋ (step-index), t the beats of the
    pattern's clock (the cue's or the show's, since a press of :restart-on),
-   or a pulse source's press count (pattern-t)."
+   or a pulse source's press count (pattern-t).
+
+   A step grid (zones plan Z6, plans/2026-11-19-zones/08 §4) is one more
+   lit style, :steps, whose lit places are data: step k lights steps[k mod
+   L] of its :steps (L of them, each the refs lit on it; [] a rest), those
+   in the lane. With no steps it is the identity."
   (:require [laser-show.animation.frames :as frames]
             [laser-show.animation.pulses :as pulses]
             [laser-show.routing.compose :as compose]
@@ -35,8 +40,8 @@
 (def lit-styles
   "The styles that light some of the lane's places each step: they move a
    picture there (copying it when several are lit), or keep only what is
-   lit."
-  #{:alternate :chase :ping-pong :random})
+   lit. :steps is a step grid's (zones plan Z6): its places are data."
+  #{:alternate :chase :ping-pong :random :steps})
 
 (def permute-styles
   "The styles that trade what is in the lane's places: a bijection."
@@ -45,7 +50,7 @@
 (def ^:private defaults
   "What a pattern's parameters are when it doesn't say (routing.zone-patterns
    has their definitions)."
-  {:style :alternate :zones [] :source :auto :from :all :rate 1.0 :offset 0.0
+  {:style :alternate :zones [] :steps [] :source :auto :from :all :rate 1.0 :offset 0.0
    :step-on :clock :clock :global :path :loop :width 1 :seed 0 :follow-pads? true :restart-on :own})
 
 
@@ -140,14 +145,32 @@
   (let [n (count l)]
     (into #{} (map #(nth l (mod (+ (long start) (long %)) n))) (range width))))
 
+(defn grid-steps
+  "A step grid's steps (zones plan Z6): its :steps when they are a vector
+   of steps, else none. A step that isn't a collection of refs is a rest."
+  [params]
+  (let [steps (:steps params)]
+    (if (sequential? steps) steps [])))
+
+(defn grid-step
+  "The refs step k of a step grid lights, before the lane: steps[k mod L]
+   (backwards too); nil with no steps."
+  [params k]
+  (let [steps (grid-steps params)
+        n (count steps)]
+    (when (pos? n)
+      (let [step (nth steps (mod (long k) n))]
+        (when (sequential? step) step)))))
+
 (defn lit-set
   "The places of l (a lane) lit at step for a lit style (07 §8.2):
    Alternate the even places on even steps and the odd ones on odd steps
    (with one place, none on odd steps: the picture is hidden then); Chase
    :width places from ring-index along :path (wrapping; with :bounce the
    window bounces inside the lane); Ping-pong a bouncing Chase; Random
-   :width places from scatter-index (:seed). A Chase, Ping-pong or Random on
-   one place lights it on every step; no place lights nothing."
+   :width places from scatter-index (:seed); a step grid (:steps, zones plan
+   Z6) the places of l its step lights (grid-step). A Chase, Ping-pong or
+   Random on one place lights it on every step; no place lights nothing."
   [style params l step]
   (let [n (count l)
         width (clamp-width (:width params) n)]
@@ -161,6 +184,8 @@
                                   (into #{} (subvec l start (+ start width))))
                                 (window l (ring-index step n :loop) width)))
         :random (window l (scatter-index step n (or (:seed params) 0)) width)
+        :steps (let [lit (set (grid-step params step))]
+                 (into #{} (filter lit) l))
         #{}))))
 
 (defn permutation
@@ -266,10 +291,11 @@
 
 (defn- key-fn
   "The key function of a pattern playing style at step on lane l, or nil
-   when it leaves every key alone."
+   when it leaves every key alone (a step grid with no steps too)."
   [style params l step frames]
   (cond
     (or (empty? frames) (empty? l)) nil
+    (and (= :steps style) (empty? (grid-steps params))) nil
     (contains? lit-styles style) (let [lit (lit-set style params l step)]
                                    (if (moves-the-picture? params frames)
                                      (move-fn (:from params) lit)

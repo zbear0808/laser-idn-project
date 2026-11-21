@@ -419,8 +419,9 @@
 
 (defn- new-zone-pattern-menu
   "New zone pattern ▸, for an empty effects cell (zones plan Z5, 07 §7.2):
-   a style, or a Map cycle. The cell becomes it, off, and its editor opens
-   (:zone-patterns/new-cell)."
+   a rule style, or a Map cycle. The cell becomes it, off, and its editor
+   opens (:zone-patterns/new-cell). A step grid starts from one of them, in
+   that editor (zones plan Z6)."
   [col row]
   {:fx/type :menu
    :id "new-zone-pattern-menu"
@@ -430,7 +431,7 @@
                          :id (str "new-zone-pattern-" (name style))
                          :text (zone-patterns/style-names style)
                          :on-action {:event/type :zone-patterns/new-cell :col col :row row :style style}})
-                      zone-patterns/styles)
+                      zone-patterns/rule-styles)
                 {:fx/type :separator-menu-item}
                 {:fx/type :menu-item
                  :id "new-zone-pattern-map-cycle"

@@ -170,8 +170,8 @@
     (testing "Style takes one too: a modulator picks the style by index"
       (ui/click! robot "#zone-pattern-row-style .modulator-toggle")
       (ui/wait-for! #(map? (param :style)))
-      (is (= [0.0 5.0] (mapv double ((juxt :min :max) (param :style)))) "Alternate 0 … Swap 5")
-      (ui/wait-for! #(some #{"0 Alternate · 1 Chase · 2 Ping-pong · 3 Random · 4 Shift · 5 Swap"}
+      (is (= [0.0 6.0] (mapv double ((juxt :min :max) (param :style)))) "Alternate 0 … Swap 5, then Steps 6 (zones plan Z6)")
+      (ui/wait-for! #(some #{"0 Alternate · 1 Chase · 2 Ping-pong · 3 Random · 4 Shift · 5 Swap · 6 Steps"}
                            (texts "#zone-pattern-row-style .label"))))))
 
 

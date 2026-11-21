@@ -568,3 +568,41 @@
       (is (= [(join X P) 0] (draws [(cue frames)] r :p1)))
       (is (= {:L [X P] :whole [] :R []} (compose/cue-plan frames r :p2 false)) "p2: X and P in its left half")
       (is (nil? (compose/cue-plan frames r :p3 false)) "p3 is Right: neither"))))
+
+;; Zones plan Z6: a step grid on the rig (08 §8)
+
+(def ^:private grid-pattern
+  "08 §8's grid: rows A, B, C, eight steps at 2 a beat, on the show's beats."
+  {:style :steps :zones [:zone/a :zone/b :zone/c]
+   :steps [[:zone/a] [] [:zone/b] [] [:zone/a :zone/b] [] [:zone/c] [:zone/a :zone/b :zone/c]]
+   :rate 2.0 :offset 0.0 :step-on :clock :clock :global :source :auto :from :all :follow-pads? false})
+
+(deftest step-grid-on-one-laser-test
+  (let [r1 (routing-on (rig-state 1) :map/left-right)
+        r4 (routing-on (rig-state 4) :map/left-right)
+        all-four (zipmap [:p1 :p2 :p3 :p4] (repeat :whole))]
+    (testing "08 §8's table: the cue draws only its All picture"
+      (doseq [[beats frame-keys one four] [[0.0 {:zone/a A} {:p1 :L} {:p1 :whole :p2 :whole}]
+                                           [0.5 {} {} {}]
+                                           [1.0 {:zone/b A} {:p1 :R} {:p3 :whole :p4 :whole}]
+                                           [2.0 {[:zone/a :zone/b] A} {:p1 :whole} all-four]
+                                           [3.0 {:zone/c A} {:p1 :L} {:p1 :whole :p2 :whole}]
+                                           [3.5 {[:zone/a :zone/b :zone/c] A} {:p1 :whole} all-four]
+                                           [4.0 {:zone/a A} {:p1 :L} {:p1 :whole :p2 :whole}]]]
+        (testing (str "beat " beats)
+          (is (= frame-keys (stage {:all A} grid-pattern beats r1)) "the frame keys")
+          (is (= one (where-drawn (stage {:all A} grid-pattern beats r1) r1 1)) "1 laser, Left / Right")
+          (is (= four (where-drawn (stage {:all A} grid-pattern beats r4) r4 4)) "4 lasers, Left / Right"))))
+    (testing "one laser: A in its left half, a rest dark, A and B the whole laser, once (spec §6 step 2)"
+      (is (= [(fit A L1) 1] (draws [(cue (stage {:all A} grid-pattern 0.0 r1))] r1 :p1)))
+      (is (nil? (draws [(cue (stage {:all A} grid-pattern 0.5 r1))] r1 :p1)))
+      (is (= [A 0] (draws [(cue (stage {:all A} grid-pattern 2.0 r1))] r1 :p1)))
+      (is (= 33 (compose/plan-points (compose/cue-plan (stage {:all A} grid-pattern 3.5 r1) r1 :p1 false)))
+          "all three rows: the circle once, not three times"))
+    (testing "What's already in the zones: a circle in A and a wave in B, each shown on its own steps; C has nothing"
+      (let [gate (assoc grid-pattern :source :zones)
+            drawn #(compose/cue-plan (stage {:zone/a A :zone/b B} gate % r1) r1 :p1 false)]
+        (is (= {:L [A] :whole [] :R []} (drawn 0.0)) "step 0: the circle, the wave hidden")
+        (is (= {:L [] :whole [] :R [B]} (drawn 1.0)) "step 2: the wave")
+        (is (= {:L [A] :whole [] :R [B]} (drawn 2.0)) "step 4: both")
+        (is (nil? (drawn 3.0)) "step 6: dark")))))

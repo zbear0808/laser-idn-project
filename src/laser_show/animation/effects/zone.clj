@@ -15,7 +15,9 @@
      picks the zone map (routing.zone-patterns/cycle-pick, its :select-map,
      which the show clock asks). As point effects they are identity: the
      render runs the stage before the point effects, and no transducer reads
-     their parameters (routing.zone-patterns has them)."
+     their parameters (routing.zone-patterns has them). A zone pattern can be
+     a step grid (zones plan Z6): its style Steps, its :steps the refs each
+     step lights."
   (:require [laser-show.animation.effects :as effects]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.routing.zone-remap :as zone-remap]))

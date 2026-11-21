@@ -28,7 +28,8 @@
 
 (deftest presets-are-valid-test
   (let [params-by-key (into {} (map (juxt :key identity)) zp/pattern-parameters)]
-    (is (= [:alternate :chase :ping-pong :random :shift :swap] zp/styles))
+    (is (= [:alternate :chase :ping-pong :random :shift :swap :steps] zp/styles) "the rules, then the step grid (zones plan Z6)")
+    (is (= [:alternate :chase :ping-pong :random :shift :swap] zp/rule-styles))
     (doseq [style zp/styles
             where [:cue :cell]]
       (testing (str style " " where)
@@ -46,10 +47,18 @@
               :bool (is (boolean? v) (str k))
               :ref-list (is (and (vector? v) (every? keyword? v)) (str k))
               :ref (is (keyword? v) (str k))
+              :step-list (is (and (vector? v) (every? #(and (vector? %) (every? keyword? %)) v)) (str k))
               (is false (str k " has no type")))))))
-    (is (= [[:zone/a :zone/b] [:lane/lasers] [:lane/lasers] [:lane/lasers] abcd [:zone/a :zone/b]]
+    (is (= [[:zone/a :zone/b] [:lane/lasers] [:lane/lasers] [:lane/lasers] abcd [:zone/a :zone/b] [:zone/a :zone/b]]
            (mapv #(get-in (zp/preset-instance % :cue) [:params :zones]) zp/styles))
         "the default lanes")
+    (testing "a new grid (Z6-Q1 A, Z6-Q2 A): 8 steps at 2 a beat over A and B, filled as Alternate, not following the pads"
+      (let [params (:params (zp/preset-instance :steps :cell))]
+        (is (= (vec (take 8 (cycle [[:zone/a] [:zone/b]]))) (:steps params)))
+        (is (= 2.0 (:rate params)))
+        (is (false? (:follow-pads? params))))
+      (is (= [] (:default (params-by-key :steps))) "the other styles have no steps")
+      (is (every? #(= [] (get-in (zp/preset-instance % :cue) [:params :steps])) zp/rule-styles)))
     (testing "every choice a modulator may drive says so, and has a label"
       (is (= #{:style :source :path} (set (keep #(when (:modulatable? %) (:key %)) zp/pattern-parameters))))
       (doseq [p zp/pattern-parameters :when (= :choice (:type p))]
@@ -76,6 +85,10 @@
   (is (= "Ping-pong · Left → Right · 1 a beat, backwards" (zp/describe {:style :ping-pong :zones [:auto/left :auto/right] :rate -1.0} names)))
   (is (= "Chase · no zones · still" (zp/describe {:style :chase :zones [] :rate 0.0} names)))
   (is (= "Chase · A → Front (missing) · 1 a beat" (zp/describe {:style :chase :zones [:zone/a :front]} names)) "a group that's gone says so")
+  (testing "a step grid (zones plan Z6): its length and its rows"
+    (is (= "Steps · 8 · A B" (zp/describe (:params (zp/preset-instance :steps :cell)) names)))
+    (is (= "Steps · 3 · A Graphics C" (zp/describe {:style :steps :zones [:zone/a :graphics :zone/c] :steps [[] [] []]} names)))
+    (is (= "Steps · 0 · no zones" (zp/describe {:style :steps :zones []} names))))
   (testing "a Map cycle (07 §7.4)"
     (is (= "Map cycle: Left / Right, Odd / Even, a bar each"
            (zp/describe-cycle {:maps [:map/left-right :map/odd-even] :rate 0.25} {})))
@@ -189,7 +202,10 @@
         "learned: nothing to say")
     (is (= ["B3 (Zone pattern) needs two zones (it has none)"]
            (mapv :text (zp/warnings state {:style :shift :zones []} names "B3 (Zone pattern)")))
-        "the lint names its own subject")))
+        "the lint names its own subject")
+    (testing "a step grid needs one row: one row is a rhythm in one zone (zones plan Z6)"
+      (is (= [] (texts state {:style :steps :zones [:zone/a] :steps [[:zone/a] []]})))
+      (is (= [[:error "This pattern needs a zone (it has none)"]] (texts state {:style :steps :zones [] :steps []}))))))
 
 
 ;; The pattern pads (07 §7.3, spec §9)

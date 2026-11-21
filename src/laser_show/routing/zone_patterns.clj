@@ -6,12 +6,14 @@
 
    A zone pattern is one effect, :zone-pattern, for every style (so a pad
    or a modulator can switch the style): Alternate, Chase, Ping-pong, Random,
-   Shift, Swap. It lives on a cue (its :zone-patterns) or in an effects-grid
+   Shift, Swap, and a step grid, Steps (zones plan Z6), whose places are
+   data (routing.step-grid edits them). It lives on a cue (its
+   :zone-patterns) or in an effects-grid
    cell. A Map cycle (:zone-map-cycle) lives in a cell only: it picks the
    zone map, a bar each, or on a press (cycle-pick, active-cycle).
 
    The pattern pads switch the style of every pattern that follows them
-   (Z5-Q1 A): [:pattern-pads :style] (nil As set, :off, a style), live, not
+   (Z5-Q1 A): [:pattern-pads :style] (nil As set, :off, a rule style), live, not
    saved (Z5-Q3 A), and a switch waits for the beat or the bar as a map
    pad's does (schedule-style, routing.zone-maps/schedule-slot)."
   (:require [clojure.string :as str]
@@ -26,12 +28,20 @@
 
 ;; Styles and their parameters (07 §8.2)
 
-(def styles
-  "The styles, in the menus' order (zones plan Z6 adds :steps)."
+(def rule-styles
+  "The styles that work their places out from a rule (zones plan Z5), in
+   the menus' order: the ones a pattern pad switches to."
   [:alternate :chase :ping-pong :random :shift :swap])
 
+(def styles
+  "Every style, in order: the rules, then a step grid (:steps, zones plan
+   Z6, 08 §4), whose places are data. A modulator on Style picks one by its
+   index, so :steps is last and the rules keep theirs."
+  (conj rule-styles :steps))
+
 (def style-names
-  {:alternate "Alternate" :chase "Chase" :ping-pong "Ping-pong" :random "Random" :shift "Shift" :swap "Swap"})
+  {:alternate "Alternate" :chase "Chase" :ping-pong "Ping-pong" :random "Random" :shift "Shift" :swap "Swap"
+   :steps "Steps"})
 
 (def step-sources
   "What a pattern steps on: the beat (:clock), or a press of one of vibe
@@ -63,9 +73,11 @@
 (def pattern-parameters
   "The :zone-pattern effect's parameters (07 §8.2). :style, :source and
    :path may follow a modulator (:modulatable?: its value picks a choice by
-   index, animation.effects/choice-at)."
+   index, animation.effects/choice-at). :steps is a step grid's (zones plan
+   Z6): the refs each step lights, [] a rest; the step grid window edits it."
   [{:key :style :label "Style" :type :choice :choices styles :labels style-names :default :alternate :modulatable? true}
    {:key :zones :label "Zones" :type :ref-list :default [:zone/a :zone/b]}
+   {:key :steps :label "Steps" :type :step-list :default []}
    {:key :source :label "Moves" :type :choice :choices [:auto :picture :zones]
     :labels {:auto "Automatic" :picture "The All picture" :zones "What's already in the zones"}
     :default :auto :modulatable? true}
@@ -99,13 +111,19 @@
   (into {} (map (juxt :key :default)) parameters))
 
 (def presets
-  "What each style's preset sets over the defaults: its lane (07 §8.2)."
+  "What each style's preset sets over the defaults: its lane (07 §8.2); a
+   step grid's, 8 steps at 2 a beat over A and B, filled as Alternate, not
+   following the pads (zones plan Z6: Z6-Q1 A, Z6-Q2 A)."
   {:alternate {:zones [:zone/a :zone/b]}
    :chase {:zones [:lane/lasers]}
    :ping-pong {:zones [:lane/lasers]}
    :random {:zones [:lane/lasers]}
    :shift {:zones [:zone/a :zone/b :zone/c :zone/d]}
-   :swap {:zones [:zone/a :zone/b]}})
+   :swap {:zones [:zone/a :zone/b]}
+   :steps {:zones [:zone/a :zone/b]
+           :steps (vec (take 8 (cycle [[:zone/a] [:zone/b]])))
+           :rate 2.0
+           :follow-pads? false}})
 
 (defn preset-instance
   "A new zone pattern of style, as an effect instance (no :id yet): its
@@ -144,8 +162,9 @@
 
 (defn lane-text
   "A pattern's lane as its style says it: Alternate \"A ⇄ B\" (the even
-   places ⇄ the odd ones: \"A C ⇄ B D\"), Swap its first two, the others
-   in order, \"A → B → C\"; \"every laser\"; \"no zones\" for none."
+   places ⇄ the odd ones: \"A C ⇄ B D\"), Swap its first two, a step grid
+   its rows (\"A B C\", zones plan Z6), the others in order, \"A → B →
+   C\"; \"every laser\"; \"no zones\" for none."
   [style refs names]
   (let [refs (vec (distinct (filter keyword? refs)))
         say (fn [rs] (str/join " " (map #(lane-place-name names %) rs)))]
@@ -153,6 +172,7 @@
       (empty? refs) "no zones"
       (and (= :alternate style) (next refs)) (str (say (take-nth 2 refs)) " ⇄ " (say (take-nth 2 (rest refs))))
       (and (= :swap style) (next refs)) (str (say [(first refs)]) " ⇄ " (say [(second refs)]))
+      (= :steps style) (say refs)
       :else (str/join " → " (map #(lane-place-name names %) refs)))))
 
 (def ^:private press-words
@@ -177,11 +197,14 @@
                  (when (neg? r) ", backwards")))))
 
 (defn describe
-  "A pattern in one line (07 §4.2): \"Alternate · A ⇄ B · 1 a beat\"."
+  "A pattern in one line (07 §4.2): \"Alternate · A ⇄ B · 1 a beat\"; a
+   step grid its length and rows, \"Steps · 8 · A B\" (08 §4)."
   [params names]
-  (str (get style-names (:style params) "Zone pattern")
-       " · " (lane-text (:style params) (:zones params) names)
-       " · " (rate-text params)))
+  (if (= :steps (:style params))
+    (str "Steps · " (count (zone-remap/grid-steps params)) " · " (lane-text :steps (:zones params) names))
+    (str (get style-names (:style params) "Zone pattern")
+         " · " (lane-text (:style params) (:zones params) names)
+         " · " (rate-text params))))
 
 (defn- cycle-rate-text
   "How long a Map cycle stays on each map: \"a bar each\", \"2 bars each\",
@@ -286,7 +309,8 @@
 (defn warnings
   "What a pattern (params) should know, worst first, each {:level :text},
    the text about subject (\"This pattern\"; the lint names the cell): it
-   needs two places and has fewer (error); its lane names a group or laser
+   needs two places and has fewer (error; a step grid needs one, zones plan
+   Z6); its lane names a group or laser
    that's gone; a place reaches no laser under the map in use (the picture
    vanishes on that step; not while no laser is on at all, which the rig
    says); under Unison a lane of zones doesn't move; it
@@ -300,9 +324,14 @@
          missing (remove #(or (= :lane/lasers %) (known-ref? state %)) (distinct zones))
          routing (routing-now state)
          dark (when (seq e) (filter #(empty? (rig/resolve-ref routing %)) l))
-         say (fn [ref] (targets/ref-name names ref))]
+         say (fn [ref] (targets/ref-name names ref))
+         grid? (= :steps (:style params))]
      (vec (concat
-           (when (< (count l) 2)
+           (cond
+             ;; A step grid's one row is a rhythm in one zone (zones plan Z6)
+             (and grid? (empty? l))
+             [{:level :error :text (str subject " needs a zone (it has none)")}]
+             (and (not grid?) (< (count l) 2))
              [{:level :error
                :text (str subject " needs two zones (it has " (if (seq l) (str "one: " (say (first l))) "none") ")")}])
            (for [ref missing]
@@ -376,8 +405,9 @@
 ;; The pattern pads (07 §7.3)
 
 (def pad-ids
-  "The pattern pads, in order: As set, Off, then a pad per style."
-  (into [:as-set :off] styles))
+  "The pattern pads, in order: As set, Off, then a pad per rule style (a
+   pad can't make up a step grid's steps, zones plan Z6)."
+  (into [:as-set :off] rule-styles))
 
 (defn pad-style
   "The live style a pad sets: nil for As set, else its id."

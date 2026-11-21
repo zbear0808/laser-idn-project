@@ -1,7 +1,8 @@
 (ns laser-show.routing.zone-remap-test
   "The zone stage (zones plan Z5, 07 §4.1, §8.2-§8.4, §8.9): steps, lanes,
    the styles' tables, moving, copying (one union key), hiding, gating,
-   trading, the join's order, and the invariants on generated frames."
+   trading, the join's order, and the invariants on generated frames; and a
+   step grid's steps (zones plan Z6, 08 §4, §8)."
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.animation.frames :as frames]
             [laser-show.animation.pulses :as pulses]
@@ -260,6 +261,129 @@
     (is (nil? (zr/rekey-item-points nil (first (:fs stage)))))))
 
 
+;; The step grid (zones plan Z6, 08 §4, §8): a style whose lit places are
+;; data, a vector of the refs lit on each step
+
+(def ^:private abc [:zone/a :zone/b :zone/c])
+
+(defn- grid
+  "A step grid over rows A, B, C (more may say other rows), steps the refs
+   lit on each step, a step a beat on the show's beats."
+  [steps & {:as more}]
+  (merge {:style :steps :zones abc :steps steps :rate 1.0 :clock :global} more))
+
+(defn- press
+  "A pulse view's entry (vibe Phase 4a's): n presses of a source, the newest
+   beats ago."
+  [n beats]
+  {:count n :beats beats :ms (* 500.0 beats) :held? false :since-release beats :recent [beats]})
+
+(deftest steps-light-their-zones-test
+  (let [g (grid [[:zone/a] [:zone/b] [:zone/a :zone/c] [:zone/c]])]
+    (is (= [{:zone/a P} {:zone/b P} {[:zone/a :zone/c] P} {:zone/c P}]
+           (mapv #(run {:all P} g %) [0.0 1.0 2.0 3.0]))
+        "each step moves the All picture to that step's own zones")
+    (is (identical? P (:zone/b (run {:all P} g 1.0))) "the same picture, moved")
+    (is (= [#{:zone/a} #{:zone/b} #{:zone/a :zone/c} #{:zone/c}] (mapv #(set (zr/lit-set :steps g abc %)) (range 4)))
+        "lit-set: step k's refs")
+    (is (= {:graphics Y :zone/b P} (run {:all P :graphics Y} g 1.0)) "what the grid doesn't move stays"))
+  (testing "a step lights only rows: a ref that isn't one, or that the rig no longer knows, stays dark"
+    (is (= {:zone/a P} (run {:all P} (grid [[:zone/a :zone/d]]) 0.0)) "D isn't a row")
+    (is (= {:zone/a P} (zr/apply-pattern {:all P} (grid [[:zone/a :graphics]] :zones [:zone/a :graphics])
+                                         (assoc (ctx 0.0) :known? #{:zone/a})))
+        "Graphics is gone"))
+  (testing "a row can be any ref: a group, a laser"
+    (is (= {[:graphics :auto.laser/p2] P}
+           (run {:all P} (grid [[:auto.laser/p2 :graphics]] :zones [:auto.laser/p2 :graphics]) 0.0)))))
+
+(deftest steps-wrap-at-their-length-test
+  (let [g (grid [[:zone/a] [:zone/b] [:zone/c]])
+        lit #(set (zr/lit-set :steps g abc %))]
+    (is (= (mapv lit (range 3)) (mapv lit (range 3 6)) (mapv lit (range 30 33))) "step k lights steps[k mod 3]")
+    (is (= [#{:zone/c} #{:zone/b} #{:zone/a}] (mapv lit [-1 -2 -3])) "backwards: k mod L, never negative")
+    (is (= {:zone/a P} (run {:all P} g 3.0)) "the beat after the last step: the first again")
+    (is (= {:zone/c P} (run {:all P} (assoc g :rate -1.0) 1.0)) "a backwards rate: step −1 is the last step")
+    (testing "one step lights on every step; 64 go round at 64"
+      (is (= [{:zone/b P} {:zone/b P}] (mapv #(run {:all P} (grid [[:zone/b]]) %) [0.0 5.0])))
+      (let [sixty-four (grid (vec (for [i (range 64)] (if (= 63 i) [:zone/c] [:zone/a]))))]
+        (is (= [{:zone/c P} {:zone/a P}] (mapv #(run {:all P} sixty-four %) [63.0 64.0])))))
+    (testing "at 2 steps a beat (Z6-Q1 A) 8 steps are a bar of eighths"
+      (let [eighths (grid (vec (take 8 (cycle [[:zone/a] [:zone/b]]))) :rate 2.0)]
+        (is (= [{:zone/a P} {:zone/b P} {:zone/a P} {:zone/a P}] (mapv #(run {:all P} eighths %) [0.0 0.5 1.0 4.0])))))))
+
+(deftest rest-step-hides-test
+  (let [g (grid [[:zone/a] []])]
+    (is (= {} (run {:all P} g 1.0)) "a rest: the moved picture is hidden")
+    (is (= {:graphics Y} (run {:all P :graphics Y} g 1.0)) "and nothing else is")
+    (testing "gate mode: a rest hides the rows' own content, and nothing else"
+      (let [frames {:zone/a X :zone/b Z :graphics Y}]
+        (is (= {:zone/a X :graphics Y} (run frames (assoc g :source :zones) 0.0)))
+        (is (= {:graphics Y} (run frames (assoc g :source :zones) 1.0)))))
+    (is (= [{} {}] (mapv #(run {:all P} (grid [[] []]) %) [0.0 1.0])) "a grid of rests: dark")))
+
+(deftest two-zone-step-is-one-union-key-test
+  (testing "08 §8: a step that lights A and B puts the picture under [A B]: one frame, never two keys"
+    (let [out (run {:all P} (grid [[:zone/a :zone/b]]) 0.0)]
+      (is (= {[:zone/a :zone/b] P} out))
+      (is (identical? P (get out [:zone/a :zone/b])))))
+  (is (= {[:zone/a :zone/c] P} (run {:all P} (grid [[:zone/c :zone/a]]) 0.0)) "in normal form, whatever the step's order")
+  (is (= {[:zone/a :zone/b :zone/c] P} (run {:all P} (grid [abc]) 0.0)) "every row: one key")
+  (testing "what the cue drew into A stays A's, and the copy's key is its own (07 §8.4)"
+    (let [out (run {:zone/a X :all P} (grid [[:zone/a :zone/b]]) 0.0)]
+      (is (= {:zone/a X [:zone/a :zone/b] P} out))
+      (is (= 1 (count (filter #(identical? P %) (vals out))))))))
+
+(deftest steps-gate-in-zones-mode-test
+  (let [frames {:zone/a X :zone/b Y :zone/c Z}
+        g (grid [[:zone/a] [:zone/b :zone/c] [] abc] :source :zones)]
+    (is (= [{:zone/a X} {:zone/b Y :zone/c Z} {} frames] (mapv #(run frames g %) [0.0 1.0 2.0 3.0]))
+        "each zone keeps its own content, shown on its steps")
+    (is (identical? frames (run frames g 3.0)) "every row lit: the same map")
+    (is (identical? Y (:zone/b (run frames g 1.0))) "what stays is the same picture")
+    (is (= {:zone/b Y :zone/c Z} (run frames (dissoc g :source) 1.0)) "Automatic gates when the cue draws nothing into All")
+    (is (= {:zone/b X} (run {[:zone/a :zone/b] X} g 1.0)) "a union key narrows to the step's places")))
+
+(deftest no-steps-is-the-identity-test
+  (let [frames {:all P :zone/a X}]
+    (doseq [g [(grid []) (dissoc (grid []) :steps) (grid nil) (grid {:type :sine :min 0.0 :max 1.0})]]
+      (is (identical? frames (run frames g 2.0)) (str "steps " (pr-str (:steps g)))))
+    (let [stage (zr/run-stage frames [{:id :p1 :params (grid [])}] (ctx 2.0))]
+      (is (identical? frames (:frames stage)))
+      (is (= {:p1 2} (:steps stage)) "it still has a step")
+      (is (= [] (:fs stage)) "and no key function"))
+    (is (= #{} (set (zr/lit-set :steps (grid []) abc 0))))))
+
+(deftest steps-on-a-press-test
+  (let [g (grid [[:zone/a] [:zone/b] [:zone/c] []] :step-on :hit)
+        at (fn [params n] (zr/apply-pattern {:all P} params (ctx 99.0 (when (pos? n) {:hit (press n 0.25)}))))]
+    (is (= [{:zone/a P} {:zone/b P} {:zone/c P} {} {:zone/a P}] (mapv #(at g %) [0 1 2 3 4]))
+        "each HIT is one step: HIT's count in the tick's pulse view, whatever the beats")
+    (is (= {:zone/c P} (at (assoc g :rate 2.0) 3)) "the rate is steps a press: 3 HITs at 2 is step 6, so 6 mod 4")
+    (is (= {:zone/b P} (zr/apply-pattern {:all P} (assoc g :step-on :zone-step) (ctx 7.0 {:zone-step (press 1 0.0)})))
+        "the Zone step key")
+    (is (= {:zone/a P} (zr/apply-pattern {:all P} (assoc g :step-on :accent) (ctx 7.0 {:hit (press 5 0.0)})))
+        "ACCENT's count, not HIT's: none yet, step 0")))
+
+(deftest steps-restart-on-a-press-test
+  (let [g (grid [[:zone/a] [:zone/b] [:zone/c] [:zone/a :zone/b]] :restart-on :flash)
+        at (fn [t pulses] (zr/apply-pattern {:all P} g (ctx t pulses)))]
+    (is (= {:zone/a P} (at 7.25 {:flash (press 1 0.0)})) "a FLASH this tick: the first step again")
+    (is (= {:zone/c P} (at 7.25 {:flash (press 2 2.5)})) "2.5 beats after the newest FLASH: step 2")
+    (is (= {:zone/b P} (at 5.0 {:hit (press 1 0.5)})) "before the first FLASH, its own clock: beat 5 is step 5 mod 4")))
+
+(deftest offset-moves-the-playhead-test
+  (let [steps [[:zone/a] [:zone/b] [:zone/c] [] [:zone/a :zone/b] [:zone/b :zone/c] [:zone/a :zone/c] abc]
+        at (fn [more t] (run {:all P} (merge (grid steps) more) t))]
+    (is (= {[:zone/a :zone/b] P} (at {:offset 4.0} 0.0)) "offset 4: step 4 at the start")
+    (is (= {[:zone/b :zone/c] P} (at {:offset 4.0} 1.0)) "then a step a beat")
+    (is (= 12 (zr/pattern-step (assoc (grid steps) :offset 4.0) (ctx 8.0))) "the step itself goes on: the playhead is step mod 8")
+    (testing "a Step modulator on Offset with the palette [0 4] (resolved before the stage): each value jumps the grid half way round"
+      (is (= [{:zone/b P} {[:zone/b :zone/c] P}] (mapv #(at {:offset %} 1.0) [0.0 4.0]))))
+    (testing "rate 0 and a Fader on Offset from 0 to 7.9: the fader scrubs the grid by hand"
+      (is (= [{:zone/a P} {} {[:zone/a :zone/c] P} {[:zone/a :zone/b :zone/c] P}]
+             (mapv #(at {:rate 0.0 :offset %} 12.34) [0.0 3.5 6.2 7.9]))))))
+
+
 ;; The invariants, on generated frames (07 §8.9: 1, 3, 5)
 
 (def ^:private pool
@@ -268,17 +392,23 @@
 
 (defn- generated
   "A seeded case: {:frames :params :t}, every frame its own picture (an x of
-   its own), its points 1-40."
+   its own), its points 1-40. A step grid's steps (zones plan Z6) come from
+   a generator of their own, so the other styles' cases stay as they were."
   [^java.util.Random rnd i]
   (let [pick (fn [xs] (nth xs (.nextInt rnd (count xs))))
         ks (distinct (repeatedly (inc (.nextInt rnd 5)) #(pick pool)))
         frames (into {} (map-indexed (fn [j k] [k (pic (inc (.nextInt rnd 40)) (+ i (/ (inc j) 10.0)))])) ks)
-        style (pick [:alternate :chase :ping-pong :random :shift :swap])
-        zones (vec (distinct (repeatedly (.nextInt rnd 6) #(pick [:zone/a :zone/b :zone/c :zone/d :zone/e :graphics :lane/lasers :auto/left]))))]
+        style (pick [:alternate :chase :ping-pong :random :shift :swap :steps])
+        zones (vec (distinct (repeatedly (.nextInt rnd 6) #(pick [:zone/a :zone/b :zone/c :zone/d :zone/e :graphics :lane/lasers :auto/left]))))
+        grid-rnd (java.util.Random. (+ 7 i))
+        grid-pick (fn [xs] (nth xs (.nextInt grid-rnd (count xs))))
+        steps (vec (repeatedly (.nextInt grid-rnd 9)
+                               #(vec (distinct (repeatedly (.nextInt grid-rnd 4) (fn [] (grid-pick [:zone/a :zone/b :zone/c :zone/d :graphics :auto/left])))))))]
     {:frames frames
      :params {:style style :zones zones :source (pick [:auto :picture :zones]) :from (pick [:all :zone/a :graphics :any])
               :width (inc (.nextInt rnd 3)) :seed (.nextInt rnd 10) :path (pick [:loop :bounce])
-              :rate (pick [1.0 0.5 2.0 -1.0 0.0]) :offset (pick [0.0 1.0 2.5 -3.0])}
+              :rate (pick [1.0 0.5 2.0 -1.0 0.0]) :offset (pick [0.0 1.0 2.5 -3.0])
+              :steps steps}
      :t (* 0.25 (.nextInt rnd 64))}))
 
 (defn- pictures-in

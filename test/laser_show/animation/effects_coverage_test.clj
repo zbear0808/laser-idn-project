@@ -46,6 +46,8 @@
    [:zone-pattern :width] "a routing param: the zone stage reads it"
    [:zone-pattern :seed] "a routing param: the zone stage reads it"
    [:zone-pattern :follow-pads?] "a routing param: the zone stage reads it"
+   ;; Zones plan Z6: a step grid's steps, the refs each step lights
+   [:zone-pattern :steps] "a routing param: the zone stage reads it"
    [:zone-map-cycle :maps] "a routing param: the show clock reads it"
    [:zone-map-cycle :rate] "a routing param: the show clock reads it"
    [:zone-map-cycle :offset] "a routing param: the show clock reads it"

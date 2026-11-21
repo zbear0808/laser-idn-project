@@ -448,7 +448,7 @@
                  :tooltip {:fx/type :tooltip :text (chip-tooltip pattern names)}
                  :items (into [{:fx/type :menu-item :text (check (nil? on) "None") :on-action (set-style nil)}]
                               (concat
-                               (for [s zone-patterns/styles]
+                               (for [s zone-patterns/rule-styles]
                                  {:fx/type :menu-item
                                   :text (check (= s current) (str (style-name s) "   " (style-lanes s)))
                                   :on-action (set-style s)})

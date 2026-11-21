@@ -12,6 +12,7 @@
    - :ref, :ref-list, :map-list - Where a zone pattern takes its picture
      from, its places, a Map cycle's maps (zones plan Z5): chips and the
      Target menu's rows
+   - :step-list - A step grid's steps (zones plan Z6): how many
    
    Note: Color parameters are now handled as separate :red, :green, :blue floats
    for modulator support. Use param-color-picker directly when you need a unified
@@ -384,6 +385,37 @@
                                                maps)})}]}))
 
 
+;; A step grid's steps (zones plan Z6)
+
+
+(defn step-count-text
+  "How many steps a step grid has, as the numeric list says it: \"8
+   steps\", \"1 step\", \"No steps yet\"."
+  [steps]
+  (let [n (if (sequential? steps) (count steps) 0)]
+    (case n
+      0 "No steps yet"
+      1 "1 step"
+      (str n " steps"))))
+
+(defn param-step-list
+  "A step grid's steps (:step-list), in the numeric list: how many there
+   are. The step grid window edits them."
+  [{:keys [param-key param-spec current-value label-width]}]
+  {:fx/type :h-box
+   :spacing 8
+   :alignment :center-left
+   :children [{:fx/type :label
+               :text (or (:label param-spec) (name param-key))
+               :pref-width (or label-width 80)
+               :min-width :use-pref-size
+               :style-class ["label-secondary"]}
+              {:fx/type :label
+               :id "zone-pattern-step-count"
+               :text (step-count-text current-value)
+               :style-class ["label"]}]})
+
+
 ;; Parameter Control Router
 
 
@@ -399,7 +431,8 @@
    Props:
    - :param-key - Parameter key
    - :param-spec - Parameter specification with :type (:float :int :bool
-     :choice, and zones plan Z5's :ref :ref-list :map-list)
+     :choice, zones plan Z5's :ref :ref-list :map-list, and Z6's
+     :step-list)
    - :current-value - Current parameter value
    - :on-change-event - Event template for value changes
    - :on-text-event - Event template for text field changes (slider only)
@@ -421,6 +454,12 @@
                                 :current-value (:current-value props)
                                 :on-change-event (:on-change-event props)
                                 :label-width (:label-width props)}
+    :step-list {:fx/type param-step-list
+                :param-key (:param-key props)
+                :param-spec param-spec
+                :current-value (:current-value props)
+                :on-change-event (:on-change-event props)
+                :label-width (:label-width props)}
     (:bool :boolean) {:fx/type param-checkbox
                       :param-key (:param-key props)
                       :param-spec param-spec
