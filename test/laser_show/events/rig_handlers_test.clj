@@ -1,13 +1,16 @@
 (ns laser-show.events.rig-handlers-test
   "The rig strip's events (plans/2026-11-19-zones/04 §6): moving a card,
    the middle laser and the split width. Undoable, never an unsaved change
-   (the rig file saves itself, 09), and never an engine restart."
+   (the rig file saves itself, 09), and never an engine restart. And where
+   the divider below the strip is left (13): UI state, for the session."
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.events.core :as events]
             [laser-show.events.handlers :as handlers]
             [laser-show.routing.rig :as rig]
             [laser-show.state.domains :as domains]
-            [laser-show.state.history :as history]))
+            [laser-show.state.history :as history]
+            [laser-show.state.persistent :as persistent]
+            [laser-show.state.rig-file :as rig-file]))
 
 (defn- rig-state []
   (assoc (domains/build-initial-state)
@@ -117,6 +120,24 @@
     (is (empty? (get-in (pipeline (history/mark-clean s) {:event/type :rig/drag-over :projector-id :b :side :after})
                         [:state :history :undo-stack]))
         "never an undo step")))
+
+(deftest divider-is-kept-for-the-session-test
+  (let [s (history/mark-clean (rig-state))
+        effects (pipeline s {:event/type :rig/set-divider :position 0.42})
+        moved (:state effects)]
+    (is (= 0.42 (get-in moved [:rig-ui :divider])) "where the divider between the strip and the inspector was left")
+    (testing "a position outside 0-1, or none, changes nothing"
+      (doseq [p [-0.1 1.5 nil "0.4"]]
+        (is (nil? (get-in (handle s {:event/type :rig/set-divider :position p}) [:rig-ui :divider])) (pr-str p))))
+    (testing "UI state: nothing to undo, nothing unsaved, not in a show's files or the rig file"
+      (is (empty? (get-in moved [:history :undo-stack])))
+      (is (false? (get-in moved [:project :dirty?])))
+      (is (not-any? #(contains? % :rig-ui) (vals (persistent/project-files moved))))
+      (is (not (contains? (rig-file/rig-document moved) :rig-ui)))
+      (is (false? (rig-file/rig-changed? s moved)) "so the rig file isn't written"))
+    (testing "for the session: opening a show keeps it"
+      (is (= 0.42 (get-in (persistent/apply-loaded-project moved (persistent/project-files s) "/tmp/show.zip")
+                          [:rig-ui :divider]))))))
 
 
 ;; The rig file's set-up and report (plans/2026-11-19-zones/09 §6)

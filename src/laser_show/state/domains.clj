@@ -448,7 +448,9 @@
   {:drop {:default nil
           :doc "{:projector-id :side} while a dragged card is over another (:before or :after it), so a bar shows where it would land; nil otherwise"}
    :scanned? {:default false
-              :doc "A network scan finished this session: until then, no card says the scan didn't find it"}})
+              :doc "A network scan finished this session: until then, no card says the scan didn't find it"}
+   :divider {:default nil
+             :doc "Where the user left the divider between the strip and the inspector (0-1, the split pane's position; :rig/set-divider), for the session: New and Open keep it. nil until it is moved: the inspector gets the room its safety zone needs and the strip the rest (views/tabs/projectors.clj default-divider)"}})
 
 ;; Unified Chain Storage Domain
 

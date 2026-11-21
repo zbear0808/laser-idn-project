@@ -108,6 +108,8 @@
   (let [robot (ui/robot)]
     (with-rig!)
     (ui/click! robot "#projectors-tab")
+    ;; The rows are under the cards: at 1200 × 800 the strip shows the cards
+    (ui/scroll-into-view! "#rig-cell-graphics-a")
     (ui/click! robot "#rig-cell-graphics-a")
     (ui/wait-for! #(= [:graphics] (groups :a)))
     (ui/click! robot "#zones-tab")

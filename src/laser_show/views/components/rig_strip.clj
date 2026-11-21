@@ -423,17 +423,26 @@
    :grid-pane/valignment :center
    :on-action {:event/type :rig/nudge-projector :projector-id selected :delta delta}})
 
+(defn- cards-height
+  "About the height of the cards' row, n cards with their thumbnails, and
+   room for the horizontal scroll bar (8 px, hovered) under more than 6 of
+   them, about what fits at 1200 px: the strip is never shorter, so the
+   divider above the inspector can't cut a card."
+  [n]
+  (+ 72 (+ thumbnail-size 2) 14 (if (> n 6) 8 0)))
+
 (defn- strip-height
-  "About the height the cards and rows need (a card with its thumbnail, a
-   row each, + Group): the strip takes it, up to a limit past which it
-   scrolls, and the inspector below gets the rest."
-  [rows]
-  (min 400 (+ 72 (+ thumbnail-size 2) 14 (* 17 rows) 38)))
+  "About the height the cards and rows need (the cards' row, a row each,
+   + Group): the strip is never taller, so the divider stops below + Group."
+  [rows n]
+  (+ (cards-height n) (* 17 rows) 38))
 
 (defn rig-strip
   "The cards between ◀ and ▶, and under them the group rows
    (group-matrix/rows), in one scroll pane, so more than about 8 lasers
-   scroll together."
+   scroll together. It sits above the inspector with a divider between
+   them (views/tabs/projectors.clj), which can make it no shorter than its
+   cards and no taller than its rows."
   [{:keys [fx/context]}]
   (let [cards (fx/sub-ctx context subs/rig-cards)
         matrix (fx/sub-ctx context subs/rig-matrix)
@@ -447,7 +456,8 @@
      :id "rig-strip-scroll"
      :vbar-policy :as-needed
      :hbar-policy :as-needed
-     :min-height (strip-height (count (:rows matrix)))
+     :min-height (cards-height n)
+     :max-height (strip-height (count (:rows matrix)) n)
      :style-class ["scroll-pane-dark"]
      :content {:fx/type :grid-pane
                :id "rig-strip"

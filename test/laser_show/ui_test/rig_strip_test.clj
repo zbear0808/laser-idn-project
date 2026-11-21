@@ -214,6 +214,8 @@
     (state/swap-state! assoc-in [:projectors :c :enabled?] false)
     (ui/click! robot "#projectors-tab")
     (ui/wait-for! #(= "□" (mark "graphics" :a)))
+    ;; The rows are under the cards: at 1200 × 800 the strip shows the cards
+    (ui/scroll-into-view! "#rig-cell-graphics-a")
     (ui/click! robot "#rig-cell-graphics-a")
     (ui/wait-for! #(= [:graphics] (groups :a)))
     (ui/wait-for! #(= "■" (mark "graphics" :a)))
@@ -224,6 +226,7 @@
     (ui/wait-for! #(= [] (groups :a)))
     (ui/wait-for! #(= "□" (mark "graphics" :a)))
     (testing "+ Group opens the New Zone Group dialog"
+      (ui/scroll-into-view! "#rig-add-group-button")
       (ui/click! robot "#rig-add-group-button")
       (ui/wait-for! #(some #{"New Zone Group"} (ui/window-titles))))))
 
@@ -233,6 +236,7 @@
     (with-lasers!)
     (ui/click! robot "#projectors-tab")
     (ui/wait-for! #(= "■" (mark "all" :b)))
+    (ui/scroll-into-view! "#rig-cell-all-b")
     (ui/click! robot "#rig-cell-all-b")
     (ui/wait-for! #(true? (excluded? :b)))
     (ui/wait-for! #(= "×" (mark "all" :b)))
@@ -247,6 +251,7 @@
   (let [robot (ui/robot)]
     (with-lasers!)
     (ui/click! robot "#projectors-tab")
+    (ui/scroll-into-view! "#rig-row-auto-left")
     (ui/click! robot "#rig-row-auto-left")
     (ui/wait-for! #(= :zones (get-in (app-state) [:ui :active-tab])))
     (is (= :auto/left (get-in (app-state) [:zone-group-ui :selected-group])))))

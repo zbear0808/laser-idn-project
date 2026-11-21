@@ -1,9 +1,10 @@
 (ns laser-show.events.handlers.rig
   "The rig strip's events (plans/2026-11-19-zones/04 §6): the order of the
-   projectors, the middle laser, the split width, and the bar that shows
-   where a dragged card would land. Pure. A move writes the whole effective
-   order, so the first one fixes every card's place. None of them restarts
-   an engine: the frame provider reads the rig live.
+   projectors, the middle laser, the split width, the bar that shows where
+   a dragged card would land, and where the divider below the strip is left
+   (13). Pure. A move writes the whole effective order, so the first one
+   fixes every card's place. None of them restarts an engine: the frame
+   provider reads the rig live.
 
    And the rig file's (09 §6): a write's result, Retry, and the startup
    notice. The writes themselves are asked for by the pipeline
@@ -81,6 +82,16 @@
   [{:keys [state]}]
   (if (get-in state [:rig-ui :drop])
     {:state (assoc-in state [:rig-ui :drop] nil)}
+    {:state state}))
+
+(defn- handle-set-divider
+  "Where the user left the divider between the strip and the inspector, as
+   the split pane gives it (0-1): kept in [:rig-ui :divider] for the
+   session, so the tab shown again puts it back (views/tabs/projectors.clj).
+   Never saved, never undone; New and Open keep it."
+  [{:keys [position state]}]
+  (if (and (number? position) (<= 0.0 position 1.0))
+    {:state (assoc-in state [:rig-ui :divider] (double position))}
     {:state state}))
 
 
@@ -321,6 +332,7 @@
     :rig/set-split-width (handle-set-split-width event)
     :rig/drag-over (handle-drag-over event)
     :rig/drag-exit (handle-drag-exit event)
+    :rig/set-divider (handle-set-divider event)
     ;; The rig file
     :rig/written (handle-written event)
     :rig/write-failed (handle-write-failed event)

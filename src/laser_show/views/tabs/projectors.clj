@@ -5,9 +5,13 @@
    - The rig strip: every output a scan finds is a card, in rig order; drag
      the cards into the order the lasers hang in (views/components/rig_strip)
    - Configure the selected card's projector (the inspector): its settings,
-     its effect chain (color calibration, corner pin), its test pattern"
+     its test pattern, its effect chain (color calibration, corner pin), its
+     safety zone, in three columns that each scroll on their own
+   - A divider between the strip and the inspector, kept where it is left
+     for the session (plans/2026-11-19-zones/13)"
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
+            [laser-show.events.core :as events]
             [laser-show.subs :as subs]
             [laser-show.animation.chains :as chains]
             [laser-show.animation.effects :as effects]
@@ -23,7 +27,13 @@
             [laser-show.views.components.list :as list]
             [laser-show.views.components.commit-field :as commit-field]
             [laser-show.views.components.rig-file-status :as rig-file-status]
-            [laser-show.views.components.rig-strip :as rig-strip]))
+            [laser-show.views.components.rig-strip :as rig-strip])
+  (:import [javafx.beans.value ChangeListener]
+           [javafx.event Event]
+           [javafx.scene Node]
+           [javafx.scene.control SplitPane]
+           [javafx.scene.input MouseEvent]
+           [javafx.scene.layout Region]))
 
 
 ;; What the text fields take (they commit on Enter or focus loss)
@@ -551,10 +561,10 @@
     width (assoc :min-width width :pref-width width :max-width width)))
 
 (defn- projector-config-panel
-  "The inspector: the selected card's settings, calibration chain, safety
-   zone and test pattern, below the rig strip, in three columns that each
-   scroll by themselves. Uses the self-contained effect chain sidebar with
-   callbacks."
+  "The inspector: the selected card's settings, its test pattern and
+   calibration chain, and its safety zone, below the rig strip, in three
+   columns that each scroll by themselves. Uses the self-contained effect
+   chain sidebar with callbacks."
   [{:keys [fx/context]}]
   (let [projector (fx/sub-ctx context subs/active-projector)
         projector-id (:id projector)
@@ -601,12 +611,16 @@
                               {:fx/type :separator}
                               {:fx/type fit-guard-section
                                :projector projector}]}
-                  ;; Middle: the calibration chain, and Remove...
+                  ;; Middle: its test pattern, its calibration chain, and Remove...
                   {:fx/type inspector-column
                    :id "projector-column-middle"
                    :width 316
                    :spacing 8
-                   :children [{:fx/type :h-box
+                   :children [{:fx/type calibration-controls
+                               :fx/context context
+                               :projector-id projector-id}
+                              {:fx/type :separator}
+                              {:fx/type :h-box
                                :alignment :center-left
                                :children [{:fx/type :label
                                            :text "CALIBRATION EFFECTS"
@@ -629,8 +643,7 @@
                                          :text "Remove this projector and its calibration"}
                                :on-action {:event/type :projectors/request-remove
                                            :projector-id projector-id}}]}
-                  ;; Right: the selected effect's editor, the safety zone (zones plan Z1)
-                  ;; and the test pattern
+                  ;; Right: the selected effect's editor, and the safety zone (zones plan Z1)
                   {:fx/type inspector-column
                    :id "projector-column-right"
                    :h-box/hgrow :always
@@ -645,9 +658,6 @@
                                    :ui-state effect-ui-state}])
                                [{:fx/type safety-editor/safety-section
                                  :fx/context context
-                                 :projector-id projector-id}
-                                {:fx/type calibration-controls
-                                 :fx/context context
                                  :projector-id projector-id}]))}]}
       ;; No projector selected
       {:fx/type :v-box
@@ -659,30 +669,109 @@
                    :style "-fx-text-fill: #606060; -fx-font-style: italic;"}]})))
 
 
+;; The divider between the strip and the inspector
+
+
+(def ^:private inspector-room
+  "The height the inspector gets before the strip grows past its cards,
+   while the divider hasn't been moved: its right column down to SAFETY
+   ZONE's Copy to… row, with one blocked area: the canvas, and 170 px for
+   the column's padding, the section's title, rows and buttons."
+  (+ safety-editor/canvas-size 170.0))
+
+(defn- default-divider
+  "Where split's divider goes while it hasn't been moved, as a position
+   (0-1): the inspector gets inspector-room and the strip the rest, no
+   shorter than its cards and no taller than all its rows (the strip's min
+   and max height, which the split pane keeps to). nil before split has a
+   height."
+  [^SplitPane split]
+  (let [^Region strip (first (.getItems split))
+        thick (or (some-> ^Node (.lookup split ".split-pane-divider") (.prefWidth -1)) 6.0)
+        insets (.getInsets split)
+        size (- (.getHeight split) (.getTop insets) (.getBottom insets))]
+    (when (and strip (pos? size))
+      (let [strip-height (max (.getMinHeight strip) (min (.getMaxHeight strip) (- size thick inspector-room)))]
+        ;; a position is where the divider's middle goes
+        (/ (+ strip-height (/ thick 2.0)) size)))))
+
+(defn- moved?
+  "Has the user moved split's divider?"
+  [^SplitPane split]
+  (true? (.get (.getProperties split) ::moved)))
+
+(defn- follow-default-divider!
+  "Until split's divider is moved, put it at default-divider whenever
+   split's height changes: when it is first laid out, and as the window is
+   resized."
+  [^SplitPane split]
+  (.addListener (.heightProperty split)
+                (reify ChangeListener
+                  (changed [_ _ _ _]
+                    (when-not (moved? split)
+                      (when-let [position (default-divider split)]
+                        (.setDividerPositions split (double-array [position]))))))))
+
+(defn- on-divider?
+  "Is node one of split's dividers, or inside one?"
+  [split node]
+  (loop [n node]
+    (cond
+      (or (not (instance? Node n)) (identical? n split)) false
+      (.contains (.getStyleClass ^Node n) "split-pane-divider") true
+      :else (recur (.getParent ^Node n)))))
+
+(defn- remember-divider
+  "The split pane's event filter: the mouse letting go of the divider (it
+   gets the release of the press that dragged it) is the user moving it, so
+   it stays there, [:rig-ui :divider], and no longer follows the default. A
+   layout pass that moves it, as a resize does, remembers nothing (as
+   views/root.clj remember-split does for the preview's divider)."
+  [^Event e]
+  (when (= MouseEvent/MOUSE_RELEASED (.getEventType e))
+    (let [^SplitPane split (.getSource e)]
+      (when (on-divider? split (.getTarget e))
+        (.put (.getProperties split) ::moved true)
+        (events/dispatch! {:event/type :rig/set-divider
+                           :position (first (.getDividerPositions split))})))))
+
+
 ;; Main Tab
 
 
 (defn projectors-tab
   "The Projectors tab: the rig strip on top (views/components/rig_strip), the
-   selected card's inspector below."
+   selected card's inspector below, and a divider between them to drag: it
+   stays where it is left for the session ([:rig-ui :divider]); until then
+   the inspector gets the room its safety zone needs (default-divider)."
   [{:keys [fx/context]}]
-  {:fx/type :v-box
-   :style (str "-fx-background-color: " (css/bg-primary) ";")
-   :padding 16
-   :spacing 6
-   :children [{:fx/type :h-box
-               :spacing 12
-               :alignment :baseline-left
-               :children [{:fx/type :label
-                           :text "Projectors"
-                           :style "-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold;"}
-                          {:fx/type :label
-                           :id "projectors-subtitle"
-                           :text "Put your lasers in order, left to right. The groups follow the order."
-                           :style "-fx-text-fill: #808080; -fx-font-size: 11;"}]}
-              ;; The rig file: saved, saving, or why not (zones plan ZR)
-              {:fx/type rig-file-status/rig-file-status}
-              {:fx/type rig-strip/rig-header}
-              {:fx/type rig-strip/rig-strip}
-              {:fx/type projector-config-panel
-               :v-box/vgrow :always}]})
+  (let [divider (fx/sub-val context get-in [:rig-ui :divider])]
+    {:fx/type :v-box
+     :style (str "-fx-background-color: " (css/bg-primary) ";")
+     :padding 16
+     :spacing 6
+     :children [{:fx/type :h-box
+                 :spacing 12
+                 :alignment :baseline-left
+                 :children [{:fx/type :label
+                             :text "Projectors"
+                             :style "-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold;"}
+                            {:fx/type :label
+                             :id "projectors-subtitle"
+                             :text "Put your lasers in order, left to right. The groups follow the order."
+                             :style "-fx-text-fill: #808080; -fx-font-size: 11;"}]}
+                ;; The rig file: saved, saving, or why not (zones plan ZR)
+                {:fx/type rig-file-status/rig-file-status}
+                {:fx/type rig-strip/rig-header}
+                {:fx/type fx/ext-on-instance-lifecycle
+                 :v-box/vgrow :always
+                 ;; Moved before this split pane was made: it takes the position instead
+                 :on-created (fn [split] (when-not divider (follow-default-divider! split)))
+                 :desc (cond-> {:fx/type :split-pane
+                                :id "projectors-split"
+                                :orientation :vertical
+                                :style (str "-fx-background-color: " (css/bg-primary) "; -fx-padding: 0;")
+                                :event-filter remember-divider
+                                :items [{:fx/type rig-strip/rig-strip}
+                                        {:fx/type projector-config-panel}]}
+                         divider (assoc :divider-positions [divider]))}]}))

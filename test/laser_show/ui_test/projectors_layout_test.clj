@@ -1,15 +1,21 @@
 (ns laser-show.ui-test.projectors-layout-test
-  "The Projectors tab's layout (plans/2026-11-19-zones/13): each inspector
-   column scrolls on its own, and FIT GUARD's rows show whole."
+  "The Projectors tab's layout (plans/2026-11-19-zones/13): at 1200 × 800 a
+   selected laser's settings, test pattern and safety zone show without
+   scrolling; each inspector column scrolls on its own; the divider between
+   the rig strip and the inspector stays where it is dragged, for the
+   session."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.scene Node Parent]
-           [javafx.scene.control Labeled ScrollPane]))
+           [javafx.scene.control Labeled ScrollPane]
+           [javafx.scene.layout Region]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
+
+(defn- app-state [] (state/get-raw-state))
 
 (defn- laser [n & {:as more}]
   (merge {:name (str "Laser " n) :host (str "10.0.0." n) :port 7255 :service-id 1 :enabled? true
@@ -35,6 +41,12 @@
   (ui/wait-for! #(ui/on-fx-thread (fn [] (let [scene (.getScene (ui/main-window))]
                                            (and (== w (.getWidth scene)) (== h (.getHeight scene)))))))
   (ui/sync-fx!))
+
+(defn- eventually
+  "Wait up to 2 s for pred, then go on either way: the assertions after it
+   say what failed."
+  [pred]
+  (try (ui/wait-for! 2000 pred) (catch clojure.lang.ExceptionInfo _ nil)))
 
 (defn- inside?
   "Is rect [x0 y0 x1 y1] inside area (a pixel and a half of slack, for a
@@ -72,6 +84,30 @@
       (and (inside? bounds [0.0 0.0 width status-top])
            (every? #(inside? bounds (:viewport %)) panes)
            (not-any? :scrolled? panes)))))
+
+(def ^:private setting-up
+  "What setting up a laser takes, in the inspector's three columns."
+  ["#projector-config-title" "#projector-name-field" "#projector-scan-rate-field" "#projector-tag-graphics"
+   "#projector-exclude-from-all" "#projector-fit-guard"
+   "#projector-calibration-button" "#projector-identify-button" "#projector-add-effect-menu" "#projector-remove-button"
+   "#safety-canvas" "#safety-limit-x0" "#safety-blocked-0-x0" "#safety-add-blocked-button" "#safety-reset-button"])
+
+(deftest setting-up-a-laser-needs-no-scrolling-test
+  (let [robot (ui/robot)]
+    (with-lasers!)
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(some? (ui/query "#safety-canvas")))
+    (testing "at 1200 × 800, the default window: the settings, the test pattern, the chain and the whole safety zone, with nothing scrolled"
+      (at-window-size! 1200 800)
+      (eventually #(every? shown? setting-up))
+      (doseq [selector (concat setting-up ["#rig-card-a" "#rig-card-b"])]
+        (is (shown? selector) selector)))
+    (testing "at 1440 × 900, also Copy to… and the strip's first rows"
+      (at-window-size! 1440 900)
+      (eventually #(every? shown? ["#safety-copy-menu" "#rig-cell-auto-left-b"]))
+      (doseq [selector (concat setting-up ["#safety-copy-menu" "#safety-mirror-menu" "#rig-card-a"
+                                           "#rig-cell-all-a" "#rig-cell-auto-left-b"])]
+        (is (shown? selector) selector)))))
 
 (deftest fit-guard-shows-whole-test
   (testing "FIT GUARD's boxes, \"never below\" and % show whole, not cut to …"
@@ -121,3 +157,40 @@
       (is (not (scrolled? "#projector-column-middle")))
       (is (== title (top "#projector-config-title")) "the settings stay where they were")
       (is (== chain (top "#projector-add-effect-menu")) "and so does the calibration chain"))))
+
+(defn- height [selector]
+  (ui/on-fx-thread #(.getHeight ^Region (ui/query selector))))
+
+(defn- near? [a b] (< (Math/abs (- (double a) (double b))) 2.0))
+
+(deftest dragged-divider-stays-for-the-session-test
+  (let [robot (ui/robot)
+        divider #(ui/query "#projectors-split > .split-pane-divider")
+        stored #(get-in (app-state) [:rig-ui :divider])]
+    (with-lasers!)
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(some? (divider)))
+    (at-window-size! 1200 800)
+    (let [before (height "#rig-strip-scroll")]
+      (testing "dragged 80 px down, the strip is 80 px taller"
+        (let [let-go! (ui/fire-drag! (divider) 0 80 :hold? true)]
+          (ui/wait-for! #(near? (+ before 80) (height "#rig-strip-scroll")))
+          (is (nil? (stored)) "nothing kept while the mouse holds it")
+          (let-go!))
+        (ui/wait-for! #(some? (stored)))
+        (is (near? (+ before 80) (height "#rig-strip-scroll")))
+        (is (empty? (get-in (app-state) [:history :undo-stack])) "nothing to undo")
+        (is (false? (get-in (app-state) [:project :dirty?])) "and the show isn't unsaved"))
+      (let [dragged (height "#rig-strip-scroll")]
+        (testing "another laser selected: it stays"
+          (ui/click! robot "#rig-card-b")
+          (ui/wait-for! #(= "CONFIGURE: Laser B" (ui/node-text "#projector-config-title")))
+          (ui/sync-fx!)
+          (is (near? dragged (height "#rig-strip-scroll"))))
+        (testing "another tab, and back: where it was left"
+          (ui/click! robot "#grid-tab")
+          (ui/wait-for! #(nil? (ui/query "#projectors-split")))
+          (ui/click! robot "#projectors-tab")
+          (ui/wait-for! #(some? (ui/query "#projectors-split")))
+          (eventually #(near? dragged (height "#rig-strip-scroll")))
+          (is (near? dragged (height "#rig-strip-scroll"))))))))
