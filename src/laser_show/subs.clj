@@ -39,6 +39,7 @@
             [laser-show.output.driver :as driver]
             [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
+            [laser-show.routing.step-grid :as step-grid]
             [laser-show.routing.targets :as targets]
             [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.routing.zone-patterns :as zone-patterns]
@@ -1262,6 +1263,89 @@
              (into [] (keep #(:name (zone-maps/map-by-id state %))) (:maps (:params running-cycle)))
              [])
      :description (when running-cycle (zone-patterns/describe-cycle (:params running-cycle) state))}))
+
+
+;; Level 2: The step grid window (zones plan Z6, 08 §4, §7)
+
+
+(defn- grid-row-text
+  "A row as its label says it: a zone and where it goes under zone-map
+   (\"A → Left\"), a group or laser by name."
+  [names zone-map ref]
+  (if (targets/zone-ref? ref)
+    (targets/target-text names zone-map ref)
+    (targets/ref-name names ref)))
+
+(defn- and-words [xs]
+  (if (< (count xs) 3)
+    (str/join " and " xs)
+    (str (str/join ", " (butlast xs)) " and " (last xs))))
+
+(defn- wrap-note
+  "The rows that go to one lane under zone-map (S-5): \"A and C both go to
+   Left under Left / Right.\"; nil when none share one, and under Unison,
+   whose fold line says every zone is All."
+  [names zone-map rows]
+  (let [shared (->> rows
+                    (filter targets/zone-ref?)
+                    (group-by #(targets/zone-lane zone-map %))
+                    (filter (fn [[lane zones]] (and lane (next zones))))
+                    (sort-by (comp targets/zone-index first second)))]
+    (when (and (seq shared) (not= :map/unison (:id zone-map)))
+      (str (str/join "; " (for [[lane zones] shared]
+                            (str (and-words (map targets/zone-letter zones))
+                                 (if (next (next zones)) " all go to " " both go to ")
+                                 (targets/ref-name names lane))))
+           " under " (:name zone-map) "."))))
+
+(defn- every-laser-note
+  "What became of Every laser in a new grid (S-4), zones the zones it became."
+  [zones]
+  (let [letters (mapv targets/zone-letter zones)
+        idx (mapv targets/zone-index zones)
+        run? (and (< 2 (count zones)) (= idx (vec (range (first idx) (inc (peek idx))))))]
+    (str "Every laser can't be a row, because the number of lasers changes. It became zones "
+         (if run? (str (first letters) "–" (peek letters)) (and-words letters))
+         ": pick a zone map that sends them where you want.")))
+
+(defn step-grid
+  "The step grid window's grid at target ({:domain :entity-key
+   :effect-path}, a cue's zone pattern or an effects cell's), or nil when it
+   holds no zone pattern: {:id (the pattern's, for the playhead) :params
+   (the grid as it shows, routing.step-grid/as-grid: a pattern that isn't
+   one yet shows the grid it becomes) :grid? (it is one already) :rows
+   [{:ref :text}] (each row and where it goes under the map in use) :lit
+   (each step's refs, as sets) :length :cursor [row step] :keyframes? (its
+   keyframes are on: the grid is greyed out) :locked? (the show lock is on)
+   :wrap-note (S-5) :every-laser-note (S-4, once it became zones)}."
+  [context {:keys [domain entity-key effect-path] :as target}]
+  (let [fx (fx/sub-ctx context zone-pattern-at domain entity-key effect-path)]
+    (when (= :zone-pattern (:effect-id fx))
+      (let [world (fx/sub-ctx context pattern-world)
+            params (step-grid/as-grid (:params fx) (count (rig/e-order (rig/rig-inputs world))))
+            names (fx/sub-ctx context names-ctx)
+            zone-map (fx/sub-ctx context active-zone-map)
+            rows (step-grid/rows params)
+            len (step-grid/length params)
+            dialog (fx/sub-ctx context dialog-data :step-grid-editor)
+            [r s] (or (when (= target (:target dialog)) (:cursor dialog)) [0 0])]
+        {:id (:id fx)
+         :params params
+         :grid? (step-grid/grid? (:params fx))
+         :rows (mapv (fn [ref] {:ref ref :text (grid-row-text names zone-map ref)}) rows)
+         :lit (mapv set (:steps params))
+         :length len
+         :cursor [(max 0 (min (dec (max 1 (count rows))) (long r))) (max 0 (min (dec (max 1 len)) (long s)))]
+         :keyframes? (true? (get-in fx [:keyframe-modulator :enabled?]))
+         :locked? (true? (fx/sub-val context get-in [:ui :show-lock?]))
+         :wrap-note (wrap-note names zone-map rows)
+         :every-laser-note (when (and (= target (:target dialog)) (seq (:every-laser dialog)))
+                             (every-laser-note (:every-laser dialog)))}))))
+
+(defn step-grid-clipboard
+  "The grid Copy keeps for the session ({:zones :steps}), or nil."
+  [context]
+  (fx/sub-val context get-in [:ui :step-grid :clipboard]))
 
 
 ;; Level 2: The rig strip (views/components/rig_strip.clj)

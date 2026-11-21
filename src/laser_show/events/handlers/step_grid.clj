@@ -197,14 +197,15 @@
 
 (defn pointer-phase
   "What the grid body's raw JavaFX event is: :press (the primary button
-   down, not a menu's popup trigger), :drag (moving with it down),
-   :release, or nil."
+   down), :drag (moving with it down), :release, or nil. The body has no
+   menu of its own, so a press that is also a popup trigger (a Ctrl-click
+   on macOS, every headless robot press) paints too."
   [e]
   (when (instance? MouseEvent e)
     (let [^MouseEvent e e
           t (.getEventType e)]
       (cond
-        (= t MouseEvent/MOUSE_PRESSED) (when (and (= MouseButton/PRIMARY (.getButton e)) (not (.isPopupTrigger e))) :press)
+        (= t MouseEvent/MOUSE_PRESSED) (when (= MouseButton/PRIMARY (.getButton e)) :press)
         (= t MouseEvent/MOUSE_DRAGGED) (when (.isPrimaryButtonDown e) :drag)
         (= t MouseEvent/MOUSE_RELEASED) (when (= MouseButton/PRIMARY (.getButton e)) :release)
         :else nil))))

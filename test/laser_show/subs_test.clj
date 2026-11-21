@@ -1242,3 +1242,65 @@
       (is (= :crowd (blocked (fx/swap-context ctx assoc-in [:config :default-target] :zone/b) 3))))
     (testing "a switch of the map in use changes nothing: every map counts"
       (is (= :crowd (blocked (fx/swap-context ctx assoc-in [:zone-map :active] :map/odd-even) 2))))))
+
+
+;; The step grid window (zones plan Z6, 08 §4, §7)
+
+(deftest step-grid-sub-test
+  (let [target {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]}
+        grid (-> (zone-patterns/preset-instance :steps :cue)
+                 (assoc :id :g1)
+                 (update :params merge {:zones [:zone/a :zone/b :zone/c :graphics]
+                                        :steps [[:zone/a] [] [:zone/b :zone/c] [:graphics]]}))
+        s (-> (domains/build-initial-state)
+              (assoc-in [:chains :cue-chains [0 0]] {:items [] :zone-patterns [grid]})
+              (assoc :zone-groups {:graphics {:name "Graphics"}})
+              (assoc-in [:zones :labels :zone/a] "Beams")
+              (assoc-in [:ui :dialogs :step-grid-editor] {:open? true :target target :cursor [1 2]}))
+        ctx (context s)
+        sg (fx/sub-ctx ctx subs/step-grid target)]
+    (testing "rows with where they go under the map in use"
+      (is (= [{:ref :zone/a :text "A · Beams → Left"} {:ref :zone/b :text "B → Right"} {:ref :zone/c :text "C → Left"}
+              {:ref :graphics :text "Graphics"}]
+             (:rows sg))))
+    (is (= :g1 (:id sg)) "the pattern's id, for the playhead")
+    (is (= 4 (:length sg)))
+    (is (= [#{:zone/a} #{} #{:zone/b :zone/c} #{:graphics}] (:lit sg)) "the refs each step lights")
+    (is (= [1 2] (:cursor sg)))
+    (is (true? (:grid? sg)))
+    (is (false? (:keyframes? sg)))
+    (is (false? (:locked? sg)))
+    (testing "the wrap note (S-5): two rows that go to one lane"
+      (is (= "A and C both go to Left under Left / Right." (:wrap-note sg)))
+      (is (nil? (:wrap-note (fx/sub-ctx (fx/swap-context ctx assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :params :zones] [:zone/a :zone/b])
+                                        subs/step-grid target))) "none shared: no note")
+      (is (= "A, C and E all go to Left; B and D both go to Right under Left / Right."
+             (:wrap-note (fx/sub-ctx (fx/swap-context ctx assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :params :zones]
+                                                      [:zone/a :zone/b :zone/c :zone/d :zone/e])
+                                     subs/step-grid target)))))
+    (testing "the keyframe guard"
+      (let [kf (fx/swap-context ctx assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :keyframe-modulator] {:enabled? true :keyframes []})]
+        (is (true? (:keyframes? (fx/sub-ctx kf subs/step-grid target))))))
+    (testing "the show lock"
+      (is (true? (:locked? (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :show-lock?] true) subs/step-grid target)))))
+    (testing "a pattern that isn't a grid yet shows the grid it becomes"
+      (let [chase (fx/swap-context ctx assoc-in [:chains :cue-chains [0 0] :zone-patterns]
+                                   [(assoc (zone-patterns/preset-instance :chase :cue) :id :p1 :params
+                                           (assoc (:params (zone-patterns/preset-instance :chase :cue)) :zones [:zone/a :zone/b :zone/c]))])
+            sg (fx/sub-ctx chase subs/step-grid target)]
+        (is (false? (:grid? sg)))
+        (is (= [#{:zone/a} #{:zone/b} #{:zone/c} #{:zone/a} #{:zone/b} #{:zone/c} #{:zone/a} #{:zone/b}] (:lit sg)))))
+    (testing "Every laser's note, once it became zones"
+      (is (= "Every laser can't be a row, because the number of lasers changes. It became zones A–D: pick a zone map that sends them where you want."
+             (:every-laser-note (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :dialogs :step-grid-editor :every-laser]
+                                                             [:zone/a :zone/b :zone/c :zone/d])
+                                            subs/step-grid target))))
+      (is (= "Every laser can't be a row, because the number of lasers changes. It became zones A and B: pick a zone map that sends them where you want."
+             (:every-laser-note (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :dialogs :step-grid-editor :every-laser] [:zone/a :zone/b])
+                                            subs/step-grid target)))))
+    (testing "no zone pattern there: nothing"
+      (is (nil? (fx/sub-ctx ctx subs/step-grid {:domain :cue-zone-patterns :entity-key [5 0] :effect-path [0]}))))
+    (testing "the clipboard"
+      (is (nil? (fx/sub-ctx ctx subs/step-grid-clipboard)))
+      (is (= {:zones [:zone/a] :steps [[:zone/a]]}
+             (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :step-grid :clipboard] {:zones [:zone/a] :steps [[:zone/a]]}) subs/step-grid-clipboard))))))

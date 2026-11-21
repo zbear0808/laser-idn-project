@@ -264,16 +264,20 @@
       (filterv #(not (contains? own %)) (grid-rows refs n-lasers)))))
 
 (defn as-grid
-  "params as a step grid. A grid stays itself. Any other pattern takes its
-   rows from its zones (grid-rows, n-lasers the rig's lasers now) and 8
-   steps of its own style (from-style), so it plays the same for those 8
-   steps at its own rate and clock; a style a grid can't copy (Shift and
-   Swap trade what's in the zones, a style a modulator picks, Steps with no
-   steps yet) starts as a new grid does, Alternate. A grid doesn't follow
-   the pattern pads (Z6-Q2 A)."
+  "params as a step grid. A grid stays itself, and so does a pattern that
+   was one (its style switched since, from the Pattern chip or a pad): its
+   steps come back. Any other pattern takes its rows from its zones
+   (grid-rows, n-lasers the rig's lasers now) and 8 steps of its own style
+   (from-style), so it plays the same for those 8 steps at its own rate and
+   clock; a style a grid can't copy (Shift and Swap trade what's in the
+   zones, a style a modulator picks, Steps with no steps yet) starts as a
+   new grid does, Alternate. A new grid doesn't follow the pattern pads
+   (Z6-Q2 A)."
   [params n-lasers]
-  (if (grid? params)
-    (normalize params)
+  (cond
+    (grid? params) (normalize params)
+    (pos? (length params)) (normalize (assoc params :style :steps))
+    :else
     (let [style (:style params)
           from (if (contains? #{:alternate :chase :ping-pong :random} style) style :alternate)]
       (-> (assoc params :zones (grid-rows (:zones params) n-lasers))

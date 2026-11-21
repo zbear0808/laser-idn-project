@@ -79,7 +79,7 @@
   (is (= "No zone pattern: the cue's pictures stay in the zones they're drawn into. Pick a style to move them on the beat or on a press."
          (tooltip-of "#pattern-chip-cue")))
   (is (= ["None" "Alternate   A ⇄ B" "Chase   across every laser" "Ping-pong   across every laser"
-          "Random   across every laser" "Shift   A → B → C → D" "Swap   A ⇄ B (what's in them)" "" "Edit pattern…"]
+          "Random   across every laser" "Shift   A → B → C → D" "Swap   A ⇄ B (what's in them)" "" "Step grid…" "Edit pattern…"]
          (item-texts "#pattern-chip-cue")))
   (testing "a style adds its preset, on the cue's clock"
     (fire-item! "#pattern-chip-cue" "Alternate   A ⇄ B")

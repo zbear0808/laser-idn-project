@@ -6,7 +6,9 @@
    (views/components/zone_map_pads.clj) and the zones and maps under the
    Zone Groups tab (views/components/zone_maps_panel.clj); zone patterns'
    chip, places and window, the pattern pads and CYCLE (zones plan Z5,
-   views/components/zone_pattern_editor.clj, pattern_pads.clj).
+   views/components/zone_pattern_editor.clj, pattern_pads.clj); the step
+   grid's cells, lines, rows and numbers (zones plan Z6,
+   views/components/step_grid.clj).
 
    cljfx.css writes a map of more than eight rules in hash order, so a state
    rule has one class more than the rule it overrides.
@@ -265,4 +267,52 @@
        {:-fx-background-color bg-interactive}
        ".pattern-pad.pattern-pad-learning"
        {:-fx-border-color red
-        :-fx-border-width 2}})))
+        :-fx-border-width 2}
+
+       ;; The step grid (zones plan Z6): its cells, the cursor, the beat and
+       ;; bar lines under them, the row labels and the step numbers
+       ".step-grid-body"
+       {:-fx-background-color (colors/with-alpha "#000000" 0.25)}
+       ".step-grid-body:focused"
+       {:-fx-background-color (colors/with-alpha blue 0.08)}
+       ".step-cell"
+       {:-fx-background-color bg-interactive
+        :-fx-background-insets 2
+        :-fx-background-radius 3}
+       ".step-cell.step-cell-on"
+       {:-fx-background-color blue}
+       ".step-cell.step-cell-cursor"
+       {:-fx-border-color text-primary
+        :-fx-border-width 2
+        :-fx-border-radius 4}
+       ".step-grid-beat-line"
+       {:-fx-background-color (colors/with-alpha text-muted 0.55)}
+       ".step-grid-bar-line"
+       {:-fx-background-color text-secondary}
+       ".step-row-label"
+       {:-fx-text-fill text-secondary
+        :-fx-font-size 12
+        :-fx-padding [0 6 0 0]
+        :-fx-text-overrun "ellipsis"}
+       ".step-number"
+       {:-fx-text-fill text-muted
+        :-fx-font-size 10}
+       ".step-number.step-number-bar"
+       {:-fx-text-fill text-secondary
+        :-fx-font-weight "bold"}
+       ".step-playhead"
+       {:-fx-background-color "transparent"}
+       ;; Its toolbar's buttons: length, Start from, Copy, Paste, Clear
+       ".button.step-grid-button"
+       {:-fx-background-color bg-interactive
+        :-fx-text-fill text-primary
+        :-fx-padding [3 9 3 9]
+        :-fx-font-size 11
+        :-fx-background-radius 4
+        :-fx-cursor "hand"}
+       ".button.step-grid-button:hover"
+       {:-fx-background-color (colors/with-alpha blue 0.35)}
+       ".button.step-grid-button.step-grid-button-selected"
+       {:-fx-background-color (colors/with-alpha blue 0.6)}
+       ".button.step-grid-button:disabled"
+       {:-fx-opacity 0.45}})))

@@ -214,7 +214,10 @@
       (is (= g (sg/as-grid g 4)))
       (is (sg/grid? g))
       (is (not (sg/grid? (assoc g :steps []))))
-      (is (not (sg/grid? (assoc g :style :chase)))))))
+      (is (not (sg/grid? (assoc g :style :chase))))))
+  (testing "a pattern that was a grid, its style switched since, gets its steps back"
+    (let [g (assoc (grid [[A] [] [B C]]) :style :chase :follow-pads? true)]
+      (is (= (assoc g :style :steps) (sg/as-grid g 4)) "the steps, the rows and whether it follows the pads, as they were"))))
 
 
 ;; Copy and paste

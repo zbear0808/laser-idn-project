@@ -123,12 +123,20 @@
 
 (defn chip-text
   "What the Pattern chip says: \"None\", or the style and its lane,
-   \"Alternate · A ⇄ B\"."
+   \"Alternate · A ⇄ B\"; a step grid its length and rows, \"Steps · 8 · A
+   B\" (zones plan Z6)."
   [pattern names]
   (if-let [{:keys [params]} (enabled pattern)]
     (let [style (style-of params)]
-      (str (style-name style) " · " (zone-patterns/lane-text style (:zones params) names)))
+      (if (= :steps style)
+        (zone-patterns/describe params names)
+        (str (style-name style) " · " (zone-patterns/lane-text style (:zones params) names))))
     "None"))
+
+(defn- grid-words
+  "Where a step grid lights things: \"on 8 steps over A B\"."
+  [params names]
+  (str "on " (count (zone-remap/grid-steps params)) " steps over " (zone-patterns/lane-text :steps (:zones params) names)))
 
 (defn chip-tooltip
   "The Pattern chip's tooltip (07 §7.4's words): what the pattern does, how
@@ -137,7 +145,8 @@
   (if-let [{:keys [params]} (enabled pattern)]
     (let [style (style-of params)]
       (str "Zone pattern: " (style-name style) ". "
-           (moves-words style params names) " " (lane-words style (lane-refs params) names)
+           (moves-words style params names) " "
+           (if (= :steps style) (grid-words params names) (lane-words style (lane-refs params) names))
            ", " (rate-words params) (clock-words params) "."))
     "No zone pattern: the cue's pictures stay in the zones they're drawn into. Pick a style to move them on the beat or on a press."))
 
@@ -146,7 +155,8 @@
    Chase across every laser, 2 steps a beat (show beats)\"."
   [params names]
   (let [style (style-of params)]
-    (str "Zone pattern: " (style-name style) " " (lane-words style (lane-refs params) names)
+    (str "Zone pattern: " (style-name style) " "
+         (if (= :steps style) (grid-words params names) (lane-words style (lane-refs params) names))
          ", " (rate-words params)
          (when (= :clock (step-source params))
            (if (= :cue (:clock params)) " (each cue from its start)" " (show beats)")))))
@@ -240,9 +250,10 @@
 
 (def ^:private label-width 90)
 
-(defn- control
+(defn control
   "The standard control of param k, with ∿ where modulators are on (not in
-   keyframe mode)."
+   keyframe mode); the step grid window's toolbar has them too (zones plan
+   Z6)."
   [{:keys [current-params params-map on-change-event on-text-event modulator-event-base]} k]
   {:fx/type (if modulator-event-base mod-param/modulatable-param-control param-controls/param-control)
    :param-key k
@@ -271,7 +282,28 @@
   {:fx/type :label :text text :min-width :use-pref-size :min-height line-height
    :style-class ["label" "label-hint" "zone-pattern-hint"]})
 
-(defn- moves-radios
+(defn- grid-target
+  "The step grid's address of the pattern a renderer edits (effect-keys:
+   {:domain :entity-key :effect-path}, a keyframe's index left out)."
+  [effect-keys]
+  (select-keys effect-keys [:domain :entity-key :effect-path]))
+
+(defn- step-grid-row
+  "Step grid…: the pattern's grid in its own window (zones plan Z6,
+   Z6-Q5 A); a pattern of another style becomes one, its first 8 steps."
+  [effect-keys]
+  (row :step-grid
+       {:fx/type :label :text "Grid" :pref-width label-width :min-height line-height :style-class ["label-secondary"]}
+       {:fx/type :button
+        :id "zone-pattern-step-grid"
+        :text "Step grid…"
+        :focus-traversable false
+        :style-class ["button-secondary"]
+        :tooltip {:fx/type :tooltip
+                  :text "Draw this pattern on a grid, a row per zone and a column per step: a pattern of another style becomes its first 8 steps"}
+        :on-action {:event/type :step-grid/open :target (grid-target effect-keys)}}))
+
+(defn moves-radios
   "Moves, as three radio buttons (07 §7.1); a click on the one already
    chosen keeps it."
   [{:keys [current-params params-map on-change-event]}]
@@ -333,7 +365,8 @@
         (row :zones
              (assoc (control props :zones)
                     :fx/type param-controls/param-ref-list
-                    :pair? (= :pair (lane-mode style))))]
+                    :pair? (= :pair (lane-mode style))))
+        (step-grid-row effect-keys)]
        (when (show? :source)
          [(row :source (if (reg/modulated? (:source params)) (control props :source) (moves-radios props)))])
        [(row :rate (control props :rate) (hint (rate-words params)))
@@ -453,6 +486,10 @@
                                   :text (check (= s current) (str (style-name s) "   " (style-lanes s)))
                                   :on-action (set-style s)})
                                [{:fx/type :separator-menu-item}
+                                {:fx/type :menu-item
+                                 :text "Step grid…"
+                                 :on-action {:event/type :step-grid/open
+                                             :target {:domain :cue-zone-patterns :entity-key [col row] :effect-path [0]}}}
                                 {:fx/type :menu-item
                                  :text "Edit pattern…"
                                  :disable (nil? pattern)
