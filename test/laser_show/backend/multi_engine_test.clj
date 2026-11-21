@@ -742,3 +742,27 @@
       (let [out (#'me/projector-frame :p (snapshot cues))]
         (is (= (+ 833 4) (count out)) "a point more where the circle crosses the limit, four times")
         (is (= 833 (:points (:fit (meta out)))))))))
+
+(defn- lit-circle
+  "n lit points round a circle."
+  [n]
+  (vec (for [i (range n)]
+         (let [a (/ (* 2.0 Math/PI i) n)] [(* 0.5 (Math/cos a)) (* 0.5 (Math/sin a)) 1.0 1.0 1.0]))))
+
+(deftest decimate-that-changes-nothing-still-meters-what-the-laser-draws-test
+  (testing "Q-D-3 B: Decimate at 15 fps (1,666 points) on a laser at 25 kpps with a minimum of 20"
+    (state/swap-state! #(-> %
+                            (assoc-in [:projectors :p] {:host "10.0.0.5" :enabled? true :zone-groups [] :scan-rate 25000})
+                            (assoc-in [:chains :projector-effects :p :items] [(assoc-in decimate [:params :fps] 15)])))
+    (let [fit-of (fn [n] (:fit (meta (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:all (lit-circle n)}}])))))]
+      (is (= [2700 1620 1620] ((juxt :points-in :points :effect-points) (fit-of 2700)))
+          "the guard leaves 1,620 of 2,700, under Decimate's budget, so it cuts none: the meter counts the 1,620, 130%, not 216%")
+      (is (= [2800 1666 1666] ((juxt :points-in :points :effect-points) (fit-of 2800)))
+          "2,800: Decimate cuts the guard's 1,680 to 1,666, 133%: a heavier cue no longer reads lower")
+      (is (= [500 500] ((juxt :points :effect-points) (fit-of 500))) "under every budget: what it draws is what it is asked for")
+      (testing "a disabled Decimate, or none: what the laser is asked for, as before (Q-Z3-4 A)"
+        (state/assoc-in-state! [:chains :projector-effects :p :items] [(assoc decimate :enabled? false)])
+        (is (= [2700 1620] ((juxt :points-in :points) (fit-of 2700))))
+        (is (not (contains? (fit-of 2700) :effect-points)))
+        (state/assoc-in-state! [:chains :projector-effects :p :items] [identity-curves])
+        (is (not (contains? (fit-of 2700) :effect-points)))))))

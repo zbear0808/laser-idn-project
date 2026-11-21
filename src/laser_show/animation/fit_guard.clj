@@ -229,6 +229,15 @@
                      :reduced-pct (if (pos? n) (* 100.0 (/ (- n points) (double n))) 0.0))
         (zero? points) (assoc :dark? true)))))
 
+(defn drawn
+  "record with :effect-points its :points, so the load meter counts what
+   the laser draws even when nothing after the guard changed the count: for
+   a laser whose calibration chain has an enabled Decimate (Q-D-3 B), whose
+   meter, fps and LOW FPS then always describe the same frame. A recounted
+   record is as it was."
+  [record]
+  (assoc record :effect-points (:points record)))
+
 
 ;; The record over time
 

@@ -275,6 +275,17 @@
     (let [thinned (assoc (record 30.0) :points 833 :effect-points 833)]
       (is (not (contains? (fg/smooth (fg/smooth nil thinned) (record 30.0)) :effect-points))))))
 
+(deftest drawn-meters-what-the-laser-draws-test
+  (testing "Q-D-3 B: a laser whose chain has Decimate meters its points, whether or not Decimate cut any"
+    (let [{fit :fit} (guarded (lit-circle 2700) 25000)]
+      (is (= [2700 1620 1620] ((juxt :points-in :points :effect-points) (fg/drawn fit))) "the guard's 1,620, not the 2,700")
+      (is (= (dissoc (fg/drawn fit) :effect-points) fit) "and nothing else changes")
+      (is (= (fg/recount fit 1500) (fg/drawn (fg/recount fit 1500))) "a frame the effects recounted: as it was")))
+  (testing "a dark one, which Decimate can't thin, still leaves the meter as it was (S-14)"
+    (let [lit (fg/drawn (assoc (record 30.0) :points 833))
+          dark (fg/drawn (record 8.3 :dark? true))]
+      (is (= 833 (:effect-points (fg/smooth (fg/smooth nil lit) dark)))))))
+
 
 ;; Seeded properties (invariant 6)
 
