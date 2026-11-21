@@ -7,17 +7,15 @@
    
    Key Functions Under Test:
    - laser-show.animation.effects.zone/evaluate-zone
-   - laser-show.routing.zone-effects/resolve-item-zone-destination
-   - laser-show.routing.zone-effects/group-items-by-zone
    - laser-show.services.frame-service/generate-frames-by-zone, on the cues
-     as zones plan Z4 converts them (state.migration/cue-z4)"
+     as zones plan Z4 converts them (state.migration/cue-z4); the old
+     readers (routing.zone-effects) went with Z4"
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
    [laser-show.animation.effects.zone :as zone]
    [laser-show.animation.types :as t]
    [laser-show.routing.compose :as compose]
    [laser-show.routing.rig :as rig]
-   [laser-show.routing.zone-effects :as ze]
    [laser-show.services.frame-service :as fs]
    [laser-show.state.core :as state]
    [laser-show.state.migration :as migration]
@@ -170,161 +168,6 @@
 
   (testing "Missing target-zone defaults to :all"
     (is (= :all (zone/evaluate-zone {})))))
-
-
-;; ============================================================================
-;; Unit Tests: Zone Effect Identification
-;; ============================================================================
-
-
-(deftest zone-effect-identification-test
-  (testing "zone-effect? correctly identifies zone-selector"
-    (is (true? (ze/zone-effect? {:effect-id :zone-selector})))
-    (is (false? (ze/zone-effect? {:effect-id :color-shift})))
-    (is (false? (ze/zone-effect? {:effect-id :scale})))
-    (is (false? (ze/zone-effect? nil)))))
-
-
-(deftest extract-zone-effects-test
-  (testing "extract-zone-effects filters to enabled zone effects only"
-    ;; No effects
-    (is (= [] (ze/extract-zone-effects [])))
-
-    ;; Only zone-selector, enabled
-    (is (= [{:effect-id :zone-selector :enabled? true :params {}}]
-           (ze/extract-zone-effects [{:effect-id :zone-selector
-                                      :enabled? true
-                                      :params {}}])))
-
-    ;; Zone-selector disabled
-    (is (= [] (ze/extract-zone-effects [{:effect-id :zone-selector
-                                         :enabled? false
-                                         :params {}}])))
-
-    ;; Mixed effects - only returns zone effects
-    (is (= [{:effect-id :zone-selector :enabled? true :params {:target-zone :left}}]
-           (ze/extract-zone-effects [{:effect-id :scale :enabled? true :params {}}
-                                     {:effect-id :zone-selector
-                                      :enabled? true
-                                      :params {:target-zone :left}}
-                                     {:effect-id :color-shift :enabled? true :params {}}])))))
-
-
-;; ============================================================================
-;; Unit Tests: resolve-item-zone-destination
-;; ============================================================================
-
-
-(deftest resolve-item-zone-destination-with-zone-selector-test
-  (testing "Item with zone-selector returns evaluated zone"
-    (let [item {:id "test-item"
-                :effects [{:effect-id :zone-selector
-                           :enabled? true
-                           :params {:target-zone :left}}]}
-          cue-chain-dest {:zone-group-id :all}
-          timing-ctx (make-timing-ctx 0.0)]
-      (is (= :left (ze/resolve-item-zone-destination item timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)}))))))
-
-
-(deftest resolve-item-zone-destination-no-zone-effect-test
-  (testing "Item without zone-selector returns default destination"
-    (let [item {:id "test-item"
-                :effects [{:effect-id :scale :enabled? true :params {}}]}
-          cue-chain-dest {:zone-group-id :center}
-          timing-ctx (make-timing-ctx 0.0)]
-      (is (= :center (ze/resolve-item-zone-destination item timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)}))))))
-
-
-(deftest resolve-item-zone-destination-disabled-effect-test
-  (testing "Disabled zone-selector is ignored, uses default"
-    (let [item {:id "test-item"
-                :effects [{:effect-id :zone-selector
-                           :enabled? false
-                           :params {:target-zone :right}}]}
-          cue-chain-dest {:zone-group-id :left}
-          timing-ctx (make-timing-ctx 0.0)]
-      (is (= :left (ze/resolve-item-zone-destination item timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)}))))))
-
-
-;; ============================================================================
-;; Unit Tests: group-items-by-zone
-;; ============================================================================
-
-
-(deftest group-items-by-zone-single-item-test
-  (testing "Single item is grouped to its resolved zone"
-    (let [items [{:id "item-1"
-                  :enabled? true
-                  :effects [{:effect-id :zone-selector
-                             :enabled? true
-                             :params {:target-zone :left}}]}]
-          cue-chain-dest {:zone-group-id :all}
-          timing-ctx (make-timing-ctx 0.0)
-          result (ze/group-items-by-zone items timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)})]
-
-      (is (= #{:left} (set (keys result))))
-      (is (= 1 (count (:left result))))
-      (is (= "item-1" (:id (first (:left result))))))))
-
-
-(deftest group-items-by-zone-multiple-items-test
-  (testing "Multiple items with different zones are grouped correctly"
-    (let [items [{:id "item-left"
-                  :enabled? true
-                  :effects [{:effect-id :zone-selector
-                             :enabled? true
-                             :params {:target-zone :left}}]}
-                 {:id "item-right"
-                  :enabled? true
-                  :effects [{:effect-id :zone-selector
-                             :enabled? true
-                             :params {:target-zone :right}}]}
-                 {:id "item-center"
-                  :enabled? true
-                  :effects [{:effect-id :zone-selector
-                             :enabled? true
-                             :params {:target-zone :center}}]}]
-          cue-chain-dest {:zone-group-id :all}
-          timing-ctx (make-timing-ctx 0.0)
-          result (ze/group-items-by-zone items timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)})]
-
-      (is (= #{:left :right :center} (set (keys result))))
-      (is (= 1 (count (:left result))))
-      (is (= 1 (count (:right result))))
-      (is (= 1 (count (:center result)))))))
-
-
-(deftest group-items-by-zone-disabled-items-excluded-test
-  (testing "Disabled items are excluded from grouping"
-    (let [items [{:id "item-enabled"
-                  :enabled? true
-                  :effects [{:effect-id :zone-selector
-                             :enabled? true
-                             :params {:target-zone :left}}]}
-                 {:id "item-disabled"
-                  :enabled? false
-                  :effects [{:effect-id :zone-selector
-                             :enabled? true
-                             :params {:target-zone :right}}]}]
-          cue-chain-dest {:zone-group-id :all}
-          timing-ctx (make-timing-ctx 0.0)
-          result (ze/group-items-by-zone items timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)})]
-
-      (is (= #{:left} (set (keys result))))
-      (is (nil? (:right result))))))
-
-
-(deftest group-items-by-zone-items-without-zone-effect-use-default-test
-  (testing "Items without zone-selector use cue chain default"
-    (let [items [{:id "item-no-effect"
-                  :enabled? true
-                  :effects []}]
-          cue-chain-dest {:zone-group-id :center}
-          timing-ctx (make-timing-ctx 0.0)
-          result (ze/group-items-by-zone items timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)})]
-
-      (is (= #{:center} (set (keys result))))
-      (is (= 1 (count (:center result)))))))
 
 
 ;; ============================================================================
@@ -540,53 +383,6 @@
                           cue-chain (make-timing-ctx 0.0))]
       (is (contains? frames-by-zone :right) "Item zone override :right beats track's :left")
       (is (nil? (:left frames-by-zone))))))
-
-
-(deftest group-items-by-zone-sealed-unit-behavior-test
-  (testing "Group with zone-selector acts as sealed unit - children's effects ignored"
-    (let [group-item {:id "group-1"
-                      :type :group
-                      :enabled? true
-                      :effects [{:effect-id :zone-selector
-                                 :enabled? true
-                                 :params {:target-zone :center}}]
-                      :items [;; Child 1: wants :right (should be ignored)
-                              {:id "child-1"
-                               :type :preset
-                               :enabled? true
-                               :preset-id :circle
-                               :params {}
-                               :effects [{:effect-id :zone-selector
-                                          :enabled? true
-                                          :params {:target-zone :right}}]}
-                              ;; Child 2: no zone effect
-                              {:id "child-2"
-                               :type :preset
-                               :enabled? true
-                               :preset-id :square
-                               :params {}
-                               :effects []}]}
-          cue-chain-dest {:zone-group-id :all}
-          timing-ctx (make-timing-ctx 0.0)
-          result (ze/group-items-by-zone [group-item] timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)})]
-
-      ;; All content should go to :center (group's destination)
-      (is (= #{:center} (set (keys result)))
-          "All content should route to :center only")
-
-      ;; The group should be in :center
-      (is (= 1 (count (:center result)))
-          "Should have exactly one item (the group) in :center")
-
-      ;; Verify the group is in :center
-      (is (= "group-1" (:id (first (:center result))))
-          "The group should be routed to :center")
-
-      ;; Other zones should be empty
-      (is (nil? (:right result))
-          ":right should be empty - child's effect was ignored")
-      (is (nil? (:all result))
-          ":all should be empty - default was overridden"))))
 
 
 ;; ============================================================================

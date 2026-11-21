@@ -500,3 +500,26 @@
       (ui/wait-for! #(nil? (get-in (app-state) [:zone-maps :map/custom-1])))
       (is (= :map/left-right (active-map)))
       (ui/wait-for! #(nil? (ui/query "#zone-map-item-custom-1"))))))
+
+
+;; The Zone Selector leaves the bank (06 §4.5, invariant 13)
+
+(deftest bank-offers-no-zone-selector-test
+  (testing "the effects grid's editor: no Zone tab"
+    (events/dispatch! {:event/type :effect-chain/open-editor :col 0 :row 0})
+    (ui/wait-for! #(seq (ui/query-all "#shape-tab")))
+    (is (empty? (ui/query-all "#zone-tab")))
+    (events/dispatch! {:event/type :ui/close-dialog :dialog-id :effect-chain-editor})
+    (ui/wait-for! #(empty? (ui/query-all "#shape-tab"))))
+  (testing "the cue chain editor: none either"
+    (open-editor! 0 0)
+    (ui/wait-for! #(seq (ui/query-all "#shape-tab")))
+    (is (empty? (ui/query-all "#zone-tab")))
+    (events/dispatch! {:event/type :ui/close-dialog :dialog-id :cue-chain-editor})
+    (ui/wait-for! #(empty? (ui/query-all "#shape-tab"))))
+  (testing "the timeline's browser, a clip selected: none either"
+    (open-timeline!)
+    (state/swap-state! assoc-in [:ui :timeline-prefs :add-panel :open?] true)
+    (events/dispatch! {:event/type :timeline/select-items :col 0 :row 0 :ids #{:c1} :mode :replace})
+    (ui/wait-for! #(seq (ui/query-all "#timeline-browser-effects #shape-tab")))
+    (is (empty? (ui/query-all "#zone-tab")))))

@@ -19,8 +19,9 @@
 
 (def ^:private param-exemptions
   "Params that legitimately don't change frame output. Keep each one explained."
-  {;; Routing-only: read by the zone routing layer, the frame transducer is identity.
-   [:zone-selector :target-zone] "routing param, not a frame transform"
+  {;; The Zone Selector, kept registered (hidden) for old shows' effect ids:
+   ;; nothing reads it since zones plan Z4, its transducer is identity
+   [:zone-selector :target-zone] "an old show's routing param, read by nothing"
    ;; Editor-only constraint: the scale editor uses it to keep x/y scale locked
    ;; together and writes both :x-scale and :y-scale. Applying it in scale-xf
    ;; (forcing y = x) would break uniform mirroring (e.g. x -1.2, y 1.2).
@@ -82,6 +83,12 @@
 
 (deftest all-expected-effects-registered-test
   (is (every? (set (map :id (effects/list-effects))) expected-effect-ids)))
+
+(deftest zone-selector-stays-registered-but-hidden-test
+  ;; zones plan Z4: where content goes is its Target; an old show's Zone
+  ;; Selector becomes one on load, so the bank offers it nowhere
+  (is (some? (effects/get-effect :zone-selector)) "its id stays registered")
+  (is (true? (:hidden? (effects/get-effect :zone-selector)))))
 
 (deftest every-effect-runs-with-defaults-test
   (doseq [{:keys [id]} (effects/list-effects)]

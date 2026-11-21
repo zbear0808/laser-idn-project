@@ -1,14 +1,10 @@
 (ns laser-show.animation.effects.zone
-  "Zone group routing effects - modify where cues are sent.
-   
-   Zone effects operate at the routing level, not frame generation level.
-   The zone-selector effect allows selecting which zone group a cue chain
-   item routes to.
-   
-   SIMPLIFIED ARCHITECTURE:
-   Only zone groups exist - projectors are assigned directly to zone groups.
-   A single zone-selector effect with a simple :target-zone parameter
-   determines routing destination."
+  "The Zone Selector, as old shows have it. Where content goes is its
+   Target since zones plan Z4 (routing.targets): loading or pasting an old
+   cue turns its first enabled top-level selector into the item's :target
+   and takes every selector out (state.migration). The id stays registered,
+   hidden, so the bank offers it nowhere and an old effect still reads; no
+   routing reads it."
   (:require [laser-show.animation.effects :as effects]))
 
 (set! *warn-on-reflection* true)
@@ -33,10 +29,8 @@
 
 
 (defn- zone-selector-xf
-  "Identity transducer - zone selection affects routing, not frame data.
-   
-   The actual zone resolution happens in the routing layer (zone_effects.clj)
-   which reads the :target-zone parameter directly."
+  "Identity transducer: a selector never changed frame data, and nothing
+   reads its :target-zone any more."
   [_time-ms _bpm _params _ctx]
   (map identity))
 
@@ -44,6 +38,7 @@
  {:id :zone-selector
   :name "Zone Selector"
   :category :zone
+  :hidden? true
   :timing :bpm
   :parameters [{:key :target-zone
                 :label "Target Zone"

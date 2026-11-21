@@ -413,6 +413,21 @@
         (is (= {2 :zone/a} (:column-targets ctx)))
         (is (= :zone/b (:show-target ctx)))))))
 
+(deftest frame-keys-ignore-the-map-test
+  ;; zones plan Z4, invariant 2: frame keys name zones, never lanes, so a
+  ;; map switch re-routes the same frames (the routing resolves the zones)
+  (let [item (fn [id t] {:id id :type :preset :preset-id :square :enabled? true :effects [] :target t})
+        cue {:items [(item :a :zone/a) (item :b [:zone/b :graphics]) (item :c nil)]}
+        render (fn [active]
+                 (let [ctx (frame-service/render-context (-> (domains/build-initial-state)
+                                                             (assoc-in [:grid :column-targets] {0 :zone/c})
+                                                             (assoc-in [:zone-map :active] active))
+                                                         {} {:effective-beats 0.0})]
+                   (frame-service/generate-frames-by-zone cue test-timing-ctx
+                                                          (assoc ctx :column-target (get-in ctx [:column-targets 0])))))]
+    (is (= #{:zone/a [:graphics :zone/b] :zone/c} (set (keys (render :map/left-right)))) "the zones, not their lanes")
+    (is (= (render :map/left-right) (render :map/odd-even) (render :map/unison)) "the same keys and frames under every map")))
+
 (deftest item-points-only-when-asked-test
   (let [cue {:items [{:id :ring :type :preset :preset-id :circle :enabled? true :effects [] :params {:num-points 99}}
                      {:id :box :type :preset :preset-id :square :enabled? true :effects [] :target :auto/left}

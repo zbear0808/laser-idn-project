@@ -37,9 +37,10 @@
 (defn- build-effects-by-category
   "Build a map of category -> effects vector.
    Handles both single keyword categories and set categories.
-   Effects with set categories appear in all relevant tabs."
+   Effects with set categories appear in all relevant tabs. A :hidden?
+   effect (the Zone Selector, zones plan Z4) is in none."
   []
-  (let [all-effects (effects/list-effects)]
+  (let [all-effects (remove :hidden? (effects/list-effects))]
     (reduce (fn [acc effect-def]
               (let [cat (:category effect-def)
                     ;; Normalize to a set of categories
@@ -97,12 +98,13 @@
    - :on-tab-change - Event map for tab changes
    - :item-event-template - Event map template for adding effects
                           Will receive :item-id (effect-id) and :item (effect-def)
-   - :include-zone? - Include Zone category (default: false)
+   - :include-zone? - Include the Zone category, while it has an effect
+                      (default: false)
    - :fill? - Grow with the parent (default: fixed 80 px)
    - :drag-kind - :effect to make the buttons drag sources (timeline browser)"
   [{:keys [active-tab on-tab-change item-event-template include-zone? fill? drag-kind]}]
   (let [effects-map (get-effects-by-category)
-        tabs (if include-zone?
+        tabs (if (and include-zone? (seq (:zone effects-map)))
                effect-bank-tab-definitions-with-zone
                effect-bank-tab-definitions)]
     {:fx/type tabbed-bank/tabbed-bank

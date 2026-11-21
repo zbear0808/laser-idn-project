@@ -41,8 +41,9 @@
    
    Returns: Preset instance map
    
-   Note: Destination zone routing is configured at the cue chain level,
-   not per-preset. See [:chains :cue-chains [col row] :destination-zone]."
+   Note: where a preset goes is its :target, else its group's, track's,
+   cue's, column's or the show's (routing.targets, zones plan Z4); a new one
+   has none, and inherits."
   ([preset-id] (create-preset-instance preset-id {}))
   ([preset-id {:keys [params effects enabled?]
                :or {params {} effects [] enabled? true}}]
