@@ -110,6 +110,20 @@
 (defn- problem [state p]
   (assoc-in state [:vibe-runtime :problem] p))
 
+(defn- refusal
+  "The problem a vibe reports when it left effect cells off because they
+   can send pictures to the crowd (zones plan Z5, library/playable-fx): the
+   first of refused, or nil."
+  [refused]
+  (when-let [cell (first refused)]
+    {:why :audience-fx :cell cell}))
+
+(defn- good-press
+  "The problem after a press that played: none, but a cell the vibe left
+   off stays said until the vibe changes."
+  [p]
+  (when (= :audience-fx (:why p)) p))
+
 (defn- solo-flash? [state]
   (boolean (get-in state [:vibe-runtime :voices :flash :solo?])))
 
@@ -162,17 +176,22 @@
         (cond-> (seq kept) (update-in [:vibe-runtime :voices :flash :fx-on] into kept)))))
 
 (defn- take-fx
-  "The FX set takes cells (those that exist): switched on, or taken over
-   from the held flash that switched them on. One already on otherwise
-   stays as it is, and isn't the set's to switch off."
-  [state cells]
+  "vibe's FX set takes cells (those that exist and it may switch on,
+   library/playable-fx): switched on, or taken over from the held flash
+   that switched them on. One already on otherwise stays as it is, and
+   isn't the set's to switch off. One it may not switch on (it can send
+   pictures to the crowd, zones plan Z5) stays off, and is the problem."
+  [state vibe cells]
   (let [flash-owned (set (get-in state [:vibe-runtime :voices :flash :fx-on]))
-        wanted (existing-fx state cells)
+        existing (existing-fx state cells)
+        wanted (library/playable-fx state vibe existing)
+        refused (remove (set wanted) existing)
         taken (filterv flash-owned wanted)
         [state switched] (switch-on state (remove flash-owned wanted))]
     (-> state
         (update-in [:vibe-runtime :fx-on] (fnil into []) (concat taken switched))
-        (cond-> (seq taken) (update-in [:vibe-runtime :voices :flash :fx-on] #(filterv (complement (set taken)) %))))))
+        (cond-> (seq taken) (update-in [:vibe-runtime :voices :flash :fx-on] #(filterv (complement (set taken)) %)))
+        (cond-> (seq refused) (problem (refusal refused))))))
 
 (defn- leave-look
   "Stop the bed and the :sustain voices, forget those a solo flash stepped
@@ -206,7 +225,7 @@
   [state vibe t]
   (if (get-in state [:vibe-runtime :blackout?])
     state
-    (-> (take-fx state (:fx vibe))
+    (-> (take-fx state vibe (:fx vibe))
         (start-bed vibe t))))
 
 (defn- restart-rotation
@@ -309,7 +328,7 @@
                     :else (assoc-in state [:vibe-runtime :duck role] {:mode mode}))]
         (with-tap {:state (update state :vibe-runtime #(-> %
                                                            (assoc-in [:held role] {:at t :src src})
-                                                           (assoc :problem nil)))}
+                                                           (update :problem good-press)))}
                   state role t)))))
 
 (defn- release-pool
@@ -405,10 +424,12 @@
         vibe (library/current-vibe state)
         {:keys [cue fx solo?]} (:flash vibe)
         cell (playable state vibe cue)
-        fx (existing-fx state fx)]
+        existing (existing-fx state fx)
+        fx (library/playable-fx state vibe existing)
+        refused (refusal (remove (set fx) existing))]
     (cond
       (nil? vibe) (problem state {:why :no-vibes})
-      (and (nil? cell) (empty? fx)) (problem state {:role :flash :why :empty-pool})
+      (and (nil? cell) (empty? fx)) (problem state (or refused {:role :flash :why :empty-pool}))
       :else
       (let [state (cond-> (let-go-of-flash (forget-stale state)) solo? duck)
             [run state] (if cell (start state cell {:hold? true} t) [nil state])
@@ -419,7 +440,7 @@
                          (assoc-in [:voices :flash] (cond-> {:fx fx :fx-on fx-on :solo? (boolean solo?)}
                                                       cell (assoc :cell cell :run run)))
                          (assoc-in [:held :flash] {:at t :src src})
-                         (assoc :problem nil)))
+                         (update :problem (fn [p] (or refused (good-press p))))))
             (cond-> (not solo?) (restore-ducked t)))))))
 
 
@@ -632,14 +653,15 @@
 ;; Edits (the Vibes tab, events/handlers/vibes.clj)
 
 (defn- refresh-fx
-  "The FX set from was's cells to vibe's: those it lost given back, those
-   it gained taken."
+  "The FX set from was's cells to vibe's (those each may switch on, so
+   Allow audience cells counts): those it lost given back, those it gained
+   taken."
   [state was vibe]
-  (let [before (existing-fx state (:fx was))
-        after (existing-fx state (:fx vibe))]
+  (let [before (library/playable-fx state was (existing-fx state (:fx was)))
+        after (library/playable-fx state vibe (existing-fx state (:fx vibe)))]
     (-> state
         (release-fx (remove (set after) before))
-        (take-fx (remove (set before) after)))))
+        (take-fx vibe (remove (set before) after)))))
 
 (defn- refresh-bed
   "The bed started again when the cue it should play changed from was's to

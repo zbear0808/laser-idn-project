@@ -5,6 +5,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.events.handlers :as handlers]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.domains :as domains]
             [laser-show.state.templates :as templates]
             [laser-show.vibes.engine :as engine]
@@ -695,3 +696,73 @@
     (is (some? (rt state :voices :hit)) "the press plays as ever")
     (is (= {:event/type :timing/tap-tempo :input-time 1000} (:dispatch (engine/press (starter) {:role :hit :time 1000})))
         "on, the default, it taps")))
+
+
+;; Zone patterns that can reach the crowd (zones plan Z5, 07 §4.7, V10 A)
+
+(defn- crowd-rig
+  "starter with p1, and p5 scanning the crowd, out of All (so the cues,
+   drawn to All, can't reach it); [2 3] a Chase over P1 and P5, off."
+  []
+  (-> (starter)
+      (assoc :projectors {:p1 {:name "P1" :host "10.0.0.1" :zone-groups [] :enabled? true}
+                          :p5 {:name "P5" :host "10.0.0.5" :zone-groups [] :tags #{:crowd-scanning} :enabled? true
+                               :exclude-from-all? true}})
+      (assoc-in [:chains :effect-chains [2 3]]
+                {:active? false :items [(assoc-in (zone-patterns/preset-instance :chase :cell) [:params :zones]
+                                                  [:auto.laser/p1 :auto.laser/p5])]})))
+
+(deftest audience-pattern-cell-is-not-switched-on-test
+  (let [s (-> (crowd-rig)
+              (with-vibe :vibe-1 {:fx [[0 3] [2 3]]})
+              (tap :hit 1000))]
+    (is (fx-on? s [0 3]) "the rest of the FX set comes on")
+    (is (not (fx-on? s [2 3])) "the pattern that can reach the crowd doesn't")
+    (is (= [[0 3]] (rt s :fx-on)) "and isn't the set's")
+    (testing "a vibe change to it, and back"
+      (let [s (-> (crowd-rig)
+                  (with-vibe :vibe-2 {:fx [[2 3]]})
+                  (tap :hit 1000)
+                  (tap :vibe 2000))]
+        (is (= :vibe-2 (rt s :current)))
+        (is (not (fx-on? s [2 3])))))))
+
+(deftest allowed-audience-cell-switches-on-test
+  (let [s (-> (crowd-rig)
+              (with-vibe :vibe-1 {:fx [[0 3] [2 3]] :allow-audience? true})
+              (tap :hit 1000))]
+    (is (fx-on? s [2 3]))
+    (is (= [[0 3] [2 3]] (rt s :fx-on)))
+    (is (nil? (rt s :problem))))
+  (testing "allowing it while the vibe plays switches it on; taking that back switches it off"
+    (let [s0 (-> (crowd-rig) (with-vibe :vibe-1 {:fx [[2 3]]}) (tap :hit 1000))
+          allow (fn [s v] (edited s 1500 assoc-in [:library :vibe-1 :allow-audience?] v))]
+      (is (not (fx-on? s0 [2 3])))
+      (let [s1 (allow s0 true)]
+        (is (fx-on? s1 [2 3]))
+        (is (not (fx-on? (allow s1 false) [2 3])))))))
+
+(deftest refused-cell-is-reported-test
+  (testing "the FX set's"
+    (let [s (-> (crowd-rig) (with-vibe :vibe-1 {:fx [[2 3]]}) (tap :hit 1000))]
+      (is (= {:why :audience-fx :cell [2 3]} (rt s :problem)))
+      (is (some? (rt s :voices :hit)) "HIT played its cue all the same")))
+  (testing "the flash's: its cue plays, the pattern stays off, and no pad says it had nothing to play"
+    (let [s (-> (crowd-rig)
+                (with-vibe :vibe-1 {:flash {:cue [6 0] :fx [[0 3] [2 3]] :solo? true}})
+                (press :flash 1000))]
+      (is (some? (intent s [6 0])))
+      (is (fx-on? s [0 3]))
+      (is (not (fx-on? s [2 3])))
+      (is (= {:why :audience-fx :cell [2 3]} (rt s :problem)))))
+  (testing "a flash of the refused cell only: nothing to play, and why"
+    (let [s (-> (crowd-rig)
+                (with-vibe :vibe-1 {:flash {:cue nil :fx [[2 3]] :solo? true}})
+                (press :flash 1000))]
+      (is (not (fx-on? s [2 3])))
+      (is (= {:why :audience-fx :cell [2 3]} (rt s :problem))))))
+
+(deftest manual-toggle-is-not-blocked-test
+  (let [s (-> (crowd-rig) (with-vibe :vibe-1 {:fx [[2 3]]}) (tap :hit 1000))
+        on (:state (handlers/handle-event {:event/type :effects/toggle-cell :col 2 :row 3 :state s}))]
+    (is (fx-on? on [2 3]) "a click on the Effects grid is a decision: it isn't blocked")))

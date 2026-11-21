@@ -18,9 +18,11 @@
    :vibes], and returns them) and the lint. laser-show.vibes.engine plays
    them."
   (:require [clojure.string :as str]
+            [laser-show.animation.chains :as chains]
             [laser-show.routing.rig :as rig]
             [laser-show.routing.targets :as targets]
             [laser-show.routing.zone-maps :as zone-maps]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.domains :as domains]
             [laser-show.timeline.playback :as playback]
             [laser-show.vibes.reactions :as reactions]))
@@ -114,17 +116,79 @@
   [state [col] cue]
   (targets/cue-refs cue (get-in state [:grid :column-targets col]) (get-in state [:config :default-target])))
 
+(defn- cue-patterns
+  "The cue's zone patterns that are on (zones plan Z5)."
+  [cue]
+  (remove #(false? (:enabled? %)) (:zone-patterns cue)))
+
+(defn- pattern-reaches?
+  "Can a zone pattern (params) send pictures to the audience: does a ref of
+   its whole lane, over the rig as it is, pass audience-ref? (07 §8.8: a
+   pad can switch any pattern to a style that moves; :from is where a
+   picture comes from, so it doesn't count)."
+  [state groups params]
+  (boolean (some #(audience-ref? state groups %) (zone-patterns/reach state params))))
+
 (defn audience-cue?
   "Can cue, at cell, reach the audience: does a ref its content draws to
-   pass audience-ref? (groups: audience-groups)."
+   pass audience-ref? (groups: audience-groups), or can one of its zone
+   patterns send pictures there (zones plan Z5)?"
   [state cell cue groups]
-  (boolean (some #(audience-ref? state groups %) (cue-refs state cell cue))))
+  (boolean (or (some #(audience-ref? state groups %) (cue-refs state cell cue))
+               (some #(pattern-reaches? state groups (:params %)) (cue-patterns cue)))))
 
 (defn audience-cell?
   "Can the cue at cell reach the audience (audience-cue?)?"
   ([state cell] (audience-cell? state cell (audience-groups state)))
   ([state cell groups]
    (audience-cue? state cell (get-in state [:chains :cue-chains cell]) groups)))
+
+;; Effect cells that can reach the audience (zones plan Z5, 07 §8.8, V10 A)
+
+(defn- stage-effects
+  "The zone patterns and Map cycles that are on among a chain's items, in
+   order (chains/flatten-chain leaves out the ones that are off)."
+  [items]
+  (filterv #(contains? zone-patterns/zone-stage-ids (:effect-id %)) (chains/flatten-chain items)))
+
+(defn- cycle-audience
+  "[map ref] of the first of a Map cycle's maps (params) with a lane, or an
+   override, that is one of groups; nil for none."
+  [state groups params]
+  (some (fn [id]
+          (when-let [m (zone-maps/map-by-id state id)]
+            (when-let [ref (some #(when (contains? groups %) %) (concat (:lanes m) (vals (:overrides m))))]
+              [m ref])))
+        (:maps params)))
+
+(defn- stage-reaches?
+  "Can a zone-stage effect send pictures to the audience: a pattern's lane
+   (pattern-reaches?), a Map cycle's maps (one has an audience lane)?"
+  [state groups {:keys [effect-id params]}]
+  (case effect-id
+    :zone-pattern (pattern-reaches? state groups params)
+    :zone-map-cycle (some? (cycle-audience state groups params))
+    false))
+
+(defn audience-fx?
+  "Can the effects cell at cell send pictures to the audience: one of its
+   zone patterns that are on, or one of its Map cycles (stage-reaches?)?
+   groups: audience-groups. A point effect never does: where pictures go is
+   the cues' (and the zone stage's)."
+  [state cell groups]
+  (boolean (some #(stage-reaches? state groups %)
+                 (stage-effects (get-in state [:chains :effect-chains cell :items])))))
+
+(defn playable-fx
+  "Those of cells (in order, each once) vibe may switch on: none that can
+   send pictures to the audience (audience-fx?), unless the vibe has
+   :allow-audience? true (V10 A)."
+  [state vibe cells]
+  (let [groups (when-not (:allow-audience? vibe) (audience-groups state))]
+    (into []
+          (comp (distinct)
+                (remove #(and groups (audience-fx? state % groups))))
+          cells)))
 
 (defn unplayable
   "Why vibe mode never plays cue, at cell: :empty (no items), :timecode (it
@@ -424,6 +488,28 @@
               (rig/effective-order (get-in state [:rig :order]) projectors))
         (some #(when (some #{group} (rig/stored-refs %)) (:name %)) (crowd-virtual-projectors state)))))
 
+(defn- place-audience
+  "[ref place] for the first place of a pattern's lane (params) that sends
+   pictures to the audience: ref the audience group (a zone's, the lane a
+   map sends it to; Every laser's, the scanner's own group), place what to
+   take out of the lane (\"B\", \"Every laser\", a group's name); nil for
+   none."
+  [state groups params]
+  (let [inputs (rig/rig-inputs state)
+        lasers (filterv #(not (contains? (:excluded inputs) %)) (:order inputs))]
+    (some (fn [place]
+            (when-let [ref (cond
+                             (= :lane/lasers place) (some #(when (contains? groups %) %) (map rig/laser-ref lasers))
+                             (targets/zone-ref? place) (some #(let [lane (targets/zone-lane % place)]
+                                                                (when (contains? groups lane) lane))
+                                                             (zone-maps/all-maps state))
+                             (contains? groups place) place)]
+              [ref (cond
+                     (= :lane/lasers place) "Every laser"
+                     (targets/zone-ref? place) (targets/zone-letter place)
+                     :else (rig/ref-name state place))]))
+          (filter keyword? (:zones params)))))
+
 (defn- audience-text
   "Why vibe-name never plays the cue at cell: the audience group it reaches,
    named as the pickers name it (\"All\", \"Left\", a laser, a group), and the
@@ -436,10 +522,16 @@
         ref (if (some #{:crowd} hits)
               :crowd
               (first (sort-by (fn [r] [(boolean (targets/zone-ref? r)) (or (targets/zone-index r) 0) r]) hits)))
-        through (if (targets/zone-ref? ref)
+        through (cond
+                  ;; only through its zone pattern (zones plan Z5)
+                  (nil? ref)
+                  (let [[audience] (some #(place-audience state groups (:params %)) (cue-patterns cue))]
+                    (str "its zone pattern" (when audience (str " (" (rig/ref-name state audience) ")"))))
+                  (targets/zone-ref? ref)
                   (let [m (first (filter #(contains? groups (targets/zone-lane % ref)) (zone-maps/all-maps state)))]
                     (str "Zone " (targets/zone-letter ref) " (the " (:name m) " map sends it to "
                          (rig/ref-name state (targets/zone-lane m ref)) ")"))
+                  :else
                   (let [scanner (when-not (or (= :crowd ref) (rig/laser-of ref))
                                   (scanner-through state ref))]
                     (str (rig/ref-name state ref) (when scanner (str " (" scanner ")")))))]
@@ -455,6 +547,54 @@
       :timecode [{:level :error :text (str vibe-name ": " label (cell-name cell) " can't be played (follows timecode)")}]
       :crowd [{:level :warn :text (audience-text state vibe-name cell cue groups)}]
       nil)))
+
+(defn- fx-names
+  "What the lint's pattern rows read to name refs (routing.targets/names)."
+  [state]
+  (targets/names (rig/target-groups state) (get-in state [:zones :labels])))
+
+(defn- stage-rows
+  "Lint rows for a zone pattern or Map cycle (fx) in a vibe's effect cell
+   (zones plan Z5, 07 §8.8): it can send pictures to the crowd in a vibe
+   that doesn't allow it (groups; nil when the vibe does), then a pattern's
+   own warnings (zone-patterns/warnings), named by its cell."
+  [state vibe-name cell {:keys [effect-id params] :as fx} groups names]
+  (let [cycle? (= :zone-map-cycle effect-id)
+        subject (str vibe-name ": " (cell-name cell) (if cycle? " (Map cycle)" " (Zone pattern)"))
+        [ref what] (when (and groups (stage-reaches? state groups fx))
+                     (if cycle?
+                       (let [[m ref] (cycle-audience state groups params)] [ref (:name m)])
+                       (or (place-audience state groups params) [:crowd "the crowd's places"])))]
+    (concat
+     (when ref
+       [{:level :warn
+         :text (str subject " can send pictures to the crowd (" (rig/ref-name state ref)
+                    "), so this vibe never switches it on. Allow audience cells, or take " what
+                    " out of its " (if cycle? "maps" "zones"))}])
+     (when-not cycle?
+       (zone-patterns/warnings state params names subject)))))
+
+(defn- fx-problems
+  "Lint rows for the zone patterns and Map cycles of a vibe's effect cells
+   (its FX set and flash FX): each one's stage-rows, then two Map cycles or
+   more, of which the last in reading order picks the map."
+  [state vibe-name cells groups]
+  (let [cells (distinct cells)
+        stage (into [] (keep (fn [cell] (when-let [fxs (seq (stage-effects (get-in state [:chains :effect-chains cell :items])))]
+                                          [cell fxs])))
+                    cells)
+        names (when (seq stage) (fx-names state))
+        cycles (sort-by (fn [[col row]] [row col])
+                        (keep (fn [[cell fxs]] (when (some #(= :zone-map-cycle (:effect-id %)) fxs) cell)) stage))]
+    (concat
+     (for [[cell fxs] stage
+           fx fxs
+           row (stage-rows state vibe-name cell fx groups names)]
+       row)
+     (when (next cycles)
+       [{:level :warn
+         :text (str vibe-name ": " (if (= 2 (count cycles)) "two" (count cycles)) " Map cycles ("
+                    (str/join ", " (map cell-name cycles)) "): " (cell-name (last cycles)) " wins")}]))))
 
 (defn- moves-only
   "The info row for a role (role-name, \"HIT\") whose press plays no cue but
@@ -512,13 +652,15 @@
      (when (:bed vibe) (cells "BED " [(:bed vibe)]))
      (for [cell hit :when (some #{cell} accent)]
        {:level :warn :text (str vibe-name ": " (cell-name cell) " is in both HIT and ACCENT")})
+     (fx-problems state vibe-name (concat (:fx vibe) fx) groups)
      (unheard state vibe-name moves heard))))
 
 (defn lint
   "What to fix before the show, worst first: [{:level :error|:warn|:info
    :vibe (the vibe it is about, or nil) :text}]. state needs the vibes, the
    cue and effects grids, the projectors, the zone groups and the trigger
-   map."
+   map; and for zones and zone patterns, the zone maps, the map in use, the
+   zones' labels and the column and show defaults."
   [state]
   (let [{:keys [order library]} (get-in state [:config :vibes])
         groups (audience-groups state)

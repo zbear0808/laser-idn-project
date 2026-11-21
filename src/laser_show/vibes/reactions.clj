@@ -12,7 +12,8 @@
   (:require [clojure.string :as str]
             [laser-show.animation.modulator-registry :as reg]
             [laser-show.animation.modulators]
-            [laser-show.events.helpers :as h]))
+            [laser-show.events.helpers :as h]
+            [laser-show.routing.zone-patterns :as zone-patterns]))
 
 
 ;; The templates
@@ -122,7 +123,7 @@
     (map? x) (when (not= false (:enabled? x))
                (if (:effect-id x)
                  [x]
-                 (mapcat effects-in [(:items x) (:effects x) (:tracks x)])))
+                 (mapcat effects-in [(:items x) (:effects x) (:tracks x) (:zone-patterns x)])))
     (sequential? x) (mapcat effects-in x)
     :else nil))
 
@@ -140,16 +141,27 @@
       (when (and source (not= :own source))
         source))))
 
-(defn- effect-sources [{:keys [params keyframe-modulator]}]
+(defn- stage-sources
+  "What a zone pattern or a Map cycle steps on (zones plan Z5, 07 S-10): its
+   :step-on when it is a press's source, else (on the beat) its :restart-on
+   when it names one; a plain parameter, not a modulator."
+  [effect-id {:keys [step-on restart-on]}]
+  (when (contains? zone-patterns/zone-stage-ids effect-id)
+    (cond
+      (and (keyword? step-on) (not= :clock step-on)) [step-on]
+      (and (keyword? restart-on) (not= :own restart-on)) [restart-on])))
+
+(defn- effect-sources [{:keys [effect-id params keyframe-modulator]}]
   (let [{:keys [enabled? restart-on]} keyframe-modulator]
-    (cond-> (into #{} (keep modulator-source) (vals params))
+    (cond-> (into (set (stage-sources effect-id params)) (keep modulator-source) (vals params))
       (and enabled? restart-on (not= :own restart-on)) (conj restart-on))))
 
 (defn listens-to
   "The sources any enabled effect in chain follows: a :pulse type's :source,
-   a modulator's or a time-driven keyframe animation's :restart-on (#{} for
-   none). A chain is an effect cell, a cue chain, or anything holding
-   effects."
+   a modulator's or a time-driven keyframe animation's :restart-on, a zone
+   pattern's or Map cycle's Step on or Restart on (#{} for none). A chain
+   is an effect cell, a cue chain (its own zone patterns too), or anything
+   holding effects."
   [chain]
   (into #{} (mapcat effect-sources) (effects-in chain)))
 

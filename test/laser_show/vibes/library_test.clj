@@ -1,5 +1,6 @@
 (ns laser-show.vibes.library-test
   (:require [clojure.test :refer [deftest is testing]]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.domains :as domains]
             [laser-show.state.templates :as templates]
             [laser-show.vibes.engine :as engine]
@@ -203,6 +204,60 @@
     (is (some #(= {:level :warn :vibe :vibe-1 :text text} %) (library/lint s)))
     (is (not-any? #(= text (:text %)) (library/lint (assoc-in s [:config :vibes :library :vibe-1 :allow-audience?] true)))
         "unless the vibe allows the audience")))
+
+
+;; Zone patterns and the audience (zones plan Z5, 07 §8.8, V10 A)
+
+(defn- pattern-fx
+  "An effects cell, off, holding a zone pattern of style over zones, more
+   merged into its params."
+  [style zones & {:as more}]
+  {:active? false :items [(update (zone-patterns/preset-instance style :cell) :params merge {:zones zones} more)]})
+
+(defn- cycle-fx [maps]
+  {:active? false :items [(assoc-in (zone-patterns/cycle-instance) [:params :maps] maps)]})
+
+(deftest audience-fx-test
+  (let [s (sweep-rig)
+        fx? (fn [state cell] (library/audience-fx? (assoc-in state [:chains :effect-chains [2 1]] cell) [2 1]
+                                                   (library/audience-groups state)))]
+    (is (false? (fx? s (pattern-fx :chase [:lane/lasers]))) "Every laser; p5 is out of All, so out of E")
+    (is (true? (fx? (assoc-in s [:projectors :p5 :exclude-from-all?] false) (pattern-fx :chase [:lane/lasers])))
+        "p5 in All: in the lane")
+    (is (true? (fx? s (pattern-fx :alternate [:zone/a :zone/b]))) "Crowd sweep sends B to Crowd")
+    (is (true? (fx? s (pattern-fx :chase [:auto/left :crowd]))) "Crowd is listed")
+    (is (false? (fx? s (pattern-fx :alternate [:zone/a :zone/c] :from :crowd)))
+        ":from doesn't count, and no map sends A or C there")
+    (is (true? (fx? s (cycle-fx [:map/left-right :map/custom-1]))) "a Map cycle with Crowd sweep in it")
+    (is (false? (fx? s (cycle-fx [:map/left-right :map/odd-even]))) "neither map has an audience lane")
+    (is (false? (fx? s (assoc-in (pattern-fx :chase [:auto/left :crowd]) [:items 0 :enabled?] false)))
+        "a disabled pattern moves nothing")
+    (is (false? (fx? s {:active? true :items [{:effect-id :scale :params {}}]})) "a point effect")
+    (is (false? (library/audience-fx? s [7 2] (library/audience-groups s))) "no cell")
+    (testing "a vibe never switches one on unless it allows the audience"
+      (let [state (-> s
+                      (assoc-in [:chains :effect-chains [2 1]] (pattern-fx :chase [:auto/left :crowd]))
+                      (assoc-in [:chains :effect-chains [1 1]] {:active? false :items [{:effect-id :scale :params {}}]}))
+            vibe (library/vibe state :vibe-1)]
+        (is (= [[1 1]] (library/playable-fx state vibe [[1 1] [2 1] [1 1]])) "in order, each once")
+        (is (= [[1 1] [2 1]] (library/playable-fx state (assoc vibe :allow-audience? true) [[1 1] [2 1]])))))))
+
+(deftest cue-pattern-reach-is-audience-test
+  (let [s (sweep-rig)
+        cue (fn [zones] {:items [{:type :preset :preset-id :circle :target :zone/a}]
+                         :zone-patterns [(assoc-in (zone-patterns/preset-instance :alternate :cue) [:params :zones] zones)]})
+        cell? #(library/audience-cell? % [0 1])]
+    (is (false? (cell? (on s :zone/a))) "A alone reaches no crowd")
+    (is (true? (cell? (assoc-in s [:chains :cue-chains [0 1]] (cue [:zone/a :zone/b]))))
+        "its pattern moves A's picture to B, which Crowd sweep sends to Crowd")
+    (is (false? (cell? (assoc-in s [:chains :cue-chains [0 1]] (cue [:zone/a :zone/c])))))
+    (is (false? (cell? (assoc-in s [:chains :cue-chains [0 1]] (assoc-in (cue [:zone/a :zone/b]) [:zone-patterns 0 :enabled?] false))))
+        "a disabled pattern moves nothing")
+    (testing "a vibe leaves the cue out of its pool unless it allows the audience"
+      (let [state (assoc-in s [:chains :cue-chains [0 1]] (cue [:zone/a :zone/b]))
+            vibe (library/vibe state :vibe-1)]
+        (is (= [] (library/playable-cells state vibe [[0 1]])))
+        (is (= [[0 1]] (library/playable-cells state (assoc vibe :allow-audience? true) [[0 1]])))))))
 
 
 ;; Editing the vibes (Phase 3)
@@ -482,3 +537,76 @@
       (let [s (react (starter) :vibe-1 :scatter :punch-size)]
         (is (= [] (warns s)))
         (is (has-row? s :info "0 of 5 controls learned"))))))
+
+
+;; Lint of zone patterns and Map cycles (zones plan Z5, 07 §8.8)
+
+(defn- four-lasers
+  "The starter show with p1-p4 in All, nothing scanning the crowd, its five
+   controls learned."
+  []
+  (learned-all (reduce (fn [s [id n]] (with-projector s id {:host (str "10.0.0." n) :zone-groups []}))
+                       (starter)
+                       [[:p1 1] [:p2 2] [:p3 3] [:p4 4]])))
+
+(defn- with-fx
+  "state with value at cell, in vibe-1's FX set (or, flash?, its flash FX)."
+  [state cell value & {:keys [flash?]}]
+  (-> state
+      (assoc-in [:chains :effect-chains cell] value)
+      (update-in [:config :vibes :library :vibe-1]
+                 #(if flash? (assoc-in % [:flash :fx] [cell]) (update % :fx (fnil conj []) cell)))))
+
+(deftest lint-zone-pattern-rows-test
+  (let [crowd (learned-all (sweep-rig))
+        s0 (four-lasers)
+        rows #(set (rows-about % :vibe-1))]
+    (testing "warn: an audience-capable pattern, in a vibe that doesn't allow the audience"
+      (let [text "Shapes: B3 (Zone pattern) can send pictures to the crowd (Crowd Scanning), so this vibe never switches it on. Allow audience cells, or take Crowd Scanning out of its zones"
+            s (with-fx crowd [2 1] (pattern-fx :chase [:auto/left :crowd]))]
+        (is (contains? (rows s) [:warn text]))
+        (is (not (contains? (rows (assoc-in s [:config :vibes :library :vibe-1 :allow-audience?] true)) [:warn text]))
+            "unless it allows the audience")
+        (is (contains? (rows (with-fx crowd [2 1] (pattern-fx :chase [:auto/left :crowd]) :flash? true)) [:warn text])
+            "in its flash FX too"))
+      (is (contains? (rows (with-fx crowd [2 1] (pattern-fx :alternate [:zone/a :zone/b])))
+                     [:warn "Shapes: B3 (Zone pattern) can send pictures to the crowd (Crowd Scanning), so this vibe never switches it on. Allow audience cells, or take B out of its zones"])
+          "a zone a map sends there: the zone")
+      (is (contains? (rows (with-fx crowd [2 1] (cycle-fx [:map/left-right :map/custom-1])))
+                     [:warn "Shapes: B3 (Map cycle) can send pictures to the crowd (Crowd Scanning), so this vibe never switches it on. Allow audience cells, or take Crowd sweep out of its maps"])
+          "a Map cycle: the map"))
+    (testing "error: two zones needed, and fewer known"
+      (is (contains? (rows (with-fx s0 [2 1] (pattern-fx :alternate [:zone/a])))
+                     [:error "Shapes: B3 (Zone pattern) needs two zones (it has one: A)"])))
+    (testing "warn: a group that's gone"
+      (is (contains? (rows (with-fx s0 [2 1] (pattern-fx :chase [:zone/a :zone/b :front])))
+                     [:warn "Shapes: B3 (Zone pattern) lists Front, which no longer exists"])))
+    (testing "warn: a place no laser is in"
+      (is (contains? (rows (with-fx (assoc-in s0 [:zone-groups :graphics] {:name "Graphics"}) [2 1] (pattern-fx :chase [:zone/a :graphics])))
+                     [:warn "Shapes: B3 (Zone pattern): Graphics has no laser, so the picture vanishes on that step"])))
+    (testing "info: under Unison a lane of zones doesn't move"
+      (is (contains? (rows (with-fx (assoc-in s0 [:zone-map :active] :map/unison) [2 1] (pattern-fx :alternate [:zone/a :zone/b])))
+                     [:info "Shapes: B3 (Zone pattern) doesn't move under Unison"])))
+    (testing "warn: two Map cycles in one vibe; the last in reading order wins"
+      (is (contains? (rows (-> s0
+                               (with-fx [0 2] (cycle-fx [:map/left-right :map/odd-even]))
+                               (with-fx [2 1] (cycle-fx [:map/odd-even :map/unison]))))
+                     [:warn "Shapes: two Map cycles (B3, C1): C1 wins"])))
+    (testing "info: it steps on the Zone step key, which has no key"
+      (let [s (with-fx s0 [2 1] (pattern-fx :alternate [:zone/a :zone/b] :step-on :zone-step))
+            text [:info "Shapes: B3 (Zone pattern) steps on the Zone step key, which has no key yet"]]
+        (is (contains? (rows s) text))
+        (is (not (contains? (rows (assoc-in s [:config :input :trigger-map {:source :midi :channel 0 :note 50}] {:type :zone-step})) text)))))
+    (testing "nothing to say of a good one"
+      (is (= #{} (rows (with-fx s0 [2 1] (pattern-fx :alternate [:zone/a :zone/b]))))))))
+
+(deftest lint-counts-a-pattern-on-hit-test
+  (let [run {:name "Shapes · Run" :active? false
+             :items [(update (zone-patterns/preset-instance :alternate :cell) :params assoc :step-on :hit)]}
+        s (-> (four-lasers)
+              (with-fx [2 1] run)
+              (assoc-in [:config :vibes :library :vibe-1 :hit :cells] []))]
+    (is (= [[:info "Shapes: HIT moves effects only (Run)"]] (rows-about s :vibe-1))
+        "a pattern that steps on HIT is one of HIT's tap reactions: not \"HIT does nothing\"")
+    (is (= [[:warn "Shapes · Run listens to HIT, which has no key yet"]]
+           (filterv #(= :warn (first %)) (rows-about (unbind s :hit) :vibe-1))))))

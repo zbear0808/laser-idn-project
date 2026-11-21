@@ -12,6 +12,7 @@
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.state.templates :as templates]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.vibes.reactions :as reactions]))
 
 (defn- starter []
@@ -219,6 +220,51 @@
       (is (= #{:accent} (reactions/listens-to {:items [{:type :group :enabled? true
                                                         :items [{:effect-id :scale :params {:x-scale (env :accent)}}]}]}))
           "through a group"))))
+
+;; Zone patterns that step on a press (zones plan Z5, 07 §4.7, S-10)
+
+(defn- pattern-cell
+  "An effects cell, off, holding a Chase across every laser with params."
+  [cell-name & {:as params}]
+  {:name cell-name :active? false
+   :items [(update (zone-patterns/preset-instance :chase :cell) :params merge params)]})
+
+(deftest pattern-on-hit-is-a-hit-reaction-test
+  (let [s (-> (starter)
+              (assoc-in [:chains :effect-chains [2 1]] (pattern-cell "Shapes · Run" :step-on :hit))
+              (update-in [:config :vibes :library :vibe-1] merge {:fx [[2 1]]}))]
+    (is (= #{:hit} (reactions/listens-to (get-in s [:chains :effect-chains [2 1]]))) "its Step on, a plain parameter")
+    (is (= [{:grid :effects :cell [2 1] :name "Run"}] (:hit (reactions/reactions s :vibe-1)))
+        "one of HIT's tap reactions: the pad names it")
+    (testing "a Map cycle's Step on"
+      (is (= #{:accent} (reactions/listens-to {:items [(assoc-in (zone-patterns/cycle-instance) [:params :step-on] :accent)]}))))
+    (testing "a cue's own pattern: the cue listens"
+      (is (= #{:flash} (reactions/listens-to {:items [{:type :preset :preset-id :circle}]
+                                               :zone-patterns [(assoc-in (zone-patterns/preset-instance :alternate :cue)
+                                                                         [:params :step-on] :flash)]}))))
+    (testing "a disabled pattern listens to nothing"
+      (is (= #{} (reactions/listens-to (assoc-in (pattern-cell "Run" :step-on :hit) [:items 0 :enabled?] false)))))))
+
+(deftest pattern-restart-on-is-heard-test
+  (is (= #{:flash} (reactions/listens-to (pattern-cell "Run" :step-on :clock :restart-on :flash)))
+      "Restart on, while it steps on the beat")
+  (is (= #{:hit} (reactions/listens-to (pattern-cell "Run" :step-on :hit :restart-on :flash)))
+      "one that steps on a press never restarts: its Restart on isn't heard")
+  (is (= #{:accent :flash} (reactions/listens-to (pattern-cell "Run" :restart-on :flash :rate {:type :envelope :source :accent :min 1.0 :max 2.0})))
+      "and a pulse modulator on its Rate, as any effect's"))
+
+(deftest clock-pattern-listens-to-nothing-test
+  (is (= #{} (reactions/listens-to (pattern-cell "Run"))) "the beat, from its own clock")
+  (is (= #{} (reactions/listens-to {:items [(zone-patterns/cycle-instance)]})) "a Map cycle, a bar each"))
+
+(deftest zone-step-is-no-roles-test
+  (let [s (-> (starter)
+              (assoc-in [:chains :effect-chains [2 1]] (pattern-cell "Run" :step-on :zone-step))
+              (update-in [:config :vibes :library :vibe-1] merge {:fx [[2 1]]}))]
+    (is (= #{:zone-step} (reactions/listens-to (get-in s [:chains :effect-chains [2 1]]))))
+    (is (nil? (reactions/roles-of :zone-step)) "like a cue start, no role's")
+    (is (= {} (reactions/reactions s :vibe-1)) "so no role's tap reaction")))
+
 
 (deftest own-reactions-leave-the-grid-out-test
   (let [s (-> (starter)

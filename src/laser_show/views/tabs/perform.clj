@@ -159,10 +159,13 @@
               :style-class "vibe-header-flash"}}]}))
 
 (defn- status-line
-  "Whether the output streams and which MIDI controllers are connected."
+  "Whether the output streams and which MIDI controllers are connected; and
+   an effect cell the vibe left off because it can reach the crowd (zones
+   plan Z5)."
   [{:keys [fx/context]}]
   (let [{:keys [status-text]} (fx/sub-ctx context subs/connection-status)
-        devices (fx/sub-ctx context subs/midi-connected-devices)]
+        devices (fx/sub-ctx context subs/midi-connected-devices)
+        refused (fx/sub-ctx context subs/vibe-refused-text)]
     {:fx/type :h-box
      :id "vibe-status"
      :spacing 24
@@ -176,7 +179,13 @@
                  :style-class (cond-> ["vibe-status"] (empty? devices) (conj "vibe-status-none"))
                  :text (if (seq devices)
                          (str "MIDI: " (str/join ", " (sort devices)) " ✓")
-                         "MIDI: none connected")}]}))
+                         "MIDI: none connected")}
+                {:fx/type :label
+                 :id "vibe-refused"
+                 :style-class ["vibe-status" "zone-pattern-warning" "zone-pattern-warning-warn"]
+                 :text (or refused "")
+                 :visible (some? refused)
+                 :managed (some? refused)}]}))
 
 (defn perform-tab
   "The Perform tab: the BLACKOUT and NO OUTPUT banners, header, vibe strip,

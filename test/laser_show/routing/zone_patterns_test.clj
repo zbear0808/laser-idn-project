@@ -176,6 +176,8 @@
     (is (= [[:warn "This pattern: Graphics has no laser, so the picture vanishes on that step"]]
            (texts state {:style :chase :zones [:zone/a :graphics]}))
         "a group no laser is in")
+    (is (= [] (texts (assoc state :projectors {}) {:style :alternate :zones [:zone/a :zone/b]}))
+        "no laser on (a show being made, the lint): no row for each place, the rig says it")
     (is (= [[:info "This pattern doesn't move under Unison"]]
            (texts (assoc-in state [:zone-map :active] :map/unison) {:style :alternate :zones [:zone/a :zone/b]})))
     (is (= [] (texts (assoc-in state [:zone-map :active] :map/unison) {:style :chase :zones [:lane/lasers]}))

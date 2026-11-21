@@ -373,8 +373,8 @@
         (is (= {:in? true :pos 1 :roles [] :others ["#4A90D9"] :blocked nil} (pick lines 5 0)))
         (is (= {:vibe :vibe-2 :slot :hit} (fx/sub-ctx lines subs/vibe-edit-target)))))
     (testing "the effects grid"
-      (is (= {:in? false :pos nil :roles [] :others ["#9B59B6"]} (fx/sub-ctx ctx subs/vibe-pick-fx 0 3)))
-      (is (= {:in? true :pos nil :roles [] :others []}
+      (is (= {:in? false :pos nil :roles [] :others ["#9B59B6"] :blocked nil} (fx/sub-ctx ctx subs/vibe-pick-fx 0 3)))
+      (is (= {:in? true :pos nil :roles [] :others [] :blocked nil}
              (fx/sub-ctx (-> ctx
                              (handle {:event/type :vibe/select-for-edit :vibe :vibe-2})
                              (handle {:event/type :vibe/set-slot :slot :fx}))
@@ -1147,6 +1147,30 @@
       (is (:active? (fx/sub-ctx (context s) subs/map-pad :map/left-right)))
       (is (not (:active? (fx/sub-ctx (context on) subs/map-pad :map/left-right))))
       (is (:active? (fx/sub-ctx (context (assoc-in on [:zone-map :cycle-paused?] true)) subs/map-pad :map/left-right))))))
+
+
+(deftest vibe-pick-fx-blocks-audience-cells-test
+  (let [s (-> (domains/build-initial-state)
+              (templates/apply-starter-cue-chains)
+              (templates/apply-starter-vibes)
+              (assoc :projectors {:p1 {:name "P1" :host "10.0.0.1" :zone-groups [] :enabled? true}
+                                  :p5 {:name "P5" :host "10.0.0.5" :zone-groups [] :tags #{:crowd-scanning} :enabled? true}})
+              (assoc-in [:chains :effect-chains [2 1]] {:active? false :items [(zone-patterns/preset-instance :chase :cell)]})
+              (assoc-in [:chains :effect-chains [3 1]] {:active? false :items [(assoc-in (zone-patterns/preset-instance :chase :cell)
+                                                                                         [:params :zones] [:auto.laser/p1 :auto/left])]})
+              (assoc-in [:chains :effect-chains [4 1]] {:active? false :items [{:effect-id :scale :params {}}]}))
+        ctx (context s)
+        blocked (fn [ctx col] (:blocked (fx/sub-ctx ctx subs/vibe-pick-fx col 1)))]
+    (is (= :crowd (blocked ctx 2)) "Every laser reaches the scanner")
+    (is (nil? (blocked ctx 3)) "P1, and Left: not the scanner, which is on the right")
+    (is (nil? (blocked ctx 4)) "a point effect")
+    (is (nil? (blocked (handle ctx {:event/type :vibe/set-option :vibe :vibe-1 :key :allow-audience? :value true}) 2))
+        "unless the vibe edited allows the audience")
+    (testing "Perform says why a vibe left one off"
+      (is (nil? (fx/sub-ctx ctx subs/vibe-refused-text)))
+      (is (= "B3 (Zone pattern) can reach the crowd: tick Allow audience cells in this vibe"
+             (fx/sub-ctx (fx/swap-context ctx assoc-in [:vibe-runtime :problem] {:why :audience-fx :cell [2 1]})
+                         subs/vibe-refused-text))))))
 
 
 ;; Who uses a group (zones plan Z4, 06 §8.7)

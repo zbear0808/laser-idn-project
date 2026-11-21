@@ -288,16 +288,18 @@
    the text about subject (\"This pattern\"; the lint names the cell): it
    needs two places and has fewer (error); its lane names a group or laser
    that's gone; a place reaches no laser under the map in use (the picture
-   vanishes on that step); under Unison a lane of zones doesn't move; it
+   vanishes on that step; not while no laser is on at all, which the rig
+   says); under Unison a lane of zones doesn't move; it
    steps on the Zone step key and no key is learned for it. names:
    routing.targets/names."
   ([state params names] (warnings state params names "This pattern"))
   ([state params names subject]
    (let [zones (filter keyword? (:zones params))
-         l (zone-remap/lane zones #(known-ref? state %) (e-lasers state))
+         e (e-lasers state)
+         l (zone-remap/lane zones #(known-ref? state %) e)
          missing (remove #(or (= :lane/lasers %) (known-ref? state %)) (distinct zones))
          routing (routing-now state)
-         dark (filter #(empty? (rig/resolve-ref routing %)) l)
+         dark (when (seq e) (filter #(empty? (rig/resolve-ref routing %)) l))
          say (fn [ref] (targets/ref-name names ref))]
      (vec (concat
            (when (< (count l) 2)

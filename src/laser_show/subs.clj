@@ -1831,12 +1831,15 @@
 (defn vibe-audience-routing
   "What the audience rule reads besides a cue and the audience groups
    (vibes.library/audience-cue?, zones plan Z4): the zone maps, the column
-   defaults and the show's; so the picker re-runs when one changes, and
-   only then."
+   defaults and the show's, and for a zone pattern's lane the rig (zones
+   plan Z5); so the picker re-runs when one changes, and only then."
   [context]
   {:zone-maps (fx/sub-val context :zone-maps)
    :grid {:column-targets (fx/sub-val context get-in [:grid :column-targets])}
-   :config {:default-target (fx/sub-val context get-in [:config :default-target])}})
+   :config {:default-target (fx/sub-val context get-in [:config :default-target])}
+   :projectors (fx/sub-val context :projectors)
+   :rig (fx/sub-val context :rig)
+   :zone-groups (fx/sub-val context :zone-groups)})
 
 (defn- edited-allows-audience? [state]
   (boolean (:allow-audience? (library/vibe state (library/edited-id state)))))
@@ -1875,11 +1878,37 @@
   (assoc (pick-state (fx/sub-ctx context vibe-edit-target) (fx/sub-ctx context cell-vibes :cue col row))
          :blocked (fx/sub-ctx context vibe-cell-blocked col row)))
 
-(defn vibe-pick-fx
-  "An effect cell of the Vibes tab's picker: {:in? :pos :roles :others}, as
-   vibe-pick-cell's."
+(defn- fx-blocked
+  "Why the vibe edited never switches on the effect cell at [col row]: :crowd
+   (it holds a zone pattern or Map cycle that can send pictures to the
+   audience, which the vibe doesn't allow, zones plan Z5); nil otherwise."
   [context col row]
-  (pick-state (fx/sub-ctx context vibe-edit-target) (fx/sub-ctx context cell-vibes :fx col row)))
+  (when-not (fx/sub-val context edited-allows-audience?)
+    (when (library/audience-fx? (assoc (fx/sub-ctx context vibe-audience-routing)
+                                       :chains {:effect-chains {[col row] (fx/sub-ctx context effect-cell-chain col row)}})
+                                [col row]
+                                (fx/sub-ctx context vibe-audience-groups))
+      :crowd)))
+
+(defn vibe-pick-fx
+  "An effect cell of the Vibes tab's picker: {:in? :pos :roles :others
+   :blocked}, as vibe-pick-cell's (:blocked :crowd, fx-blocked)."
+  [context col row]
+  (assoc (pick-state (fx/sub-ctx context vibe-edit-target) (fx/sub-ctx context cell-vibes :fx col row))
+         :blocked (fx/sub-ctx context fx-blocked col row)))
+
+(defn vibe-refused-text
+  "What Perform says of an effect cell the vibe left off, because it can
+   send pictures to the crowd (zones plan Z5, vibes.engine's :audience-fx
+   problem): \"B3 (Zone pattern) can reach the crowd: tick Allow audience
+   cells in this vibe\"; nil otherwise."
+  [context]
+  (let [{:keys [why cell]} (fx/sub-val context get-in [:vibe-runtime :problem])]
+    (when (and (= :audience-fx why) cell)
+      (let [[col row] cell
+            kinds (set (map :effect-id (chains/flatten-chain (:items (fx/sub-ctx context effect-cell-chain col row)))))]
+        (str (char (+ 65 row)) (inc col) (if (contains? kinds :zone-pattern) " (Zone pattern)" " (Map cycle)")
+             " can reach the crowd: tick Allow audience cells in this vibe")))))
 
 (defn- pick-label [context col row]
   (select-keys (fx/sub-ctx context cell-display-data col row)
@@ -1905,15 +1934,22 @@
 
 (defn- lint-world
   "What the lint, the checklist and the Vibes tab's tap reactions read
-   (vibes.library/lint)."
+   (vibes.library/lint): with the zone maps, the map in use, the zones'
+   labels and the column and show defaults, which say where a zone or a
+   zone pattern goes (zones plans Z4, Z5)."
   [state]
   {:config {:vibes (get-in state [:config :vibes])
-            :input {:trigger-map (get-in state [:config :input :trigger-map])}}
+            :input {:trigger-map (get-in state [:config :input :trigger-map])}
+            :default-target (get-in state [:config :default-target])}
    :chains (select-keys (:chains state) [:cue-chains :effect-chains])
    :projectors (:projectors state)
    :virtual-projectors (:virtual-projectors state)
    :zone-groups (:zone-groups state)
-   :rig (:rig state)})
+   :rig (:rig state)
+   :zone-maps (:zone-maps state)
+   :zone-map {:active (get-in state [:zone-map :active])}
+   :zones {:labels (get-in state [:zones :labels])}
+   :grid {:column-targets (get-in state [:grid :column-targets])}})
 
 (defn vibe-lint
   "What to fix before the show, worst first (vibes.library/lint)."
