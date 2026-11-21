@@ -2,7 +2,9 @@
 ;; Not part of the test suite and not on any classpath.
 ;;
 ;; Each deftest prints PROBE lines describing what the engines do TODAY
-;; (written at master 3229c95, re-run at cc9e000 after Decimate landed): a
+;; (written at master 3229c95, re-run at cc9e000 after Decimate landed and
+;; at fe7d554 after the output drivers, zones Z4-Z6 and Decimate's
+;; follow-ups; e1i added there, the citations below updated): a
 ;; projector's frame takes the tick's cues and routing from the show clock's
 ;; snapshot, and its calibration, safety zone, test pattern and BLACKOUT from
 ;; app state as it is when the engine gets to them (backend/multi_engine.clj
@@ -14,9 +16,11 @@
 ;;   being made, and an edit landing between two lasers' frames of one tick.
 ;;   e1g does it once through show-clock/tick! itself. e1h adds Decimate to a
 ;;   laser's calibration after the tick: since d6fbb15 the frame's :fit
-;;   record (the card, LOW FPS) counts what the calibration left.
+;;   record (the card, LOW FPS) counts what the calibration left. e1i removes
+;;   it after the tick: the tick's routing still carries its budget
+;;   (Q-D-3 B), which decides how the record is metered.
 ;; - e2: latency. (a) d, how long before the tick is published the clock read
-;;   app state (show-clock/tick! :235 to the snapshot's :at-ns, :250), for an
+;;   app state (show-clock/tick! :263 to the snapshot's :at-ns, :287), for an
 ;;   idle tick, one cue, and four cues with a global effect on three lasers;
 ;;   (b) with the clock thread and three engines on the fake DAC, how long
 ;;   after the publish the engines read app state, and how long after it
@@ -29,10 +33,11 @@
 ;;   per change (it already normalizes every laser's zone).
 ;; - e4: how many times one frame reads app state, per kind of frame.
 ;;
-;; The same file measures before the plan (cc9e000) and after it: once
+;; The same file measures before the plan (cc9e000, fe7d554) and after it: once
 ;; multi-engine/engine-inputs exists, snapshot adds :engine-inputs as the
 ;; clock will, e1 should print "follows the tick" for every case, e1e reach
-;; 0.80, e1h keep the guard's 1,800 points and record, e2b no reads on the
+;; 0.80, e1h keep the guard's 1,800 points and record, e1i keep Decimate's
+;; [833 833 833] for the tick, e2b no reads on the
 ;; engine threads, e4 0 reads per frame.
 ;;
 ;; Timings are medians (p95) of 5,000 calls after 3,000 warm-up calls, on
@@ -144,7 +149,7 @@
   (try (requiring-resolve sym) (catch Exception _ nil)))
 
 (defn- snapshot
-  "A snapshot as the show clock publishes it (show-clock/tick! :249-256),
+  "A snapshot as the show clock publishes it (show-clock/tick! :286-294),
    its routing from app state as it is now, and after the plan its NEW
    :engine-inputs too (multi-engine/engine-inputs), so the same probe runs
    before and after. :at-ns a minute ahead, so no frame here is ever stale."
@@ -271,8 +276,29 @@
            (pr-str (points-and-record after)) "after: it follows" (follows before after)
            "| the next tick:" (pr-str (points-and-record next-tick))))))
 
+(defn- e1i
+  "Added at fe7d554: since Q-D-3 B (bfcaeab) the tick's routing carries the
+   Decimate budget of each laser's chain (rig/routing :decimate-budget, from
+   the tick's [:chains :projector-effects]), and show-frame meters what the
+   laser draws (fit-guard/drawn) when the routing has one, while the chain it
+   runs is read #2's."
+  []
+  (init! {:p (assoc (laser 5) :scan-rate 25000)})
+  (state/assoc-in-state! [:chains :projector-effects :p :items] [decimate])
+  (let [cues [{:cell [0 0] :zone-frames {:all (circle 3000 0.0 0.5)}}]
+        counts (fn [frame] (let [fit (:fit (meta frame))] [(count frame) (:points fit) (:effect-points fit)]))
+        snap (snapshot cues)
+        before (#'me/projector-frame :p snap)]
+    (state/assoc-in-state! [:chains :projector-effects :p :items] [])
+    (let [after (#'me/projector-frame :p snap)
+          next-tick (#'me/projector-frame :p (snapshot cues))]
+      (say "e1i Decimate (25 kpps, 30 fps) removed from the calibration after the tick, a 3,000-point cue: the tick's routing has"
+           ":decimate-budget" (get-in snap [:routing :outputs :p :decimate-budget])
+           "| the tick's [points sent, record's :points, :effect-points] are" (pr-str (counts before)) "before the edit and"
+           (pr-str (counts after)) "after (the edit's chain, the tick's meter rule) | the next tick:" (pr-str (counts next-tick))))))
+
 (deftest e1-a-frame-mixes-states
-  (e1a) (e1b) (e1c) (e1d) (e1e) (e1f) (e1g) (e1h))
+  (e1a) (e1b) (e1c) (e1d) (e1e) (e1f) (e1g) (e1h) (e1i))
 
 
 ;; e2: latency
@@ -407,7 +433,7 @@
             st (assoc s :projectors ps)
             inputs (rig/routing-inputs st nil)]
         (say "e3 per change: rig/routing with" n (if (= 1 n) "laser" "lasers")
-             "(it already normalizes each zone, in halves, rig.clj:379-386):" (us (timed #(rig/routing inputs))))))
+             "(it already normalizes each zone, in halves, rig.clj:395-402):" (us (timed #(rig/routing inputs))))))
     (say "e3 per tick while nothing changed: rig/cached-routing's identity check:"
          (let [inputs (rig/routing-inputs s nil)
                [cache] (rig/cached-routing nil inputs)]
