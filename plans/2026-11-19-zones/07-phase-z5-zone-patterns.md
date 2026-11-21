@@ -1,7 +1,7 @@
 # Phase Z5: zone patterns on cues and effect cells, the Map cycle, pattern pads
 
 **Written:** 2026-11-19   **Written for commit:** `f178f56` (`master`; first written at `739bd74`, then re-verified here: `src/` is as vibe Phase 5 left it in `9f5d78a`, after vibe Phase 4b (`f5a4f84`), 4a (`6715fb4`) and UX Phase 3 (`b9b9d55`), and `test/` as `43fa00d` left it; every line below is at that source). Z2–Z4 edit several of these files first, so **re-check every path and line at HEAD before starting.**
-**Status:** Proposed. Not to be built yet (D-8).   **Needs:** Z4 (`06`), and through it Z3's routing and "each picture once" (`05`) and Z2's rig (`04`). Vibe Phase 8a has **not** landed (`routing/` holds only `zone_effects.clj` at `f178f56`), so Z5 builds the stage Phase 8 designed, over refs. If 8a lands first, Z5 extends it instead (§3). Vibe **Phase 4 has landed** (4a `6715fb4`, 4b `f5a4f84`): pulses, Restart on, the Envelope, Step and Energy modulators, and tap reactions with `listens-to`. So patterns step on its pulses from the start (§4.2), and the names below are as built (`plans/2026-11-18-vibe-mode/04-phase4-tap-reactions.md` (in git history at `8b4b7d7`) §10–11). Vibe **Phase 5 has landed** too (`9f5d78a`): its Fader modulator can drive a pattern's rate, offset or style (§8.3), and a new project's Master cell is a point effect, outside the zone stage (§7.2). V10 is answered A (2026-11-20; `11-vibe-phase8-zone-effects.md` §11), as this doc plans.
+**Status:** Built on branch `zones-z5`, not merged (`d4ad710`..`428a21f`, 2026-11-20; as built in §13).   **Needs:** Z4 (`06`), and through it Z3's routing and "each picture once" (`05`) and Z2's rig (`04`). Vibe Phase 8a has **not** landed (`routing/` holds only `zone_effects.clj` at `f178f56`), so Z5 builds the stage Phase 8 designed, over refs. If 8a lands first, Z5 extends it instead (§3). Vibe **Phase 4 has landed** (4a `6715fb4`, 4b `f5a4f84`): pulses, Restart on, the Envelope, Step and Energy modulators, and tap reactions with `listens-to`. So patterns step on its pulses from the start (§4.2), and the names below are as built (`plans/2026-11-18-vibe-mode/04-phase4-tap-reactions.md` (in git history at `8b4b7d7`) §10–11). Vibe **Phase 5 has landed** too (`9f5d78a`): its Fader modulator can drive a pattern's rate, offset or style (§8.3), and a new project's Master cell is a point effect, outside the zone stage (§7.2). V10 is answered A (2026-11-20; `11-vibe-phase8-zone-effects.md` §11), as this doc plans.
 **Implements spec** (`01-model-and-routing-spec.md`): §4 (the Map cycle in the effective map, and its pause: S-2), §5 (the order within a tick: S-3), §6.1 (pattern copies: S-1), §6.2 a, §9 (pattern-pad switches), invariants 1, 3, 4, 8 and 10. S-1 to S-3 started in this doc and are now in the spec. Overview §6 (vibe Phase 8), and D-4, D-5, D-11, D-16, D-19, D-25, D-26.   **Size:** ~4.5 d
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks what doesn't exist yet. Z2–Z4 names are the ones their docs propose; `rig/resolve-ref` is Z3's name for the one ref reader, and Z4 uses the same name (re-checked 2026-11-19).
@@ -581,3 +581,160 @@ About 4.5 days. If it runs long, `:width`, `:seed` and the choice modulator can 
 > **Z5-Q6 · Where a cue's pattern counts from by default.**
 > - **A ★** The cue's start, so A always comes first.
 > - **B** The show's beats, so every cue alternates in step with the others.
+
+**Questions the build raised** (2026-11-20; each is built as its ★, and listed in §13)
+
+> **Z5-Q7 · The show lock and a pattern's parameters.**
+> - **A ★ (built)** Locked, a zone pattern's or a Map cycle's parameter, modulator or keyframe edit is refused ("Zone pattern edit refused"), as its structure is: a pattern moves pictures between zones, which the lock exists to keep still. A point effect's edit still goes through, as before.
+> - **B** Let them through, as every other parameter edit is: only the chip, New zone pattern ▸ and the pads' settings are refused.
+
+> **Z5-Q8 · The map pad that is in use, while a Map cycle runs.**
+> - **A ★ (built)** Pressing it switches to that map, at the beat, and pauses the cycle there, as any map pad's press does. CYCLE carries on.
+> - **B** It does nothing while the cycle runs: only another map's pad pauses it.
+
+> **Z5-Q9 · Alternate over one place.**
+> - **A ★ (built)** The place is lit on even steps and dark on odd ones: one laser blinks its picture on the beat.
+> - **B** Lit on every step, as Chase, Ping-pong and Random over one place are: nothing moves.
+
+> **Z5-Q10 · When the zone map pads show.**
+> - **A ★ (built)** While a cue draws into a zone (Z4-Q1 A), and also while the show has a zone pattern or a Map cycle anywhere: a pattern sends pictures to zones that the map in use resolves.
+> - **B** Only Z4's rule: a show that draws to All and alternates A ⇄ B with a pattern gets no map pads on the Grid tab or Perform.
+
+## 13. As built (2026-11-20, `d4ad710`..`428a21f`, on branch `zones-z5`, not merged)
+
+Built in worktree `zones-z5` off `4c5fcc8` (Z4 on `master`), while Decimate's two follow-ups and the Projectors tab's layout pass landed on `master` (now `2049034`). The ★ answers are built: Z5-Q1 A (a pad switches the style of every pattern that follows the pads), Z5-Q2 A (a map pad's press pauses a running cycle; CYCLE carries on), Z5-Q3 A (the pads' live style isn't saved), Z5-Q4 A (Every laser, left to right; one laser's halves), Z5-Q5 A (Random is Phase 4a's golden-ratio scatter, never the same place twice) and Z5-Q6 A (a cue's pattern counts from the cue's start). V10 is built as answered (A): a vibe never switches on a pattern or Map cycle that can reach the crowd unless it allows the audience (step 9). Z4-Q7 A is built in a commit of its own (below). The build raised Z5-Q7 to Z5-Q10 (§12), each built as its ★. `legacy-shows` ran in every step. **Not done: seeing it on a real projector** (00 R-1): Alternate on one laser's halves, a Chase across three lasers, a Map cycle on the bar, at 25 and 40 kpps.
+
+### Where it landed
+
+| # | Commit | Step (§10) |
+|---|---|---|
+| 1 | `d4ad710` | `routing.zone-maps/schedule-slot`: the rule for when a live switch lands, on any slot (`:key`); `schedule` is it on `[:zone-map]` |
+| 2 | `4138147` | NEW `routing/zone_remap.clj` (the stage: `step-index`, `ring-index`, `scatter-index`, `pattern-t`, `effective-style`, `lane`, `lit-set`, `permutation`, `rekey`, `rekey-item-points`, `run-pattern`, `run-stage`, `routing-ctx`) and NEW `routing/zone_patterns.clj` (styles, parameters, presets, `describe`, `describe-cycle`, `active-cycles`, `cycle-pick`, `reach`, `warnings`, the pads' ids, `live-style`, `schedule-style`); `modulators/source-labels` public |
+| 3 | `d9f4cc7` | `:zone-pattern` and `:zone-map-cycle` registered (`animation/effects/zone.clj`, `:scope #{:global}`, `:apply-zones`, `:select-map`); `effects/resolve-effect-params`, `choice-at`, `zone-stage-effect?`; a `:modulatable?` choice picks by index |
+| 4 | `19a8e05` | the render: `frame-service/stage-patterns`, `run-zone-stage` (a throwing pattern reported and skipped), `zone-ctx`, `render-context`'s `:zone-effects` and `:zone-ctx`, `:item-points` re-keyed; the clock makes the zone ctx after the routing and puts `:zone-steps` in the snapshot |
+| 5 | `a5176cf` | the Map cycle: `zone-maps/cycle-on?`, `effective-map-id`'s cycle argument, `resume-cycle`, `[:zone-map :cycle-paused?]`; the clock's cycle pick and `:routing :cycle`; a map switch landing pauses, CYCLE and a cycle cell switched on resume (`:effects/toggle-cell`, the vibe engine's `switch-on`) |
+| 6 | `0ae6668` | NEW `events/handlers/zone_patterns.clj` (`:zone-patterns/set-cue-pattern`, `new-cell`; `:pattern-pads/pointer`, `press`, `schedule`, `step`, `set-pad-bar`, `clear-control`); `:show-clock/pattern-due`; the `pattern-pads` domain; `:zone-step` a pulse source; the trigger actions; the `:cue-zone-patterns` chain domain; the show lock, history labels, saving and session reset |
+| 7 | `aaf8c0a` | NEW `views/components/zone_pattern_editor.clj` and `views/dialogs/zone_pattern_editor.clj` (mounted in `root.clj`); the Pattern chip in both footers; `:ref`, `:ref-list`, `:map-list` and choice `:labels` in `parameter_controls.clj`; `modulator-choice-control`; the renderers; `effect_bank`'s `:scope` and the Zone tab's hint; New zone pattern ▸, the cell tooltip and the badge's ⇄ (`grid_cell.clj`); `target-control`'s `:pattern` scope; the subs; `css/zones.clj` |
+| 8 | `027eccb` | NEW `views/components/pattern_pads.clj` (`pattern-pad`, `step-pad`, `pattern-strip`, `pattern-pad-row`); CYCLE, `:cycling` and the ↻ mark in `zone_map_pads.clj`; the Grid tab's strips and Perform's ZONE PATTERN row; `subs/pattern-pad`, `step-pad`, `zone-patterns-in-use?`, `zone-map-pads-shown?`, `map-cycle-state`, `map-cycle-running?`; the Target menu's "map: cycling (…)"; STEP's pointer |
+| 9 | `57d843f` | `vibes.library/audience-fx?`, `playable-fx`, `audience-cue?` counting each pattern's `reach`, the lint rows of §8.8; `reactions/effect-sources` reads `:step-on` and `:restart-on`, and a cue's `:zone-patterns`; the engine's `take-fx`, `press-flash` and `refresh-fx` on `playable-fx`, the refusal; `subs/vibe-pick-fx`'s `:blocked`, `vibe-refused-text`; Perform's status line |
+| – | `428a21f` | Z4-Q7 A: `routing/refs.clj` reads `:target` only; an old show's Z0 keys are re-pointed by `state.migration/show-rows` itself (NEW `old-keys`), before Z4's rows make them targets; the fixtures that leaned on the walker's old keys moved to `:target` |
+| 10 | this commit | this note, §12's new questions and probe z5 |
+
+### Deviations from the plan
+
+- **Where things live.** `pattern-t` and `effective-style` are in `routing.zone-remap` (the stage needs them, and `zone-patterns` requires the stage for `lane`); `zone-patterns` names them. The parameters' definitions are in `zone-patterns` (`pattern-parameters`, `cycle-parameters`), the registrations in `animation/effects/zone.clj`. `fold-text` is in `zone-patterns` beside `warnings` (both read the rig and the map in use), aliased in the editor; `subs/pattern-fold [params]` returns it. `modulators/source-labels` went public in step 2, not 6.
+- **Errors are keyed** `[:zone-patterns :cue id]` and `[:zone-patterns :effects id]`, not `[:zone-patterns cell]`: a cell can hold several patterns, and cue and effect cells share coordinates. A cycle that throws reports `[:zone-map-cycle]` and picks nothing.
+- **Small rules the plan left open:**
+  - Alternate over one place lights it on even steps only; Chase, Ping-pong and Random over one place light it always (asked as Z5-Q9).
+  - While a cycle picks the map, the map slot's value in use is `:cycle`: pressing the map pad in use switches to it and pauses (Z5-Q8), CYCLE cancels a waiting switch, CYCLE with no cycle on does nothing, and a `:cycle` commit resumes and leaves `:active`. While it runs no map pad is lit: CYCLE is.
+  - Pad ids are `:as-set`, `:off` and the styles (`zone-patterns/pad-ids`), and the events carry `:pad` (As set's style is nil, so `:style` can't name it). The trigger actions are `{:type :pattern-pad :target pad}` and `{:type :zone-step}`; `:pattern-pads/clear-control :pad :step` clears STEP's key, and `:pattern-pads/pointer :pad :step` presses it.
+  - `warnings` takes a subject ("This pattern", or the lint's "Shapes: B3 (Zone pattern)") and says nothing of dark places while no laser is on at all.
+  - A pattern's Restart on is heard (`reactions/listens-to`) only while it steps on the beat, since it does nothing otherwise; a cue's own patterns count for the cue.
+- **The UI, where it differs from §7:**
+  - The chip's menu rows say each style by its preset ("Chase   across every laser"), also on a cue whose pattern keeps its own zones. Edit pattern… is off with no pattern.
+  - Moves is three radio buttons (the mock); Automatic's long text (§7.4's table) is its tooltip. Modulated, it is the choice control. Rate shows its words beside the slider ("1 step a beat"); Offset and Width have none.
+  - Now says the lit places or the move ("B (step 5)", "A ⇄ B (step 1)", "as drawn (the pads say Off)"), from the snapshot's `:zone-steps` and the pads' live style.
+  - The fold line names the map in use as `[:zone-map :active]` resolves; while a cycle runs it doesn't follow the cycle's pick.
+  - The lane picker, From and Maps send their value from a function: a menu item's event map carries `:fx/event`, which `:chain/update-param` reads before `:value`.
+  - The numeric list keeps the parameters' order past eight: `params-vector->map` builds an array map (a zone pattern has 13).
+  - The effects cell's tooltip lists each effect, a pattern by its line (§7.2) and a cycle by `describe-cycle`; a cue's badge gains ⇄ and its tooltip "Zone pattern: Alternate · A ⇄ B".
+  - CYCLE is always on the map strip and row: dim and "off" with no cycle cell on (its tooltip says §7.4's "Switch on a Map cycle cell on the Effects grid"), "cycling", "paused", "next beat". The map the tick's cycle shows is `:cycling` (purple) and marked ↻: `redraw-blink!` sets the chip's text or the large pad's name from its user data.
+  - The map pads show while a zone pattern or a Map cycle is anywhere too (Z5-Q10).
+  - The pattern pads' keys line says "Right-click to learn" (nine pads share a row) and wraps; their tooltips are §7.4's words, with the keys when bound.
+  - A refused cell is said on Perform's status line (`#vibe-refused`): "B3 (Zone pattern) can reach the crowd: tick Allow audience cells in this vibe". A good press keeps it; a vibe change clears it.
+- **The audience rule and the lint (step 9):**
+  - `subs/vibe-audience-routing` gains the projectors, the rig and the zone groups (a lane's reach needs the rig), and the lint's world gains the zone maps, the map in use, the zones' labels and the column and show defaults (Z4's zone rows needed them too: found on the way).
+  - The audience row names what to take out: a zone ("take B out of its zones"), a group by name, Every laser (naming the scanner), a cycle's map ("take Crowd sweep out of its maps"). A pool cue that reaches the crowd only through its pattern: "… reaches the audience through its zone pattern (Crowd Scanning) …".
+  - `refresh-fx` compares what each vibe may switch on, so ticking or unticking Allow audience cells switches a pattern cell on or off at once.
+- **The show lock** (the choices; each refused event has an example in `show-lock-test`'s `structure-edits`):
+  - refused, as structure: `:zone-patterns/set-cue-pattern`, `:zone-patterns/new-cell`, `:pattern-pads/set-pad-bar`, `:pattern-pads/clear-control`;
+  - NEW `show-lock/pattern-edit?`: chain, modulator and keyframe events on `:cue-zone-patterns`, or on an effects cell's zone pattern or Map cycle (found through `:effect-path`), are refused with "Zone pattern edit refused" (`locked-zone-pattern-edits-are-refused-test`). Asked as Z5-Q7;
+  - let through, as a performer's: `:pattern-pads/pointer`, `press`, `schedule`, `step`, `:show-clock/pattern-due`, `:zone-map/press :map :cycle`, toggling a cell, and a point effect's edits.
+- **Beyond §9:** `item-points-follow-the-stage-test` (frame-service), `map-cycle-state-sub-test`, `fold-text-test`, `old-keys-are-no-places-test`, the `:pattern` scope's rows and the cycling header in `target-control-test`, STEP's pointer in `pad-pointer-and-settings-test`.
+- **§9 said these pass unchanged; they don't:** `modulator-editor-test/source-choice-shows-its-labels-test` lists `:zone-step` (every Follows and Restart on offers it now); Z4's `map-row-shows-when-zones-are-used-test` counts four pads (three maps and CYCLE); Z4's `bank-offers-no-zone-selector-test` expects the effects grid's Zone tab to offer Zone pattern and Map cycle; Z4's tests that compared all of `[:zone-map]` compare `:active` and `:pending` (the domain gained `:cycle-paused?`); `vibe-pick-cell-sub-test`'s effects-grid rows gain `:blocked nil`.
+- **Z4-Q7, where the old keys went.** `routing/refs.clj` lost every Z0 key (a cue's `[:destination-zone :zone-group-id]`, an item's, group's, clip's or track's `:zone-group-id`, a Zone Selector's `:target-zone` and its keyframes', a preview cell's `:zone-group-id`, and the effects-chain place that held only selectors). Z2's show rows still need them on an old show (they rename a removed built-in before Z4's rows make it a target), so `state.migration/show-rows` re-points them itself (NEW private `old-keys`); `migration-test` and `legacy-shows` pass unchanged. The fixtures that leaned on the walker reading them moved to `:target`: `refs-test`, `zone-groups-handlers-test`, `projector-handlers-test`'s pins, `rig-handlers-test`, `rig-file-test` and `show-lock-test`'s `[7 3]`. Fixtures whose old keys nothing reads (an inert `:destination-zone {:zone-group-id :all}`) were left as they are, and the preview still reads an old cell's `:zone-group-id` (Z3).
+
+### Tests added
+
+- `laser-show.routing.zone-remap-test` (NEW): the twenty-three §9 tests.
+- `laser-show.routing.zone-patterns-test` (NEW): the ten §9 tests.
+- `laser-show.routing.zone-maps-test`: the three §9 tests. `laser-show.events.zone-maps-handlers-test`: the four.
+- `laser-show.animation.effects-test`: the three; `effects-coverage-test`'s ids and exemptions. `laser-show.animation.pulses-test`: the two. `laser-show.animation.modulation-test`: `zone-step-is-a-source-test`.
+- `laser-show.services.frame-service-test`: the nine §9 tests and `item-points-follow-the-stage-test`. `laser-show.routing.compose-test`: the three. `laser-show.services.show-clock-test`: five of the six (`routing-is-made-before-the-render-test` is Z3's, and passes); `renders-once-per-tick-test` and `one-state-and-input-read-per-tick-test` pass unchanged.
+- `laser-show.events.zone-patterns-handlers-test` (NEW): the twelve §9 tests and `pad-pointer-and-settings-test`.
+- `laser-show.events.handlers.triggers-test`: the two. `laser-show.events.handlers.input-test`: the one. `laser-show.events.show-lock-test`: the refused events in `structure-edits`, the performer's in `locked-allows-performance-events-test`, and `locked-zone-pattern-edits-are-refused-test`.
+- `laser-show.state.persistent-test`: the three. `laser-show.state.history-test`: the one.
+- `laser-show.vibes.library-test`: the four. `laser-show.vibes.engine-test`: the four. `laser-show.vibes.reactions-test`: the four.
+- `laser-show.subs-test`: the three §9 tests and `map-cycle-state-sub-test`.
+- `laser-show.views.components.zone-pattern-editor-test` (NEW): `chip-text-test`, `rows-per-style-test` and `fold-text-test`. `laser-show.views.components.target-control-test`: the `:pattern` scope and the cycling header.
+- `laser-show.routing.refs-test`: its Z0 fixtures in Z4's form, and `old-keys-are-no-places-test`.
+- UI:
+  - `laser-show.ui-test.zone-patterns-test` (NEW): the ten §9 tests.
+  - `laser-show.ui-test.perform-test`: `pattern-row-shows-when-patterns-are-used-test`; `map-row-shows-when-zones-are-used-test` counts CYCLE.
+  - `laser-show.ui-test.main-window-test`: the two footer tests find "Pattern:", its chip and its tooltip.
+  - `laser-show.ui-test.zones-test` and `modulator-editor-test`: as above.
+
+### Red first
+
+Where the new code didn't exist yet, the run was first made to compile with stubs (nil, `{}`, or a value no test expects), so the tests below were seen failing unless it says otherwise. Steps 1 to 6 were recorded before the credentials outage and steps 7 to 9 after it; no record is missing.
+
+| Step | Before the change |
+|---|---|
+| 1 | `zone-maps-test` with `schedule-slot` stubbed (nil): 10 tests, 25 failures, all in `schedule-slot-is-the-map-rule-test` |
+| 2 | the stage was drafted before its tests: parked, the tests written, then run against a stub namespace (the same API, inert): `zone-remap-test` 23 tests, 981 failures (every test failed); `zone-patterns-test` 8 tests, 67 failures |
+| 3 | `effects-test` and `effects-coverage-test` against stub `choice-at`, `resolve-effect-params`, `zone-stage-effect?` and no registration: 24 tests, 52 failures, 3 errors. Z4's UI `bank-offers-no-zone-selector-test`: 1 error |
+| 4 | `frame-service-test`, `compose-test` and `zone-patterns-test` against stubs: 75 tests, 59 failures. **Not seen red:** `no-pattern-renders-as-before-test` (vacuous on the old render), `example-a-alternate-on-one-laser-test` and `copy-is-drawn-once-per-laser-test` (they call step 2's stage and Z3's compose); `fold-tables-test` failed only in its Every laser parts |
+| 5 | `zone-maps-test`, `zone-maps-handlers-test` and `show-clock-test` against stub `cycle-on?` and `resume-cycle` and the old clock: 66 tests, 30 failures. **Not seen red:** `no-cycle-nothing-to-pause-test` (the old handlers refused `:cycle` as no map, which Z5 keeps when no cycle runs) |
+| 6 | ten namespaces with the handler stubbed (`{}`): 277 tests, 108 failures, 3 errors, after a paren in the new input test was fixed (it didn't compile). **Not seen red:** `cue-patterns-survive-save-and-load-test` (cue patterns ride in the cue chains), `pattern-switch-is-not-undoable-test`, `zone-step-is-not-in-any-test`, `pending-pattern-switch-is-effective-once-due-test` (steps 2 and 4 already read a due pending style) and `locked-allows-performance-events-test`'s new rows. Four first-run failures were the new test's own (two fresh states differ by random ids) |
+| 7 | `zone-pattern-editor-test` against a stub namespace: 3 tests, 30 failures. UI, before any view code: `zone-patterns-test`'s five and the two footer tests, 7 tests, 3 failures, 5 errors. `target-control-test`'s `:pattern` rows with `target_control.clj` stashed: 3 tests, 4 failures (then one expectation fixed: the new zone is the gap letter C) |
+| 8 | `subs-test` and `target-control-test` against stub subs: 48 tests, 24 failures. UI, the five pad tests, `pattern-row-shows-when-patterns-are-used-test` and Z4's map-row test: 7 tests, 7 errors. STEP's pointer: `zone-patterns-handlers-test` 13 tests, 1 failure |
+| 9 | `library-test`, `engine-test`, `subs-test`, `reactions-test` and `zone-patterns-test` against stubs and the old reactions and warnings: 139 tests, 52 failures. The first run with the code had 3 failures in the new engine test's own rig (a scanner in All made every starter cue an audience cue); the rig was fixed |
+| Z4-Q7 | `refs-test` in Z4's form with `old-keys-are-no-places-test`, on the old walker: 11 tests, 3 failures (the new test's). Then the full unit suite: 70 failures in the fixtures listed above, all moved to `:target` |
+
+### Verification
+
+| Where | Unit suite (`clj -M:mac-arm:test`) | UI suite (`clj -M:test-ui:mac-arm:test-ui-headless`) |
+|---|---|---|
+| `4c5fcc8` (the base) | 1,522 tests, 542,854 assertions, 0 failures | 211 tests, 1,015 assertions, 0 failures |
+| **`428a21f`, the branch's last code** | **1,627 tests, 556,117 assertions, 0 failures, 0 errors** | **222 tests, 1,108 assertions, 0 failures, 0 errors** |
+| the trial merge onto `master` `2049034` (tree `e7f6c15`, below) | 1,639 tests, 556,227 assertions, 0 failures, 0 errors | 228 tests, 1,170 assertions, 0 failures, 0 errors |
+
+Each step also ran its targeted namespaces (§9's run list) and the UI namespaces whose views it changed, and `legacy-shows` every time. Screenshots were checked at 1200 × 800 for the pattern window (Alternate, a modulated Offset, Swap's two pickers, Numeric), the effects grid's editor with the Zone tab's hint and a Map cycle, the Cue Chain Editor's footer at its 960 × 640 minimum, the Grid tab's two strips (and at 900 × 700, where the pattern strip wraps) and Perform's ZONE MAP and ZONE PATTERN rows with a cycle running. `~/LaserShowProjects` didn't exist before the work and doesn't after it: no test or app start wrote under the home folder.
+
+**Probe z5** (`probes/zones_probes_test.clj`, run at `428a21f`): the stage alone on 1,000-point frames, parameters resolved once, at beat 4.5 (step 4), 1, 3 and 8 lasers:
+
+| Setup | Keys out | Objects / points in → out | Time |
+|---|---|---|---|
+| no pattern | as in | the same map | 0.0–0.1 µs |
+| the All picture, 1 cue pattern (Alternate A ⇄ B) | `:zone/a` | 1 / 1,000 → 1 / 1,000 | 2.1–2.6 µs (7.8 µs on the first, still warming) |
+| the same, 1 cue + 3 cell patterns (Chase across every laser; Random over A–D, two wide, on what's there; Shift over A–D) | `:zone/a` | 1 / 1,000 → 1 / 1,000 | 7.4–10.2 µs (13.9 µs on the first) |
+| A and B drawn, the same patterns | `:zone/a` | 2 / 2,000 → 1 / 1,000 (B is dark on even steps) | 2.4–4.5 µs; 7.4–11.2 µs |
+
+A cue's whole render (a 1,000-point circle, 3 lasers): 56.1 µs with no pattern (p95 71.5), 59.8 µs with its own (p95 83.1), 71.2 µs with its own and the three cells' (p95 75.2). No object is ever under two keys and no point changes (invariants 1 and 3), and with no pattern the stage hands back the same map (invariant 2).
+
+### For the merge
+
+Trial merges with `git merge-tree`, which writes no branch and no worktree. The merged tree was unpacked with `git archive` into a temporary directory, its suites run there, and the directory deleted.
+
+- **Into `master` at `2049034`** (Decimate's follow-up `9585cae`..`114e49e`, the Projectors tab's layout pass `77230f1`..`0a1c219` and Decimate's second follow-up `bfcaeab`..`144c0a7` in): merged tree `e7f6c15`. One conflict, in `test/laser_show/routing/compose_test.clj`, where both sides appended to the end of the file: `master`'s `cue-warnings-count-a-decimated-cue-at-its-budget-test`, `cue-warnings-say-which-decimate-setting-to-change-test`, the helper `decimated-warning` and `decimate-advice-suggests-settings-that-work-test`; Z5's helpers `stage` and `where-drawn`, `fold-alternate`, and `example-a-alternate-on-one-laser-test`, `fold-tables-test` and `copy-is-drawn-once-per-laser-test`. Keep both blocks whole, `master`'s first, with the blank line and Z5's comment header between them; no name is defined twice, and the namespace's requires (`zone-remap` is Z5's) merge cleanly above. The trial resolved it so, in its temporary copy only. Its suites are in the table above. The other files both sides edit merge cleanly:
+  - `src/laser_show/state/domains.clj`: Z5's `pattern-pads` domain, `[:config :pattern-pads]`, `[:zone-map :cycle-paused?]` and the pulses' doc beside the layout pass's `:divider` (`53589f1`);
+  - `src/laser_show/subs.clj`: Z5's blocks (zone patterns, the pads, the cycle, the picker's `fx-blocked`, `vibe-refused-text`, the lint's world, `vibe-audience-routing`) beside Decimate's (`9585cae`, `b2bdb77`) and the layout pass's;
+  - `test/laser_show/events/rig_handlers_test.clj` (Z4-Q7's `:target` fixtures beside the layout pass's divider tests) and `test/laser_show/services/show_clock_test.clj` (Z5's cycle and pattern tests beside Decimate's).
+  - `master` hasn't edited this doc; `00-overview.md` and `10-questions.md` are `master`'s alone (this branch doesn't edit them).
+- **Every file the branch edits** (81 in `src/` and `test/`, and two in `plans/`):
+  - NEW: `routing/zone_remap.clj`, `routing/zone_patterns.clj`, `events/handlers/zone_patterns.clj`, `views/components/zone_pattern_editor.clj`, `views/components/pattern_pads.clj`, `views/dialogs/zone_pattern_editor.clj`; the tests `routing/zone_remap_test.clj`, `routing/zone_patterns_test.clj`, `events/zone_patterns_handlers_test.clj`, `views/components/zone_pattern_editor_test.clj`, `ui_test/zone_patterns_test.clj`.
+  - `animation/`: `effects.clj`, `effects/zone.clj`, `modulators.clj`, `pulses.clj`, `show_time.clj`.
+  - `events/`: `handlers.clj`, `handlers/chain/helpers.clj`, `handlers/effects.clj`, `handlers/history.clj`, `handlers/input.clj`, `handlers/timing.clj`, `handlers/triggers.clj`, `handlers/zone_maps.clj`, `show_lock.clj`.
+  - `routing/`: `refs.clj`, `zone_maps.clj`. `services/`: `frame_service.clj`, `show_clock.clj`. `state/`: `domains.clj`, `history.clj`, `migration.clj`, `persistent.clj`. `vibes/`: `engine.clj`, `library.clj`, `reactions.clj`. `subs.clj`, `css/zones.clj`.
+  - `views/`: `root.clj`, `tabs/grid.clj`, `tabs/perform.clj`, `dialogs/cue_chain_editor.clj`, `dialogs/effect_chain_editor.clj`, `dialogs/timeline_cue_editor.clj`, `components/effect_bank.clj`, `effect_param_ui.clj`, `grid_cell.clj`, `modulator_param_control.clj`, `parameter_controls.clj`, `tabbed_bank.clj`, `target_control.clj`, `visual_editors/timeline/browser.clj`, `zone_map_pads.clj`.
+  - tests: `animation/effects_coverage_test.clj`, `effects_test.clj`, `modulation_test.clj`, `pulses_test.clj`; `events/handlers/input_test.clj`, `handlers/triggers_test.clj`, `projector_handlers_test.clj`, `rig_handlers_test.clj`, `show_lock_test.clj`, `zone_groups_handlers_test.clj`, `zone_maps_handlers_test.clj`; `routing/compose_test.clj`, `refs_test.clj`, `zone_maps_test.clj`; `services/frame_service_test.clj`, `show_clock_test.clj`; `state/history_test.clj`, `persistent_test.clj`, `rig_file_test.clj`; `subs_test.clj`; `ui_test/main_window_test.clj`, `modulator_editor_test.clj`, `perform_test.clj`, `zones_test.clj`; `vibes/engine_test.clj`, `library_test.clj`, `reactions_test.clj`; `views/components/target_control_test.clj`.
+  - plans: this doc and `probes/zones_probes_test.clj`.
+- Files other work often touches, where Z5's edits are small and local: `subs.clj` (Z5's subs sit in their own blocks; `map-pad`'s `:active?`, the picker's `vibe-pick-fx`, `lint-world` and `vibe-audience-routing` are edited in place), `services/show_clock.clj` and `services/frame_service.clj` (the zone ctx, the cycle pick, the stage), `state/domains.clj`, `events/show_lock.clj`, `events/handlers.clj`, `events/handlers/history.clj`, `state/migration.clj`, `routing/refs.clj`. Z5 doesn't edit `fit_guard.clj`, `output_runtime.clj`, `rig_strip.clj`, `compose.clj`, `rig.clj`, `projectors.clj` or `group_matrix.clj`.
+
+### Found on the way
+
+- **The lint's world had no zone maps.** `subs/lint-world` gave `vibes.library/lint` the vibes, the grids, the rig and the groups, but not `:zone-maps`, the column defaults or the show's, so in the app Z4's "reaches the audience through Zone B (the Crowd sweep map …)" row only ever saw the built-in maps and the cues' own targets; `library-test` builds full states, so it didn't show. The world now has them, the map in use and the zones' labels.
+- **Probe z3's left / right setup** still writes `:zone-group-id` on its items, which nothing reads since Z4, so it now measures both pictures on All.
+- **A param map of more than eight parameters lost its order:** `params-vector->map` built a hash map, so any effect's numeric list past eight came out in hash order. It builds an array map now.
+- **`:chain/update-param` reads `:fx/event` before `:value`,** so a menu item's event map can't set a value: the new controls dispatch from a function.
+- **No clock thread in `start-test!`:** a pad's press switches at once there, so `pending-pattern-pad-blinks-test` blinks under `fixtures/with-clock`, as Z4's does.
