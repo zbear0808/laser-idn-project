@@ -1,7 +1,7 @@
 # Phase 8: zone effects (chase, swap, shift)
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`; the files cited are the same at `67735d0`, and `state/domains.clj` and `events/handlers/effects.clj` are cited at `b1da0f2` because Phase 1 is editing both)
-**Status:** Proposed. 8a (the three effects, the render stage, the pickers) needs nothing. 8b (reactions, the audience rule, lint) needs Phases 1 and 4, and V10, now answered A (§11; it was the vibe overview's §7)   **Last verified against:** `b1da0f2` (probes v19–v24, §11; they were the vibe overview's §3)
+**Status:** Done in zones Phase Z5 (`1d3d3b8`..`376d5f6`, on `master`; what it covers is §12.1), except 8b's four tap reactions, which are being built on `vibe-8b` (§12, 2026-11-20). V10 is answered A (§11; it was the vibe overview's §7)   **Last verified against:** `ea4d153` (§12); `b1da0f2` for §1–§9 (probes v19–v24, §11; they were the vibe overview's §3)
 **Supersedes / Superseded by:** none   **Related findings:** V6 and R-4 (a random pick must not scan the crowd), extended here to effects that move a picture. The effects-grid editor offering the zone selector, which does nothing there, is fixed on the way. The zones plan (`plans/2026-11-18-zones-ux/00-overview.md`, a draft written after this phase) asks for the same effects in its §4.5 and question 20; §9 says how the two fit
 
 > **Moved 2026-11-20.** This was Phase 8 of the vibe-mode plan, `plans/2026-11-18-vibe-mode/`, which was deleted when its Phases 1–7 were done (the folder is in git history at `8b4b7d7`). It lives here because the zones plan builds the same effects (Z5, `07-phase-z5-zone-patterns.md`). In this doc, `00-overview.md` and `01-…` to `07-…` mean that plan's docs, not this folder's: the parts it relies on are copied in §11 below (V10, still open, and probes v19–v24). The probes moved with it: `probes/vibe_probes_test.clj` in this folder.
@@ -291,3 +291,147 @@ Run them from the repo root with `P=plans/2026-11-19-zones` in the command at th
 | v22 (ran) | What if a picture were copied into two zones? | A projector in `[:all :left]`: the 33-point frame under `:left` alone sends 33 points, under `:all` and `:left` **68** | a remap moves and never copies (08 invariant 1) |
 | v23 (ran) | What does a remap cost? | 1,000-point frames, two runs (load 1.8 and 2.5): shift 0.7–0.8 µs, swap 0.2 µs, a chase that only re-keys 0.3 µs (about 1 KB of garbage each); a chase that joins two frames 11–12 µs (p99 12–50 µs, about 8 KB) | nothing next to a point chain (v17); 08 invariant 12 |
 | v24 (ran) | In what order do the effects grid's cells become one chain? | Six cells: the order they were put in. Twelve cells put in as 13 10 12 2 1 11 20 21 23 22 3 0 (row·10 + col) come out 22 0 1 11 3 20 2 13 12 21 23 10: hash order | zone effects don't commute, so they run in reading order (08 §7). The order of point effects is a separate finding (08 §9) |
+
+## 12. After Z5: what's left, and how it's built (2026-11-20, at `ea4d153`)
+
+Zones Phase Z5 (this folder's `07-phase-z5-zone-patterns.md`, "Z5" below; as built in its §13, `1d3d3b8`..`376d5f6`) built this phase's 8a and most of its 8b over refs, as one `:zone-pattern` effect with styles instead of three effects (Z5 §11). What it leaves is 8b's four tap reactions (Z5 §11, "Phase 8b's reactions"). This section says what is covered and plans the rest, against `ea4d153`. Paths are under `src/laser_show/`.
+
+### 12.1 What Z5 already covers
+
+**§4, 8a**
+
+| Here | As Z5 built it | Left |
+|---|---|---|
+| `routing.zone-remap`: `step-index`, `ring-index`, `lane`, `shift`, `swap`, `chase`, `apply-zone-effects` | `routing/zone_remap.clj` with these names: `step-index`, `ring-index`, `lane` (over refs, with Every laser), `apply-zone-stage` (this `apply-zone-effects`). Chase, shift and swap are styles of `run-pattern`, and a join is `animation.frames/concatenate-frames`, with no cycle (Z3) | – |
+| `animation.effects`: `:apply-zones`, `:scope`, `zone-remap-effect?`, `resolve-effect-params` | `zone-stage-effect?`, `resolve-effect-params`, `choice-at` | – |
+| `animation.effects.zone`: `:zone-chase`, `:zone-shift`, `:zone-swap`; the selector's `:scope #{:item}` | one `:zone-pattern` (and the Map cycle), because a pad or a modulator can't switch an effect id (Z5 §11); Z4 hid the selector | – |
+| `frame-service`: `get-active-zone-effects` in reading order, `:zone-effects` in the render context, the stage before the point effects, a throw reported | `get-active-zone-effects` (`services/frame_service.clj:132-143`), `stage-patterns` and `run-zone-stage` (`:400-434`, reported under `[:zone-patterns :effects id]`) | – |
+| `show-clock`: `record-render!` counts the zone effects | not built: the profiler counts the point chain (`services/show_clock.clj:91-98`) | left out (§12.8) |
+| `effect-bank`: `:scope`, the Zone tab's hint | built | – |
+| `parameter-controls`: `:zone-group-id`, `:zone-group-ids`; `zone-chips/zone-order-chip` | `:ref`, `:ref-list`, `:map-list`; the lane picker (`views/components/zone_pattern_editor.clj`) | – |
+
+**§4, 8b**
+
+| Here | As Z5 built it | Left |
+|---|---|---|
+| `vibes.library`: `audience-fx?`, `playable-fx`, §7's lint rows; `listens-to` reads a chase's `:restart-on` | `audience-fx?` and `playable-fx` (`vibes/library.clj:173-191`), Z5 §8.8's rows (`stage-rows`, `:556-575`); `reactions/effect-sources` reads `:step-on` and `:restart-on` (`vibes/reactions.clj:144-157`, Z5 S-10) | two info rows (§12.8) |
+| `vibes.engine`: `enter-look` and `press-flash` switch on `playable-fx`; a refused cell is `{:why :audience-fx :cell}` | `take-fx`, `press-flash`, `refresh-fx` (`vibes/engine.clj:178-194`, `:418-444`, `:655-664`) | – |
+| `vibes.reactions`: four templates and `lane [state]` | – | **§12.2–§12.7** |
+| `subs`, Perform: the refusal on the status line | `subs/vibe-refused-text` (`subs.clj:1900-1911`), Perform's `#vibe-refused`: "B3 (Zone pattern) can reach the crowd: tick Allow audience cells in this vibe" | – |
+| `:zone-chase` gains `:restart-on` | `:zone-pattern`'s `:restart-on`, through `pulses/rebase` (`routing/zone_remap.clj:88-103`) | – |
+| `README.md`: a "Zone effects" paragraph | not written | a line for the four, and the audience rule for cells (§12.6) |
+
+**§7**
+
+- The three effects' parameters are `:zone-pattern`'s (Z5 §8.2). `:zone-a` and `:zone-b` are the lane's first two (Z5 S-6), and a Swap trades on odd steps instead of reading an `:amount`.
+- The step, loop and bounce, dropped refs, and the chase, shift and swap tables: Z5 §8.2's styles table and `zone-remap-test`.
+- Moved, never copied (probe v22): changed. A copy is one frame under the union of its places (Z5 §8.4).
+- Driving the numbers: any modulator on Rate and Offset; Style, Moves and Path pick by index (Z5 S-8).
+- Order: reading order (`frame-service-test/grid-patterns-run-in-reading-order-test`).
+- The audience rule: Z5 §8.8, over refs. A pattern reaches its whole lane, `:from` doesn't count, and a zone counts through every map.
+- **The reactions (8b): not built.** §12.2–§12.7.
+- The lint rows: 1 (two zones), 2 (a group that's gone), 3 (a place with no laser) and 6 (the audience, at warn, the level Phase 3 gives an audience cue) are Z5 §8.8's. Rows 4 (a laser in `:from` goes dark) and 5 (nothing to swap) aren't built (§12.8).
+- Invariants 1–13: Z5 §8.9 (1 as changed for copies; 13 is its 13).
+
+**§8, the tests**
+
+- 8a's: Z5's, under its own names (Z5 §13, "Tests added"): `zone-remap-test` (23), `effects-test` (3), `frame-service-test` (10), `compose-test`'s fold tables instead of `multi-engine-test`, `show-clock-test`, `zone-remap-test/lane-expands-every-laser-and-drops-unknown-test` for a removed group, and the UI's `zone-patterns-test`.
+- 8b's `library-test` and `engine-test`: Z5's `audience-fx-test` (with `playable-fx`), `lint-zone-pattern-rows-test`, and the four engine tests by the same names. `pulses-test/zone-chase-restarts-on-its-press-test` is `zone-patterns-test/restart-on-rebases-test`. Perform's `refused-zone-cell-is-explained-in-the-status-line-test` exists only as a sub test (`subs-test/vibe-pick-fx-blocks-audience-cells-test`).
+- **8b's five `reactions-test` tests: not built.** §12.7.
+
+### 12.2 The four templates
+
+They join `reactions/templates` (`vibes/reactions.clj:33-64`) in its menu order, each after its role's Phase 4 ones, so the menus that list them group them by role. Each is one `:zone-pattern`: Z5's preset of its style for a cell (`zone-patterns/preset-instance style :cell`, `routing/zone_patterns.clj:110-119`) with its press. It steps on the press itself (`:step-on`, Z5 §8.3: the source's `:count` in the tick's pulse view), not through a Step modulator on its offset as §7 had it. The rest is Z5's defaults: rate 1, offset 0, width 1, `:source :auto` (the All picture when the cue draws into All, else what is in the places), `:from :all`, the show's beats, and it follows the pattern pads (Z5-Q1 A: Off stops it, a style pad switches it; Z8b-Q4).
+
+| Kind | Menu (role) | Cell | Style, places (§12.3) | Steps | At rest (before its source's first press, as Phase 4's invariant 11 means it) | Goes into |
+|---|---|---|---|---|---|---|
+| `:zone-hop` | "Zone hop: next zone (one zone at a time)" (HIT) | "Groove · Zone hop" | Chase over Every laser | on each HIT: the next laser | the All picture sits on the first laser (a lone laser's left half) until the first HIT, by design (§7) | FX set |
+| `:zone-swap` | "Zone swap" (ACCENT) | "Groove · Zone swap" | Swap, A ⇄ B | on each ACCENT: the 1st trades A and B, the 2nd trades them back | as drawn: step 0 trades nothing | FX set |
+| `:zone-shift` | "Zone shift: next zone" (ACCENT) | "Groove · Zone shift" | Shift, A → B → C → D | on each ACCENT: what is in each zone moves one zone on | as drawn: a shift by 0 | FX set |
+| `:zone-chase` | "Zone chase while held" (FLASH) | "Groove · Zone chase" | Chase over Every laser | on the beat (a laser a beat), Restart on FLASH: each FLASH starts it from the first laser | off: on only while FLASH is held | flash FX |
+
+They are made as Phase 4's are. `:vibe/add-reaction {:vibe :kind}` (`events/handlers/vibes.clj:171-180`) puts the cell in the first empty effect cell from the bottom row up (a new project's Master holds `[0 3]`), last in the FX set or, for the chase, in the flash FX, as one undo step ("Add Tap Reaction"), and `engine/reconcile` switches it on at once if the vibe plays (the chase waits for FLASH). Through Z5's `listens-to` each is one of its role's reactions: the role's line on the Vibes tab and its Perform pad name it, and Phase 4b's lint rows count it ("Groove: HIT moves effects only (Zone hop)", "Groove · Zone hop listens to HIT, which has no key yet"). Once one exists, Z5's pattern pads and the zone map pads show, as for any zone pattern (Z5-Q10 A). The swap and the shift move what the cues draw into zones A and B (or C, D); the hop and the chase move what is drawn into All (§7: "route the cue's items to zones (swap and shift) or leave them in `:all` (hop and chase)").
+
+### 12.3 The default places
+
+- **Hop and chase: Every laser, left to right** (`:lane/lasers`, Z5-Q4 A): the lasers that are on and in All, in rig order, and a lone laser's two halves. It follows the rig, so the vibe works on whatever rig it plays on. One case can't keep it: a laser in All, on or off, that can reach the audience (its own group is an audience group: it scans the audience). Every laser would sweep it (Z5 §8.8's second row), so the places are instead **the lasers that are on and in All and can't**, left to right, each by its own group (`:auto.laser/<id>`). That list is fixed when made; the pattern window edits it.
+- **Swap and shift: zones**, as Z5's Swap and Shift presets: A ⇄ B, and A → B → C → D. A swap or a shift trades what is drawn into its places (a permutation re-keys only the frame keys that name a lane place, `routing/zone_remap.clj:246-253`), and cues draw into All or zones, so over lasers they would trade only what a cue pins to a laser. Under the default map, Left / Right, A is the left and B the right: an ACCENT swaps left and right, as this phase's opening says. Another map sends them elsewhere, as it does every zone.
+
+So §7's three wishes hold: not audience (the moves by their places, the trades by the rule, §12.5), at least two places (§12.4), left to right (rig order; A before B).
+
+### 12.4 When an entry is greyed
+
+An entry is greyed while its places on this rig are fewer than two: the count behind Z5's "needs two zones" lint error (`routing/zone_patterns.clj:297-307`: `zone-remap/lane` over the lasers that are on and in All; a zone is always one place). So the swap and the shift never are (A and B are two places on any rig), and one laser on its own is two places (its halves). The hop and the chase are greyed when:
+
+| Rig | Their places | Hint, after the entry's text |
+|---|---|---|
+| no laser on and in All | Every laser, empty | "— needs a laser that's on and in All (Projectors tab)" |
+| a laser in All can reach the audience, and fewer than two that are on and in All can't | those lasers | "— needs two lasers in All that don't scan the audience (Projectors tab)" |
+
+For example "Zone hop: next zone (one zone at a time) — needs a laser that's on and in All (Projectors tab)". `:vibe/add-reaction` with a greyed kind changes nothing and adds no undo step, as with an unknown kind.
+
+### 12.5 The audience rule (V10 A, as Z5 built it)
+
+Nothing new: the cell is one more zone pattern in the vibe's FX set (the chase: its flash FX), so Z5's rule applies as it is (Z5 §8.8, invariant 13).
+- `:vibe/add-reaction` ends in `engine/reconcile` → `refresh-fx` → `take-fx` (`vibes/engine.clj:178-194`), which switches on only `library/playable-fx`. A cell whose lane can reach the crowd (`audience-fx?`: a lane ref passes `audience-ref?`) stays off in a vibe that doesn't allow the audience, and `[:vibe-runtime :problem]` is `{:why :audience-fx :cell c}`. Perform says "A4 (Zone pattern) can reach the crowd: tick Allow audience cells in this vibe", and the lint warns "Groove: A4 (Zone pattern) can send pictures to the crowd (Crowd), so this vibe never switches it on. Allow audience cells, or take B out of its zones". Ticking Allow audience cells switches it on at once (`refresh-fx`). FLASH leaves a refused chase off and says so (`press-flash`). A click on the Effects grid is never blocked.
+- With §12.3's places a new hop or chase never reaches the crowd. A swap or a shift does when a map sends one of its zones to an audience group (Z4's "Crowd sweep": B → Crowd), or while a scanner is in All (Unison sends every zone to All). The vibe then leaves it off and says why, and the user decides.
+
+### 12.6 What changes
+
+| Namespace | Change |
+|---|---|
+| `vibes/reactions.clj` | the four templates in `templates`; NEW `zone-reaction?` (a template holding a zone pattern), `lane [state groups kind]` (§12.3; groups is `library/audience-groups`, which this namespace can't require, since library requires it), `places [state zones]` (§12.4's count), `zone-hint [state groups kind]` (§12.4's text, nil when it isn't greyed); `reaction-cell` takes the places; `add-to-vibe` takes groups (`#{}` without), puts §12.3's places in and makes nothing for a greyed kind |
+| `events/handlers/vibes.clj` | `handle-add-reaction` passes `library/audience-groups` |
+| `subs.clj` | NEW `vibe-tap-hints`: `{kind hint}` of the greyed entries, from the rig and the audience groups |
+| `views/tabs/vibes.clj` | `tap-menu` greys an entry and adds its hint |
+| `README.md` | Tap reactions names the four; Safety: an effect cell whose zone pattern can reach the crowd isn't switched on either |
+
+No change to `vibes/library.clj`, `vibes/engine.clj`, `routing/`, `events/show_lock.clj` (it already refuses `:vibe/add-reaction`, `:45`) or `events/handlers/history.clj` ("Add Tap Reaction", `:224`). The Effects grid's New tap reaction ▸ (`views/components/grid_cell.clj:398-418`) lists `templates` by role, so it offers the four too, with no change there: `:effects/new-reaction` (`events/handlers/effects.clj:91-105`) makes the template as it is (Every laser, not narrowed, since the grid has no audience rule; A ⇄ B; A–D), on but the chase, as the Strobe, and not greyed. Asked as Z8b-Q1.
+
+### 12.7 Tests
+
+Fixtures: `starter`, `ctx` and `press` (`test/laser_show/vibes/reactions_test.clj:18-33`); the show clock by hand, as `fade-in-starts-dark-and-returns-to-full-test` runs it (`:157-177`); `run` (`test/laser_show/events/handlers/vibes_test.clj:20-28`: the real pipeline, so the show lock and the history are in it); Z5's way of rendering a cell's pattern (`render-with`, `test/laser_show/services/frame_service_test.clj:529-538`); `crowd-rig`'s scanner (`test/laser_show/vibes/engine_test.clj:703-713`). A rig of three lasers, `p1`–`p3` at `10.0.0.1`–`.3`, so rig order is theirs.
+
+- `laser-show.vibes.reactions-test`: `every-template-is-valid-test` (fourteen kinds: HIT 5, ACCENT 4, FLASH 3, VIBE 1, any 1); `templates-are-identity-at-rest-test` keeps to the point effects; NEW `zone-templates-are-zone-patterns-test` (each is Z5's preset of its style with its press, its menu, name, role and slot, and its role hears it), `zone-reactions-at-rest-test`, `zone-hop-moves-the-picture-on-each-hit-test` (through the engine and the show clock: 0, 1, 2, 3 HITs → p1, p2, p3, p1), `zone-swap-and-shift-on-each-accent-test`, `zone-chase-restarts-on-each-flash-test`, `lane-leaves-a-scanner-out-test`, `zone-reactions-need-two-places-test` (§12.4's table, one laser, an excluded scanner).
+- `laser-show.events.handlers.vibes-test`: NEW `add-zone-reaction-test` (each kind: the cell, its name, its slot, on at once in the vibe that plays but the chase, one undo step "Add Tap Reaction", undone; refused while the show is locked), `greyed-zone-reaction-changes-nothing-test`, `zone-reaction-that-can-reach-the-crowd-stays-off-test` (V10 A: a map sends B to Crowd: the swap stays off, the problem names its cell, Allow audience cells switches it on; a scanner in All: the hop leaves it out and comes on).
+- `laser-show.subs-test`: NEW `vibe-tap-hints-sub-test`.
+- UI `laser-show.ui-test.vibes-test`: `tap-reaction-menu-adds-a-cell-to-the-vibe-test` (HIT's list gains the hop, greyed with its hint: the starter show has no laser); NEW `zone-reactions-in-the-tap-menus-test` (ACCENT's and FLASH's lists; with two lasers the hop isn't greyed; Zone swap makes "Shapes · Zone swap", on).
+- UI `laser-show.ui-test.grid-test/new-tap-reaction-on-an-effects-cell-test`: fourteen templates.
+- Unchanged: `history-handlers-test/history-labels-name-real-events-test`, `show-lock-test`, and the other `vibes-test` and `perform-test` tests.
+
+Run: `clj -M:mac-arm:test reactions vibes-test subs-test library engine show-lock history-handlers`, then `clj -M:test-ui:mac-arm:test-ui-headless -n laser-show.ui-test.vibes-test`, then `-n laser-show.ui-test.grid-test`, then both full suites.
+
+### 12.8 Not built, from §4 and §7
+
+- Lint rows 4 and 5 (info): a laser in the `:from` place that goes dark while a move runs, and a swap or shift with nothing to trade ("no cue here draws into A or B"). Z5 §8.8's table replaced this one without them. The second would tell a user why a new Zone swap does nothing while every cue draws into All. Asked as Z8b-Q3.
+- `record-render!` counting the zone stage: a profiler count.
+- A UI test of Perform's refusal line: Z5 tests the sub only.
+
+### 12.9 Commit plan
+
+| # | Commit | Red first |
+|---|---|---|
+| 1 | `plans: vibe Phase 8 after Z5: what Z5 covers, and the four zone reactions to build (§12)` | – |
+| 2 | `feat(vibes): Zone hop on HIT, Zone swap and Zone shift on ACCENT, and Zone chase while FLASH is held, as zone patterns that step on the press, over every laser (none that scans the audience) or zones A and B; one undo step, on at once in the vibe that plays` | `reactions-test`, handlers `vibes-test` |
+| 3 | `feat(ui): the Tap reactions menus offer the four zone reactions, greyed with a hint while the rig has too few places for them` | `subs-test`, UI `vibes-test` and `grid-test` |
+| 4 | `plans: vibe Phase 8 done (<sha>): as built, red first, both suites` | – |
+
+### 12.10 Questions (★ = built)
+
+> **Z8b-Q1 · The Effects grid's New tap reaction ▸ and the four.**
+> - **A ★** It offers them, as every template: made as they are (Every laser, not narrowed, since a click on the grid is a decision (V10); A ⇄ B; A–D), on at once but the chase, and not greyed. The hop moves the All picture to the first laser at once, as it does in the vibe that plays.
+> - **B** It doesn't: the grid's New zone pattern ▸ makes patterns, off, and Step on is set in the pattern window.
+> - **C** It offers them, with the hop off until switched on (Z5's rule for a new pattern cell).
+
+> **Z8b-Q2 · The swap's and the shift's places.**
+> - **A ★** Zones (A ⇄ B; A → B → C → D): what the cues draw into, through the map in use.
+> - **B** Every laser, as the moves: they then trade only what a cue pins to a laser.
+> - **C** All four over zones: the hop and the chase then move between the map's sides, not lasers.
+
+> **Z8b-Q3 · §7's two info rows that Z5 didn't build** (a laser goes dark while a move runs; a swap or shift with nothing to trade).
+> - **A ★** Later, with the rest of the patterns' lint.
+> - **B** Now, at least "has nothing to swap: no cue in this vibe draws into A or B", which a new Zone swap often meets.
+
+> **Z8b-Q4 · Do the four follow the pattern pads?**
+> - **A ★** Yes, as every zone pattern does (Z5's default): Off stops them, a style pad switches them, As set gives them back.
+> - **B** No (`:follow-pads? false`, as Z6's grid): a tap reaction keeps its own style whatever the pads say.
