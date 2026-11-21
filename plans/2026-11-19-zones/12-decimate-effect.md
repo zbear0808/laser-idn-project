@@ -1,6 +1,6 @@
 # Decimate: an effect that thins a frame to a target fps
 
-**Written:** 2026-11-20 at `c067030` (`master`, Z0–Z3 and ZR in).   **Status:** **Done, on `master`** (`e7b93e4`..`d6fbb15`, fast-forwarded from `3229c95`). The as-built note is §6. Not checked on a real projector. Asked for by the user on 2026-11-20 ("a decimate effect that will reduce point counts by a factor to target a certain fps at a given kpps… default to 25 kpps and 30 fps… try to never mess with anchor blanking points").   **Needs:** Z3's fit guard (`animation/fit_guard.clj`: `budget`, `keep-mask`, `thin`; 05 §13).   **Size:** ~0.5 d. It can be built alongside Z4.
+**Written:** 2026-11-20 at `c067030` (`master`, Z0–Z3 and ZR in).   **Status:** **Done, on `master`** (`e7b93e4`..`d6fbb15`, fast-forwarded from `3229c95`). The as-built note is §6. The follow-up for Q-D-1 B and Q-D-2 B is §7 (`5adfd4b`..`16a3e10`, on branch `decimate-b`, not merged). Not checked on a real projector. Asked for by the user on 2026-11-20 ("a decimate effect that will reduce point counts by a factor to target a certain fps at a given kpps… default to 25 kpps and 30 fps… try to never mess with anchor blanking points").   **Needs:** Z3's fit guard (`animation/fit_guard.clj`: `budget`, `keep-mask`, `thin`; 05 §13).   **Size:** ~0.5 d. It can be built alongside Z4.
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks anything that doesn't exist yet.
 
@@ -152,3 +152,150 @@ A trial merge with `git merge-tree --write-tree`, which writes no branch and no 
 **Q-D-2 · A cue's ⚠ for a laser that decimates it.**
 - **A ★ (built)** Keep warning: the cue is heavy, and the laser thins it. The warning already ignores the guard.
 - **B** Count each laser's calibration chain, which the warning would have to run for every laser.
+
+## 7. Follow-up (Q-D-1 B, Q-D-2 B) (2026-11-20, `5adfd4b`..`16a3e10`, on branch `decimate-b`, not merged)
+
+The user answered both of §6's questions B (`10-questions.md` § Decimate). Built in worktree `wt-decimate-b` off `master` at `cc9e000`, after the commit that records the answers (`6484e62`). `master` has since moved to `4c5fcc8` (Z4 landed). "For the merge" has a trial merge with it.
+
+### Where it landed
+
+| # | Commit | What |
+|---|---|---|
+| 1 | `5adfd4b` | Q-D-1 B, the meter: `fit-guard/recount` and `smooth`, `output-runtime/load-of`, `load-warning/load-percent` and `meter-tooltip`; docstrings in `output-runtime/status` and `subs/projector-load` |
+| 2 | `16a3e10` | Q-D-2 B, the ⚠: NEW `points/chain-budget`; `routing.rig`'s inputs, cache key and `:outputs`; `compose/cue-warnings` |
+| 3 | this commit | this note |
+
+The two code commits share no file. Step 1 passes its tests on its own: they were run with step 2's files stashed.
+
+### What changed
+
+**The meter (Q-D-1 B).** With Decimate (or any projector effect that changes the count) in a laser's calibration chain, the card's meter is what the laser draws over the guard's budget. A 3,000-point cue at 25 kpps, with Decimate at 30 fps, reads 833 / 1,250 = **67%**, green, and its tooltip says "833 points a frame. 1,250 fit 20 fps at 25,000 pts/s". The fps (30), the note ("−72% pts", the guard's cut and Decimate's together) and LOW FPS (off) already counted what Decimate left (§6), so all four now describe the same frame.
+- `fit-guard/recount`, which `show-frame` calls when the projector effects changed the count, adds `:effect-points`, that count. `:points-in` still means what the guard was given, so `:reduced-pct` and `:est-fps` are as §6 has them.
+- `load-warning/load-percent` and `meter-tooltip` count `:effect-points` when it's there, else `:points-in` (`metered`).
+- Without such an effect `recount` returns the guard's own record, so neither the record nor the card's `:load` has the key. The meter is then what the laser is asked for, as before (Q-Z3-4 A).
+
+**The ⚠ (Q-D-2 B).** A laser whose calibration chain has an enabled Decimate counts each cue at no more than that Decimate's budget, ⌊kpps·1000 / fps⌋, the smallest if it has several. So a cue the laser decimates to its target gets no ⚠ for it. A 2,000-point cue on two lasers, with Decimate in one of them, warns for the other only; with Decimate in both, it doesn't warn.
+- NEW `points/chain-budget items` reads the budget from the chain's params. Nothing runs: the chain isn't applied per cue. Each value is clamped as the effect clamps it (1–100 kpps, 5–120 fps). **A modulated `:kpps` or `:fps` is read at its default** (25, 30), and under an enabled keyframe modulator both are, since its keyframes then set the params. A Decimate in a group counts (`chains/flatten-chain`); a disabled one, or one in a disabled group, doesn't.
+- `routing.rig`: `routing-inputs` adds `:projector-effects` (`[:chains :projector-effects]`), and `cached-routing`'s key has it. So adding, changing or removing a laser's Decimate makes a new routing on the next tick, and an edit of a cue's chain doesn't (`[:chains :projector-effects]` keeps its identity). A laser's `:outputs` entry has `:decimate-budget` while its chain has an enabled Decimate, and only then.
+- `compose/cue-warnings` counts a cue on such a laser at `(min points decimate-budget)`. The warning's `:points` is that count, so its points and its fps agree. Anchors can leave more than the budget (§1), so this is an estimate, as the warning already is.
+- `services/show_clock.clj` is unchanged: it builds the routing with `routing-inputs` and gives it to `cue-warnings`.
+
+### Deviations and small rules
+
+- **`fit-guard/smooth` keeps the meter's count through dark frames,** which the brief didn't list. Decimate can't thin a dark frame (every blanked point is an anchor), so a dark frame is never recounted. During a Strobe the meter would then flick between 67% and 240% as the status (4 times a second) caught a lit frame or a dark one. A dark record now keeps the previous record's `:effect-points`, or its absence, as S-14 keeps the averages and the low flag.
+- **`:effect-points` reaches the card exact,** not to the nearest 10 like the other counts (`output-runtime/load-of`). At 830 the meter would read 66%. Decimate's count is its budget, which holds still, so the status doesn't change more often for it.
+- **A calibration chain that can't be read gives no budget.** `rig.clj` `decimate-budget` catches, as `halves` does, so a bad chain can't stop the routing for the whole rig; that laser's cues are counted as they are.
+- **The warning's `:points` is the count on the laser,** at most the budget. Its `:item` (the heaviest item) keeps the item's own count, which can be the larger ("Found on the way").
+- **Not touched:**
+  - `backend/multi_engine.clj`: `show-frame` already recounts when the count changes;
+  - `views/components/rig_strip.clj`, because the Projectors tab layout pass works there. `load-meter` draws `load-percent` and `meter-tooltip`; its docstring ("the points the laser is asked for") now has the exception that `load-percent`'s docstring states;
+  - `services/show_clock.clj`, `00-overview.md` and `10-questions.md`.
+- **The cost:** an edit of any laser's calibration chain (dragging a Corner Pin handle, say) now works the routing out again, at most once a tick. Not measured here; 05 §8 (invariant 12) estimates the resolver at tens of µs after an edit.
+
+### Tests added
+
+- `laser-show.animation.fit-guard-test`: `recount-counts-what-is-drawn-test` checks `:effect-points` (833; none in the guard's own record; and once a frame left with no point is smoothed, the meter as it was); NEW `dark-frames-leave-the-meter-as-it-was-test` (lit frames Decimate thinned, every other one dark: 833 throughout; without Decimate a dark frame gets none; a lit frame that wasn't recounted drops it).
+- `laser-show.backend.multi-engine-test`: `decimate-in-a-calibration-chain-counts-on-the-card-test` checks `:effect-points` (833) on the record and on the provider's smoothed one, and that a dark 3,000-point frame keeps the meter at 833; `fit-guard-runs-before-projector-effects-test` checks that a chain that keeps the count (identity RGB curves) adds no `:effect-points`.
+- `laser-show.backend.output-lifecycle-test`: NEW `status-load-counts-what-decimate-left-test`. Two lasers stream to the fake DAC, one frame as `show-frame` makes it with Decimate, the other without: the card's `:load` is `{… :points 830 :effect-points 833 …}` and `load-percent` 67; without Decimate, no key and 240.
+- `laser-show.views.components.load-warning-test`: `load-meter-test` (67% and the tooltip with `:effect-points`; 240% without).
+- `laser-show.animation.effects.points-test`: NEW `chain-budget-reads-the-params-test` (the defaults, 40 kpps, 60 fps, several, clamped, modulated, keyframes, groups, disabled, none; and the count Decimate leaves equals the budget).
+- `laser-show.routing.rig-test`: NEW `outputs-carry-each-lasers-decimate-budget-test` (833, 416 for two, none for a disabled one, a chain that can't be read or none, and nothing else changes); `cached-routing-follows-an-edit-test` (a laser's calibration chain is an edit; Decimate added, then its fps changed: nil, 833, 416); `cached-routing-is-reused-while-inputs-are-identical-test` (an edit of a cue's chain isn't one).
+- `laser-show.routing.compose-test`: NEW `cue-warnings-count-a-decimated-cue-at-its-budget-test` (warned without Decimate, moved to the other laser, gone with both, counted at 1,666 for a target under the minimum, a disabled Decimate counts for nothing, a cue under the budget).
+- `laser-show.services.show-clock-test`: NEW `decimate-put-in-a-calibration-chain-moves-the-warning-test` (end to end through the routing cache: Decimate put in p1's chain while the cue plays moves the ⚠ to p2; in both, no ⚠).
+- UI, `laser-show.ui-test.rig-card-test`: NEW `decimated-laser-meters-what-it-draws-test` (a 3,000-point circle with Decimate in the laser's chain: "67%", green, "−72% pts", not low).
+
+### Red first
+
+The tests were written first and run against `6484e62`'s code (§6's), the 7 unit namespaces together: 159 tests, 80,114 assertions, **18 failures**, 0 errors. Only the "can't be read" check came with the code (below).
+
+| Test | Before the change |
+|---|---|
+| `recount-counts-what-is-drawn-test` | 1 failure (no `:effect-points`) |
+| `dark-frames-leave-the-meter-as-it-was-test` | 1 (the dark records had none) |
+| `decimate-in-a-calibration-chain-counts-on-the-card-test` | 3 (the record, the smoothed record, the dark frame) |
+| `status-load-counts-what-decimate-left-test` | 2 (the `:load` without the key; 240 for 67) |
+| `load-meter-test` | 2 (240 for 67; "3,000 points a frame") |
+| `cue-warnings-count-a-decimated-cue-at-its-budget-test` | 4 (still p1, warned with both, 2,000 points for 1,666, the 900-point cue warned) |
+| `outputs-carry-each-lasers-decimate-budget-test` | 1 (no budgets) |
+| `cached-routing-follows-an-edit-test` | 2 (the routing reused after Decimate was added; no budget) |
+| `decimate-put-in-a-calibration-chain-moves-the-warning-test` | 2 (still p1; still warned with both) |
+| `chain-budget-reads-the-params-test` | its namespace couldn't compile (no `points/chain-budget`); against a stub that returns nil, 9 failures |
+| `decimated-laser-meters-what-it-draws-test` (UI) | 1 error: timed out waiting for "67%" |
+
+- The "can't be read" laser in `outputs-carry-each-lasers-decimate-budget-test` came with the code. It was seen red by taking out `decimate-budget`'s `try`: 1 error (`IllegalArgumentException: Don't know how to create ISeq from: java.lang.Long`), because the whole routing threw.
+- Passing before the change, by design, as checks of what mustn't change:
+  - the new check in `fit-guard-runs-before-projector-effects-test`;
+  - the "without Decimate" and "lit frame" parts of `dark-frames-leave-the-meter-as-it-was-test`, and "the meter as it was" in `recount-counts-what-is-drawn-test`;
+  - "a cue's chain isn't one" in `cached-routing-is-reused-while-inputs-are-identical-test`;
+  - the compose test's "without Decimate", its disabled Decimate and the 900-point cue's first check;
+  - the laser without Decimate in `status-load-counts-what-decimate-left-test`.
+
+### Verification
+
+| Where | Unit suite (`clj -M:mac-arm:test`) | UI suite (`clj -M:test-ui:mac-arm:test-ui-headless`) |
+|---|---|---|
+| `d6fbb15` (the base's code: `cc9e000` and `6484e62` only add plans), §6's run | 1,447 tests, 541,789 assertions, 0 failures | 195 tests, 884 assertions, 0 failures |
+| **`16a3e10`, the branch's last code** | **1,453 tests, 541,840 assertions, 0 failures, 0 errors** | **196 tests, 888 assertions, 0 failures, 0 errors** |
+| the trial merge with `master` `4c5fcc8` (tree `d21ee47`, made before this note; its conflict resolved as below) | 1,528 tests, 542,907 assertions, 0 failures, 0 errors | 212 tests, 1,019 assertions, 0 failures, 0 errors |
+
+`master` itself, the same tree as 06's trial merge, has 1,522 tests and 542,856 assertions, and 211 UI tests and 1,015 assertions (06's numbers, not run again). This branch adds 6 unit tests (51 assertions) and 1 UI test (4 assertions) both on its own and on the merge.
+
+- **Targeted runs while working:**
+  - the 8 unit namespaces above after the code: 168 tests, 80,159 assertions, 0 failures;
+  - step 1 alone: `fit-guard-test`, `multi-engine-test`, `output-lifecycle-test`, `load-warning-test`, `subs-test` and `streaming-engine-test`, 134 tests, 8,613 assertions, 0 failures;
+  - UI: `rig-card-test` (6 tests, 25 assertions), then `cue-load-test`, `rig-strip-test`, `toolbar-test`, `setup-dialogs-test` and `streaming-status-test` (50 tests, 167 assertions), 0 failures.
+- `streaming-engine-test/new-tick-goes-out-without-the-minimum-gap-test` passed in every full run.
+- clj-kondo reports nothing new on the touched files. Its two warnings (`rig_test.clj:121`, `load_warning_test.clj:7`) and the redundant coercions it notes (`rig.clj` `known-ref?`, `points.clj` `decimate`) were there before.
+- No test wrote under the home folder: `~/LaserShowProjects` doesn't exist.
+
+**Not done: the check on a real projector.** At 25 kpps, a 3,000-point cue on a laser with Decimate last in its calibration chain: the card reads 67%, green, about 30 fps, "−72% pts", and the cue's cell shows no ⚠ for that laser. The same cue on a second laser without Decimate: 240%, red, LOW FPS, and the ⚠ names that laser.
+
+### For the merge
+
+`git merge-tree --write-tree master decimate-b` (`master` at `4c5fcc8`, base `cc9e000`) writes no branch and no worktree. **One file conflicts: `src/laser_show/routing/rig.clj`, in two places.** Z4 rewrapped two docstrings that this branch also edits:
+
+1. **`routing-inputs`' docstring.** Keep `master`'s and add `:projector-effects (the lasers' calibration chains, for their Decimate budgets)` to its list.
+2. **`routing`'s docstring and argument vector.** Keep `master`'s docstring, add `:decimate-budget` to the `:outputs` shape, and add before "Pure." the sentence on it: ":decimate-budget, only while its calibration chain has an enabled Decimate: that Decimate's budget (points/chain-budget), the most points the cue warnings count a cue at on it (zones plan 12, Q-D-2 B)". The argument vector is `[{:keys [rig projectors zone-groups zone-maps projector-effects] map-id :map}]`.
+
+Everything else in `rig.clj` merges on its own: the `ns` form, `routing-keys`, `routing-inputs`' map, `decimate-budget`, and `routing`'s body, where Z4's `zone-map`, `:lanes` and `:overrides` sit beside this branch's `:outputs`. The trial merge's tree was unpacked with `git archive` into a temporary folder, the two places resolved that way, and both suites run there (above).
+
+- Merged cleanly: `subs.clj` (this branch's docstring is at `projector-load`, away from Z4's subs), `10-questions.md`, `multi_engine_test.clj`, `compose_test.clj`, `rig_test.clj` and `show_clock_test.clj`. `compose.clj` hasn't changed on `master`, and `show_clock.clj` hasn't changed on this branch.
+- Files this branch touches:
+  - `src/laser_show/animation/fit_guard.clj`: `recount` and `smooth`;
+  - `src/laser_show/backend/output_runtime.clj`: `load-of` and `status`' docstring;
+  - `src/laser_show/views/components/load_warning.clj`: NEW private `metered`, `load-percent` and `meter-tooltip`;
+  - `src/laser_show/subs.clj`: `projector-load`'s docstring;
+  - `src/laser_show/animation/effects/points.clj`: the `ns` form (docstring and a `require`) and NEW `chain-budget`;
+  - `src/laser_show/routing/rig.clj`: a `require`, `routing-keys`, `routing-inputs`, NEW private `decimate-budget`, `routing`;
+  - `src/laser_show/routing/compose.clj`: `cue-warnings`;
+  - tests:
+    - `fit_guard_test.clj`: `recount-counts-what-is-drawn-test`, and one test after it;
+    - `multi_engine_test.clj`: `fit-guard-runs-before-projector-effects-test` and `decimate-in-a-calibration-chain-counts-on-the-card-test`, both outside Z4's `:332-372`;
+    - `output_lifecycle_test.clj`: three `require`s, and one test after `status-carries-each-lasers-load-test`;
+    - `load_warning_test.clj`: `load-meter-test`;
+    - `points_test.clj`: its `require` takes `:as points`, and one test at the end;
+    - `rig_test.clj`: a `decimate` helper and one test after `outputs-carry-scan-rate-fit-and-region-fits-test`, and the two `cached-routing-*` tests;
+    - `compose_test.clj`: one test at the end;
+    - `show_clock_test.clj`: a `decimate` def and one test after `edited-cue-names-its-heaviest-item-test`;
+    - `ui_test/rig_card_test.clj`: one test after `thinned-laser-shows-its-cut-test`;
+  - this doc: the status line and this section.
+
+### Found on the way
+
+- **The meter when Decimate leaves the count as it is.** When the projector effects don't change the count, nothing is recounted, and the meter shows what the laser is asked for, as without Decimate. That happens in two cases:
+  - the guard has already taken the frame under Decimate's budget, which needs Decimate's target under the laser's minimum. At 25 kpps with a minimum of 20 and Decimate at 15 fps (1,666 points), a 2,700-point circle reads 216% (the guard leaves 1,620), and a 2,800-point one reads 133% (Decimate leaves 1,666). A heavier cue reads lower;
+  - only anchors are left after the guard (text, dots). Then the meter is what the laser was asked for while the laser draws the guard's count, as without Decimate.
+
+  Asked below (Q-D-3).
+- **The note's cut blinks during a Strobe,** with or without Decimate. S-14 keeps a dark frame's own `:reduced-pct` (0), so the status shows "−72% pts" or nothing, depending on which frame it catches. This comes from reading the code; it wasn't seen in the UI, and it isn't changed here.
+- **The ⚠'s advice can miss when Decimate sets the count.** With Decimate at its 25 kpps on a 12 kpps laser, the laser draws 833 points at about 14 fps, so the cue warns: "⚠ ~830 points: about 14 fps on Laser C (12 kpps). Most points: Circle (2,000). Simplify it, or lower Laser C's minimum." Simplifying the cue helps only at 600 points or fewer; setting Decimate's scan rate to the laser's 12 kpps clears it (400 points, 30 fps). And the item's 2,000 is more than the warning's 830. Asked below (Q-D-4).
+
+### Questions for the user
+
+**Q-D-3 · The meter when Decimate in a laser's chain leaves the count as it is** (the guard got under Decimate's budget first, or only anchors are left).
+- **A ★ (built)** What the laser is asked for, as without Decimate (Q-Z3-4 A). Simple, but a heavier cue can read lower: 2,700 points read 216% and 2,800 read 133% with Decimate at 15 fps under a 20 fps minimum.
+- **B** What the laser draws, whenever its chain has an enabled Decimate: the routing knows (`:decimate-budget`), so the meter would always be the count that reaches the safety stage.
+
+**Q-D-4 · The ⚠'s advice when the laser's Decimate sets the count.**
+- **A ★ (built)** As for any cue: "Simplify it, or lower Laser C's minimum."
+- **B** Name Decimate: "Laser C's Decimate keeps ~830 points: set its scan rate to Laser C's 12 kpps, or lower Laser C's minimum."
