@@ -449,6 +449,19 @@
       (log/warn "Dev reload" kind "is unavailable (needs the :dev alias / tools.namespace):"
                 (.getMessage t)))))
 
+(defn- effect-dev-deliver
+  "Effect that delivers events/flush!'s promise: every event queued before
+   its :dev/flush has been handled."
+  [p _dispatch]
+  (deliver p true))
+
+(defn- effect-dev-swap-state
+  "Effect that does events/write-state!'s write, (apply state/swap-state! f
+   args), on the event thread in this turn.
+   Args: {:f :args}"
+  [{:keys [f args]} _dispatch]
+  (apply state/swap-state! f args))
+
 ;; File Chooser Effect
 
 (defn- get-primary-stage
@@ -664,6 +677,9 @@
      (Desktop, then xdg-open on Linux); :on-failed with its :path comes back
      when neither can (later, future)
    - :dev/reload - reload :styles or :app code (dev only)
+   - :dev/deliver - deliver events/flush!'s promise (:dev/flush)
+   - :dev/swap-state - events/write-state!'s write: (apply swap-state! f
+     args) on the event thread, after this turn's :state (:dev/write-state)
    - :clipboard/write - put a clip's EDN on the OS clipboard (FX thread, no
      follow-up)
    - :clipboard/read - read the OS clipboard, then dispatch :then with
@@ -694,6 +710,9 @@
    :system/open-url effect-system-open-url
    :system/open-folder effect-system-open-folder
    :dev/reload effect-dev-reload
+   ;; Tooling: events/flush! and events/write-state!
+   :dev/deliver effect-dev-deliver
+   :dev/swap-state effect-dev-swap-state
    ;; The OS clipboard
    :clipboard/write effect-clipboard-write
    :clipboard/read effect-clipboard-read
@@ -781,3 +800,35 @@
       (when-not (= :drag (:interaction/type event))
         (log/debug "dispatch! using FALLBACK for event:" (:event/type event)))
       (event-handler event))))
+
+(defn flush!
+  "Wait until every event queued before this call has been handled: true,
+   or false when that took longer than timeout-ms (default 2000). It queues
+   :dev/flush with a promise, which the event delivers when it runs. On the
+   event thread or the FX thread it returns false at once: the event thread
+   is busy with the event in flight, and the FX thread may be what that
+   event waits for. Without an app the fallback is synchronous, so true at
+   once. For tests and the REPL: (dispatch! event), then (flush!)."
+  ([] (flush! 2000))
+  ([timeout-ms]
+   (if (or (on-event-thread?) (Platform/isFxApplicationThread))
+     false
+     (let [p (promise)]
+       (dispatch! {:event/type :dev/flush :promise p})
+       (deref p timeout-ms false)))))
+
+(defn write-state!
+  "(apply state/swap-state! f args) on the event thread, as the next event,
+   then wait for it with flush!: for tests and the REPL, where a direct
+   write while an event is in flight would be lost to its write-back. Like a
+   direct write it adds no undo step, leaves the unsaved flag, the output
+   sync and the rig file alone (:dev/write-state returns no :state, so no
+   middleware sees it). Without an app it writes at once. Throws ex-info
+   when the write wasn't handled within flush!'s timeout (or this is the
+   event or FX thread, where flush! can't wait)."
+  [f & args]
+  (dispatch! {:event/type :dev/write-state :f f :args args})
+  (when-not (flush!)
+    (throw (ex-info "events/write-state!: the write was queued, but not handled within 2000 ms (or this is the event or FX thread)"
+                    {:thread (.getName (Thread/currentThread))})))
+  nil)

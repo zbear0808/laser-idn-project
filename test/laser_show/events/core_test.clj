@@ -17,7 +17,8 @@
    [laser-show.output.jar-builder :as jar]
    [laser-show.output.recording-driver :as rd]
    [laser-show.state.core :as state]
-   [laser-show.state.domains :as domains])
+   [laser-show.state.domains :as domains]
+   [laser-show.state.rig-store :as rig-store])
   (:import [java.io File]
            [java.util.concurrent CountDownLatch TimeUnit]))
 
@@ -51,7 +52,7 @@
                :input/await-learn :multi-engine/start :multi-engine/stop :multi-engine/refresh
                :output/write-status
                :project/save :project/load :fx/show-file-chooser :system/exit :system/open-url
-               :dev/reload :clipboard/write :clipboard/read
+               :dev/reload :dev/deliver :dev/swap-state :clipboard/write :clipboard/read
                :projectors/scan :addons/install :system/open-folder]))
   (is (not-any? #(contains? events/effects %) [:clipboard/copy-effects :clipboard/paste-effects])
       "no effect copies or pastes behind the clipboard's handlers (keyboard plan Step 4a)")
@@ -135,6 +136,67 @@
       (events/set-exit-fn! #(swap! exits inc))
       (events/dispatch! {:event/type :file/exit})
       (is (= 1 @exits)))))
+
+
+;; Waiting for the queue, and writing on the event thread (tests, the REPL)
+
+
+(defn- on-event-thread
+  "(f) run on events/event-executor: its value, or ::timeout after 5 s."
+  [f]
+  (try
+    (.get (.submit events/event-executor ^Callable f) 5 TimeUnit/SECONDS)
+    (catch java.util.concurrent.TimeoutException _ ::timeout)))
+
+(deftest flush-test
+  (testing "without an app: true at once (the synchronous fallback)"
+    (is (true? (events/flush!)))
+    (is (true? (events/flush! 0))))
+  (testing "on the event thread: false at once, as the event in flight is this one"
+    (let [[result ms on-thread?] (on-event-thread #(let [t0 (System/currentTimeMillis)
+                                                         result (events/flush!)]
+                                                     [result (- (System/currentTimeMillis) t0)
+                                                      (events/on-event-thread?)]))]
+      (is on-thread?)
+      (is (false? result))
+      (is (< ms 1000) (str ms " ms"))))
+  (is (not (events/on-event-thread?)) "the test thread isn't the event thread"))
+
+(deftest write-state-test
+  (let [path [:chains :cue-chains [0 0] :name]
+        before (state/get-raw-state)
+        submitted (atom [])]
+    (with-redefs [output-runtime/submit-sync! (fn [& args] (swap! submitted conj [:sync args]))
+                  output-runtime/submit-stop! (fn [& args] (swap! submitted conj [:stop args]))
+                  rig-store/submit! (fn [& args] (swap! submitted conj [:rig args]))]
+      (is (nil? (events/write-state! assoc-in path "Written")))
+      (is (= "Written" (get-in (state/get-raw-state) path)) "without an app, written at once")
+      (testing "a write the output sync and the rig autosave would act on, through :state"
+        (events/write-state! assoc-in [:backend :streaming :running?] true)
+        (events/write-state! update :projectors assoc :p1 {:name "Out 1" :host "10.0.0.5" :service-id 1
+                                                           :enabled? true :zone-groups [:all]})
+        (is (= "Out 1" (get-in (state/get-raw-state) [:projectors :p1 :name])))))
+    (is (= (:history before) (:history (state/get-raw-state))) "no undo step")
+    (is (false? (get-in (state/get-raw-state) [:project :dirty?])) "the unsaved flag untouched")
+    (is (= [] @submitted) "nothing reaches the output runtime or the rig writer")))
+
+(deftest dev-events-are-routed-test
+  (log-test/with-log
+    (let [p (promise)]
+      (is (= {:dev/deliver p} (handlers/handle-event {:event/type :dev/flush :promise p :state {}})))
+      (is (= {:dev/swap-state {:f assoc-in :args [[:ui :probe] 1]}}
+             (handlers/handle-event {:event/type :dev/write-state :f assoc-in :args [[:ui :probe] 1]
+                                     :state {}})))
+      (testing "through the whole pipeline: no :state, so no middleware adds anything"
+        (is (= {:dev/deliver p} (events/handle-event-pipeline {:event/type :dev/flush :promise p
+                                                               :state (state/get-raw-state) :time 0}))))
+      (testing "and their effects"
+        (events/event-handler {:event/type :dev/flush :promise p})
+        (is (true? (deref p 0 ::not-delivered)))
+        (events/event-handler {:event/type :dev/write-state :f assoc-in :args [[:ui :probe] 1]})
+        (is (= 1 (get-in (state/get-raw-state) [:ui :probe])))))
+    (is (not-any? #(str/includes? (str (:message %)) "Unknown event domain") (log-test/the-log)))
+    (is (not-any? #(= :error (:level %)) (log-test/the-log)))))
 
 
 ;; Lost-update detector (dev mode)

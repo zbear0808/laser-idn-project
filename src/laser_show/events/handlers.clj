@@ -25,7 +25,8 @@
    [laser-show.events.handlers.vibes :as vibes]
    [laser-show.events.handlers.timeline :as timeline]
    [laser-show.events.handlers.history :as history]
-   [laser-show.events.handlers.addons :as addons]))
+   [laser-show.events.handlers.addons :as addons]
+   [laser-show.events.handlers.dev :as dev]))
 
 (defn handle-event
   "Main event dispatcher - PURE FUNCTION.
@@ -78,6 +79,7 @@
       "timeline-cue-editor" (timeline/handle event)  ; Timeline open with initialization
       "history" (history/handle event)
       "addons" (addons/handle event)  ; Output drivers and add-ons
+      "dev" (dev/handle event)  ; Tooling: events/flush!, events/write-state!
       ;; Unknown domain
       (do
         (log/error "Unknown event domain:" domain "type:" type)
