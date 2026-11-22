@@ -5,8 +5,7 @@
    selection, drag-drop, and rename operations."
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.events.handlers.list :as list-handlers]
-            [laser-show.state.clipboard :as clipboard]
-            [laser-show.state.core :as app-state]))
+            [laser-show.state.clipboard :as clipboard]))
 
 
 ;; Selection Tests
@@ -424,46 +423,127 @@
         (is (= [id-b id-a] (mapv :id new-items)))))))
 
 (deftest timeline-track-copy-uses-own-clipboard-type-test
-  (let [calls (atom [])
-        state {:chains {:cue-chains {[0 0] {:tracks [{:id :t1 :type :track :name "T1"}]}}}
-               :list-ui {:timeline-tracks {:selected-ids #{:t1}}}}]
-    (with-redefs [clipboard/copy-timeline-tracks!
-                  (fn [items] (swap! calls conj [:timeline-tracks items]) true)
-                  clipboard/copy-cue-chain-items!
-                  (fn [items] (swap! calls conj [:cue-chain-items items]) true)]
-      (list-handlers/handle {:event/type :list/copy-selected
-                             :component-id :timeline-tracks
-                             :items-path [:chains :cue-chains [0 0] :tracks]
-                             :clipboard-type :timeline-tracks
-                             :state state}))
-    (is (= [:timeline-tracks] (mapv first @calls)))
-    (is (= "T1" (:name (first (second (first @calls))))))))
+  (let [state {:chains {:cue-chains {[0 0] {:tracks [{:id :t1 :type :track :name "T1"}]}}}
+               :list-ui {:timeline-tracks {:selected-ids #{:t1}}}}
+        result (list-handlers/handle {:event/type :list/copy-selected
+                                      :component-id :timeline-tracks
+                                      :items-path [:chains :cue-chains [0 0] :tracks]
+                                      :clipboard-type :timeline-tracks
+                                      :state state})]
+    (is (= :timeline-tracks (get-in result [:state :ui :clipboard :type])))
+    (is (= "T1" (:name (first (get-in result [:state :ui :clipboard :items])))))))
 
 
 ;; Paste into a list of effects (a projector's calibration chain)
 
 
 (deftest paste-effects-into-an-item-effects-list-test
-  (app-state/init-state! {:ui {:clipboard nil}})
-  (with-redefs [clipboard/copy-to-system-clipboard! (fn [_] nil)
-                clipboard/read-from-system-clipboard (fn [] nil)]
-    (let [state {:chains {:projector-effects {:p1 {:items [{:id #uuid "00000000-0000-0000-0000-000000000001"
-                                                           :effect-id :rgb-curves :enabled? true :params {}}]}}}
-                 :list-ui {}}
-          paste (fn [] (list-handlers/handle {:event/type :list/paste-items
-                                              :component-id [:projector-effects :p1]
-                                              :items-path [:chains :projector-effects :p1 :items]
-                                              :on-change-event :chain/set-items
-                                              :on-change-params {:domain :projector-effects :entity-key :p1}
-                                              :clipboard-type :item-effects
-                                              :state state}))]
-      (testing "effects copied as a chain paste, as the Paste button promises"
-        (clipboard/copy-effect-chain! {:effects [{:effect-id :axis-transform :enabled? true :params {}}]})
-        (is (= [:rgb-curves :axis-transform] (mapv :effect-id (:items (:dispatch (paste)))))))
-      (testing "effects copied from another list of effects paste too"
-        (clipboard/copy-item-effects! [{:effect-id :corner-pin :enabled? true :params {}}])
-        (is (= [:rgb-curves :corner-pin] (mapv :effect-id (:items (:dispatch (paste)))))))
-      (testing "a cue's presets never land in a list of effects"
-        (clipboard/copy-cue-chain-items! [{:type :preset :preset-id :circle :id #uuid "00000000-0000-0000-0000-000000000002"}])
-        (is (nil? (:dispatch (paste))))))))
+  (let [state {:chains {:projector-effects {:p1 {:items [{:id #uuid "00000000-0000-0000-0000-000000000001"
+                                                         :effect-id :rgb-curves :enabled? true :params {}}]}}}
+               :list-ui {}}
+        paste (fn [clip] (list-handlers/handle {:event/type :list/paste-items
+                                                :component-id [:projector-effects :p1]
+                                                :items-path [:chains :projector-effects :p1 :items]
+                                                :on-change-event :chain/set-items
+                                                :on-change-params {:domain :projector-effects :entity-key :p1}
+                                                :clipboard-type :item-effects
+                                                :state (assoc-in state [:ui :clipboard] clip)}))]
+    (testing "effects copied as a chain paste, as the Paste button promises"
+      (is (= [:rgb-curves :axis-transform]
+             (mapv :effect-id (:items (:dispatch (paste {:type :effect-chain :copied-at 1
+                                                         :effects [{:effect-id :axis-transform :enabled? true :params {}}]})))))))
+    (testing "effects copied from another list of effects paste too"
+      (is (= [:rgb-curves :corner-pin]
+             (mapv :effect-id (:items (:dispatch (paste (clipboard/list-clip :item-effects [{:effect-id :corner-pin :enabled? true :params {}}] 1))))))))
+    (testing "a cue's presets never land in a list of effects"
+      (is (nil? (:dispatch (paste (clipboard/list-clip :cue-chain-items [{:type :preset :preset-id :circle :id #uuid "00000000-0000-0000-0000-000000000002"}] 1))))))))
 
+
+;; Copy and paste through the one clipboard (keyboard plan Phase 4, Step 4a)
+
+
+(def ^:private id-a #uuid "00000000-0000-0000-0000-0000000000aa")
+(def ^:private id-b #uuid "00000000-0000-0000-0000-0000000000bb")
+
+(defn- cue-state
+  "Cue [0 0] holding a circle (A) and a square (B), A selected; the slot
+   holds clip."
+  [clip]
+  {:chains {:cue-chains {[0 0] {:items [{:id id-a :type :preset :preset-id :circle :effects []}
+                                        {:id id-b :type :preset :preset-id :square :effects []}]}}}
+   :list-ui {[:cue-chain 0 0] {:selected-ids #{id-a} :last-selected-id id-a}}
+   :ui {:clipboard clip}})
+
+(defn- copy-event [state]
+  {:event/type :list/copy-selected :component-id [:cue-chain 0 0]
+   :items-path [:chains :cue-chains [0 0] :items] :clipboard-type :cue-chain-items
+   :state state :time 1763650000000})
+
+(defn- paste-event [state & {:as more}]
+  (merge {:event/type :list/paste-items :component-id [:cue-chain 0 0]
+          :items-path [:chains :cue-chains [0 0] :items]
+          :on-change-event :chain/set-items
+          :on-change-params {:domain :cue-chains :entity-key [0 0]}
+          :clipboard-type :cue-chain-items
+          :state state :time 1763650000001 :fx/event :an-action-event}
+         more))
+
+(def ^:private triangle-clip
+  {:type :cue-chain-items :copied-at 5
+   :items [{:id #uuid "00000000-0000-0000-0000-0000000000cc" :type :preset :preset-id :triangle :effects []}]})
+
+(defn- pasted-presets [result] (mapv :preset-id (get-in result [:dispatch :items])))
+
+(deftest copy-selected-writes-the-slot-and-asks-for-an-os-write-test
+  (let [result (list-handlers/handle (copy-event (cue-state nil)))
+        clip (get-in result [:state :ui :clipboard])]
+    (is (= :cue-chain-items (:type clip)))
+    (is (= [:circle] (mapv :preset-id (:items clip))))
+    (is (not= id-a (:id (first (:items clip)))) "a copy, with its own id")
+    (is (= 1763650000000 (:copied-at clip)) ":copied-at is the event's :time")
+    (is (= clip (:clipboard/write result)) "the OS clipboard gets the same clip")
+    (is (= #{:state :clipboard/write} (set (keys result))))))
+
+(deftest copy-selected-with-nothing-selected-does-nothing-test
+  (let [state (assoc-in (cue-state triangle-clip) [:list-ui [:cue-chain 0 0] :selected-ids] #{})
+        result (list-handlers/handle (copy-event state))]
+    (is (= {:state state} result) "no clip, no OS write: the slot keeps what it had")))
+
+(deftest paste-with-a-clip-reads-only-the-slot-test
+  (let [result (list-handlers/handle (paste-event (cue-state triangle-clip)))]
+    (is (not (contains? result :clipboard/read)))
+    (is (= [:circle :triangle :square] (pasted-presets result)) "after the selection")
+    (is (= "Paste Item(s)" (get-in result [:dispatch :history/description])))))
+
+(deftest paste-with-an-empty-slot-asks-for-the-system-clipboard-test
+  (let [event (paste-event (cue-state nil))
+        result (list-handlers/handle event)
+        then (get-in result [:clipboard/read :then])]
+    (is (= #{:clipboard/read} (set (keys result))) "nothing else: no state, no paste yet")
+    (is (= (dissoc event :state :time :fx/event) then) "the paste, without its co-effects")
+    (is (not-any? #(contains? then %) [:state :time :fx/event]))))
+
+(deftest paste-after-the-read-adopts-and-pastes-test
+  (let [result (list-handlers/handle (paste-event (cue-state nil) :clipboard/system triangle-clip))]
+    (is (= triangle-clip (get-in result [:state :ui :clipboard])) "the slot takes the read clip")
+    (is (= [:circle :triangle :square] (pasted-presets result)))
+    (is (not (contains? result :clipboard/read)) "one read, never two")))
+
+(deftest paste-after-a-read-that-found-nothing-says-so-test
+  (doseq [found [nil {:type :effects-cell :data {:items []} :copied-at 1}]]
+    (let [result (list-handlers/handle (paste-event (cue-state nil) :clipboard/system found))]
+      (is (nil? (:dispatch result)) "nothing pasted")
+      (is (= "Nothing to paste here" (get-in result [:state :ui :notice :text])))
+      (is (= :ui/clear-notice (get-in result [:dispatch-later :event :event/type])))
+      (is (= found (get-in result [:state :ui :clipboard])) "a clip read is kept, even one this list doesn't take"))))
+
+(deftest paste-keeps-a-clip-copied-during-the-read-test
+  (let [mine {:type :cue-chain-items :copied-at 9
+              :items [{:id #uuid "00000000-0000-0000-0000-0000000000dd" :type :preset :preset-id :star :effects []}]}
+        result (list-handlers/handle (paste-event (cue-state mine) :clipboard/system triangle-clip))]
+    (is (= mine (get-in result [:state :ui :clipboard])) "the copy made meanwhile wins")
+    (is (= [:circle :star :square] (pasted-presets result)))))
+
+(deftest paste-of-a-clip-this-list-does-not-take-does-nothing-test
+  (let [state (cue-state {:type :item-effects :copied-at 1 :effects [{:effect-id :scale :params {}}]})]
+    (is (= {:state state} (list-handlers/handle (paste-event state))) "no read, no notice, no paste")))

@@ -11,6 +11,7 @@
   (:require [clojure.tools.logging :as log]
             [laser-show.animation.chains :as chains]
             [laser-show.events.handlers.list.helpers :as helpers]
+            [laser-show.events.helpers :as h]
             [laser-show.state.extractors :as ex]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.state.migration :as migration]))
@@ -233,55 +234,55 @@
 
 
 (defn- handle-copy-selected
-  "Copy selected items to clipboard."
-  [{:keys [component-id items-path clipboard-type state]}]
+  "Copy the selected items: a clip (clipboard/list-clip, of the event's
+   :clipboard-type, cue items by default) in [:ui :clipboard], copied at the
+   event's :time, and on the OS clipboard (:clipboard/write)."
+  [{:keys [component-id items-path clipboard-type state] :as event}]
   (let [items (get-in state items-path [])
-        selected-ids (get-in state [:list-ui component-id :selected-ids] #{})]
-    (if (seq selected-ids)
-      (let [normalized-ids (helpers/normalize-selected-ids selected-ids items)
-            selected-items (helpers/collect-by-ids items normalized-ids)
-            copied-items (chains/deep-copy-items selected-items)]
-        (case clipboard-type
-          :item-effects (clipboard/copy-item-effects! copied-items)
-          :timeline-tracks (clipboard/copy-timeline-tracks! copied-items)
-          (clipboard/copy-cue-chain-items! copied-items))
-        {:state state})
+        selected-ids (get-in state [:list-ui component-id :selected-ids] #{})
+        clip (when (seq selected-ids)
+               (let [normalized-ids (helpers/normalize-selected-ids selected-ids items)
+                     selected-items (helpers/collect-by-ids items normalized-ids)]
+                 (clipboard/list-clip (or clipboard-type :cue-chain-items)
+                                      (chains/deep-copy-items selected-items)
+                                      (h/current-time-ms event))))]
+    (if clip
+      {:state (assoc-in state [:ui :clipboard] clip)
+       :clipboard/write clip}
       {:state state})))
 
 
 (defn- handle-paste-items
-  "Paste items from clipboard after selected item (or at end). A list of
-   effects (:clipboard-type :item-effects, a projector's chain) pastes
-   whatever clipboard/get-effects-to-paste returns, the same test that turns
-   its Paste button on, so a cue's presets never land in it."
-  [{:keys [component-id items-path on-change-event on-change-params clipboard-type state]}]
-  (let [clip (clipboard/get-clipboard)
-        expected-type (or clipboard-type :cue-chain-items)
-        clipboard-items (if (= expected-type :item-effects)
-                          (clipboard/get-effects-to-paste)
-                          (when (= (:type clip) expected-type)
-                            (:items clip)))]
-    (if (seq clipboard-items)
-      (let [items (get-in state items-path [])
-            last-selected-id (get-in state [:list-ui component-id :last-selected-id])
-            items-to-paste (cond-> (chains/deep-copy-items clipboard-items)
-                             ;; presets and groups from an older build route as there
-                             (= expected-type :cue-chain-items) migration/items-z4)
-            new-items (if last-selected-id
-                        (helpers/insert-after-id items last-selected-id items-to-paste)
-                        (into (vec items) items-to-paste))
-            pasted-ids (set (map :id items-to-paste))
-            last-pasted-id (:id (last items-to-paste))
-            new-state (assoc-in state [:list-ui component-id]
-                                {:selected-ids pasted-ids
-                                 :last-selected-id last-pasted-id
-                                 :renaming-id nil})]
-        {:state new-state
-         :dispatch (assoc on-change-params
-                          :event/type on-change-event
-                          :items new-items
-                          :history/description "Paste Item(s)")})
-      {:state state})))
+  "Paste the clipboard's items after the selected item (or at the end),
+   through h/with-clipboard: with nothing copied in this app yet, the OS
+   clipboard is read first. A list takes what clipboard/payload gives its
+   :clipboard-type (cue items by default); a list of effects (:item-effects,
+   a projector's chain) takes effects, so a cue's presets never land in it."
+  [{:keys [component-id items-path on-change-event on-change-params clipboard-type] :as event}]
+  (let [expected-type (or clipboard-type :cue-chain-items)]
+    (h/with-clipboard
+     event
+     (fn [state clip]
+       (when-let [clipboard-items (not-empty (clipboard/payload clip expected-type))]
+         (let [items (get-in state items-path [])
+               last-selected-id (get-in state [:list-ui component-id :last-selected-id])
+               items-to-paste (cond-> (chains/deep-copy-items clipboard-items)
+                                ;; presets and groups from an older build route as there
+                                (= expected-type :cue-chain-items) migration/items-z4)
+               new-items (if last-selected-id
+                           (helpers/insert-after-id items last-selected-id items-to-paste)
+                           (into (vec items) items-to-paste))
+               pasted-ids (set (map :id items-to-paste))
+               last-pasted-id (:id (last items-to-paste))
+               new-state (assoc-in state [:list-ui component-id]
+                                   {:selected-ids pasted-ids
+                                    :last-selected-id last-pasted-id
+                                    :renaming-id nil})]
+           {:state new-state
+            :dispatch (assoc on-change-params
+                             :event/type on-change-event
+                             :items new-items
+                             :history/description "Paste Item(s)")}))))))
 
 
 (defn- handle-group-selected

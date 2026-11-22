@@ -19,7 +19,6 @@
  (:require [clojure.tools.logging :as log]
            [laser-show.events.helpers :as h]
            [laser-show.routing.zone-maps :as zone-maps]
-           [laser-show.state.clipboard :as clipboard]
            [laser-show.vibes.reactions :as reactions]
            [laser-show.vibes.refs :as refs]))
 
@@ -59,18 +58,19 @@
               (refs/remove-fx [col row]))})
 
 (defn- handle-effects-copy-cell
-  "Copy an effects cell to clipboard.
-   Also copies to system clipboard as serialized EDN."
-  [{:keys [col row state]}]
+  "Copy an effects cell to the clipboard, and its EDN to the OS clipboard
+   (:clipboard/write)."
+  [{:keys [col row state] :as event}]
   (h/handle-copy-to-clipboard state
                               [:chains :effect-chains [col row]]
                               :effects-cell
-                              clipboard/copy-effects-cell!))
+                              (h/current-time-ms event)))
 
 (defn- handle-effects-paste-cell
-  "Paste clipboard to an effects cell."
-  [{:keys [col row state]}]
-  (h/handle-paste-from-clipboard state
+  "Paste the clipboard's effects cell (h/with-clipboard: the OS clipboard
+   first while nothing is copied in this app)."
+  [{:keys [col row] :as event}]
+  (h/handle-paste-from-clipboard event
                                  [:chains :effect-chains [col row]]
                                  :effects-cell))
 

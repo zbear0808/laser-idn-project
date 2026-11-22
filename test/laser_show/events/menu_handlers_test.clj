@@ -39,8 +39,10 @@
   (testing "Edit > Copy on grid tab with selected cell copies cue chain"
     (let [event {:event/type :edit/copy
                  :state sample-state-with-cues}
-          result (menu/handle event)]
+          result (menu/handle (assoc event :time 77))]
       (is (= :cue-chain (get-in result [:state :ui :clipboard :type])))
+      (is (= 77 (get-in result [:state :ui :clipboard :copied-at])) "the co-effect's :time")
+      (is (= (get-in result [:state :ui :clipboard]) (:clipboard/write result)))
       (is (= {:items [{:preset-id :circle}]}
              (get-in result [:state :ui :clipboard :data]))))))
 
@@ -48,8 +50,10 @@
   (testing "Edit > Copy on grid tab without selected cell falls back to active playing cue"
     (let [event {:event/type :edit/copy
                  :state sample-state-playing}
-          result (menu/handle event)]
+          result (menu/handle (assoc event :time 77))]
       (is (= :cue-chain (get-in result [:state :ui :clipboard :type])))
+      (is (= 77 (get-in result [:state :ui :clipboard :copied-at])) "the co-effect's :time")
+      (is (= (get-in result [:state :ui :clipboard]) (:clipboard/write result)))
       (is (= {:items [{:preset-id :circle}]}
              (get-in result [:state :ui :clipboard :data]))))))
 
@@ -57,8 +61,10 @@
   (testing "Edit > Copy on effects tab with selected cell copies effects chain"
     (let [event {:event/type :edit/copy
                  :state sample-state-with-effects}
-          result (menu/handle event)]
+          result (menu/handle (assoc event :time 77))]
       (is (= :effects-cell (get-in result [:state :ui :clipboard :type])))
+      (is (= 77 (get-in result [:state :ui :clipboard :copied-at])))
+      (is (= (get-in result [:state :ui :clipboard]) (:clipboard/write result)))
       (is (= {:items [{:effect-id :scale}] :active? true}
              (get-in result [:state :ui :clipboard :data]))))))
 
@@ -73,6 +79,15 @@
           result (menu/handle event)]
       (is (= clipboard-data (get-in result [:state :chains :cue-chains [1 1]])))
       (is (history/derive-dirty (:state event) (:state result))))))
+
+(deftest edit-paste-with-an-empty-slot-asks-for-the-system-clipboard-test
+  (testing "Edit > Paste on the grid tab, nothing copied in this app: the cell's paste waits for the OS clipboard"
+    (let [state (assoc-in sample-state-with-cues [:grid :selected-cell] [1 1])
+          result (menu/handle {:event/type :edit/paste :state state :time 3})]
+      (is (= {:clipboard/read {:then {:event/type :grid/paste-cell :col 1 :row 1}}} result))))
+  (testing "on the effects tab, the effects cell's paste"
+    (let [result (menu/handle {:event/type :edit/paste :state sample-state-with-effects :time 3})]
+      (is (= {:clipboard/read {:then {:event/type :effects/paste-cell :col 0 :row 1}}} result)))))
 
 (deftest handle-edit-clear-cell-grid-test
   (testing "Edit > Clear Cell on grid tab clears selected cell"

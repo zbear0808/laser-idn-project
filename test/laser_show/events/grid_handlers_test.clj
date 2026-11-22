@@ -129,14 +129,23 @@
       (is (nil? (get-in result [:state :chains :cue-chains [0 0]])))
       (is (false? (get-in result [:state :project :dirty?]))))))
 
-(deftest handle-grid-paste-cell-empty-clipboard
-  (testing "Pasting with empty clipboard does nothing"
-    (let [event {:event/type :grid/paste-cell
-                 :col 0
-                 :row 0
-                 :state sample-state-empty}
+(deftest paste-cell-with-an-empty-slot-asks-for-the-system-clipboard-test
+  (testing "With nothing copied in this app, a paste asks the OS clipboard first (D8 A)"
+    (let [event {:event/type :grid/paste-cell :col 0 :row 0
+                 :state sample-state-empty :time 5 :fx/event :an-action-event}
           result (grid/handle event)]
+      (is (= {:clipboard/read {:then {:event/type :grid/paste-cell :col 0 :row 0}}} result))))
+  (testing "the read brings a cue: pasted, and the slot keeps it"
+    (let [clip {:type :cue-chain :data {:items [{:preset-id :circle}]} :copied-at 1}
+          result (grid/handle {:event/type :grid/paste-cell :col 0 :row 0
+                               :state sample-state-empty :clipboard/system clip})]
+      (is (= {:items [{:preset-id :circle}]} (get-in result [:state :chains :cue-chains [0 0]])))
+      (is (= clip (get-in result [:state :ui :clipboard])))))
+  (testing "the read brings nothing: the cell stays empty, and a notice says so"
+    (let [result (grid/handle {:event/type :grid/paste-cell :col 0 :row 0
+                               :state sample-state-empty :clipboard/system nil})]
       (is (nil? (get-in result [:state :chains :cue-chains [0 0]])))
+      (is (= "Nothing to paste here" (get-in result [:state :ui :notice :text])))
       (is (false? (get-in result [:state :project :dirty?]))))))
 
 (deftest handle-grid-paste-cell-overwrite
@@ -190,10 +199,13 @@
                  :col 0
                  :row 0
                  :state sample-state-with-content}
-          result (grid/handle event)]
+          result (grid/handle (assoc event :time 1763650000000))]
       (is (= :cue-chain (get-in result [:state :ui :clipboard :type])))
       (is (= {:items [{:preset-id :circle}]}
-             (get-in result [:state :ui :clipboard :data]))))))
+             (get-in result [:state :ui :clipboard :data])))
+      (is (= 1763650000000 (get-in result [:state :ui :clipboard :copied-at])) "the event's :time")
+      (is (= (get-in result [:state :ui :clipboard]) (:clipboard/write result))
+          "the OS clipboard gets the same clip, through the effect"))))
 
 (deftest handle-grid-clear-cell-test
   (testing "Clearing cell removes cue-chain from state"

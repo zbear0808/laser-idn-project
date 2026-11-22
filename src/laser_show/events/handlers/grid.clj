@@ -6,7 +6,6 @@
    - Cell content management (clear, move)
    - Clipboard operations (copy, paste)"
   (:require [laser-show.events.helpers :as h]
-            [laser-show.state.clipboard :as clipboard]
             [laser-show.state.migration :as migration]
             [laser-show.routing.targets :as targets]
             [laser-show.animation.cue-chains :as cue-chains]
@@ -155,20 +154,21 @@
       {:state state})))
 
 (defn- handle-grid-copy-cell
-  "Copy a cell's cue chain to clipboard.
-   Also copies to system clipboard as serialized EDN."
-  [{:keys [col row state]}]
+  "Copy a cell's cue chain to the clipboard, and its EDN to the OS
+   clipboard (:clipboard/write)."
+  [{:keys [col row state] :as event}]
   (h/handle-copy-to-clipboard state
                               [:chains :cue-chains [col row]]
                               :cue-chain
-                              clipboard/copy-cue-chain!))
+                              (h/current-time-ms event)))
 
 (defn- handle-grid-paste-cell
-  "Paste clipboard cue chain to a cell. A cue copied from an older build is
-   converted as an old show is when it opens (state.migration/cue-z4), so it
-   routes the same."
-  [{:keys [col row state]}]
-  (h/handle-paste-from-clipboard state
+  "Paste the clipboard's cue chain to a cell (h/with-clipboard: the OS
+   clipboard first while nothing is copied in this app). A cue copied from an
+   older build is converted as an old show is when it opens
+   (state.migration/cue-z4), so it routes the same."
+  [{:keys [col row] :as event}]
+  (h/handle-paste-from-clipboard event
                                  [:chains :cue-chains [col row]]
                                  :cue-chain
                                  migration/cue-z4))

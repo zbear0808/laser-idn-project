@@ -8,7 +8,8 @@
    intent, not the engine's status, which lags and can recover."
   (:require [clojure.string :as str]
             [laser-show.animation.safety :as safety]
-            [laser-show.backend.output-runtime :as output-runtime]))
+            [laser-show.backend.output-runtime :as output-runtime]
+            [laser-show.events.helpers :as h]))
 
 (defn outputting?
   "Is projector-id's light going out?"
@@ -31,11 +32,6 @@
       (str/join names)
       (str (str/join ", " (pop names)) " and " (peek names)))))
 
-(defn parked
-  "event as plain data, to continue after a confirm: without its co-effects."
-  [event]
-  (dissoc event :state :time :fx/event))
-
 (defn asking?
   "Is the shared confirm dialog already asking something?"
   [state]
@@ -50,7 +46,7 @@
              :title (or title "Allow light in a larger area?")
              :message message
              :confirm-label (or confirm-label "Allow")
-             :confirm-event (assoc (parked event) :confirmed? true)}))
+             :confirm-event (assoc (h/parked event) :confirmed? true)}))
 
 (defn growing
   "The outputting projectors (in before) whose safety zone after would let

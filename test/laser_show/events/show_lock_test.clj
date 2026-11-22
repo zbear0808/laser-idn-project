@@ -178,6 +178,29 @@
                                                          :contents (persistent/project-files (starter))})))
           "a read that finishes while locked replaces nothing"))))
 
+(deftest locked-paste-asks-nothing-of-the-system-clipboard-test
+  ;; Keyboard plan Phase 4 (Step 4a): with nothing copied in this app, a
+  ;; paste reads the OS clipboard first (:clipboard/read). The lock refuses
+  ;; the paste before its handler runs, so a locked paste reads nothing
+  (let [s0 (-> (starter)
+               (assoc-in [:ui :clipboard] nil)
+               (assoc-in [:ui :active-tab] :grid)
+               (assoc-in [:grid :selected-cell] [5 2])
+               (history/mark-clean))]
+    (doseq [event [{:event/type :grid/paste-cell :col 5 :row 2}
+                   {:event/type :effects/paste-cell :col 5 :row 2}
+                   {:event/type :edit/paste}]]
+      (testing (str (:event/type event))
+        (is (contains? (handle s0 event) :clipboard/read) "unlocked, it asks the OS clipboard")
+        (let [effects (handle (lock s0) event)]
+          (is (= #{:state :dispatch-later} (set (keys effects))) "locked: the lock's notice only, no read")
+          (is (= (lock s0) (without-notices (:state effects)))))))
+    (testing "a paste that resumes after the read, when the lock came on meanwhile, is refused too"
+      (let [effects (handle (lock s0) {:event/type :grid/paste-cell :col 5 :row 2
+                                       :clipboard/system {:type :cue-chain :data {:items []} :copied-at 1}})]
+        (is (= #{:state :dispatch-later} (set (keys effects))))
+        (is (nil? (get-in effects [:state :chains :cue-chains [5 2]])))))))
+
 (deftest locked-allows-performance-events-test
   (let [s0 (starter)
         ;; Stop's restart request has a random id

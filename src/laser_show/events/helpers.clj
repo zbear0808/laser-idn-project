@@ -5,7 +5,8 @@
    consistent behavior and avoid code duplication.
    
    Note: handlers never set [:project :dirty?]. The event pipeline derives it
-   (laser-show.events.handlers.history/wrap-dirty).")
+   (laser-show.events.handlers.history/wrap-dirty)."
+  (:require [laser-show.state.clipboard :as clipboard]))
 
 
 (defn current-time-ms
@@ -46,55 +47,6 @@
 
 
 
-(defn handle-copy-to-clipboard
-  "Generic copy handler that reads data from state and copies to clipboard.
-   
-   Parameters:
-   - state: Application state
-   - source-path: Path to read data from (e.g., [:chains :effect-chains [col row]])
-   - clipboard-type: Keyword for clipboard type (e.g., :effects-cell)
-   - system-clipboard-fn: Function to call for system clipboard (e.g., clipboard/copy-effects-cell!)
-   
-   Returns: {:state updated-state} with internal clipboard set
-   
-   Example:
-   (handle-copy-to-clipboard state
-                             [:chains :effect-chains [0 1]]
-                             :effects-cell
-                             clipboard/copy-effects-cell!)"
-  [state source-path clipboard-type system-clipboard-fn]
-  (let [data (get-in state source-path)
-        clip-data {:type clipboard-type :data data}]
-    ;; Copy to system clipboard (side effect)
-    (when (and system-clipboard-fn data)
-      (system-clipboard-fn data))
-    ;; Return state update for internal clipboard
-    {:state (assoc-in state [:ui :clipboard] clip-data)}))
-
-(defn handle-paste-from-clipboard
-  "Generic paste handler that writes clipboard data to target path.
-   
-   Parameters:
-   - state: Application state
-   - target-path: Path to write data to (e.g., [:chains :effect-chains [col row]])
-   - expected-type: Expected clipboard type keyword (e.g., :effects-cell)
-   - transform-fn: Optional function to transform data before pasting (e.g., regenerate-ids)
-   
-   Returns: {:state updated-state} or {:state state} if clipboard type doesn't match
-   
-   Example:
-   (handle-paste-from-clipboard state
-                                [:chains :effect-chains [0 2]]
-                                :effects-cell
-                                identity)"
-  [state target-path expected-type & [transform-fn]]
-  (let [cb (get-in state [:ui :clipboard])]
-    (if (and cb (= expected-type (:type cb)))
-      (let [data (:data cb)
-            transformed-data (if transform-fn (transform-fn data) data)]
-        {:state (assoc-in state target-path transformed-data)})
-      {:state state})))
-
 (defn first-some
   "Return the first argument that is not nil. Unlike `or`, keeps `false`
    (e.g. an unchecked checkbox's :fx/event)."
@@ -121,3 +73,60 @@
     {:state (assoc-in state [:ui :notice] {:id id :text text :level level})
      :dispatch-later {:event {:event/type :ui/clear-notice :id id}
                       :delay-ms notice-ms}}))
+
+
+(defn parked
+  "event as plain data, to continue later (after a confirm, or the OS
+   clipboard's read): without its co-effects."
+  [event]
+  (dissoc event :state :time :fx/event))
+
+
+;; The clipboard (keyboard plan Phase 4, Step 4a)
+
+(defn with-clipboard
+  "The one place a paste looks at the clipboard: (f state clip), clip being
+   [:ui :clipboard], f's effects, or nil when its target takes nothing from
+   clip. While the slot is empty (nothing copied in this app yet), the paste
+   first asks the OS clipboard: {:clipboard/read {:then event}} (parked), and
+   the read continues with event and :clipboard/system, the clip it found or
+   nil, which the slot takes if it is still empty (clipboard/adopt). A paste
+   after a read that finds nothing to paste says so: \"Nothing to paste
+   here\". Without a read, a clip the target doesn't take does nothing."
+  [{:keys [state] :as event} f]
+  (let [read? (contains? event :clipboard/system)]
+    (if (and (nil? (get-in state [:ui :clipboard])) (not read?))
+      {:clipboard/read {:then (parked event)}}
+      (let [state' (clipboard/adopt state (:clipboard/system event))]
+        (or (f state' (get-in state' [:ui :clipboard]))
+            (if read?
+              (show-notice state' "Nothing to paste here" :info)
+              {:state state'}))))))
+
+(defn handle-copy-to-clipboard
+  "A cell's copy: the cell at source-path as a clip of clipboard-type
+   (clipboard/cell-clip, copied at now) in [:ui :clipboard], and on the OS
+   clipboard (:clipboard/write). An empty cell's clip goes in the slot only.
+
+   Example:
+   (handle-copy-to-clipboard state [:chains :effect-chains [0 1]] :effects-cell 1763650000000)
+   => {:state (assoc-in state [:ui :clipboard] clip) :clipboard/write clip}"
+  [state source-path clipboard-type now]
+  (let [data (get-in state source-path)
+        clip (clipboard/cell-clip clipboard-type data now)]
+    (cond-> {:state (assoc-in state [:ui :clipboard] clip)}
+      (some? data) (assoc :clipboard/write clip))))
+
+(defn handle-paste-from-clipboard
+  "A cell's paste (with-clipboard): a clip of expected-type written to
+   target-path, through transform-fn when given (for example
+   migration/cue-z4); a clip of another type does nothing.
+
+   Example:
+   (handle-paste-from-clipboard event [:chains :effect-chains [0 2]] :effects-cell)"
+  [event target-path expected-type & [transform-fn]]
+  (with-clipboard event
+    (fn [state clip]
+      (when (clipboard/accepts? clip expected-type)
+        (let [data (clipboard/payload clip expected-type)]
+          {:state (assoc-in state target-path (if transform-fn (transform-fn data) data))})))))

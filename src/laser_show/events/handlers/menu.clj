@@ -284,7 +284,7 @@
   "Copy selected cell to clipboard.
    Delegates to grid or effects handler depending on active tab.
    Falls back to active playing cue on grid tab if no cell is explicitly selected."
-  [{:keys [state]}]
+  [{:keys [state time]}]
   (let [active-tab (get-in state [:ui :active-tab])
         selected-cell (case active-tab
                         :grid (or (get-in state [:grid :selected-cell])
@@ -295,8 +295,8 @@
       (let [[col row] selected-cell]
         (log/debug "Edit > Copy: delegating to" active-tab "handler" {:col col :row row})
         (case active-tab
-          :grid (grid/handle {:event/type :grid/copy-cell :col col :row row :state state})
-          :effects (effects/handle {:event/type :effects/copy-cell :col col :row row :state state})
+          :grid (grid/handle {:event/type :grid/copy-cell :col col :row row :state state :time time})
+          :effects (effects/handle {:event/type :effects/copy-cell :col col :row row :state state :time time})
           {:state state}))
       (do
         (log/debug "Edit > Copy: No cell selected")
@@ -304,8 +304,10 @@
 
 (defn- handle-edit-paste
   "Paste clipboard to selected cell.
-   Delegates to grid or effects handler depending on active tab."
-  [{:keys [state]}]
+   Delegates to grid or effects handler depending on active tab; with
+   nothing copied in this app, that cell's paste reads the OS clipboard
+   first and then continues as the cell's own paste."
+  [{:keys [state time]}]
   (let [active-tab (get-in state [:ui :active-tab])
         selected-cell (case active-tab
                         :grid (get-in state [:grid :selected-cell])
@@ -315,8 +317,8 @@
       (let [[col row] selected-cell]
         (log/debug "Edit > Paste: delegating to" active-tab "handler" {:col col :row row})
         (case active-tab
-          :grid (grid/handle {:event/type :grid/paste-cell :col col :row row :state state})
-          :effects (effects/handle {:event/type :effects/paste-cell :col col :row row :state state})
+          :grid (grid/handle {:event/type :grid/paste-cell :col col :row row :state state :time time})
+          :effects (effects/handle {:event/type :effects/paste-cell :col col :row row :state state :time time})
           {:state state}))
       (do
         (log/debug "Edit > Paste: No cell selected")
