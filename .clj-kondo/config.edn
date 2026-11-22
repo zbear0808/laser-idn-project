@@ -7,8 +7,36 @@
   :unresolved-var {:level :error}
   :clojure-lsp/unused-public-var {:exclude #{laser-show.idn.hello
                                              laser-show.idn.stream}
-                                  :exclude-when-defined-by #{laser-show.state.core/defstate}}}
- 
+                                  :exclude-when-defined-by #{laser-show.state.core/defstate}}
+  ;; Only the event pipeline writes app state (docs/CLJFX_STATE_MANAGEMENT.md).
+  ;; The exemptions are in :config-in-ns below.
+  :discouraged-var
+  {laser-show.state.core/swap-state!
+   {:level :error
+    :message "App state is written by the event pipeline: return :state from a handler, or dispatch an event (docs/CLJFX_STATE_MANAGEMENT.md)"}
+   laser-show.state.core/reset-state!
+   {:level :error
+    :message "App state is written by the event pipeline: return :state from a handler, or dispatch an event (docs/CLJFX_STATE_MANAGEMENT.md)"}
+   laser-show.state.core/reset-state-vals!
+   {:level :error
+    :message "App state is written by the event pipeline: return :state from a handler, or dispatch an event (docs/CLJFX_STATE_MANAGEMENT.md)"}
+   laser-show.state.core/assoc-in-state!
+   {:level :error
+    :message "App state is written by the event pipeline: return :state from a handler, or dispatch an event (docs/CLJFX_STATE_MANAGEMENT.md)"}
+   laser-show.state.core/init-state!
+   {:level :error
+    :message "App state is written by the event pipeline: return :state from a handler, or dispatch an event (docs/CLJFX_STATE_MANAGEMENT.md)"}}}
+
+ :ns-groups [{:filename-pattern "(^|/)test/" :name test-code}]
+
+ :config-in-ns
+ {test-code {:linters {:discouraged-var {:level :off}}}
+  laser-show.state.core {:linters {:discouraged-var {:level :off}}}
+  laser-show.events.core {:linters {:discouraged-var {laser-show.state.core/swap-state! {:level :off}
+                                                      laser-show.state.core/reset-state! {:level :off}
+                                                      laser-show.state.core/reset-state-vals! {:level :off}}}}
+  laser-show.app {:linters {:discouraged-var {laser-show.state.core/init-state! {:level :off}}}}}
+
  :hooks
  {:analyze-call
   {laser-show.state.core/defstate hooks.laser-show.state.core/defstate}}}

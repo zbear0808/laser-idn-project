@@ -235,6 +235,7 @@
       (reset! *app app)
       ;; Wire dispatch! to use app's handler (wrapped with async agent)
       (events/set-dispatch-fn! (:handler app))
+      (state/guard-writes! {:allowed? events/on-event-thread? :strict? (dev-config/dev-mode?)})
       (events/set-exit-fn! #(exit!))
       (input-mapper/set-dispatch-fn! events/dispatch!))
 
@@ -310,7 +311,8 @@
    streaming engines (the output runtime is drained), the add-ons' drivers
    (unregistered, their jars closed), input devices, the Carabiner link and
    the rig file (its pending change written, its lock let go). dispatch!
-   falls back to the synchronous handler afterwards.
+   falls back to the synchronous handler afterwards, and the write guard
+   start! or start-test! installed is removed.
 
    It writes nothing to app state. The devices are closed from one read,
    after the events already queued have run (within 1 s; on the event
@@ -335,6 +337,7 @@
     (stop-rig-file!)
     (events/set-exit-fn! nil)
     (events/set-dispatch-fn! nil)
+    (state/guard-writes! nil)
     (when (dev-config/dev-mode?)
       (Platform/setImplicitExit false))
     nil))
@@ -355,6 +358,9 @@
    state is isolated at the cljfx context level, while the normal event
    handler and production root view remain in use. No show clock runs: tests
    tick it by hand (show-clock/tick!), and show time starts from nothing.
+
+   While it runs, a write to app state from any thread but the event thread
+   throws (state/guard-writes!): tests write with events/write-state!.
 
    No rig file is read or written unless the state names one in
    [:rig-file :path] (a test's temp folder): then it is locked, read and
@@ -386,6 +392,7 @@
      (let [app (create-app)]
        (reset! *app app)
        (events/set-dispatch-fn! (:handler app))
+       (state/guard-writes! {:allowed? events/on-event-thread? :strict? true})
        (dispatch-drivers-loaded! loaded-addons)
        (after-rig-loaded! rig)
        app))))

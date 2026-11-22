@@ -3,8 +3,9 @@
    (plans/2026-11-20-state-integrity/02-direct-state-writes.md): every app
    instance's events run on one thread, events/event-thread-name (W3 A),
    tests write app state on it with events/write-state! (W5 A), the Link
-   connection comes in by event, and stop! writes nothing and closes each
-   device once (W4 A)."
+   connection comes in by event, stop! writes nothing and closes each device
+   once (W4 A), and while the app runs a direct write from another thread
+   throws (W2 A)."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.app :as app]
             [laser-show.events.core :as events]
@@ -68,6 +69,17 @@
     (is (= "Written meanwhile" (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :name]))
         "the event's write-back didn't undo it")
     (is (= 128.0 (get-in (state/get-raw-state) [:timing :bpm])) "and the event's own change landed")))
+
+(deftest a-direct-write-while-the-app-runs-throws-test
+  (let [e (try (state/swap-state! assoc-in [:timing :bpm] 99.0)
+               nil
+               (catch clojure.lang.ExceptionInfo e e))]
+    (is (some? e) "the write from the test thread is refused")
+    (is (re-find #"outside the event pipeline" (ex-message e)))
+    (is (= (.getName (Thread/currentThread)) (:thread (ex-data e)))))
+  (is (not= 99.0 (get-in (state/get-raw-state) [:timing :bpm])) "and not written")
+  (events/write-state! assoc-in [:timing :bpm] 99.0)
+  (is (= 99.0 (get-in (state/get-raw-state) [:timing :bpm])) "write-state! writes on the event thread"))
 
 (deftest link-connection-survives-an-event-in-flight-test
   (let [threads (atom {})]

@@ -95,6 +95,34 @@
 ;; Section 3: State Mutation Primitives
 
 
+(defonce ^{:private true
+           :doc "nil, or {:allowed? (fn []) :strict? bool}: set by
+                 guard-writes! while an app runs."}
+  !write-guard
+  (atom nil))
+
+(defn guard-writes!
+  "Installs the write guard, or removes it with nil. While a guard is set,
+   every write fn below first calls its (allowed?). When that is false the
+   write is refused: with :strict? it throws ex-info (with :thread), otherwise
+   it is logged at ERROR with a stack trace and done anyway.
+
+   laser-show.app installs {:allowed? events/on-event-thread?} while an app
+   runs, so only the event pipeline writes app state then."
+  [guard]
+  (reset! !write-guard guard))
+
+(def ^:private refused-message
+  "App state written outside the event pipeline: dispatch an event (tests and the REPL: events/write-state!)")
+
+(defn- check-write! []
+  (when-let [{:keys [allowed? strict?]} @!write-guard]
+    (when-not (allowed?)
+      (let [e (ex-info refused-message {:thread (.getName (Thread/currentThread))})]
+        (if strict?
+          (throw e)
+          (log/error e refused-message))))))
+
 (defn swap-state!
   "Update state using a function, preserving context memoization.
    
@@ -106,6 +134,7 @@
    (swap-state! assoc-in [:timing :bpm] 140.0)
    (swap-state! update-in [:playback :active-cues] dissoc [0 0])"
   [f & args]
+  (check-write!)
   (swap! *context
          (fn [ctx]
            (if ctx
@@ -119,6 +148,7 @@
    Parameters:
    - new-state: The new state map"
   [new-state]
+  (check-write!)
   (swap! *context
          (fn [ctx]
            (if ctx
@@ -129,6 +159,7 @@
   "Like reset-state!, but returns [old-state new-state], with old-state the
    value it replaced."
   [new-state]
+  (check-write!)
   (let [[old-ctx _] (swap-vals! *context
                                 (fn [ctx]
                                   (if ctx
@@ -174,6 +205,7 @@
    This creates a cljfx context wrapping the state with an LRU cache.
    Call this once at application startup before mounting the renderer."
   [initial-state]
+  (check-write!)
   (reset! *context (fx/create-context initial-state cache-factory))
   (log/info "State initialized with" (count initial-state) "top-level keys"))
 
