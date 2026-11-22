@@ -31,7 +31,6 @@
    [clojure.string :as str]
    [clj-font-awesome.core :as fa]
    [cljfx.api :as fx]
-   [clojure.tools.logging :as log]
    [laser-show.animation.chains :as chains]
    [laser-show.common.util :as u]
    [laser-show.events.core :as events]
@@ -39,7 +38,8 @@
    [laser-show.state.core :as state]
    [laser-show.subs :as subs]
    [laser-show.views.components.list-dnd :as dnd]
-   [laser-show.views.components.shortcuts :as shortcuts])
+   [laser-show.views.components.shortcuts :as shortcuts]
+   [laser-show.views.keys :as keys])
   (:import [javafx.scene.input MouseButton]))
 
 ;; State Access Helpers
@@ -55,29 +55,27 @@
   (or (:selected-ids (get-ui-state component-id)) #{}))
 
 
-;; Component Handler Props Atoms (shared for dynamic event dispatch and keyboard shortcuts)
+;; The list's latest props, for its key filter and its row clicks, which
+;; JavaFX calls between renders (keyboard plan 03, D7 A). One writer,
+;; list-sidebar, each render, with :ordered-ids; the entry goes when the
+;; list editor's node does. FX thread only; not app state.
 
 (defonce ^:private !component-handler-props (atom {}))
 
-(defn- get-or-create-props-atom!
-  "Get or create atom for a component's handler props."
-  [component-id]
-  (or (get @!component-handler-props component-id)
-      (let [new-atom (atom {})]
-        (swap! !component-handler-props assoc component-id new-atom)
-        new-atom)))
-
 (defn- update-props-atom!
-  "Update the atom with current props."
+  "Keep props as component-id's latest."
   [component-id props]
-  (let [props-atom (get-or-create-props-atom! component-id)]
-    (reset! props-atom props)))
+  (swap! !component-handler-props assoc component-id props))
+
+(defn- remove-props-atom!
+  "Forget component-id's props: its list editor is gone."
+  [component-id]
+  (swap! !component-handler-props dissoc component-id))
 
 (defn- get-handler-props
-  "Get latest props for a component from atom."
+  "component-id's latest props, or nil while it has no list on screen."
   [component-id]
-  (when-let [p-atom (get @!component-handler-props component-id)]
-    @p-atom))
+  (get @!component-handler-props component-id))
 
 
 ;; JavaFX Event Handler Helper
@@ -750,78 +748,47 @@
 ;; Keyboard Handler Setup
 
 (defn- setup-keyboard-handlers!
-  "Setup keyboard handlers on a parent node for a hierarchical list component."
-  [^javafx.scene.Node node component-id props-atom]
-  (log/info "Setting up keyboard handlers"
-            {:component-id component-id
-             :node-class (.getSimpleName (class node))
-             :focus-traversable? (.isFocusTraversable node)})
+  "Handle the list's keys while the focus is anywhere inside it (on a
+   toolbar button or a row's box too), except in its rename field
+   (keys/list-key-target?). The props are read when a key comes, so they are
+   the last render's."
+  [^javafx.scene.Node node component-id]
   (.addEventFilter
    node
    javafx.scene.input.KeyEvent/KEY_PRESSED
    (on-fx-event
     (fn [event]
-      (let [code (.getCode event)
-            ctrl? (or (.isShortcutDown event) (.isControlDown event))
-            shift? (.isShiftDown event)
-            alt? (.isAltDown event)
-            props @props-atom
-            focused? (.isFocused node)
-            scene (.getScene node)
-            focus-owner (when scene (.getFocusOwner scene))]
-        (log/debug "KEY_PRESSED event received in list handler"
-                   {:component-id component-id
-                    :key-code (str code)
-                    :ctrl? ctrl?
-                    :shift? shift?
-                    :alt? alt?
-                    :node-focused? focused?
-                    :focus-owner-class (when focus-owner (.getSimpleName (class focus-owner)))
-                    :props-keys (keys props)
-                    :selected-ids (get-selected-ids component-id)})
-        ;; Only handle keyboard shortcuts when this node has focus
-        ;; This prevents multiple list handlers from intercepting the same event
-        (when focused?
-          (let [handled? (cond
-                           (and ctrl? (= code javafx.scene.input.KeyCode/C))
-                           (do (log/debug "Handling Ctrl+C (copy)")
-                               (dispatch-copy-selected! props)
-                               true)
+      (when (keys/list-key-target? node event)
+        (let [code (.getCode event)
+              ctrl? (or (.isShortcutDown event) (.isControlDown event))
+              props (get-handler-props component-id)
+              handled? (cond
+                         (nil? props) false
 
-                           (and ctrl? (= code javafx.scene.input.KeyCode/V))
-                           (do (log/debug "Handling Ctrl+V (paste)")
-                               (dispatch-paste-items! props)
-                               true)
+                         (and ctrl? (= code javafx.scene.input.KeyCode/C))
+                         (do (dispatch-copy-selected! props) true)
 
-                           (and ctrl? (= code javafx.scene.input.KeyCode/X))
-                           (do (log/debug "Handling Ctrl+X (cut)")
-                               (dispatch-cut-selected! props)
-                               true)
+                         (and ctrl? (= code javafx.scene.input.KeyCode/V))
+                         (do (dispatch-paste-items! props) true)
 
-                           (and ctrl? (= code javafx.scene.input.KeyCode/A))
-                           (do (log/debug "Handling Ctrl+A (select all)")
-                               (select-all! component-id (:items-path props) (:ordered-ids props))
-                               true)
+                         (and ctrl? (= code javafx.scene.input.KeyCode/X))
+                         (do (dispatch-cut-selected! props) true)
 
-                           (and ctrl? (= code javafx.scene.input.KeyCode/G))
-                           (do (log/debug "Handling Ctrl+G (group)")
-                               (dispatch-group-selected! props)
-                               true)
+                         (and ctrl? (= code javafx.scene.input.KeyCode/A))
+                         (do (select-all! component-id (:items-path props) (:ordered-ids props)) true)
 
-                           (= code javafx.scene.input.KeyCode/DELETE)
-                           (do (log/debug "Handling Delete")
-                               (dispatch-delete-selected! props)
-                               true)
+                         (and ctrl? (= code javafx.scene.input.KeyCode/G))
+                         (do (dispatch-group-selected! props) true)
 
-                           (= code javafx.scene.input.KeyCode/ESCAPE)
-                           (do (log/debug "Handling Escape")
-                               (clear-selection! component-id)
-                               true)
+                         (= code javafx.scene.input.KeyCode/DELETE)
+                         (do (dispatch-delete-selected! props) true)
 
-                           :else false)]
-            (when handled?
-              (log/debug "Event consumed" {:key-code (str code)})
-              (.consume event)))))))))
+                         (= code javafx.scene.input.KeyCode/ESCAPE)
+                         (do (clear-selection! component-id) true)
+
+                         :else false)]
+          (when handled?
+            (.consume event))))))))
 
 
 ;; All-in-One Wrapper Component
@@ -877,34 +844,16 @@
                    (make-registry-label item-id-key item-registry-fn fallback-label)
 
                    :else
-                   (fn [item] (or (:name item) fallback-label)))
-
-        handler-props {:component-id component-id
-                       :items-path items-path
-                       :on-change-event on-change-event
-                       :on-change-params on-change-params}
-
-        props-atom (get-or-create-props-atom! component-id)
-        _ (update-props-atom! component-id handler-props)]
+                   (fn [item] (or (:name item) fallback-label)))]
     {:fx/type fx/ext-on-instance-lifecycle
+     ;; The props the keys and clicks read are list-sidebar's, written each
+     ;; render with :ordered-ids (keyboard plan 03, D7 A); they go with the list
      :on-created (fn [^javafx.scene.Node node]
-                   (log/info "list-editor on-created"
-                             {:component-id component-id
-                              :node-class (.getSimpleName (class node))})
-                   (setup-keyboard-handlers! node component-id props-atom)
-                   (.setFocusTraversable node true)
-                   ;; NOTE: Don't auto-request focus on creation!
-                   ;; Focus should be determined by user interaction (clicking items).
-                   ;; Auto-requesting focus causes focus stealing between multiple lists
-                   ;; in the same container (e.g., cue chain editor with two lists).
-                   ;; Also add a focus listener for debugging
-                   (.addListener (.focusedProperty node)
-                                 (reify javafx.beans.value.ChangeListener
-                                   (changed [_ _ old-val new-val]
-                                     (log/debug "list-editor focus changed"
-                                                {:component-id component-id
-                                                 :old-focused? old-val
-                                                 :new-focused? new-val})))))
+                   (setup-keyboard-handlers! node component-id)
+                   ;; Focus comes from a click on a row (request-list-focus!),
+                   ;; never on creation: the Cue Chain Editor has two lists
+                   (.setFocusTraversable node true))
+     :on-deleted (fn [_] (remove-props-atom! component-id))
      :desc {:fx/type :v-box
             :id (str "list-editor-"
                      (str/join "-"

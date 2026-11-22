@@ -8,7 +8,8 @@
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
-  (:import [javafx.scene.control Control Labeled]))
+  (:import [javafx.scene.control Control Labeled]
+           [javafx.scene.input KeyCode]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -125,6 +126,93 @@
       (is (= "Collapse" (tooltip-of ".group-collapse-btn")))
       (ui/click-node! robot (first (ui/query-all (in-list ".group-collapse-btn"))))
       (ui/wait-for! #(= "Expand" (tooltip-of ".group-collapse-btn"))))))
+
+;; Keys reach the list while the focus is anywhere inside it (keyboard plan
+;; 03, D5 A), and never while it is in a text field inside it
+
+(defn- cue-items [] (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :items]))
+(defn- selected-ids [] (get-in (state/get-raw-state) [:list-ui [:cue-chain 0 0] :selected-ids]))
+
+(defn- focus-owner
+  "The focus owner of the window the node at selector is in."
+  [selector]
+  (let [^javafx.scene.Node n (ui/query selector)]
+    (ui/on-fx-thread #(some-> n .getScene .getFocusOwner))))
+
+(defn- push! [robot & codes]
+  (.push ^org.testfx.api.FxRobot robot (into-array KeyCode codes))
+  (ui/sync-fx!))
+
+(defn- three-items-second-selected!
+  "The editor on [0 0] with three items, the second one clicked."
+  [robot]
+  (open-cue-chain-editor!)
+  (add-cue-chain-items! [:square :triangle])
+  (ui/click-node! robot (nth (ui/query-all ".chain-item") 1))
+  (ui/wait-for! #(= #{(:id (second (cue-items)))} (selected-ids))))
+
+(deftest delete-after-clicking-a-row-still-works-test
+  (let [robot (ui/robot)]
+    (three-items-second-selected! robot)
+    (is (= "list-editor-cue-chain-0-0"
+           (ui/on-fx-thread #(.getId ^javafx.scene.Node (focus-owner ".chain-item"))))
+        "the click gives the list the focus")
+    (push! robot KeyCode/SHORTCUT KeyCode/A)
+    (ui/wait-for! #(= 3 (count (selected-ids))))
+    (push! robot KeyCode/DELETE)
+    (ui/wait-for! #(empty? (cue-items)))))
+
+(deftest delete-after-focus-moves-to-a-toolbar-button-test
+  (let [robot (ui/robot)
+        [first-item _ third-item] (do (three-items-second-selected! robot) (cue-items))]
+    (ui/focus! robot (in-list "#chain-new-group"))
+    (ui/wait-for! #(= "chain-new-group" (ui/on-fx-thread (fn [] (.getId ^javafx.scene.Node (focus-owner ".chain-item"))))))
+    (push! robot KeyCode/DELETE)
+    (ui/wait-for! #(= [(:id first-item) (:id third-item)] (mapv :id (cue-items))))
+    (testing "and Escape clears the selection from there too"
+      (ui/click-node! robot (first (ui/query-all ".chain-item")))
+      (ui/wait-for! #(seq (selected-ids)))
+      (ui/focus! robot (in-list "#chain-delete-selection"))
+      (push! robot KeyCode/ESCAPE)
+      (ui/wait-for! #(empty? (selected-ids)))
+      (is (= 2 (count (cue-items)))))))
+
+(deftest select-all-after-clicking-a-row-checkbox-test
+  (let [robot (ui/robot)
+        enabled #(mapv (fn [i] (:enabled? i true)) (cue-items))]
+    (three-items-second-selected! robot)
+    (testing "a click on a row's On box turns the item off"
+      (ui/click-node! robot (first (ui/query-all (in-list ".chain-item .check-box"))))
+      (ui/wait-for! #(= [false true true] (enabled))))
+    ;; The click's bubbling can leave the focus on the list itself; Tab, or a
+    ;; click the row doesn't see, leaves it on the box
+    (ui/on-fx-thread #(.requestFocus ^javafx.scene.Node (first (ui/query-all (in-list ".chain-item .check-box")))))
+    (ui/wait-for! #(instance? javafx.scene.control.CheckBox (focus-owner ".chain-item")))
+    (push! robot KeyCode/SHORTCUT KeyCode/A)
+    (ui/wait-for! #(= 3 (count (selected-ids))))
+    (is (= [false true true] (enabled)) "the keys didn't touch the box")))
+
+(deftest list-shortcuts-do-not-act-while-renaming-test
+  (let [robot (ui/robot)
+        rename-field (in-list ".list-item-name-input")]
+    (three-items-second-selected! robot)
+    (events/dispatch! {:event/type :list/start-rename :component-id [:cue-chain 0 0]
+                       :item-id (:id (second (cue-items)))})
+    (ui/wait-for! #(some? (ui/query rename-field)))
+    (ui/wait-for! #(instance? javafx.scene.control.TextField (focus-owner ".chain-item")))
+    (let [before (cue-items)
+          selection (selected-ids)]
+      (ui/on-fx-thread #(doto ^javafx.scene.control.TextField (ui/query rename-field)
+                          (.setText "Beams")
+                          (.positionCaret 5)))
+      (push! robot KeyCode/BACK_SPACE)
+      (ui/wait-for! #(= "Beam" (ui/node-text rename-field)))
+      (push! robot KeyCode/SHORTCUT KeyCode/A)
+      (push! robot KeyCode/DELETE)
+      (ui/wait-for! #(= "" (ui/node-text rename-field)))
+      (testing "the field edited its text; the list did nothing"
+        (is (= before (cue-items)))
+        (is (= selection (selected-ids)))))))
 
 (deftest grouped-list-drag-and-drop-reorders-items
   (let [robot (ui/robot)]

@@ -11,6 +11,7 @@
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.scene Node Parent]
            [javafx.scene.control Labeled ScrollPane]
+           [javafx.scene.input KeyCode]
            [javafx.scene.layout Region]))
 
 (use-fixtures :once fixtures/with-toolkit)
@@ -221,3 +222,36 @@
           (ui/wait-for! #(some? (ui/query "#projectors-split")))
           (eventually #(near? dragged (height "#rig-strip-scroll")))
           (is (near? dragged (height "#rig-strip-scroll"))))))))
+
+(deftest projector-chain-delete-after-focus-moves-to-its-copy-button-test
+  ;; Keyboard plan 03 §7: in the main window a list button with the focus
+  ;; let Delete fall through to Edit > Clear Cell, which does nothing here,
+  ;; and the list ignored it. The Copy button gets the focus without a click,
+  ;; as Tab gives it, so the test leaves the OS clipboard alone
+  (let [robot (ui/robot)
+        rgb #uuid "00000000-0000-0000-0000-0000000000a1"
+        axis #uuid "00000000-0000-0000-0000-0000000000a2"
+        chain #(mapv :id (get-in (app-state) [:chains :projector-effects :a :items]))
+        grid #(get-in (app-state) [:chains :cue-chains])]
+    (with-lasers!)
+    (events/write-state! #(-> %
+                              (assoc-in [:chains :projector-effects :a :items]
+                                        [{:id rgb :effect-id :rgb-curves :enabled? true
+                                          :params {:r-curve-points [[0.0 0.0] [1.0 1.0]]
+                                                   :g-curve-points [[0.0 0.0] [1.0 1.0]]
+                                                   :b-curve-points [[0.0 0.0] [1.0 1.0]]}}
+                                         {:id axis :effect-id :axis-transform :enabled? true
+                                          :params {:mirror-x? false :mirror-y? false :swap-axes? false}}])
+                              (assoc-in [:grid :selected-cell] [0 0])))
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(some? (ui/query "#list-editor-projector-effects-a .chain-item")))
+    (ui/scroll-into-view! "#list-editor-projector-effects-a")
+    (ui/click-node! robot (second (ui/query-all "#list-editor-projector-effects-a .chain-item")))
+    (ui/wait-for! #(= #{axis} (get-in (app-state) [:list-ui [:projector-effects :a] :selected-ids])))
+    (let [cells (grid)]
+      (ui/focus! robot "#list-editor-projector-effects-a #chain-copy-selection")
+      (ui/wait-for! #(= "chain-copy-selection"
+                        (ui/on-fx-thread (fn [] (some-> (.getFocusOwner (.getScene (ui/main-window))) .getId)))))
+      (ui/press! robot KeyCode/DELETE)
+      (ui/wait-for! #(= [rgb] (chain)))
+      (is (= cells (grid)) "and no grid cell was cleared"))))
