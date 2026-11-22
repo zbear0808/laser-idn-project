@@ -410,9 +410,8 @@
     {:state (assoc-in state [:debug :zone-routing-debug?] new-value)}))
 
 (defn- handle-help-reload-styles
-  "Reload all CSS stylesheets (dev only). The reload bumps
-   [:styles :reload-trigger] itself, so this handler returns no :state that
-   could overwrite it."
+  "Reload all CSS stylesheets (dev only). The reload dispatches
+   :dev/reloaded, which bumps [:styles :reload-trigger] in its own event."
   [_event]
   (log/info "Help > Reload Styles")
   {:dev/reload :styles})

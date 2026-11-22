@@ -187,6 +187,10 @@
       (is (= {:dev/swap-state {:f assoc-in :args [[:ui :probe] 1]}}
              (handlers/handle-event {:event/type :dev/write-state :f assoc-in :args [[:ui :probe] 1]
                                      :state {}})))
+      (is (= {:state {:styles {:reload-trigger 1}}}
+             (handlers/handle-event {:event/type :dev/reloaded :kind :styles :state {}})))
+      (is (= {:state {:ui {:last-reload-timestamp 7}}}
+             (handlers/handle-event {:event/type :dev/reloaded :kind :app :state {} :time 7})))
       (testing "through the whole pipeline: no :state, so no middleware adds anything"
         (is (= {:dev/deliver p} (events/handle-event-pipeline {:event/type :dev/flush :promise p
                                                                :state (state/get-raw-state) :time 0}))))

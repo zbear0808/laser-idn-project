@@ -46,7 +46,8 @@
    This function:
    1. Discovers all CSS namespaces dynamically
    2. Reloads all CSS namespace files with :reload flag
-   3. Updates app state to trigger re-render (via :styles :reload-trigger)
+   3. Dispatches :dev/reloaded {:kind :styles}, whose handler bumps
+      [:styles :reload-trigger] to trigger a re-render
    4. Returns a map indicating success/failure
    
    The UI will pick up new CSS URLs with updated hashes from subscriptions.
@@ -61,11 +62,9 @@
       (doseq [ns-sym namespaces]
         (require ns-sym :reload))
       
-      ;; Trigger state update to force UI re-render
-      ;; The state namespace is always loaded when this function is called
-      (require 'laser-show.state.core)
-      ((resolve 'laser-show.state.core/swap-state!)
-       update-in [:styles :reload-trigger] (fnil inc 0))
+      ;; Its handler bumps the trigger, so the UI re-renders
+      ((requiring-resolve 'laser-show.events.core/dispatch!)
+       {:event/type :dev/reloaded :kind :styles})
       
       {:success? true :reloaded-count (count namespaces)})
     (catch Exception e

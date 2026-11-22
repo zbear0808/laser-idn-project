@@ -117,7 +117,8 @@
    How it works:
    1. Discovers CSS module vars dynamically (vars with :cljfx.css/url)
    2. When you eval a (def theme ...) form, the var changes
-   3. The watch callback triggers a dummy state update
+   3. The watch callback dispatches :dev/reloaded {:kind :styles}, which
+      bumps [:styles :reload-trigger]
    4. cljfx sees the state change and re-renders, picking up new CSS URLs
    
    Style vars are discovered automatically from laser-show.css.* namespaces,
@@ -144,10 +145,10 @@
                        (if url
                          (do
                            (println "🎨 Style updated:" (symbol v))
-                           ;; Trigger a dummy state update to force re-render
-                           ;; The actual CSS URLs are computed in subs/stylesheet-urls
-                           ((resolve 'laser-show.state.core/swap-state!)
-                            update-in [:styles :reload-trigger] (fnil inc 0)))
+                           ;; Its handler bumps [:styles :reload-trigger], so
+                           ;; subs/stylesheet-urls computes the CSS URLs again
+                           ((requiring-resolve 'laser-show.events.core/dispatch!)
+                            {:event/type :dev/reloaded :kind :styles}))
                          (println "⚠️  Warning: No :cljfx.css/url in" (symbol v)))))))
       (swap! !style-watches conj v))
     

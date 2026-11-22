@@ -79,7 +79,7 @@
       "timeline-cue-editor" (timeline/handle event)  ; Timeline open with initialization
       "history" (history/handle event)
       "addons" (addons/handle event)  ; Output drivers and add-ons
-      "dev" (dev/handle event)  ; Tooling: events/flush!, events/write-state!
+      "dev" (dev/handle event)  ; Tooling: events/flush!, events/write-state!, the dev reloads
       ;; Unknown domain
       (do
         (log/error "Unknown event domain:" domain "type:" type)

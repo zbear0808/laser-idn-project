@@ -65,3 +65,25 @@
              (catch Throwable _ nil))
       (is (= 1 (get-in (state/get-raw-state) [:styles :reload-trigger])))
       (is (nil? (get-in (state/get-raw-state) [:styles :reload-trigger]))))))
+
+(deftest dev-reloaded-test
+  (let [s0 (state/get-raw-state)
+        reloaded #(:state (events/handle-event-pipeline {:event/type :dev/reloaded :kind %1 :state %2 :time 1234}))
+        unchanged-history-and-dirty (fn [s]
+                                      (is (= (:history s0) (:history s)) "no undo entry")
+                                      (is (= (get-in s0 [:project :dirty?]) (get-in s [:project :dirty?])) "not dirty")
+                                      (is (not (get-in s [:project :dirty?]))))]
+    (testing ":styles bumps the reload trigger"
+      (let [s (reloaded :styles s0)]
+        (is (= 1 (get-in s [:styles :reload-trigger])))
+        (is (= 2 (get-in (reloaded :styles s) [:styles :reload-trigger])))
+        (unchanged-history-and-dirty s)))
+    (testing ":app sets the reload timestamp to the event's :time"
+      (let [s (reloaded :app s0)]
+        (is (= 1234 (get-in s [:ui :last-reload-timestamp])))
+        (is (= (:styles s0) (:styles s)))
+        (unchanged-history-and-dirty s)))
+    (testing "through the wired pipeline: :time is the co-effect's"
+      (let [t0 (System/currentTimeMillis)]
+        (events/event-handler {:event/type :dev/reloaded :kind :app})
+        (is (<= t0 (get-in (state/get-raw-state) [:ui :last-reload-timestamp]) (System/currentTimeMillis)))))))

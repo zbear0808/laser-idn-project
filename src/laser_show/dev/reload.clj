@@ -89,7 +89,8 @@
    
    This function:
    1. Discovers and reloads all code namespaces (views, events, animation, backend)
-   2. Triggers a re-render by touching state
+   2. Triggers a re-render: :dev/reloaded {:kind :app} sets
+      [:ui :last-reload-timestamp]
 
    The show clock keeps running through it: its loop calls tick! through the
    var, so the next tick runs the reloaded code, and the output never stops.
@@ -130,9 +131,8 @@
       ;; The renderer watches the context atom; updating state triggers re-render.
       ;; Since view functions use var references, the new code is used.
       (log/info "  Triggering re-render...")
-      (let [assoc-in-state! (resolve 'laser-show.state.core/assoc-in-state!)]
-        ;; Touch a timestamp to force context change and re-render
-        (assoc-in-state! [:ui :last-reload-timestamp] (System/currentTimeMillis)))
+      ((requiring-resolve 'laser-show.events.core/dispatch!)
+       {:event/type :dev/reloaded :kind :app})
       (log/info "  ✓ Re-render triggered")
       
       (log/info "✅ App reload complete!")
