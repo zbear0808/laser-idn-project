@@ -616,3 +616,41 @@
         result (list-handlers/handle (assoc fx-chain-paste :state (assoc-in s [:ui :clipboard] fx-clip)))]
     (is (= [:rotate :scale] (mapv :effect-id (get-in result [:dispatch :items])))
         "an item's effect pastes into the effects grid's chain")))
+
+
+;; D9 A: a copied cell pastes into a list (Step 4b; probe p6)
+
+
+(deftest paste-a-copied-cell-into-a-cue-list-test
+  ;; p6: before Step 4b a list's ⌘V of a copied cell pasted nothing (1 → 1)
+  (let [cell {:items [{:id #uuid "00000000-0000-0000-0000-0000000000c1" :type :preset :preset-id :triangle :effects []}
+                      {:id #uuid "00000000-0000-0000-0000-0000000000c2" :type :group :name "G"
+                       :items [{:id #uuid "00000000-0000-0000-0000-0000000000c3" :type :preset :preset-id :star :effects []}]}]
+              :destination-zone {:zone-group-id :all}}
+        result (list-handlers/handle (paste-event (cue-state {:type :cue-chain :data cell :copied-at 3})))
+        pasted (get-in result [:dispatch :items])]
+    (is (= [:circle :triangle nil :square] (mapv :preset-id pasted)) "the cell's items, after the selection")
+    (is (= :star (get-in pasted [2 :items 0 :preset-id])) "a group comes with its items")
+    (is (not-any? (set (map :id (:items cell))) (map :id pasted)) "with ids of their own")
+    (is (= "Paste Item(s)" (get-in result [:dispatch :history/description])))))
+
+(deftest paste-a-copied-effects-cell-into-an-effect-list-test
+  (let [cell {:items [{:id #uuid "00000000-0000-0000-0000-0000000000d1" :effect-id :hue-shift :enabled? true :params {}}]
+              :active? true}]
+    (doseq [paste [item-fx-paste fx-chain-paste]]
+      (let [result (list-handlers/handle (assoc paste :state (lists-state {:type :effects-cell :data cell :copied-at 4})))
+            pasted (get-in result [:dispatch :items])]
+        (is (= :hue-shift (:effect-id (last pasted))) (str "the cell's effects into " (:component-id paste)))
+        (is (not= (:id (first (:items cell))) (:id (last pasted))) "with an id of its own")))))
+
+(deftest paste-a-timeline-cell-into-a-list-does-nothing-test
+  (let [cell {:editor-type :timeline :tracks [{:id #uuid "00000000-0000-0000-0000-0000000000a1" :type :track}]
+              :items [{:id #uuid "00000000-0000-0000-0000-0000000000a2" :type :preset :preset-id :circle
+                       :track-id #uuid "00000000-0000-0000-0000-0000000000a1" :timeline/start 0.0 :timeline/duration 4.0}]}
+        state (cue-state {:type :cue-chain :data cell :copied-at 3})]
+    (is (= {:state state} (list-handlers/handle (paste-event state))) "a timeline's clips aren't a cue list's items")
+    (testing "and an effects cell's effects never land in a cue list, nor a cue cell's items in an effect list"
+      (let [s (cue-state {:type :effects-cell :data {:items [{:id fx-id :effect-id :scale}]} :copied-at 1})]
+        (is (= {:state s} (list-handlers/handle (paste-event s)))))
+      (let [s (lists-state {:type :cue-chain :data {:items [{:id id-a :type :preset :preset-id :circle}]} :copied-at 1})]
+        (is (= {:state s} (list-handlers/handle (assoc fx-chain-paste :state s))))))))

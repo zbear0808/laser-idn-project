@@ -90,6 +90,20 @@
       (is (= {:zones [:zone/a] :steps [[:zone/a]]} (clipboard/payload grid :step-grid)))
       (is (nil? (clipboard/payload cue-items :item-effects)))
       (is (nil? (clipboard/payload item-effects :cue-chain-items))))
+    (testing "D9 A's two conversions: a cue cell's items into a cue list, an effects cell's effects into an effect list"
+      (is (= #{:cue-chain-items :cue-chain} (takes :cue-chain-items)))
+      (is (= #{:item-effects :effects-cell} (takes :item-effects)))
+      (is (= [item] (clipboard/payload cue-cell :cue-chain-items)))
+      (is (= [effect] (clipboard/payload fx-cell :item-effects)))
+      (is (nil? (clipboard/payload cue-cell :item-effects)))
+      (is (nil? (clipboard/payload fx-cell :cue-chain-items))))
+    (testing "a timeline cue's cell pastes onto a cell, never into a list"
+      (let [timeline (clipboard/cell-clip :cue-chain {:editor-type :timeline :tracks [{:id :t1 :type :track}]
+                                                     :items [(assoc item :track-id :t1)]} 1)
+            implicit (clipboard/cell-clip :cue-chain {:items [(assoc item :timeline/start 0.0)]} 1)]
+        (doseq [c [timeline implicit]]
+          (is (not (clipboard/accepts? c :cue-chain-items)))
+          (is (clipboard/accepts? c :cue-chain)))))
     (testing "nothing takes nothing, and no target is no list"
       (is (not-any? #(clipboard/accepts? nil %) [:cue-chain-items :item-effects :cue-chain :effects-cell :step-grid]))
       (is (not-any? #(clipboard/accepts? % nil) clips))

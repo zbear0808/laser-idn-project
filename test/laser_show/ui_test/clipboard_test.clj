@@ -309,8 +309,9 @@
     (add-cue-items! [:square])
     (select-cue-item! robot 1)
     (ui/wait-for! #(some? (node item-fx-paste)))
-    (ui/wait-for! #(and (disabled? cue-paste) (disabled? item-fx-paste)))
-    (is (= [true true] [(disabled? cue-paste) (disabled? item-fx-paste)]) "a copied cell: neither list takes it")
+    (ui/wait-for! #(and (not (disabled? cue-paste)) (disabled? item-fx-paste)))
+    (is (= [false true] [(disabled? cue-paste) (disabled? item-fx-paste)])
+        "a copied cell: the cue list takes its items (Step 4b), an item's effects nothing")
     (shortcut! robot KeyCode/C)
     (ui/wait-for! #(= :cue-chain-items (:type (slot))))
     (ui/wait-for! #(not (disabled? cue-paste)))
@@ -513,6 +514,34 @@
         (ui/click! robot fx-paste)
         (ui/wait-for! #(= (inc n) (count (fx-items))))
         (is (= :scale (:effect-id (last (fx-items)))))))))
+
+
+(deftest cell-copy-pastes-into-a-list-test
+  ;; p6: before Step 4b a list's ⌘V of a copied grid cell pasted nothing (1 → 1)
+  (let [robot (ui/robot)
+        cell-presets (mapv :preset-id (get-in (raw) [:chains :cue-chains [1 0] :items]))
+        fx-cell (mapv :effect-id (get-in (raw) [:chains :effect-chains [0 3] :items]))]
+    (set-os-text! "")
+    (testing "a grid cell's items into the cue list"
+      (events/dispatch! {:event/type :grid/copy-cell :col 1 :row 0})
+      (ui/wait-for! #(= :cue-chain (:type (slot))))
+      (open-cue-editor!)
+      (select-cue-item! robot 0)
+      (ui/wait-for! #(not (disabled? cue-paste)))
+      (shortcut! robot KeyCode/V)
+      (ui/wait-for! #(= (into [:circle] cell-presets) (mapv :preset-id (cue-items))))
+      (is (not-any? (set (map :id (get-in (raw) [:chains :cue-chains [1 0] :items]))) (map :id (cue-items)))
+          "the pasted items have ids of their own"))
+    (testing "an effects cell's effects into an item's effects"
+      (is (seq fx-cell))
+      (events/dispatch! {:event/type :effects/copy-cell :col 0 :row 3})
+      (ui/wait-for! #(= :effects-cell (:type (slot))))
+      (select-cue-item! robot 0)
+      (ui/wait-for! #(some? (node item-fx-paste)))
+      (ui/wait-for! #(not (disabled? item-fx-paste)))
+      (ui/wait-for! #(disabled? cue-paste))
+      (ui/click! robot item-fx-paste)
+      (ui/wait-for! #(= fx-cell (mapv :effect-id (item-fx)))))))
 
 
 ;; The step grid copies and pastes through the one clipboard (p18)

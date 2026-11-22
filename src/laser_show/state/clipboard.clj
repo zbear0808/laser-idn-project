@@ -19,6 +19,7 @@
    :clipboard/read reads it back (<-system-text) for a paste made while
    nothing is copied in this app (events.helpers/with-clipboard)."
   (:require [clojure.string :as str]
+            [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.state.serialization :as ser]
             [laser-show.animation.modulation :as mod]))
 
@@ -139,13 +140,22 @@
 (defn payload
   "What target takes from clip, or nil (04 §7, second table). A list
    (list-type) takes the items of a clip of its own type: a cue list
-   (:cue-chain-items) cue items, an effect list (:item-effects) effects. A
-   cue or effects cell (:cue-chain, :effects-cell) takes a cell of its type;
-   a step grid (:step-grid) a grid."
+   (:cue-chain-items) cue items, an effect list (:item-effects) effects.
+   With D9 A's two conversions, a cue list also takes a copied grid cell's
+   items (not a timeline cue's clips), and an effect list a copied effects
+   cell's effects. A cue or effects cell (:cue-chain, :effects-cell) takes a
+   cell of its type; a step grid (:step-grid) a grid."
   [clip target]
   (cond
-    (= :cue-chain-items target) (when (= :cue-chain-items (:type clip)) (:items clip))
-    (= :item-effects target) (when (= :item-effects (:type clip)) (:effects clip))
+    (= :cue-chain-items target) (case (:type clip)
+                                  :cue-chain-items (:items clip)
+                                  :cue-chain (let [cell (:data clip)]
+                                               (when-not (cue-chains/timeline-cue? cell) (:items cell)))
+                                  nil)
+    (= :item-effects target) (case (:type clip)
+                               :item-effects (:effects clip)
+                               :effects-cell (:items (:data clip))
+                               nil)
     (contains? #{:cue-chain :effects-cell} target) (when (= target (:type clip)) (:data clip))
     (= :step-grid target) (when (= :step-grid (:type clip)) (:grid clip))
     :else nil))
