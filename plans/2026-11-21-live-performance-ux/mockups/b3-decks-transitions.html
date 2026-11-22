@@ -1,0 +1,211 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.tabbar .tright { margin-left: auto; display: flex; align-items: center; gap: 14px; padding: 0 14px; height: 36px; font-size: 12px; color: var(--text2); }
+.beat.sm i { width: 9px; height: 18px; }
+
+/* pinned deck strip */
+.deckstrip { display: grid; grid-template-columns: 1fr 300px 1fr; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #262626; background: #101010; }
+.mdeck { border-radius: 10px; padding: 8px 12px; display: flex; align-items: center; gap: 12px; height: 74px; }
+.mdeck.now { border: 2px solid #f2f2f2; background: #161616; }
+.mdeck.next { border: 2px solid var(--warn); background: #17140c; }
+.mdeck .tg { font-size: 11px; font-weight: 800; letter-spacing: .08em; padding: 3px 8px; border-radius: 9px; white-space: nowrap; }
+.mdeck.now .tg { background: #f2f2f2; color: #111; }
+.mdeck.next .tg { background: var(--warn); color: #111; }
+.mdeck .vn { font-size: 22px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+.mdeck .vn .sw { width: 13px; height: 13px; border-radius: 3px; }
+.mdeck .tl { display: flex; gap: 4px; }
+.mdeck .tl .screen { width: 54px; height: 42px; }
+.mbars { display: grid; grid-template-columns: repeat(32, 6px); gap: 2px; }
+.mbars i { height: 10px; border-radius: 1px; background: #333; display: block; }
+.mbars i.d { background: #cfcfcf; }
+.mbars i.c { background: #fff; box-shadow: 0 0 6px #fff; }
+.mbars i.a { background: color-mix(in srgb, var(--auto) 55%, #222); }
+.autobox { border-radius: 10px; border: 1.5px solid color-mix(in srgb, var(--auto) 60%, transparent); background: linear-gradient(180deg, #16182a, #121320); display: flex; align-items: center; gap: 12px; padding: 8px 12px; height: 74px; }
+.autobox .big { font-size: 26px; font-weight: 800; font-family: "SF Mono", Menlo, monospace; color: var(--auto); line-height: 1; }
+.autobox .t { font-size: 12.5px; color: #dfe2ff; line-height: 1.35; }
+
+.subbar { height: 44px; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-bottom: 1px solid #262626; }
+.main { flex: 1; padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+
+/* set path strip */
+.path { border-radius: 10px; background: #151515; border: 1px solid #2a2a2a; padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.lane2 { display: flex; align-items: stretch; gap: 0; position: relative; }
+.blk { border-radius: 8px; background: #1f1f1f; border: 1.5px solid #333; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; position: relative; min-width: 0; }
+.blk .n { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.blk .n .sw { width: 10px; height: 10px; border-radius: 3px; }
+.blk .n .e { font-size: 11px; color: #bbb; letter-spacing: 1px; font-weight: 500; }
+.blk .ruler { height: 8px; border-radius: 2px; background: repeating-linear-gradient(90deg, #3a3a3a 0 2px, transparent 2px calc(100% / var(--bars))); opacity: .9; }
+.blk .meta { font-size: 11.5px; color: var(--text2); line-height: 1.4; }
+.blk .meta b { color: #eee; font-weight: 600; }
+.blk.isnow { border-color: #f2f2f2; }
+.blk.isnext { border-color: var(--warn); background: #1f1a0e; }
+.blk.edit { box-shadow: 0 0 0 3px rgba(255,176,0,.25); }
+.blk .st { position: absolute; top: 7px; right: 8px; font-size: 10px; font-weight: 800; letter-spacing: .06em; padding: 1px 6px; border-radius: 7px; }
+.blk.isnow .st { background: #f2f2f2; color: #111; }
+.blk.isnext .st { background: var(--warn); color: #111; }
+.fa { width: 92px; flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 11px; color: var(--text2); text-align: center; }
+.fa .arr { font-size: 18px; color: #888; line-height: 1; }
+.fa .lab { padding: 3px 8px; border-radius: 10px; background: #262626; color: #ddd; font-size: 11.5px; white-space: nowrap; }
+.fa.auto .lab { background: color-mix(in srgb, var(--auto) 22%, #1c1c1c); color: var(--auto); border: 1px solid color-mix(in srgb, var(--auto) 50%, transparent); }
+.playhead { position: absolute; top: -4px; bottom: -4px; width: 2px; background: #fff; box-shadow: 0 0 8px #fff; z-index: 3; }
+
+/* blind edit */
+.blind { flex: 1; border-radius: 12px; border: 3px solid var(--warn); background: repeating-linear-gradient(135deg, #17140c 0 18px, #191509 18px 36px); padding: 0; display: flex; flex-direction: column; min-height: 0; position: relative; }
+.blindhead { display: flex; align-items: center; gap: 12px; padding: 9px 14px; background: #3a2b00; border-bottom: 1px solid #6b5000; border-radius: 9px 9px 0 0; }
+.blindhead .big { font-size: 16px; font-weight: 800; letter-spacing: .1em; color: #ffd36b; }
+.blindbody { flex: 1; display: grid; grid-template-columns: 1fr 430px; gap: 16px; padding: 14px; min-height: 0; }
+.form { display: flex; flex-direction: column; gap: 12px; }
+.frow { display: grid; grid-template-columns: 170px 1fr; gap: 12px; align-items: center; }
+.frow .k { font-size: 13px; font-weight: 700; color: #eee; }
+.frow .k small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.frow .seg span { padding: 6px 12px; font-size: 12.5px; }
+.seg span.was { box-shadow: inset 0 -2px 0 #888; }
+.chg { font-size: 10px; font-weight: 800; color: #111; background: var(--warn); border-radius: 7px; padding: 1px 6px; margin-left: 8px; letter-spacing: .04em; }
+.tstyles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.ts { border-radius: 8px; background: #1e1e1e; border: 1.5px solid #3a3a3a; padding: 7px 8px; display: flex; flex-direction: column; gap: 4px; }
+.ts b { font-size: 12.5px; }
+.ts span { font-size: 11px; color: var(--muted); line-height: 1.3; }
+.ts svg { width: 100%; height: 40px; background: #121212; border-radius: 4px; }
+.ts.on { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue) inset; background: #19222c; }
+.side { display: flex; flex-direction: column; gap: 10px; }
+.pv { border-radius: 9px; background: #121212; border: 1px solid #3a3a3a; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.pv .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pv .st { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text2); text-align: center; }
+.pv .screen { height: 66px; border: 1px dashed #7a5d10; }
+.pv .pvlab { font-size: 11px; font-weight: 800; color: var(--warn); letter-spacing: .1em; }
+.diffs { border-radius: 9px; background: #1b1810; border: 1px solid #5a4510; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+.diffs .d { display: flex; gap: 8px; align-items: center; }
+.diffs .d s { color: var(--muted); }
+.diffs .d b { color: #ffe2a0; }
+.commitbar { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-top: 1px solid #6b5000; background: #221a05; border-radius: 0 0 9px 9px; }
+.btn.commit { height: 40px; padding: 0 22px; font-size: 15px; font-weight: 800; background: var(--warn); color: #111; }
+</style></head><body>
+<div class="page tall">
+  <div class="caption-bar"><b>B3 · Transitions and follow actions</b><span class="tag">Design B · Now &amp; Next</span><span class="tag">show is live; Build (cued in NEXT) is being edited blind</span></div>
+  <div class="menubar"><span class="logo"></span><span>File</span><span>Edit</span><span>Transport</span><span>View</span><span>Help</span><span class="title">Laser Show — club-friday.show</span></div>
+  <div class="tabbar">
+    <div class="tab">Grid</div><div class="tab active">Vibes</div><div class="tab">Perform</div><div class="tab">Effects</div><div class="tab">Projectors</div><div class="tab">Zone Groups</div><div class="tab">Settings</div>
+    <div class="tright"><span>BPM <b class="mono" style="color:#fff">128.0</b></span><span class="beat sm"><i class="on"></i><i></i><i></i><i></i></span><span><span class="dot green"></span> Launchpad Mini</span></div>
+  </div>
+  <div class="status-band live">● LIVE · 4 of 4 lasers · 128.0 BPM · NOW Groove · NEXT Build (AUTO in 5 bars) <span style="margin-left:auto;font-weight:600;color:#bfe9ca">edits below are blind · the pads still work</span></div>
+
+  <!-- pinned mini decks: how auto-advance shows on the deck -->
+  <div class="deckstrip">
+    <div class="mdeck now">
+      <span class="tg">● NOW</span>
+      <div class="col gap6"><div class="vn"><span class="sw" style="background:#4d7bff"></span>Groove <span class="mono" style="font-size:15px;color:#ddd;font-weight:600">bar 27 / 32</span></div>
+        <div class="mbars"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="c"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i></div></div>
+      <div class="tl" style="margin-left:auto">
+        <div class="screen onair" data-shape="wave" data-color="#36e2ff"></div><div class="screen onair" data-shape="star" data-color="#39ff6a"></div><div class="screen onair" data-shape="star" data-color="#39ff6a"></div><div class="screen onair" data-shape="wave" data-color="#36e2ff"></div>
+      </div>
+    </div>
+    <div class="autobox">
+      <svg width="54" height="54" viewBox="0 0 54 54"><circle cx="27" cy="27" r="22" fill="none" stroke="#2a2d48" stroke-width="6"/><circle cx="27" cy="27" r="22" fill="none" stroke="#9aa7ff" stroke-width="6" stroke-dasharray="117 138.2" transform="rotate(-90 27 27)"/></svg>
+      <div class="col gap6"><div class="row center gap8"><span class="auto-tag">AUTO</span><span class="big">5 bars</span></div>
+        <span class="t">then takes Build · follow: energy up · hold VIBE to stay</span></div>
+    </div>
+    <div class="mdeck next">
+      <span class="tg">◐ NEXT</span>
+      <div class="col gap6"><div class="vn"><span class="sw" style="background:#b05cff"></span>Build <span class="auto-tag">AUTO</span></div><span class="small" style="color:#d9b45a;white-space:nowrap">follow: energy up · editing ↓</span></div>
+      <div class="tl" style="margin-left:auto;opacity:.8">
+        <div class="screen" style="border:1px dashed #7a5d10" data-shape="beams" data-color="#ff3bd4"></div><div class="screen" style="border:1px dashed #7a5d10" data-shape="tunnel" data-color="#b05cff"></div><div class="screen" style="border:1px dashed #7a5d10" data-shape="tunnel" data-color="#b05cff"></div><div class="screen" style="border:1px dashed #7a5d10" data-shape="beams" data-color="#ff3bd4"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="subbar">
+    <span class="seg"><span>Crates</span><span class="on">Transitions</span><span>Reactions</span></span>
+    <span class="hint">Each vibe says when it leaves, where it goes, and how the change looks. The strip shows the path if nobody touches anything.</span>
+    <span style="margin-left:auto" class="row center gap8"><span class="small text2">Default take</span><span class="seg"><span>beat</span><span class="on">bar</span><span>4 bars</span></span></span>
+  </div>
+
+  <div class="main">
+    <div class="path">
+      <div class="row between center"><h3>Set path · if left alone</h3><span class="hint">block width = bars · arrows = follow action · click a block to edit it</span></div>
+      <div class="lane2">
+        <div class="blk" style="flex:16;--bars:16"><div class="n"><span class="sw" style="background:#1ABC9C"></span>Warm-up <span class="e">●○○○</span></div><div class="ruler"></div><div class="meta"><b>16 bars</b> · take on bar<br>cut · bed carries over</div></div>
+        <div class="fa"><span class="lab">→ next</span><span class="arr">⟶</span><span>after 16</span></div>
+        <div class="blk isnow" style="flex:32;--bars:32"><span class="st">NOW</span><div class="n"><span class="sw" style="background:#4d7bff"></span>Groove <span class="e">●●○○</span></div><div class="ruler"></div><div class="meta"><b>32 bars</b> · take on bar<br>1-bar blend · bed rises</div>
+          <div class="playhead" style="left:82%"></div></div>
+        <div class="fa auto"><span class="lab">↗ energy up</span><span class="arr" style="color:var(--auto)">⟶</span><span>in 5 bars</span></div>
+        <div class="blk isnext edit" style="flex:32;--bars:32"><span class="st">NEXT · EDITING</span><div class="n"><span class="sw" style="background:#b05cff"></span>Build <span class="e">●●●○</span></div><div class="ruler"></div><div class="meta"><b>16 bars</b> <span style="color:var(--warn)">(was 32)</span> · take on 4 bars<br>flash bridge · bed holds</div></div>
+        <div class="fa"><span class="lab">↗ energy up</span><span class="arr">⟶</span><span>after 16</span></div>
+        <div class="blk" style="flex:16;--bars:16"><div class="n"><span class="sw" style="background:#ff3bd4"></span>Peak <span class="e">●●●●</span></div><div class="ruler"></div><div class="meta"><b>16 bars</b> · bar<br>blackout-and-bang</div></div>
+        <div class="fa"><span class="lab">⤨ random</span><span class="arr">⟶</span><span>not Peak again</span></div>
+        <div class="blk" style="flex:16;--bars:16"><div class="n"><span class="sw" style="background:#36e2ff"></span>Breakdown <span class="e">●○○○</span></div><div class="ruler"></div><div class="meta"><b>stay</b> · manual only<br>1-bar blend</div></div>
+      </div>
+    </div>
+
+    <div class="blind">
+      <div class="blindhead">
+        <span class="big">◐ EDITING NEXT — NOT ON AIR</span>
+        <span class="text2" style="font-size:13px">Build is cued. Groove keeps playing. Nothing here reaches the lasers until you commit.</span>
+        <span style="margin-left:auto" class="small" style="color:#ffd36b"><span style="color:#ffd36b">3 changes</span></span>
+      </div>
+      <div class="blindbody">
+        <div class="form">
+          <div class="frow"><div class="k">Leave after<small>counted from the take</small></div>
+            <div class="row center gap8"><span class="seg"><span>8</span><span class="on">16</span><span class="was">32</span><span>64 bars</span><span>never</span></span><span class="chg">CHANGED</span></div></div>
+          <div class="frow"><div class="k">Then go to<small>the follow action</small></div>
+            <div class="row center gap8"><span class="seg"><span>next</span><span class="on">energy up</span><span>energy down</span><span>random</span><span>stay</span></span><span class="small text2">→ today that is <b style="color:#fff">Peak</b></span></div></div>
+          <div class="frow"><div class="k">Take on<small>when a VIBE tap or auto lands</small></div>
+            <div class="row center gap8"><span class="seg"><span>beat</span><span>bar</span><span class="on">4 bars</span><span>phrase (16)</span></span><span class="small text2">Build lands on a phrase line</span></div></div>
+          <div class="frow" style="align-items:start"><div class="k">Transition style<small>how NOW hands over to this vibe</small></div>
+            <div class="col gap6">
+              <div class="tstyles">
+                <div class="ts"><b>Cut</b><svg viewBox="0 0 120 40"><line x1="60" y1="2" x2="60" y2="38" stroke="#444" stroke-dasharray="2 2"/><polyline points="4,10 60,10 60,34" fill="none" stroke="#eee" stroke-width="2"/><polyline points="60,34 60,10 116,10" fill="none" stroke="#FFB000" stroke-width="2" stroke-dasharray="0"/></svg><span>switch on the line</span></div>
+                <div class="ts"><b>1-bar blend</b><svg viewBox="0 0 120 40"><line x1="60" y1="2" x2="60" y2="38" stroke="#444" stroke-dasharray="2 2"/><polyline points="4,10 30,10 60,34" fill="none" stroke="#eee" stroke-width="2"/><polyline points="30,34 60,10 116,10" fill="none" stroke="#FFB000" stroke-width="2"/></svg><span>cross-blend the bar before</span></div>
+                <div class="ts"><b>Blackout-and-bang</b><svg viewBox="0 0 120 40"><line x1="60" y1="2" x2="60" y2="38" stroke="#444" stroke-dasharray="2 2"/><polyline points="4,10 46,10 46,34 60,34" fill="none" stroke="#eee" stroke-width="2"/><polyline points="60,34 60,4 70,10 116,10" fill="none" stroke="#FFB000" stroke-width="2"/></svg><span>1 beat dark, then hit</span></div>
+                <div class="ts on"><b>Flash bridge <span class="chg" style="margin-left:4px">NEW</span></b><svg viewBox="0 0 120 40"><line x1="60" y1="2" x2="60" y2="38" stroke="#444" stroke-dasharray="2 2"/><polyline points="4,10 52,10 52,34" fill="none" stroke="#eee" stroke-width="2"/><rect x="52" y="3" width="14" height="31" fill="#F0E442" opacity=".85"/><polyline points="66,34 66,10 116,10" fill="none" stroke="#FFB000" stroke-width="2"/></svg><span>Build's FLASH for 1 beat</span></div>
+              </div>
+              <span class="hint">With Morph set to <b style="color:#ddd">transition</b>, the fader can do any blend by hand; reaching 100 % commits the take.</span>
+            </div></div>
+          <div class="frow"><div class="k">Bed across the change<small>what runs underneath</small></div>
+            <div class="row center gap8"><span class="seg"><span>cut with the take</span><span class="was">rise over 1 bar</span><span class="on">hold until new HIT</span><span>keep Groove's bed</span></span><span class="chg">CHANGED</span></div></div>
+          <div class="frow"><div class="k">Reactions on the take<small>applied once, on the line</small></div>
+            <div class="row center gap8"><span class="chip" style="background:color-mix(in srgb,var(--hit) 22%,#262626)">punch size</span><span class="chip outline">zone map → chase A→D</span><span class="hint">the audience lasers stay off (Build does not allow them)</span></div></div>
+        </div>
+
+        <div class="side">
+          <div class="pv">
+            <div class="row between center"><span class="pvlab">PREVIEW OF THE TAKE · NOT SENT</span><span class="btn sm amber" style="background:#5a4100;border:1px solid var(--warn);color:#ffe2a0">▶ Play the take</span></div>
+            <div class="steps">
+              <div class="st"><div class="screen" data-shape="wave" data-color="#36e2ff"></div>bar 32 · beat 4<br>Groove</div>
+              <div class="st"><div class="screen" style="border-color:#F0E442" data-shape="text" data-text="DROP" data-color="#F0E442"></div>bridge · 1 beat<br>FLASH "DROP"</div>
+              <div class="st"><div class="screen" data-shape="tunnel" data-color="#b05cff"></div>bar 1 · Build<br>first HIT tunnel</div>
+            </div>
+            <span class="hint">Stage left shown. ← → steps through lasers 1–4 in rig order.</span>
+          </div>
+          <div class="diffs">
+            <b style="color:#fff;font-size:12px;letter-spacing:.06em">NOT ON AIR YET</b>
+            <div class="d">Leave after <s>32</s> <b>16 bars</b></div>
+            <div class="d">Transition <s>1-bar blend</s> <b>flash bridge</b></div>
+            <div class="d">Bed <s>rise over 1 bar</s> <b>hold until new HIT</b></div>
+            <span class="hint" style="margin-top:2px">If the take lands before you commit, Build plays as it was. Your edits wait here.</span>
+          </div>
+        </div>
+      </div>
+      <div class="commitbar">
+        <span class="btn ghost">Discard</span>
+        <span class="text2" style="font-size:13px">Commit updates the cued Build. Groove is not touched.</span>
+        <span style="margin-left:auto" class="kbd">⌘⏎</span>
+        <span class="btn commit">Commit to NEXT</span>
+      </div>
+    </div>
+  </div>
+  <div class="status"><span><span class="dot green"></span> <b>Streaming</b> 4 of 4 · 62 fps</span><span>Preview: NEXT at 10 fps</span><span style="margin-left:auto">MIDI: Launchpad Mini</span></div>
+
+  <div class="callout" style="left:6px;top:170px">1</div>
+  <div class="callout" style="left:900px;top:134px">2</div>
+  <div class="callout" style="left:6px;top:310px">3</div>
+  <div class="callout" style="left:6px;top:476px">4</div>
+  <div class="callout" style="left:1000px;top:1010px">5</div>
+
+  <div class="notes" style="left:30px;top:826px;width:930px;font-size:12px"><b>B3 · when a vibe leaves, where it goes, how it changes</b><ol>
+    <li>While the show is live, mini decks stay pinned on the vibe tabs: NOW, NEXT and the take.</li>
+    <li>Auto-advance on the deck: an AUTO tag, a countdown ring ("5 bars") and lilac bars at the end of NOW's bar counter. Hold VIBE to stay.</li>
+    <li>Set path: one block per vibe, as wide as its bars; arrows are follow actions (next, energy up, random, stay). The white line is the playhead.</li>
+    <li>Blind edit of the cued vibe: amber hatched frame, CHANGED marks, a list of what is not on air yet, and one Commit (r04 rule 19).</li>
+    <li>Preview of the take plays the chosen transition on the NEXT preview only. Discard or Commit; the pads keep working throughout.</li>
+  </ol></div>
+</div></body></html>

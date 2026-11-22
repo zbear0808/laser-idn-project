@@ -1,0 +1,83 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.sheet { padding: 22px 28px; display: grid; grid-template-columns: 1fr 1fr; gap: 22px 34px; }
+.sec h2 { margin-bottom: 10px; }
+.sec p { margin: 4px 0 10px; color: var(--text2); line-height: 1.45; font-size: 12.5px; }
+.pads5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.pads5 .rpad { height: 150px; }
+.states { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.states .rpad { height: 118px; }
+.states .cap { text-align: center; margin-top: 6px; font-size: 12px; color: #ddd; }
+.states .cap small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+table.t { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+table.t td { padding: 6px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: middle; }
+table.t td:first-child { width: 120px; }
+.tiles { display: flex; gap: 12px; }
+.tile { width: 150px; }
+.tile .screen { height: 92px; }
+.tile .cap { font-size: 11.5px; margin-top: 6px; color: #ddd; }
+.tile .cap small { display: block; color: var(--muted); }
+</style></head><body>
+<div class="page">
+  <div class="caption-bar"><b>S1 · Shared design language</b><span class="tag">used by every design A–E</span><span class="tag">colours: Okabe–Ito (colour-blind safe)</span></div>
+  <div class="sheet">
+    <div class="sec">
+      <h2>1 · Five roles, five colours, everywhere</h2>
+      <p>The same colour on the pad, on the cells it can play, on the lasers it moves, and on the controller's LED. A role never moves and never changes colour between vibes. BLACKOUT is the only red-family control on screen.</p>
+      <div class="pads5">
+        <div class="rpad ready role-hit"><span class="glyph">▶</span><div class="role">HIT</div><div class="what">circle</div><div class="next">next: star</div><div class="key">C2</div></div>
+        <div class="rpad ready role-accent"><span class="glyph">▶</span><div class="role">ACCENT</div><div class="what">fan</div><div class="next">next: tunnel</div><div class="key">C#2</div></div>
+        <div class="rpad ready role-flash"><span class="glyph">▮</span><div class="role">FLASH</div><div class="what">wall</div><div class="next">while held</div><div class="key">D2</div></div>
+        <div class="rpad ready role-vibe"><span class="glyph">▶</span><div class="role">VIBE</div><div class="what">→ Peak</div><div class="next">hold: lock</div><div class="key">D#2</div></div>
+        <div class="rpad ready role-blackout"><span class="glyph">⟳</span><div class="role">BLACK<br>OUT</div><div class="next">sticky</div><div class="key">E2</div></div>
+      </div>
+    </div>
+    <div class="sec">
+      <h2>2 · One light grammar (screen = LEDs)</h2>
+      <p>Five states, each shown by colour <i>and</i> a second cue (outline, fill, motion or text), so it reads in the dark and for colour-blind users. Flashing is one flash per beat, as on a Launchpad.</p>
+      <div class="states">
+        <div><div class="rpad empty role-hit"><div class="role">HIT</div><div class="next">nothing to play</div></div><div class="cap">Empty<small>dashed, dim, says why</small></div></div>
+        <div><div class="rpad ready role-hit"><div class="role">HIT</div><div class="what">circle</div></div><div class="cap">Ready<small>colour band + outline</small></div></div>
+        <div><div class="rpad on role-hit"><div class="role">HIT</div><div class="what">circle</div><div class="decay" style="width:60%"></div></div><div class="cap">On<small>full colour + decay bar</small></div></div>
+        <div><div class="rpad queued role-vibe"><div class="role">VIBE</div><div class="what">→ Peak</div><div class="ring"></div></div><div class="cap">Queued<small>flashes on the beat, ring fills to the bar</small></div></div>
+        <div><div class="rpad ready role-hit" style="background:linear-gradient(180deg,#1d1d1d,color-mix(in srgb,var(--hit) 30%,#1d1d1d))"><div class="role">HIT</div><div class="what">circle</div><div class="next"><span class="auto-tag">AUTO</span></div></div><div class="cap">Running by itself<small>slow pulse + AUTO tag</small></div></div>
+      </div>
+    </div>
+    <div class="sec">
+      <h2>3 · What a press does, in the corner</h2>
+      <table class="t">
+        <tr><td><b>▶ Shot</b></td><td>plays, then ends by itself (a HIT that decays after its beats; a Punch reaction)</td></tr>
+        <tr><td><b>▮ Hold</b></td><td>on while your finger is down; let go and the look comes back (FLASH, Strobe, Swell)</td></tr>
+        <tr><td><b>⟳ Latch</b></td><td>press on, press off (BLACKOUT, a sustained bed)</td></tr>
+        <tr><td><b>⏱ On the bar</b></td><td>waits for the next beat or bar; the pad flashes until it lands (vibe change, zone map)</td></tr>
+        <tr><td><b>chips</b></td><td>under the name: what else the press moves (<span class="mini-tag">size</span> <span class="mini-tag">bright</span> <span class="mini-tag">A→B</span>)</td></tr>
+      </table>
+    </div>
+    <div class="sec">
+      <h2>4 · Honest laser tiles</h2>
+      <p>Tiles sit in rig order, left to right. A white ring means "this laser is emitting right now", after intensity, blackout, zones and safety. Everything else says why it is dark.</p>
+      <div class="tiles">
+        <div class="tile"><div class="screen onair" data-shape="circle" data-color="#56B4E9" data-lbl="1 · Stage left" data-dot="green"></div><div class="cap">On air<small>white ring</small></div></div>
+        <div class="tile"><div class="screen offair" data-shape="none" data-lbl="2 · Center" data-dot="orange" data-lbl2="Zone B is empty"></div><div class="cap">Dark, and why<small>amber dashes + reason</small></div></div>
+        <div class="tile"><div class="screen onair" data-shape="fan" data-color="#E69F00" data-lbl="3 · Stage right" data-dot="green" data-lbl2="⚠ 14 fps · heavy"></div><div class="cap">Overloaded<small>amber text, still on air</small></div></div>
+        <div class="tile"><div class="screen" data-shape="none" data-lbl="4 · Audience" data-dot="red" data-lbl2="🔒 audience: off" data-blocked="0,0,100,100"></div><div class="cap">Audience laser<small>hatched until allowed</small></div></div>
+      </div>
+    </div>
+    <div class="sec">
+      <h2>5 · The status band (readable from the room)</h2>
+      <div class="col gap6">
+        <div class="status-band live">● LIVE · 4 of 4 lasers · 128.0 BPM</div>
+        <div class="status-band degraded">▲ DEGRADED · Center not answering · 3 of 4 lasers</div>
+        <div class="status-band dark">■ BLACKOUT · press BLACKOUT again to bring the light back</div>
+        <div class="status-band locked">🔒 SHOW LOCK · only the pads and faders work · hold 2 s to unlock</div>
+      </div>
+    </div>
+    <div class="sec">
+      <h2>6 · Zones, and things the app did by itself</h2>
+      <p>Zones are letters with a colour; a dashed chip is a zone with nothing in it. Anything the app changed on its own (a beat chase, a pool pick, an auto-advance) carries an AUTO tag and a one-line reason.</p>
+      <div class="row gap8 center"><span class="zchip zone-a">A</span><span class="zchip zone-b">B</span><span class="zchip zone-c">C</span><span class="zchip zone-d off">D</span>
+        <span style="width:14px"></span><span class="auto-tag">AUTO</span><span class="text2 small">Vibe → Peak: 32 bars in Build and a 2-beat gap</span></div>
+      <p style="margin-top:14px">Rules from the research (04 §8): no performance control opens anything; at most four concepts on the live view; quasimodes only while held; one red element, for safety.</p>
+    </div>
+  </div>
+</div></body></html>

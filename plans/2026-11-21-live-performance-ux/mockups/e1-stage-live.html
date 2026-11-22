@@ -1,0 +1,243 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.tabbar .spacer { margin-left: auto; display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 36px; }
+.stage { position: absolute; left: 14px; top: 154px; width: 1412px; height: 620px; border-radius: 10px; overflow: hidden;
+         background: radial-gradient(ellipse at 50% 20%, #17191d 0%, #0d0d0f 60%, #0a0a0a 100%); border: 1px solid #2a2a2a; }
+.stage > svg.bg { position: absolute; inset: 0; width: 1412px; height: 620px; }
+.st-head { position: absolute; left: 16px; top: 12px; display: flex; align-items: center; gap: 10px; }
+.st-head h3 { color: #cfcfcf; }
+.house { position: absolute; font-size: 11px; letter-spacing: .12em; color: #6f6f6f; font-weight: 700; }
+.unit { position: absolute; width: 228px; }
+.unit .screen { width: 228px; height: 146px; }
+.uname { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.uname .n { font-size: 20px; font-weight: 800; }
+.uname .nm { font-size: 15px; font-weight: 600; color: #e8e8e8; }
+.uname .st { margin-left: auto; }
+.uload { display: flex; align-items: center; gap: 8px; margin-top: 5px; font-size: 11px; color: var(--text2); }
+.uload .meter { width: 110px; }
+.st { font-size: 11px; font-weight: 800; letter-spacing: .05em; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+.st.live { background: #123d1e; color: #8ff0a8; border: 1px solid #2fbf5a; }
+.st.safe { background: #2a2a2a; color: #c8c8c8; border: 1px solid #5a5a5a; }
+.flashring { box-shadow: 0 0 0 3px var(--flash), 0 0 22px rgba(240,228,66,.55); }
+.rtag { position: absolute; top: -11px; right: 10px; z-index: 3; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 9px; background: var(--flash); color: #111; letter-spacing: .04em; }
+.lanepill { position: absolute; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #ddd; padding: 4px 10px 4px 5px; border-radius: 14px; background: rgba(10,10,10,.75); border: 1px solid #333; }
+.lanepill .h { color: var(--muted); font-size: 11px; }
+.chasepill { position: absolute; left: 470px; top: 10px; display: flex; align-items: center; gap: 10px; padding: 5px 12px; border-radius: 14px;
+             background: color-mix(in srgb, var(--flash) 16%, #141414); border: 1px solid var(--flash); color: #f7f1a0; font-size: 12.5px; font-weight: 700; }
+.chasepill .pips { display: inline-flex; gap: 4px; }
+.chasepill .pips i { width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid #8d8640; font-style: normal; font-size: 10px; display: inline-flex; align-items: center; justify-content: center; color: #bdb66a; }
+.chasepill .pips i.on { background: var(--flash); color: #111; border-color: var(--flash); }
+.aud { position: absolute; width: 150px; }
+.aud .screen { width: 150px; height: 94px; }
+.aud .top { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.aud .top .n { font-size: 16px; font-weight: 800; }
+.aud .top .nm { font-size: 12.5px; color: #ddd; }
+.aud .why { font-size: 11px; color: var(--text2); margin-top: 4px; }
+.gest { position: absolute; left: 16px; bottom: 14px; display: flex; align-items: center; gap: 14px; padding: 8px 12px; border-radius: 8px; background: rgba(18,18,18,.9); border: 1px solid #333; font-size: 12px; color: var(--text2); }
+.gest b { color: #eee; font-weight: 600; }
+.solo-sample { font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 4px; background: #e8e8e8; color: #111; letter-spacing: .04em; }
+
+.zstrip { position: absolute; left: 14px; top: 784px; width: 1412px; height: 76px; display: flex; gap: 10px; }
+.zlabel { width: 168px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+.zlabel .now { font-size: 15px; font-weight: 700; }
+.zlabel .nx { font-size: 12px; color: var(--zone-b); font-weight: 600; }
+.zbtn { width: 200px; flex-shrink: 0; height: 76px; border-radius: 10px; background: #1d1d1d; border: 2px solid #3a3a3a; display: flex; align-items: center; gap: 12px; padding: 0 12px; position: relative; }
+.zbtn .nm { font-size: 16px; font-weight: 700; white-space: nowrap; }
+.zbtn .sub { white-space: nowrap; }
+.zbtn .sub { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.zbtn .gl { position: absolute; top: 6px; right: 9px; font-size: 12px; color: #bbb; }
+.zbtn.on { background: #17324f; border-color: var(--blue); box-shadow: 0 0 16px rgba(73,146,219,.45); }
+.zbtn.on .sub { color: #cfe6ff; }
+.zbtn.queued { border-color: var(--zone-b); box-shadow: 0 0 0 3px rgba(0,158,115,.35); }
+.zbtn.queued .qt { position: absolute; top: 6px; left: 12px; font-size: 10px; font-weight: 800; letter-spacing: .06em; color: #5fe0b8; }
+.zbtn.queued .ring { position: absolute; inset: 4px; border-radius: 7px; border: 2px solid transparent; border-top-color: var(--zone-b); border-right-color: var(--zone-b); }
+.zbtn.queued .body2 { margin-top: 10px; }
+.mini { display: grid; grid-template-columns: repeat(4, 17px); gap: 3px; flex-shrink: 0; }
+.mini i { height: 26px; border-radius: 3px; font-style: normal; font-size: 11px; font-weight: 800; color: #0b0b0b; display: flex; align-items: center; justify-content: center; }
+.mini i.a { background: var(--zone-a); } .mini i.b { background: var(--zone-b); } .mini i.o { background: transparent; border: 1.5px dashed #555; color: #666; }
+.mini i.hl { box-shadow: 0 0 0 2px #fff; }
+.znow { flex: 1; border-radius: 10px; background: #161616; border: 1px solid #333; padding: 10px 14px; display: flex; flex-direction: column; justify-content: center; gap: 5px; }
+.znow .t { font-size: 12px; color: var(--text2); }
+.znow .v { font-size: 14px; font-weight: 700; color: #f7f1a0; }
+
+.pads { position: absolute; left: 14px; top: 870px; width: 1412px; height: 194px; display: flex; gap: 10px; }
+.pads .rpad { width: 200px; height: 194px; }
+.pads .rpad.bo { width: 178px; margin-left: 18px; }
+.faders { margin-left: 18px; flex: 1; display: flex; flex-direction: column; gap: 10px; justify-content: center; }
+.faders .hfader { height: 52px; }
+.vibeline { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text2); }
+.vdot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+</style></head><body>
+<div class="page tall">
+  <div class="caption-bar"><b>E1 · Stage, live</b><span class="tag">design E · stage view</span><span class="tag">Perform tab, stage picture</span><span class="tag">FLASH held → zone chase 1→4</span></div>
+  <div class="toolbar">
+    <span class="tb-btn">▶</span><span class="tb-btn">⟳</span><span class="tb-sep"></span>
+    <span class="tb-label">BPM</span><span class="tb-field mono">128.0</span>
+    <span class="beat"><i></i><i></i><i class="on"></i><i></i></span><span class="tb-btn">TAP</span>
+    <span class="tb-sep"></span><span class="tb-label">Controller</span><span class="tb-field">Launchpad Mini <span class="dot green" style="margin-left:6px"></span></span>
+    <span style="margin-left:auto" class="row center gap8"><span class="dot green"></span><span class="tb-label">Streaming · 4 lasers</span><span class="tb-btn green">Stream</span></span>
+  </div>
+  <div class="tabbar">
+    <div class="tab">Grid</div><div class="tab">Vibes</div><div class="tab active">Perform</div><div class="tab">Effects</div><div class="tab">Stage</div><div class="tab">Settings</div>
+    <div class="spacer"><span class="hint">View</span><span class="seg"><span>Pads</span><span class="on">Stage</span></span><span class="btn sm ghost">🔒 Show lock</span></div>
+  </div>
+  <div class="status-band live">● LIVE · 4 of 6 lasers on air · 5, 6 audience: SAFE (off) · Groove · 128.0 BPM · Map: Left / Right <span style="margin-left:auto;font-weight:600;color:#c9f5d4">Odd / Even lands on the bar ▸ 2 beats</span></div>
+
+  <!-- ================= STAGE ================= -->
+  <div class="stage">
+    <svg class="bg" viewBox="0 0 1412 620">
+      <defs>
+        <linearGradient id="deck" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e1e20"/><stop offset="1" stop-color="#141414"/></linearGradient>
+        <marker id="ah" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#F0E442"/></marker>
+      </defs>
+      <!-- zone lanes -->
+      <rect x="200" y="62" width="506" height="338" fill="rgba(47,143,224,.10)"/>
+      <rect x="706" y="62" width="506" height="338" fill="rgba(0,158,115,.10)"/>
+      <line x1="200" y1="62" x2="200" y2="400" stroke="rgba(47,143,224,.45)" stroke-dasharray="4 4"/>
+      <line x1="706" y1="62" x2="706" y2="400" stroke="rgba(160,160,160,.35)" stroke-dasharray="4 4"/>
+      <line x1="1212" y1="62" x2="1212" y2="400" stroke="rgba(0,158,115,.5)" stroke-dasharray="4 4"/>
+      <!-- beams from fixtures (atmosphere) -->
+      <g id="rays"></g>
+      <!-- chase arrow -->
+      <line x1="300" y1="50" x2="1112" y2="50" stroke="#F0E442" stroke-width="2" stroke-opacity=".75" marker-end="url(#ah)"/>
+      <circle cx="326" cy="50" r="5" fill="#2b2a14" stroke="#F0E442"/>
+      <circle cx="579" cy="50" r="5" fill="#2b2a14" stroke="#F0E442"/>
+      <circle cx="833" cy="50" r="9" fill="#F0E442" style="filter:drop-shadow(0 0 6px #F0E442)"/>
+      <circle cx="1086" cy="50" r="5" fill="#2b2a14" stroke="#F0E442"/>
+      <!-- truss -->
+      <g stroke="#4a4a4a" stroke-width="1.5" fill="none">
+        <line x1="150" y1="68" x2="1262" y2="68"/><line x1="150" y1="80" x2="1262" y2="80"/>
+        <path id="zig" d=""/>
+      </g>
+      <!-- fixture heads on truss -->
+      <g fill="#2c2c2c" stroke="#777">
+        <rect x="311" y="82" width="30" height="20" rx="3"/><rect x="564" y="82" width="30" height="20" rx="3"/>
+        <rect x="818" y="82" width="30" height="20" rx="3" stroke="#F0E442"/><rect x="1071" y="82" width="30" height="20" rx="3"/>
+      </g>
+      <!-- stage deck -->
+      <polygon points="150,400 1262,400 1340,440 72,440" fill="url(#deck)" stroke="#3a3a3a"/>
+      <line x1="30" y1="440" x2="1382" y2="440" stroke="#5a5a5a" stroke-width="2"/>
+      <!-- audience-laser fixtures on the front edge -->
+      <rect x="86" y="420" width="30" height="18" rx="3" fill="#2c2c2c" stroke="#a33"/>
+      <rect x="1296" y="420" width="30" height="18" rx="3" fill="#2c2c2c" stroke="#a33"/>
+      <g id="crowd"></g>
+    </svg>
+
+    <div class="st-head"><h3>Stage</h3><span class="hint">seen from FOH · your left = house left</span></div>
+    <div class="house" style="left:214px;top:412px">◂ HOUSE LEFT</div>
+    <div class="house" style="right:214px;top:412px">HOUSE RIGHT ▸</div>
+
+    <div class="chasepill">ZONE CHASE · while FLASH held · 1 → 4 · ¼ beat
+      <span class="pips"><i>1</i><i>2</i><i class="on">3</i><i>4</i></span></div>
+
+    <!-- truss row -->
+    <div class="unit" style="left:212px;top:112px">
+      <div class="screen onair" data-shape="spiral" data-color="#ff3bd4" data-scale="1.05" data-lbl="spiral · zone A"></div>
+      <div class="uname"><span class="n">1</span><span class="nm">Stage left</span><span class="st live">LIVE</span></div>
+      <div class="uload"><div class="meter"><i style="width:38%"></i></div>38 % · 62 fps</div>
+    </div>
+    <div class="unit" style="left:465px;top:112px">
+      <div class="screen onair" data-shape="spiral" data-color="#ff3bd4" data-scale="1.05" data-rot="40" data-lbl="spiral · zone A"></div>
+      <div class="uname"><span class="n">2</span><span class="nm">Left center</span><span class="st live">LIVE</span></div>
+      <div class="uload"><div class="meter"><i style="width:41%"></i></div>41 % · 62 fps</div>
+    </div>
+    <div class="unit" style="left:719px;top:112px">
+      <span class="rtag">FLASH</span>
+      <div class="screen flashring" data-shape="fan" data-color="#ffe23b" data-scale="1.1" data-lbl="beam fan · chase step 3"></div>
+      <div class="uname"><span class="n">3</span><span class="nm">Right center</span><span class="st live">LIVE</span></div>
+      <div class="uload"><div class="meter"><i class="warn" style="width:72%"></i></div>72 % · 58 fps</div>
+    </div>
+    <div class="unit" style="left:972px;top:112px">
+      <div class="screen onair" data-shape="tunnel" data-color="#39ff6a" data-scale="1.1" data-lbl="tunnel · zone B"></div>
+      <div class="uname"><span class="n">4</span><span class="nm">Stage right</span><span class="st live">LIVE</span></div>
+      <div class="uload"><div class="meter"><i style="width:34%"></i></div>34 % · 62 fps</div>
+    </div>
+
+    <!-- lane pills -->
+    <div class="lanepill" style="left:212px;top:362px"><span class="zchip zone-a">A</span><b>Left</b> · 1 2 <span class="h">hold lane = mute A</span></div>
+    <div class="lanepill" style="left:718px;top:362px"><span class="zchip zone-b">B</span><b>Right</b> · 3 4 <span class="h">hold lane = mute B</span></div>
+
+    <!-- audience row, front edge -->
+    <div class="aud" style="left:26px;top:290px">
+      <div class="top"><span class="n">5</span><span class="nm">Audience L</span></div>
+      <div class="screen" data-shape="none" data-blocked="0,0,100,100" data-lbl="🔒 audience: off" data-dot="red"></div>
+    </div>
+    <div class="aud" style="left:1236px;top:290px">
+      <div class="top"><span class="n">6</span><span class="nm">Audience R</span></div>
+      <div class="screen" data-shape="none" data-blocked="0,0,100,100" data-lbl="🔒 audience: off" data-dot="red"></div>
+    </div>
+    <div style="position:absolute;left:26px;top:226px;width:160px" class="col gap6"><span class="st safe" style="align-self:flex-start">SAFE (off)</span><span class="small text2">not allowed in Groove</span></div>
+    <div style="position:absolute;left:1236px;top:226px;width:160px" class="col gap6"><span class="st safe" style="align-self:flex-start">SAFE (off)</span><span class="small text2">not allowed in Groove</span></div>
+
+    <div class="gest"><b>Mouse / touch extras</b>
+      <span>hold a laser → <span class="solo-sample">SOLO 3 (not saved)</span></span>
+      <span>hold a lane → mute that zone</span>
+      <span>double-click → Identify</span></div>
+  </div>
+
+  <!-- ================= ZONE MAP STRIP ================= -->
+  <div class="zstrip">
+    <div class="zlabel"><h3>Zone map</h3><div class="now">Left / Right</div><div class="nx">→ Odd / Even on the bar</div></div>
+    <div class="zbtn on"><span class="gl">⟳</span><div class="mini"><i class="a">A</i><i class="a">A</i><i class="b">B</i><i class="b">B</i></div><div><div class="nm">Left / Right</div><div class="sub">now · key 1</div></div></div>
+    <div class="zbtn queued"><span class="qt">ON THE BAR</span><span class="ring"></span><span class="gl">⏱</span><div class="mini body2"><i class="a">A</i><i class="b">B</i><i class="a">A</i><i class="b">B</i></div><div class="body2"><div class="nm">Odd / Even</div><div class="sub">key 2</div></div></div>
+    <div class="zbtn"><span class="gl">⏱</span><div class="mini"><i class="a">A</i><i class="a">A</i><i class="a">A</i><i class="a">A</i></div><div><div class="nm">Unison</div><div class="sub">key 3</div></div></div>
+    <div class="zbtn"><span class="gl">⟳</span><div class="mini"><i class="a hl">A</i><i class="o">·</i><i class="o">·</i><i class="o">·</i></div><div><div class="nm">Chase ▸</div><div class="sub">½ beat · key 4</div></div></div>
+    <div class="zbtn"><span class="gl">▶</span><div class="mini"><i class="b">B</i><i class="b">B</i><i class="a">A</i><i class="a">A</i></div><div><div class="nm">Swap ⇄</div><div class="sub">once · key 5</div></div></div>
+    <div class="znow"><div class="t">Moving the picture now</div><div class="v">FLASH → chase 1→4</div><div class="t">0 = each cue's own map</div></div>
+  </div>
+
+  <!-- ================= PADS + FADERS ================= -->
+  <div class="pads">
+    <div class="rpad ready role-hit"><span class="glyph">▶</span><div class="role">HIT</div><div class="what">circle</div><div class="next">next: star</div><div class="chips"><span>size</span><span>A→B hop</span></div><div class="key">H · Pad 1</div></div>
+    <div class="rpad ready role-accent"><span class="glyph">▶</span><div class="role">ACCENT</div><div class="what">wave</div><div class="next">next: tunnel</div><div class="chips"><span>A ⇄ B swap</span></div><div class="key">J · Pad 2</div></div>
+    <div class="rpad on role-flash"><span class="glyph">▮</span><div class="role">FLASH</div><div class="what">beam fan</div><div class="next">held · 1.5 s</div><div class="chips"><span>chase 1→4</span><span>bright</span></div><div class="key">K · Pad 3</div></div>
+    <div class="rpad ready role-vibe"><span class="glyph">▶</span><div class="role">VIBE</div><div class="what">→ Build</div><div class="next">tap: next · hold: lock</div><div class="key">L · Pad 4</div></div>
+    <div class="rpad ready role-blackout bo"><span class="glyph">⟳</span><div class="role">BLACK<br>OUT</div><div class="next">sticky</div><div class="key">; · Pad 8</div></div>
+    <div class="faders">
+      <div class="vibeline"><span class="vdot" style="background:#3fb6a8"></span><b style="color:#fff">Groove</b> energy ●●○○ <span class="muted">· next Build</span></div>
+      <div class="hfader"><div class="fill" style="width:85%"></div><span class="lbl">Intensity</span><span class="val">85 %</span></div>
+      <div class="hfader"><div class="fill" style="width:30%;background:linear-gradient(90deg,#4a3a5a,#8a6aa8)"></div><span class="lbl">Morph</span><span class="val">30 %</span></div>
+    </div>
+  </div>
+
+  <div class="status" style="position:absolute;left:0;right:0;bottom:0;background:var(--bg)"><span><b>Launchpad Mini</b> connected</span><span>6 lasers: <b>4 live</b>, 2 safe (off)</span><span>Output <b>85 %</b></span><span>Zone map: <b>Left / Right</b></span><span style="margin-left:auto">last change: <span class="auto-tag">AUTO</span> none · you queued Odd / Even</span></div>
+
+  <!-- design callouts -->
+  <div class="callout" style="left:452px;top:166px">1</div>
+  <div class="callout" style="left:1188px;top:262px">2</div>
+  <div class="callout" style="left:420px;top:520px">3</div>
+  <div class="callout" style="left:548px;top:771px">4</div>
+  <div class="callout" style="left:30px;top:436px">5</div>
+  <div class="callout" style="left:20px;top:860px">6</div>
+  <div class="notes" style="right:26px;top:604px;width:690px">
+    <b>E1 · The stage is the live picture</b>
+    <ol>
+      <li>Zone effects play <i>on the rig</i>: the chase arrow sweeps 1→4; the lit laser wears FLASH's yellow ring.</li>
+      <li>Every laser sits where it hangs, with its real output, on-air ring, status word and load meter.</li>
+      <li>Zones are lanes behind the lasers. Hold a lane = mute it; hold a laser = SOLO (never saved).</li>
+      <li>Zone maps are big buttons with 4-box thumbnails; the queued one flashes and lands on the bar.</li>
+      <li>Audience lasers sit on the front edge, hatched and locked until the vibe allows them.</li>
+      <li>The five pads and two faders still run the show; stage gestures are mouse/touch extras.</li>
+    </ol>
+  </div>
+</div>
+<script>
+(function(){
+  var NS="http://www.w3.org/2000/svg";
+  var zig=document.getElementById('zig'), d="";
+  for (var x=150;x<1262;x+=14){ d+="M"+x+",68 L"+(x+7)+",80 L"+(x+14)+",68 "; }
+  zig.setAttribute('d',d);
+  var rays=document.getElementById('rays');
+  [[326,'#ff3bd4',.10],[579,'#ff3bd4',.10],[833,'#ffe23b',.26],[1086,'#39ff6a',.10]].forEach(function(f){
+    for(var i=0;i<7;i++){ var l=document.createElementNS(NS,'line');
+      l.setAttribute('x1',f[0]);l.setAttribute('y1',100);l.setAttribute('x2',f[0]-170+i*56);l.setAttribute('y2',400);
+      l.setAttribute('stroke',f[1]);l.setAttribute('stroke-opacity',f[2]);l.setAttribute('stroke-width',1.4);rays.appendChild(l);} });
+  var crowd=document.getElementById('crowd');
+  for(var r=0;r<4;r++){ for(var c=0;c<34;c++){ var cx=30+c*41+(r%2)*20, cy=478+r*34;
+      var g=document.createElementNS(NS,'g'); g.setAttribute('fill', r<2?'#1f1f22':'#19191b');
+      var h=document.createElementNS(NS,'circle'); h.setAttribute('cx',cx);h.setAttribute('cy',cy);h.setAttribute('r',8);
+      var s=document.createElementNS(NS,'path'); s.setAttribute('d','M'+(cx-15)+','+(cy+22)+' Q'+cx+','+(cy+4)+' '+(cx+15)+','+(cy+22)+' Z');
+      g.appendChild(h);g.appendChild(s);crowd.appendChild(g);} }
+})();
+</script>
+</body></html>

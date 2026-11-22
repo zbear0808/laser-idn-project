@@ -1,0 +1,206 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.main { flex: 1; display: flex; gap: 16px; padding: 12px 14px 10px; min-height: 0; }
+.left { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.right { width: 330px; display: flex; flex-direction: column; gap: 10px; }
+
+/* vibe header */
+.vhead { height: 66px; border-radius: 10px; background: #181818; border: 1px solid #2c2c2c; display: flex; align-items: center; gap: 16px; padding: 0 16px; position: relative; overflow: hidden; }
+.vhead::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--vc); }
+.vname { font-size: 30px; font-weight: 800; letter-spacing: .03em; color: var(--vc); }
+.energy { font-size: 15px; letter-spacing: 2px; color: #ddd; white-space: nowrap; }
+.energy small { font-size: 11px; color: var(--muted); letter-spacing: 0; margin-left: 4px; }
+.bpm { display: flex; align-items: center; gap: 8px; padding: 0 14px; border-left: 1px solid #2c2c2c; border-right: 1px solid #2c2c2c; height: 44px; }
+.bpm .num { font-family: "SF Mono", Menlo, monospace; font-size: 26px; font-weight: 700; }
+.bpm .unit { font-size: 11px; color: var(--muted); margin-right: 4px; }
+.beats { display: flex; gap: 5px; align-items: center; margin-left: 6px; }
+.beats i { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid #666; display: block; }
+.beats i.done { background: #555; border-color: #777; }
+.beats i.now { background: #fff; border-color: #fff; box-shadow: 0 0 8px #fff; }
+.barc { font-size: 12px; color: var(--text2); margin-left: 6px; line-height: 1.2; }
+.barc b { color: #fff; font-size: 15px; font-family: "SF Mono", Menlo, monospace; }
+
+/* vibe strip */
+.vstrip { display: flex; gap: 8px; height: 42px; }
+.vchip { flex: 1; border-radius: 8px; background: #1b1b1b; border: 1.5px solid #333; display: flex; align-items: center; gap: 8px; padding: 0 12px; font-size: 14px; color: #ccc; position: relative; overflow: hidden; }
+.vchip .sw { width: 12px; height: 12px; border-radius: 3px; background: var(--vc); }
+.vchip .en { font-size: 11px; letter-spacing: 1px; color: #999; }
+.vchip .t { white-space: nowrap; margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.vchip.now { background: color-mix(in srgb, var(--vc) 30%, #161616); border-color: var(--vc); color: #fff; font-weight: 700; }
+.vchip.now .t { color: var(--vc); }
+.vchip.next { border-color: var(--vibe); border-style: solid; box-shadow: 0 0 0 2px color-mix(in srgb, var(--vibe) 30%, transparent); color: #fff; }
+.vchip.next .t { color: var(--vibe); }
+.vchip.next .fillbar { position: absolute; left: 0; bottom: 0; height: 3px; width: 62%; background: var(--vibe); }
+
+/* pads */
+.pads { display: flex; gap: 12px; height: 326px; }
+.pads .rpad { flex: 1; height: 100%; }
+.pads .rpad .role { font-size: 30px; }
+.pads .rpad .what { font-size: 20px; margin-top: 6px; }
+.pads .rpad .next { font-size: 14px; margin-top: 5px; }
+.pads .rpad .chips { margin-top: 12px; }
+.pads .rpad .chips span { font-size: 12px; padding: 3px 9px; }
+.pads .rpad .glyph { font-size: 15px; top: 18px; right: 14px; }
+.pads .rpad .key { font-size: 11px; bottom: 14px; }
+.pads .rpad .decay { height: 7px; }
+.pads .rpad.queued::after { top: 18px; left: 14px; font-size: 11px; }
+.bo-gap { width: 30px; display: flex; align-items: center; justify-content: center; }
+.bo-gap i { width: 1px; height: 70%; background: repeating-linear-gradient(180deg, #444 0 4px, transparent 4px 8px); }
+.rpad.role-blackout { flex: 0 0 172px; }
+.pads .rpad.role-blackout .role { font-size: 28px; line-height: 1.05; }
+.pads .rpad.role-hit.on .what { font-size: 22px; }
+.decay-lbl { position: absolute; bottom: 12px; right: 12px; font-size: 11px; color: #111; font-weight: 700; }
+
+/* laser strip */
+.lsec-h { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text2); }
+.lsec-h h3 { font-size: 12px; }
+.lstrip { display: flex; gap: 10px; }
+.lstrip .screen { width: 164px; height: 118px; flex: none; }
+.lstrip .aud { margin-left: 14px; }
+.lstrip .screen.hitmoved { box-shadow: 0 0 0 2px #fff, 0 0 0 5px var(--hit), 0 0 16px color-mix(in srgb, var(--hit) 70%, transparent); }
+.zt { position: absolute; right: 6px; top: 5px; z-index: 3; }
+.zt .zchip { width: 18px; height: 18px; font-size: 10.5px; border-radius: 4px; }
+.mv { position: absolute; right: 6px; bottom: 6px; z-index: 3; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 7px; background: var(--hit); color: #0b0b0b; }
+
+/* faders */
+.faders { display: flex; gap: 16px; }
+.fwrap { flex: 1; }
+.fwrap .hfader { height: 46px; }
+.fwrap .hfader .lbl { font-size: 16px; }
+.fwrap .hfader .val { font-size: 16px; font-family: "SF Mono", Menlo, monospace; }
+.hfader.int .fill { background: linear-gradient(90deg, #3a3a3a, #8a8a8a); }
+.hfader.mor .fill { background: linear-gradient(90deg, #2a2a2a, #6d6d6d); }
+.fends { display: flex; justify-content: space-between; font-size: 12px; color: var(--text2); margin-top: 5px; padding: 0 2px; }
+.fends b { color: #ddd; font-weight: 600; }
+.fkey { color: #777; font-size: 11px; }
+
+/* active now */
+.panel { background: #171717; border: 1px solid #2a2a2a; border-radius: 10px; padding: 12px; }
+.panel h3 { font-size: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.arow { display: flex; align-items: center; gap: 9px; padding: 8px 9px; border-radius: 7px; background: #212121; margin-top: 6px; position: relative; overflow: hidden; font-size: 13.5px; }
+.arow .rc { width: 4px; align-self: stretch; border-radius: 2px; background: var(--rc); }
+.arow .tx { flex: 1; min-width: 0; line-height: 1.3; }
+.arow .tx small { display: block; color: var(--muted); font-size: 11.5px; }
+.arow .bar { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--rc); }
+.arow.fresh { background: #26303a; }
+.arow .x { color: #777; font-size: 13px; }
+.chg { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 10px; border-radius: 7px; border: 1px dashed #555; font-size: 13px; color: #ddd; }
+.chg .n { font-weight: 800; color: #fff; }
+.chg .btn { margin-left: auto; }
+.hdr-btns { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+</style></head><body>
+<div class="page">
+  <div class="caption-bar"><b>A1 · Perform, live</b><span class="tag">Design A · The Instrument</span><span class="tag">in the show · Groove → Build queued · HIT just pressed</span></div>
+  <div class="menubar"><span class="logo"></span><span>File</span><span>Edit</span><span>Transport</span><span>View</span><span>Help</span><span class="title">Laser Show — club-night.show</span></div>
+  <div class="tabbar"><div class="tab">Grid</div><div class="tab">Vibes</div><div class="tab active">Perform</div><div class="tab">Effects</div><div class="tab">Projectors</div><div class="tab">Zone Groups</div><div class="tab">Settings</div></div>
+  <div class="status-band live">● LIVE · 4 of 4 stage lasers on air · audience lasers off (Groove doesn't allow them) · 128.0 BPM<span style="margin-left:auto;font-weight:600;opacity:.8">APC mini · keys H J K L ;</span></div>
+
+  <div class="main">
+    <div class="left">
+      <div class="vhead" style="--vc:#1ABC9C">
+        <div class="col" style="margin-left:6px">
+          <div class="vname">GROOVE</div>
+        </div>
+        <div class="energy">●●○○<small>energy 2</small></div>
+        <div class="bpm">
+          <span class="num">128.0</span><span class="unit">BPM</span>
+          <span class="btn sm">TAP</span><span class="btn sm ghost">×2</span><span class="btn sm ghost">÷2</span>
+          <div class="beats"><i class="done"></i><i class="done"></i><i class="now"></i><i></i></div>
+          <div class="barc">bar <b>13</b></div>
+        </div>
+        <div class="hdr-btns">
+          <span class="hint" style="white-space:nowrap">hold <span class="kbd">?</span> to see</span>
+          <span class="btn sm ghost">AUTO off</span>
+          <span class="btn sm ghost">🔒 Show lock</span>
+          <span class="btn sm ghost">⇋ Tune</span>
+        </div>
+      </div>
+
+      <div class="vstrip">
+        <div class="vchip" style="--vc:#a1887f"><span class="sw"></span>Warm-up <span class="en">●○○○</span></div>
+        <div class="vchip now" style="--vc:#1ABC9C"><span class="sw"></span>Groove <span class="en">●●○○</span><span class="t">now</span></div>
+        <div class="vchip next" style="--vc:#8bc34a"><span class="sw"></span>Build <span class="en">●●●○</span><span class="t">⏱ next bar</span><span class="fillbar"></span></div>
+        <div class="vchip" style="--vc:#ec407a"><span class="sw"></span>Peak <span class="en">●●●●</span></div>
+        <div class="vchip" style="--vc:#5c6bc0"><span class="sw"></span>Breakdown <span class="en">●○○○</span></div>
+      </div>
+
+      <div class="pads">
+        <div class="rpad on role-hit"><span class="glyph">▶ shot</span>
+          <div class="role">HIT</div><div class="what">star</div><div class="next">next: spiral</div>
+          <div class="chips"><span>size</span><span>A→B</span></div>
+          <div class="key">H · Pad 1</div><div class="decay" style="width:50%"></div><span class="decay-lbl">½ beat left</span></div>
+        <div class="rpad ready role-accent"><span class="glyph">▶ shot</span>
+          <div class="role">ACCENT</div><div class="what">beam fan</div><div class="next">then: tunnel</div>
+          <div class="chips"><span>flip</span><span>bright</span></div>
+          <div class="key">J · Pad 2</div></div>
+        <div class="rpad ready role-flash"><span class="glyph">▮ hold</span>
+          <div class="role">FLASH</div><div class="what">ring burst</div><div class="next">while held</div>
+          <div class="chips"><span>strobe</span><span>swell</span></div>
+          <div class="key">K · Pad 3</div></div>
+        <div class="rpad queued role-vibe"><span class="glyph">⏱</span><div class="ring"></div>
+          <div class="role">VIBE</div><div class="what">→ Build</div><div class="next">lands in 2 beats · hold: lock</div>
+          <div class="key">L · Pad 4</div></div>
+        <div class="bo-gap"><i></i></div>
+        <div class="rpad ready role-blackout"><span class="glyph">⟳ latch</span>
+          <div class="role">BLACK<br>OUT</div><div class="next">instant · sticky</div><div class="next" style="font-size:12px">hold 1 s to come back</div>
+          <div class="key">; · Pad 8</div></div>
+      </div>
+
+      <div class="lsec-h"><h3>Lasers</h3><span>rig order, as the audience sees them · ring = really emitting</span>
+        <span style="margin-left:auto" class="state-legend"><span class="zchip zone-a">A</span><span class="zchip zone-b">B</span> zone each laser plays</span></div>
+      <div class="lstrip">
+        <div class="screen onair" data-shape="wave" data-color="#1ABC9C" data-scale=".8" data-lbl="1 · Stage left" data-dot="green" data-lbl2="bed · 60 fps"><span class="zt"><span class="zchip zone-a">A</span></span></div>
+        <div class="screen onair" data-shape="wave" data-color="#1ABC9C" data-scale=".8" data-rot="180" data-lbl="2 · Left center" data-dot="green" data-lbl2="bed · 60 fps"><span class="zt"><span class="zchip zone-a">A</span></span></div>
+        <div class="screen hitmoved" data-shape="star" data-color="#56B4E9" data-scale="1.15" data-lbl="3 · Right center" data-dot="green" data-lbl2="star"><span class="zt"><span class="zchip zone-b">B</span></span><span class="mv">HIT</span></div>
+        <div class="screen onair" data-shape="wave" data-color="#1ABC9C" data-scale=".8" data-lbl="4 · Stage right" data-dot="green" data-lbl2="bed · 60 fps"><span class="zt"><span class="zchip zone-b">B</span></span></div>
+        <div class="screen aud" data-shape="none" data-lbl="5 · Audience L" data-dot="red" data-lbl2="🔒 audience: off" data-blocked="0,0,100,100"></div>
+        <div class="screen" data-shape="none" data-lbl="6 · Audience R" data-dot="red" data-lbl2="🔒 audience: off" data-blocked="0,0,100,100"></div>
+      </div>
+
+      <div class="faders">
+        <div class="fwrap">
+          <div class="hfader int"><div class="fill" style="width:100%"></div><span class="lbl">Intensity</span><span class="val">100 %</span></div>
+          <div class="fends"><span>dark</span><span class="fkey">APC fader 9</span><span>full</span></div>
+        </div>
+        <div class="fwrap">
+          <div class="hfader mor"><div class="fill" style="width:35%"></div><span class="lbl">Morph</span><span class="val">35 %</span></div>
+          <div class="fends"><span><b>calm</b> ←</span><span class="fkey">moves: size, spin · APC fader 1</span><span>→ <b>wild</b></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="panel">
+        <h3>Active now <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500">newest first</span></h3>
+        <div class="arow fresh role-hit"><span class="rc"></span><div class="tx">Punch size · HIT<small>½ beat · laser 3</small></div><span class="x">✕</span><div class="bar" style="width:50%"></div></div>
+        <div class="arow role-hit"><span class="rc"></span><div class="tx">Zone hop A→B · HIT<small>star moved to laser 3</small></div><span class="x">✕</span></div>
+        <div class="arow" style="--rc:var(--auto)"><span class="rc"></span><div class="tx">Shuffle pick: spiral is next <span class="auto-tag">AUTO</span><small>HIT pool, never the same twice</small></div><span class="x">✕</span></div>
+        <div class="chg"><div class="col"><span class="n">3 changed from home</span><span class="text2 small">Morph 35 % · VIBE queued · bed spin +20 %</span></div><span class="btn sm ghost">Reset</span></div>
+      </div>
+      <div class="panel">
+        <h3>Where it plays <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500">zone map from Groove</span></h3>
+        <div class="row center gap8" style="font-size:13.5px;margin-top:4px;white-space:nowrap"><span class="zchip zone-a">A</span><span>lasers 1, 2</span><span style="width:8px"></span><span class="zchip zone-b">B</span><span>lasers 3, 4</span><span style="width:8px"></span><span class="zchip zone-c off">C</span><span class="zchip zone-d off">D</span><span class="muted small">empty</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="status"><span><span class="dot green"></span> Output: <b>streaming</b> to 4 of 6</span><span>MIDI: <b>APC mini</b></span><span>press → light <b>6 ms</b></span><span>Undo: Bed spin +20 %</span><span style="margin-left:auto">Show: club-night.show · saved</span></div>
+
+  <div class="callout" style="left:284px;top:142px">1</div>
+  <div class="callout" style="left:22px;top:330px">2</div>
+  <div class="callout" style="left:870px;top:290px">3</div>
+  <div class="callout" style="left:356px;top:620px">4</div>
+  <div class="callout" style="left:1100px;top:166px">5</div>
+  <div class="callout" style="left:700px;top:786px">6</div>
+  <div class="notes" style="right:14px;bottom:36px;width:330px">
+    <b>The screen confirms; the eyes stay on the room</b>
+    <ol>
+      <li>One header for time: vibe, energy, BPM with TAP ×2 ÷2, beat dots, bar. The transport toolbar folds into it on this tab.</li>
+      <li>Each pad shows its press (glyph), what plays, what's next and what else moves (chips). The learned key is small; "Right-click to learn" is gone.</li>
+      <li>BLACKOUT sits after a gap and a dashed rule.</li>
+      <li>The laser strip replaces "No Preview": the Projectors tab's thumbnails, in rig order. Laser 3 is ringed in HIT blue because HIT just moved it.</li>
+      <li>"Active now" says why the picture looks like this; AUTO marks what the app did. "3 changed" counts what is off home.</li>
+      <li>Faders name their ends and what they move.</li>
+    </ol>
+  </div>
+</div></body></html>

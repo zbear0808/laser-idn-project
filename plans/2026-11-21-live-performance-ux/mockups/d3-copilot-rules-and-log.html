@@ -1,0 +1,175 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+:root { --v-warm:#3fb6a8; --v-groove:#6cc26a; --v-build:#b38be8; --v-peak:#ff6f91; }
+.panel { background:#181818; border:1px solid #2c2c2c; border-radius:10px; }
+.ptitle { display:flex; align-items:center; gap:10px; font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text2); }
+.copilot-chip { margin-left:auto; display:inline-flex; align-items:center; gap:8px; height:22px; padding:0 12px; border-radius:11px;
+  background:color-mix(in srgb, var(--auto) 22%, #10162a); color:#d6dcff; border:1px solid var(--auto); font-size:12px; letter-spacing:.04em; }
+.copilot-chip .pulse { width:8px; height:8px; border-radius:50%; background:var(--auto); box-shadow:0 0 8px var(--auto); }
+.you-tag { font-size:10px; font-weight:800; padding:1px 6px; border-radius:8px; background:#f4f4f4; color:#111; letter-spacing:.04em; }
+.held-tag { font-size:10px; font-weight:800; padding:1px 6px; border-radius:8px; border:1px solid #888; color:#ddd; }
+.safe-tag { font-size:10px; font-weight:800; padding:1px 6px; border-radius:8px; border:1px solid var(--red); color:#ff9a9a; background:#2a1212; }
+.leftc { width:800px; padding:14px 16px; gap:12px; }
+.rightc { flex:1; padding:14px 16px 14px 0; gap:12px; }
+.card { padding:12px 14px; }
+table.rules { width:100%; border-collapse:collapse; margin-top:8px; font-size:12px; table-layout:auto; }
+table.rules th { text-align:left; font-size:11px; color:var(--muted); font-weight:600; padding:4px 4px; white-space:nowrap; text-transform:uppercase; letter-spacing:.05em; }
+table.rules td { padding:5px 4px; border-top:1px solid #262626; }
+table.rules td .f { display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 7px; border-radius:4px; background:#2a2a2a; border:1px solid #3a3a3a; white-space:nowrap; }
+table.rules td .f::after { content:"▾"; color:#888; font-size:10px; }
+table.rules tr.now td { background:color-mix(in srgb, var(--v-groove) 10%, transparent); }
+.en { display:flex; align-items:center; gap:8px; font-weight:700; white-space:nowrap; }
+.en i { width:6px; height:22px; border-radius:3px; display:inline-block; }
+.two { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.opt { display:flex; align-items:center; gap:10px; padding:7px 0; border-top:1px solid #242424; font-size:12.5px; }
+.opt:first-of-type { border-top:0; }
+.opt .grow small { display:block; color:var(--muted); font-size:11px; margin-top:1px; }
+.never { border-color:#5b2a2a; background:#1b1414; }
+.never .opt { border-top-color:#2f1f1f; }
+.lock { width:22px; height:22px; border-radius:5px; background:#3a1a1a; border:1px solid var(--red); display:inline-flex; align-items:center; justify-content:center; font-size:11px; flex:none; }
+.sel { display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 8px; border-radius:4px; background:#2a2a2a; border:1px solid #3a3a3a; font-size:12px; white-space:nowrap; }
+.sel::after { content:"▾"; color:#888; font-size:10px; }
+
+.logp { flex:1; padding:12px 14px; display:flex; flex-direction:column; min-height:0; }
+.filters { display:flex; gap:6px; align-items:center; margin-top:10px; }
+.filters .chip { height:24px; }
+.filters .chip b { font-weight:700; }
+.lhead, .lrow { display:grid; grid-template-columns:62px 40px 62px 1fr; gap:8px; align-items:start; }
+.lhead { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; padding:8px 8px 4px; border-bottom:1px solid #2a2a2a; margin-top:8px; }
+.lrow { flex:none; padding:7px 8px; border-bottom:1px solid #222; font-size:12.5px; }
+.lrow .t { font-family:"SF Mono",Menlo,monospace; font-size:11px; color:var(--muted); padding-top:2px; }
+.lrow .b { font-family:"SF Mono",Menlo,monospace; font-size:11px; color:#bbb; padding-top:2px; }
+.lrow .w small { display:block; color:var(--muted); font-size:11.5px; margin-top:2px; }
+.lrow.picked { background:#1c2238; border:1px solid #3b4370; border-radius:8px; margin:4px 0; }
+.lrow.you { background:linear-gradient(90deg, rgba(255,255,255,.05), transparent 60%); }
+.why { margin-top:8px; display:grid; grid-template-columns:18px 1fr; gap:3px 6px; font-size:12px; color:#dfe3ff; }
+.why .ok { color:#8ff0a8; }
+.lfoot { margin-top:auto; padding-top:10px; display:flex; align-items:center; gap:12px; font-size:12px; color:var(--text2); border-top:1px solid #2a2a2a; }
+.agency { display:flex; height:8px; width:160px; border-radius:4px; overflow:hidden; }
+.agency i { display:block; height:100%; }
+</style></head><body>
+<div class="page tall">
+  <div class="caption-bar"><b>D3 · Co-pilot rules and the log</b><span class="tag">design D · co-pilot</span><span class="tag">what it may do, what it may never do, and who did what (and why)</span></div>
+  <div class="menubar"><span class="logo"></span><span>File</span><span>Edit</span><span>Transport</span><span>View</span><span>Help</span><span class="title">Laser Show — club-friday.show</span></div>
+  <div class="toolbar">
+    <span class="tb-btn">▶</span><span class="tb-btn">⟲</span><span class="tb-sep"></span>
+    <span class="tb-label">BPM</span><span class="tb-field mono">128.0</span><span class="beat"><i class="on"></i><i></i><i></i><i></i></span><span class="tb-btn">TAP</span><span class="tb-btn">Bar 1</span>
+    <span class="tb-sep"></span><span class="tb-label">Bar</span><span class="tb-field mono">3 · 13 . 1</span>
+    <span style="margin-left:auto" class="row center gap8"><span class="dot green"></span><span class="tb-label">Streaming · 4 lasers</span><span class="tb-btn">Stream</span></span>
+  </div>
+  <div class="tabbar"><span class="tab">Grid</span><span class="tab">Vibes</span><span class="tab">Perform</span><span class="tab active">Co-pilot</span><span class="tab">Effects</span><span class="tab">Projectors</span><span class="tab">Zone Groups</span><span class="tab">Settings</span></div>
+  <div class="status-band live">● LIVE · 4 of 4 lasers on air · 128.0 BPM · phrase 3, bar 13 of 32 · rule edits apply from the next phrase
+    <span class="copilot-chip"><span class="pulse"></span>CO-PILOT ON · following the music</span></div>
+
+  <div class="body">
+    <div class="col leftc">
+      <div class="panel card">
+        <div class="row center between"><span class="ptitle">How much it plays, per energy</span><span class="hint">ENERGY fader picks the row · in between, it blends to the nearer row</span></div>
+        <table class="rules">
+          <tr><th>Energy</th><th>HIT pulse</th><th>New pick</th><th>ACCENT</th><th>Reactions</th><th>Zone map</th><th>Colour</th></tr>
+          <tr><td><span class="en"><i style="background:var(--v-warm)"></i>1 Calm</span></td><td><span class="f">every 2 beats</span></td><td><span class="f">every 4 bars</span></td><td><span class="f">every 8 bars</span></td><td><span class="f">25 %</span></td><td><span class="f">hold</span></td><td><span class="f">phrase</span></td></tr>
+          <tr class="now"><td><span class="en"><i style="background:var(--v-groove)"></i>2 Groove <span class="auto-tag">NOW</span></span></td><td><span class="f">every beat</span></td><td><span class="f">every 2 bars</span></td><td><span class="f">1 of each 4</span></td><td><span class="f">50 %</span></td><td><span class="f">every 16</span></td><td><span class="f">8 bars</span></td></tr>
+          <tr><td><span class="en"><i style="background:var(--v-build)"></i>3 Build</span></td><td><span class="f">beat + 8th fills</span></td><td><span class="f">every bar</span></td><td><span class="f">every 2 bars</span></td><td><span class="f">75 %</span></td><td><span class="f">Map cycle · 8</span></td><td><span class="f">4 bars</span></td></tr>
+          <tr><td><span class="en"><i style="background:var(--v-peak)"></i>4 Peak</span></td><td><span class="f">every beat</span></td><td><span class="f">every bar</span></td><td><span class="f">every bar</span></td><td><span class="f">100 %</span></td><td><span class="f">Map cycle · 4</span></td><td><span class="f">1 bar</span></td></tr>
+        </table>
+        <div class="hint" style="margin-top:8px">Picks use each pool's shuffle-bag (never the same cue twice in a row). HIT and ACCENT decay over the vibe's own beats. Colour stays inside the energy's palette (Vibes ▸ Energy sort).</div>
+      </div>
+
+      <div class="two">
+        <div class="panel card">
+          <div class="ptitle">It may change</div>
+          <div style="margin-top:6px">
+            <div class="opt"><span class="toggle on"></span><span class="grow">Cue picks from the pools<small>shuffle-bag, on the pick grid above</small></span></div>
+            <div class="opt"><span class="toggle on"></span><span class="grow">Zone maps<small>Left/Right, Odd/Even, Unison, Map cycle · on the bar</small></span></div>
+            <div class="opt"><span class="toggle on"></span><span class="grow">Reaction depth<small>Punch, Pump, Swell, Zone swap · scaled by energy</small></span></div>
+            <div class="opt"><span class="toggle on"></span><span class="grow">Colour, inside the palette<small>pauses when you pick a colour</small></span></div>
+            <div class="opt"><span class="grow">Vibe changes<small>at least 1 phrase per vibe</small></span><span class="seg"><span>Off</span><span class="on">On phrase only</span><span>Any 8 bars</span></span></div>
+          </div>
+        </div>
+        <div class="panel card never">
+          <div class="row center between"><span class="ptitle" style="color:#ff9a9a">It may never</span><span class="hint">safety · not editable here</span></div>
+          <div style="margin-top:6px">
+            <div class="opt"><span class="lock">🔒</span><span class="grow">Turn on audience lasers or audience cues<small>lasers 5, 6 and cone stay off unless a vibe allows it</small></span></div>
+            <div class="opt"><span class="lock">🔒</span><span class="grow">Use BLACKOUT, Stop or Intensity<small>only your hands change how bright or dark the room is</small></span></div>
+            <div class="opt"><span class="lock">🔒</span><span class="grow">Fire FLASH or a "never auto" cue<small>"DROP" text plays only while you hold FLASH</small></span></div>
+            <div class="opt"><span class="lock">🔒</span><span class="grow">Strobe faster than 3 Hz by itself<small>photosensitivity guideline · held FLASH is yours</small></span></div>
+            <div class="opt"><span class="lock">🔒</span><span class="grow">Get past safety zones or scan limits<small>they act after the co-pilot, exactly as after you</small></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="two">
+        <div class="panel card">
+          <div class="ptitle">When you play</div>
+          <div style="margin-top:6px">
+            <div class="opt"><span class="grow">A HIT tap<small>your cue plays now; auto HITs wait</small></span><span class="sel">takes the lane · 2 bars</span></div>
+            <div class="opt"><span class="grow">An ACCENT tap</span><span class="sel">takes the lane · 4 bars</span></div>
+            <div class="opt"><span class="grow">HIT or ACCENT held<small>yours until you let go, then 1 bar</small></span><span class="hint">fixed</span></div>
+            <div class="opt"><span class="grow">Hold VIBE 0.6 s: FREEZE<small>tap VIBE again to hand back</small></span><span class="sel">all choices</span></div>
+            <div class="opt"><span class="grow">Something you overrode<small>its AUTO ↩ pill pulses after this time; it is never taken back silently</small></span><span class="sel">2 phrases</span></div>
+          </div>
+        </div>
+        <div class="panel card">
+          <div class="ptitle">Phrase · no audio, so it counts</div>
+          <div style="margin-top:6px">
+            <div class="opt"><span class="grow">Phrase length</span><span class="seg"><span>16</span><span class="on">32</span><span>64</span></span></div>
+            <div class="opt"><span class="grow">Bar 1 comes from<small>the bar count follows tap tempo or Link</small></span><span class="row gap6"><span class="chip on" style="height:24px">TAP on 1</span><span class="chip" style="height:24px">Link</span></span></div>
+            <div class="opt"><span class="toggle on"></span><span class="grow">FLASH release restarts the phrase<small>you mark the drop, and the co-pilot counts from there</small></span></div>
+            <div class="opt"><span class="toggle"></span><span class="grow">Fill the last 4 bars before a change<small>more hits as the phrase ends (Build and Peak only)</small></span></div>
+            <div class="opt"><span class="grow">Count is off?<small>press Bar 1 on the downbeat; the plan shifts, nothing jumps</small></span><span class="btn sm">Bar 1</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col rightc">
+      <div class="panel logp">
+        <div class="row center between"><span class="ptitle">Session log · who did what</span><span class="row gap8"><span class="field" style="height:24px;font-size:12px;width:150px;color:#888">🔍 search</span><span class="btn ghost sm">Export</span></span></div>
+        <div class="filters">
+          <span class="chip on">All <b>312</b></span><span class="chip"><span class="auto-tag">AUTO</span> 271</span><span class="chip"><span class="you-tag">YOU</span> 38</span><span class="chip"><span class="held-tag">HELD</span> 2</span><span class="chip"><span class="safe-tag">SAFETY</span> 1</span>
+          <span class="hint" style="margin-left:auto">hide beat pulses ✓</span>
+        </div>
+        <div class="lhead"><span>Time</span><span>Bar</span><span>Who</span><span>What · why</span></div>
+        <div class="lrow you"><span class="t">22:41:37</span><span class="b">3·13</span><span><span class="you-tag">YOU</span></span><span class="w">HIT → star<small>you pressed H · the HIT lane is yours till bar 15</small></span></div>
+        <div class="lrow"><span class="t">22:41:37</span><span class="b">3·13</span><span><span class="auto-tag">AUTO</span></span><span class="w">ACCENT → beam fan + Zone swap A↔B<small>bar 13 is 1 of a 4-bar · Groove: accent on 1 of each 4</small></span></div>
+        <div class="lrow"><span class="t">22:41:34</span><span class="b">3·11</span><span><span class="auto-tag">AUTO</span></span><span class="w">Planned: → Build at bar 33<small>energy is 2.7, over 2.5 · Build is the next energy-3 vibe</small></span></div>
+        <div class="lrow you"><span class="t">22:41:34</span><span class="b">3·11</span><span><span class="you-tag">YOU</span></span><span class="w">ENERGY 2.1 → 2.7<small>fader 2 · density and reaction depth follow at once</small></span></div>
+                <div class="lrow you"><span class="t">22:41:15</span><span class="b">3·01</span><span><span class="you-tag">YOU</span></span><span class="w">Colour → cyan<small>you picked a swatch · Step colour paused until AUTO ↩</small></span></div>
+        <div class="lrow picked"><span class="t">22:41:15</span><span class="b">3·01</span><span><span class="auto-tag">AUTO</span></span><span class="w"><b>Vibe → Groove</b><small>32 bars in Warm-up and energy rose</small>
+          <div class="why">
+            <span class="ok">✓</span><span>Warm-up had played 32 bars (rule: at least 1 phrase)</span>
+            <span class="ok">✓</span><span>Energy rose 1.0 → 2.1 at bar 2·21, and Groove is energy 2</span>
+            <span class="ok">✓</span><span>Phrase start, nothing frozen, VIBE not held</span>
+            <span>⏱</span><span>Waited 1 bar: ACCENT was down at 2·32</span>
+          </div>
+          <div class="row gap8" style="margin-top:8px"><span class="btn sm ghost">Show the rule</span><span class="btn sm ghost">Do this less: 2 phrases per vibe</span></div></span></div>
+                <div class="lrow"><span class="t">22:41:13</span><span class="b">2·32</span><span><span class="held-tag">HELD</span></span><span class="w">Vibe change waits a bar<small>a key was down at the phrase end</small></span></div>
+                <div class="lrow"><span class="t">22:40:30</span><span class="b">2·09</span><span><span class="safe-tag">SAFETY</span></span><span class="w">Zone hop left out lasers 5 and 6<small>audience off (Projectors) · the hop used 1–4</small></span></div>
+                        <div class="lfoot">
+          <span>This set: <b style="color:#fff">271</b> AUTO · <b style="color:#fff">38</b> YOU</span>
+          <span class="agency"><i style="width:88%;background:var(--auto)"></i><i style="width:12%;background:#f4f4f4"></i></span>
+          <span>you made 12 % of the changes</span><span style="margin-left:auto" class="hint">▾ 300 older</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="status"><span><span class="dot green"></span> <b>Streaming</b> 4 of 6 lasers</span><span>MIDI: <b>APC mini</b></span><span>Co-pilot: <b>ON</b></span><span style="margin-left:auto">Show lock: off · rules can't be edited while locked</span></div>
+
+  <div class="callout" style="left:284px;top:198px">1</div>
+  <div class="callout" style="left:150px;top:457px">2</div>
+  <div class="callout" style="left:526px;top:457px">3</div>
+  <div class="callout" style="left:154px;top:742px">4</div>
+  <div class="callout" style="left:1036px;top:203px">5</div>
+  <div class="callout" style="left:1382px;top:532px">6</div>
+  <div class="notes" style="right:30px;bottom:96px;width:578px">
+    <b>D3 · trust comes from limits you can read</b>
+    <ol>
+      <li>One row per energy: how often it hits, picks, accents, moves zones and steps colour. The ENERGY fader chooses the row.</li>
+      <li>What it may change is a short list of things the engine already does (pool picks, zone maps, reaction depth, colour).</li>
+      <li>What it may never do is fixed and safety-red: audience, blackout, FLASH, strobe above 3 Hz, safety zones.</li>
+      <li>"When you play" sets how long your press keeps a lane, and what FREEZE holds.</li>
+      <li>The log lists every change as AUTO, YOU, HELD or SAFETY, with its reason. You can filter and search it.</li>
+      <li>Open an entry to see the checks behind it, and tune the rule from there ("Do this less").</li>
+    </ol>
+  </div>
+</div></body></html>

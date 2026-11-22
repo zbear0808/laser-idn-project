@@ -1,0 +1,307 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+:root { --v-warm:#3fb6a8; --v-groove:#6cc26a; --v-build:#b38be8; --v-peak:#ff6f91; --v-break:#5d8fd6; --you:#f4f4f4; }
+.copilot-chip { margin-left:auto; display:inline-flex; align-items:center; gap:8px; height:22px; padding:0 12px; border-radius:11px;
+  background:color-mix(in srgb, var(--auto) 22%, #10162a); color:#d6dcff; border:1px solid var(--auto); font-size:12px; letter-spacing:.04em; }
+.copilot-chip .pulse { width:8px; height:8px; border-radius:50%; background:var(--auto); box-shadow:0 0 8px var(--auto); }
+.you-tag { font-size:10px; font-weight:800; padding:1px 6px; border-radius:8px; background:#f4f4f4; color:#111; letter-spacing:.04em; }
+.panel { background:#181818; border:1px solid #2c2c2c; border-radius:10px; }
+.ptitle { display:flex; align-items:center; gap:10px; font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text2); }
+.leftcol { width:1000px; padding:14px 16px; gap:12px; }
+.rightcol { flex:1; padding:14px 16px 14px 0; gap:12px; }
+
+/* header */
+.hdr { height:96px; display:flex; gap:0; }
+.vibe-now { width:240px; padding:12px 16px; border-right:1px solid #2c2c2c; position:relative; }
+.vibe-now::before { content:""; position:absolute; left:0; top:0; bottom:0; width:6px; border-radius:10px 0 0 10px; background:var(--v-groove); }
+.vibe-now .name { font-size:30px; font-weight:800; letter-spacing:.02em; color:#fff; }
+.dots i { display:inline-block; width:11px; height:11px; border-radius:50%; border:1.5px solid #ddd; margin-right:3px; }
+.dots i.f { background:#ddd; }
+.why { flex:1; padding:12px 16px; border-right:1px solid #2c2c2c; }
+.why .line { font-size:15px; white-space:nowrap; color:#eee; margin-top:6px; font-weight:600; }
+.why .sub { font-size:12px; color:var(--muted); margin-top:5px; }
+.cpctl { width:214px; padding:12px 14px; display:flex; flex-direction:column; gap:8px; }
+
+/* phrase ruler */
+.ruler-card { padding:12px 14px; }
+.ruler { position:relative; display:grid; grid-template-columns:120px 704px 1fr; column-gap:0; margin-top:10px; }
+.lane-lbl { height:32px; display:flex; flex-direction:column; justify-content:center; font-size:11px; color:var(--muted); line-height:1.2; }
+.lane-lbl b { font-size:13px; letter-spacing:.04em; }
+.lane { height:32px; position:relative; border-bottom:1px solid #242424; }
+.nums { height:20px; position:relative; }
+.nums span { position:absolute; top:2px; font-size:11px; color:#8a8a8a; transform:translateX(-50%); }
+.nums span.now { color:#fff; font-weight:800; }
+.nextc { height:32px; display:flex; align-items:center; padding-left:10px; font-size:11px; color:var(--text2); gap:6px; border-bottom:1px solid #242424; }
+.grp { position:absolute; top:0; bottom:0; width:1px; background:#333; }
+.tick { position:absolute; bottom:5px; width:2px; border-radius:1px; background:var(--hit); }
+.acc { position:absolute; top:7px; height:18px; width:18px; border-radius:3px; background:var(--accent); }
+.acc.plan { background:transparent; border:1.5px dashed var(--accent); }
+.seg-b { position:absolute; top:5px; height:22px; border-radius:4px; display:flex; align-items:center; padding:0 7px; font-size:11px; font-weight:700; white-space:nowrap; overflow:hidden; }
+.pill { position:absolute; top:6px; height:20px; display:flex; align-items:center; gap:5px; padding:0 7px; border-radius:10px; background:#0f1220; border:1px solid color-mix(in srgb, var(--auto) 55%, transparent); font-size:11px; color:#dfe3ff; white-space:nowrap; }
+.past { position:absolute; left:0; width:264px; top:20px; bottom:0; background:rgba(18,18,18,.55); pointer-events:none; z-index:5; }
+.playhead { z-index:6; }
+#ruler .lane { z-index:1; }
+.pastl { position:absolute; top:0; bottom:0; background:rgba(18,18,18,.55); z-index:3; }
+.playhead { position:absolute; top:14px; bottom:-4px; width:2px; background:#fff; box-shadow:0 0 8px #fff; }
+.playhead::before { content:""; display:none; position:absolute; top:-14px; left:-13px; font-size:10px; font-weight:800; color:#fff; letter-spacing:.06em; }
+.pick { position:absolute; top:2px; font-size:10.5px; color:#9fd3f3; transform:translateX(-2px); white-space:nowrap; }
+.hatchw { background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.28) 0 4px, transparent 4px 8px); }
+.legend { display:flex; gap:18px; margin-top:10px; font-size:11.5px; color:var(--text2); align-items:center; }
+.legend i { display:inline-block; width:16px; height:10px; border-radius:2px; margin-right:6px; vertical-align:-1px; }
+
+/* pads */
+.pads { display:flex; gap:12px; height:250px; }
+.pads .rpad { width:178px; }
+.pads .rpad.bo { width:150px; margin-left:auto; }
+.autorun { background:linear-gradient(180deg,#1d1d1d 30%, color-mix(in srgb, var(--rc) 26%, #1d1d1d)); }
+.rpad .tagrow { display:flex; gap:5px; justify-content:center; margin-top:8px; }
+.rpad .next { font-size:12.5px; }
+.rpad .hint2 { font-size:11.5px; color:#9a9a9a; margin-top:6px; line-height:1.35; }
+.rpad.on .hint2 { color:#1b1b1b; }
+
+/* bottom: faders + freeze */
+.bottom { display:flex; gap:12px; height:236px; }
+.faders { width:600px; padding:12px 14px; display:flex; flex-direction:column; gap:10px; }
+.efader { height:44px; border-radius:8px; background:#1f1f1f; border:1px solid #3a3a3a; position:relative; overflow:hidden; }
+.efader .fill { position:absolute; left:0; top:0; bottom:0; width:56.7%; background:linear-gradient(90deg, color-mix(in srgb,var(--v-warm) 55%,#111), color-mix(in srgb,var(--v-groove) 70%,#111) 60%, color-mix(in srgb,var(--v-build) 70%,#111)); }
+.efader .det { position:absolute; top:0; bottom:0; width:1px; background:rgba(255,255,255,.25); }
+.efader .lbl { position:absolute; left:12px; top:0; bottom:0; display:flex; align-items:center; font-weight:800; font-size:15px; letter-spacing:.04em; }
+.efader .val { position:absolute; right:12px; top:0; bottom:0; display:flex; align-items:center; font-size:14px; color:#eee; gap:8px; }
+.efader .thumb { position:absolute; top:3px; bottom:3px; width:4px; border-radius:2px; background:#fff; left:calc(56.7% - 2px); box-shadow:0 0 6px #fff; }
+.efader .ghost { position:absolute; top:3px; bottom:3px; width:0; border-left:2px dashed var(--auto); left:33.3%; }
+.detlbl { position:relative; height:16px; font-size:11px; color:var(--text2); }
+.detlbl span { position:absolute; transform:translateX(-50%); white-space:nowrap; }
+.echg { display:grid; grid-template-columns:118px 1fr 1fr; gap:4px 10px; font-size:12px; align-items:center; }
+.echg .h { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+.echg .k { color:var(--text2); }
+.mini-meter { height:6px; border-radius:3px; background:#333; overflow:hidden; width:60px; display:inline-block; vertical-align:middle; margin-right:6px; }
+.mini-meter i { display:block; height:100%; background:var(--auto); }
+.freeze { flex:1; padding:12px 14px; border-style:dashed; border-color:#3b4370; }
+.frozen-pad { --rc: var(--vibe); height:128px; border-radius:14px; border:3px solid #cfe3ff; position:relative; overflow:hidden;
+  background: repeating-linear-gradient(135deg, rgba(207,227,255,.16) 0 10px, rgba(207,227,255,.04) 10px 20px), #1c2433;
+  display:flex; align-items:center; gap:16px; padding:0 18px; box-shadow:0 0 18px rgba(207,227,255,.35); }
+.frozen-pad::before { content:""; position:absolute; left:0; right:0; top:0; height:8px; background:var(--vibe); }
+.frozen-pad .big { font-size:30px; font-weight:900; color:#e8f2ff; letter-spacing:.05em; }
+.mini-band { height:26px; border-radius:5px; display:flex; align-items:center; gap:10px; padding:0 10px; font-size:12px; font-weight:700; letter-spacing:.03em;
+  background:#1c2433; color:#cfe3ff; border-bottom:2px solid #cfe3ff; margin-top:8px; }
+
+/* right column */
+.drive { padding:12px 14px; }
+.drow { display:grid; grid-template-columns:92px 1fr auto; gap:8px; align-items:center; padding:7px 0; border-bottom:1px solid #262626; font-size:12.5px; }
+.drow:last-child { border-bottom:0; }
+.drow .k { color:var(--text2); font-size:12px; }
+.drow.over { background:linear-gradient(90deg, rgba(255,255,255,.06), transparent); margin:0 -8px; padding:7px 8px; border-radius:6px; border:1px dashed #777; }
+.handback { white-space:nowrap; height:22px; padding:0 9px; border-radius:11px; background:var(--auto); color:#0d1030; font-weight:800; font-size:11px; display:inline-flex; align-items:center; gap:4px; }
+.lasers { padding:12px 14px; }
+.lrow { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+.lrow .screen { height:66px; }
+.arow { display:grid; grid-template-columns:128px 1fr 128px; gap:8px; margin-top:8px; }
+.arow .screen { height:50px; }
+.log { padding:12px 14px; }
+.lg { display:grid; grid-template-columns:44px 46px 1fr; gap:8px; align-items:start; padding:6px 0; border-bottom:1px solid #242424; font-size:12px; }
+.lg .t { color:var(--muted); font-family:"SF Mono",Menlo,monospace; font-size:11px; padding-top:1px; }
+.lg .w { color:#ddd; }
+.lg .w small { display:block; color:var(--muted); font-size:11px; margin-top:1px; }
+</style></head><body>
+<div class="page tall">
+  <div class="caption-bar"><b>D1 · Co-pilot, live</b><span class="tag">design D · mixed initiative</span><span class="tag">the app plays the show, you steer: add on top, override, freeze, hand back</span></div>
+  <div class="menubar"><span class="logo"></span><span>File</span><span>Edit</span><span>Transport</span><span>View</span><span>Help</span><span class="title">Laser Show — club-friday.show</span></div>
+  <div class="toolbar">
+    <span class="tb-btn">▶</span><span class="tb-btn">⟲</span><span class="tb-sep"></span>
+    <span class="tb-label">BPM</span><span class="tb-field mono">128.0</span>
+    <span class="beat"><i class="on"></i><i></i><i></i><i></i></span>
+    <span class="tb-btn">TAP</span><span class="tb-btn" style="min-width:auto">Bar 1</span>
+    <span class="chip outline" style="height:24px">Link · 2 peers</span>
+    <span class="tb-sep"></span><span class="tb-label">Bar</span><span class="tb-field mono">3 · 13 . 1</span>
+    <span style="margin-left:auto" class="row center gap8"><span class="dot green"></span><span class="tb-label">Streaming · 4 lasers</span><span class="tb-btn">Stream</span></span>
+  </div>
+  <div class="tabbar"><span class="tab">Grid</span><span class="tab">Vibes</span><span class="tab active">Perform</span><span class="tab">Co-pilot</span><span class="tab">Effects</span><span class="tab">Projectors</span><span class="tab">Zone Groups</span><span class="tab">Settings</span></div>
+  <div class="status-band live">● LIVE · 4 of 4 lasers on air · audience lasers off · 128.0 BPM · phrase 3, bar 13 of 32
+    <span class="copilot-chip"><span class="pulse"></span>CO-PILOT ON · following the music</span></div>
+
+  <div class="body">
+    <!-- LEFT -->
+    <div class="col leftcol">
+      <div class="panel hdr">
+        <div class="vibe-now">
+          <div class="row center between"><span class="name">GROOVE</span><span class="auto-tag">AUTO</span></div>
+          <div class="row center gap8" style="margin-top:6px"><span class="dots"><i class="f"></i><i class="f"></i><i></i><i></i></span><span class="text2" style="font-size:13px">energy 2 of 4</span></div>
+          <div class="hint" style="margin-top:5px">since bar 3·01 · 22 s · min. 1 phrase</div>
+        </div>
+        <div class="why">
+          <div class="row center gap8"><span class="ptitle">Why</span><span class="auto-tag">AUTO</span><span class="hint">last change the co-pilot made</span></div>
+          <div class="line">Changed to Groove: 32 bars in Warm-up and energy rose</div>
+          <div class="sub">on the phrase start, bar 3·01 · energy fader 1.0 → 2.1 at bar 2·21</div>
+        </div>
+        <div class="cpctl">
+          <div class="row center between"><span class="ptitle">Co-pilot</span><span class="seg"><span class="on">ON</span><span>OFF</span></span></div>
+          <div class="row center between"><span class="small text2">2 things are yours</span><span class="handback">AUTO ALL ↩</span></div>
+          <div class="hint">OFF = today's Perform</div>
+        </div>
+      </div>
+
+      <div class="panel ruler-card">
+        <div class="row center gap10"><span class="ptitle">Phrase 3 · bar 13 of 32</span><span class="hint">what the co-pilot has planned, bar by bar · phrase = 32 bars, counted from the beat (tap / Link) · bar 1 set by TAP on 1 or a FLASH release</span></div>
+        <div class="ruler" id="ruler"></div>
+        <div class="legend">
+          <span><i style="background:#5a5f80"></i>AUTO, planned (dashed = not yet drawn)</span>
+          <span><i class="hatchw" style="background-color:#3a3a3a"></i>YOU: you took this lane</span>
+          <span><i style="background:#000;border:1px solid #444"></i>dim = already played</span>
+          <span><i style="background:#fff;width:3px"></i>now</span>
+        </div>
+      </div>
+
+      <div class="pads">
+        <div class="rpad on role-hit"><span class="glyph">▶</span><div class="role">HIT</div><div class="what">star</div><div class="next">yours till bar 15</div>
+          <div class="tagrow"><span class="you-tag">YOU</span></div>
+          <div class="chips"><span>+ on top now</span><span>Punch 50 %</span></div><div class="key">H · Pad 1</div><div class="decay" style="width:58%"></div></div>
+        <div class="rpad ready role-accent autorun"><span class="glyph">▶</span><div class="role">ACCENT</div><div class="what">beam fan</div><div class="next">next by itself: bar 17</div>
+          <div class="tagrow"><span class="auto-tag">AUTO</span></div>
+          <div class="chips"><span>+ on top now</span><span>Zone swap A↔B</span></div><div class="key">J · Pad 2</div></div>
+        <div class="rpad ready role-flash"><span class="glyph">▮</span><div class="role">FLASH</div><div class="what">DROP text</div><div class="next">hold = the drop · only yours</div>
+          <div class="chips"><span>Zone chase</span><span>Swell</span></div>
+          <div class="hint2">let go = bar 1 of a new phrase</div><div class="key">K · Pad 3</div></div>
+        <div class="rpad queued role-vibe"><span class="glyph">⏱</span><div class="role">VIBE</div><div class="what">→ Build</div><div class="next">AUTO at bar 33 · in 37 s</div>
+          <div class="chips"><span>tap: skip now</span><span>hold: FREEZE</span></div><div class="key">L · Pad 4</div><div class="ring"></div></div>
+        <div class="rpad ready role-blackout bo"><span class="glyph">⟳</span><div class="role">BLACK<br>OUT</div><div class="next">sticky · press again</div><div class="hint2">the co-pilot never<br>uses this</div><div class="key">; · Pad 8</div></div>
+      </div>
+
+      <div class="bottom">
+        <div class="panel faders">
+          <div class="hfader"><div class="fill" style="width:85%"></div><div class="lbl">1 · Intensity</div><div class="val">85 %</div></div>
+          <div>
+            <div class="efader"><div class="fill"></div><div class="det" style="left:33.3%"></div><div class="det" style="left:66.6%"></div><div class="ghost"></div><div class="thumb"></div>
+              <div class="lbl">2 · ENERGY</div><div class="val"><span class="text2 small">playing 2 · fader</span> 2.7 ↑</div></div>
+            <div class="detlbl"><span style="left:3%;transform:none">1 Calm</span><span style="left:33.3%">2 Groove</span><span style="left:66.6%">3 Build</span><span style="right:0;transform:none">4 Peak</span></div>
+          </div>
+          <div class="echg">
+            <span class="h">Energy moves</span><span class="h">now (2.7)</span><span class="h">when</span>
+            <span class="k">Density</span><span>HIT every beat · ACCENT 4 → 2 bars</span><span class="text2">next bar</span>
+            <span class="k">Reaction depth</span><span><span class="mini-meter"><i style="width:62%"></i></span>Punch, Swell 62 %</span><span class="text2">at once</span>
+            <span class="k">Vibe tier</span><span>Groove (2) → Build (3)</span><span class="text2">next phrase · bar 33</span>
+          </div>
+        </div>
+        <div class="panel freeze">
+          <div class="row center gap8"><span class="ptitle">VIBE held 0.6 s = FREEZE</span><span class="hint">(state shown when on)</span></div>
+          <div class="frozen-pad" style="margin-top:10px">
+            <div style="flex:none"><div style="font-size:13px;font-weight:800;color:var(--vibe);letter-spacing:.06em;margin-top:6px">VIBE</div><div class="big">❄ FROZEN</div></div>
+            <div style="font-size:12.5px;color:#dce8ff;line-height:1.5;margin-top:6px">holds vibe, picks,<br>zone map, colour<br>beat goes on<br><b>tap: hand back</b></div>
+          </div>
+          <div class="mini-band">❄ CO-PILOT FROZEN · tap VIBE to hand back</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT -->
+    <div class="col rightcol">
+      <div class="panel drive">
+        <div class="row center between"><span class="ptitle">Who is driving</span><span class="hint">AUTO = the co-pilot · YOU = you</span></div>
+        <div style="margin-top:6px">
+          <div class="drow"><span class="k">Vibe</span><span>Groove → Build at bar 33</span><span class="auto-tag">AUTO</span></div>
+          <div class="drow"><span class="k">Cue picks</span><span>shuffle-bag · new every 2 bars</span><span class="auto-tag">AUTO</span></div>
+          <div class="drow"><span class="k">HIT lane</span><span>star · back to AUTO at bar 15</span><span class="you-tag">YOU</span></div>
+          <div class="drow"><span class="k">ACCENT lane</span><span>on 1 of each 4-bar</span><span class="auto-tag">AUTO</span></div>
+          <div class="drow over"><span class="k">Colour</span><span class="row center gap6"><span class="swatch" style="background:#36e2ff"></span>manual · cyan · Step colour paused</span><span class="handback">AUTO ↩</span></div>
+          <div class="drow"><span class="k">Zone map</span><span class="row center gap6">Left/Right <span class="zchip zone-a" style="width:18px;height:18px;font-size:10px">A</span><span class="zchip zone-b" style="width:18px;height:18px;font-size:10px">B</span> → Odd/Even at 17</span><span class="auto-tag">AUTO</span></div>
+          <div class="drow"><span class="k">Reactions</span><span>Punch · Zone swap · Swell</span><span class="auto-tag">AUTO</span></div>
+        </div>
+      </div>
+
+      <div class="panel lasers">
+        <div class="row center between"><span class="ptitle">Lasers · rig order</span><span class="hint">white ring = really on air</span></div>
+        <div class="lrow" style="margin-top:8px">
+          <div class="screen onair" data-shape="star" data-color="#36e2ff" data-scale="1.1" data-lbl="1 · Stage left" data-dot="green" data-lbl2="A · HIT"></div>
+          <div class="screen onair" data-shape="star" data-color="#36e2ff" data-scale="1.1" data-rot="18" data-lbl="2 · Left ctr" data-dot="green" data-lbl2="A · HIT"></div>
+          <div class="screen onair" data-shape="fan" data-color="#36e2ff" data-scale=".8" data-lbl="3 · Right ctr" data-dot="green" data-lbl2="B · ACCENT"></div>
+          <div class="screen onair" data-shape="fan" data-color="#36e2ff" data-scale=".8" data-lbl="4 · Stage right" data-dot="green" data-lbl2="B · ACCENT"></div>
+        </div>
+        <div class="arow">
+          <div class="screen" data-shape="none" data-lbl="5 · Audience L" data-dot="red" data-lbl2="🔒 audience: off" data-blocked="0,0,100,100"></div>
+          <div class="row center"><span class="hint" style="text-align:center;width:100%">front of stage ·<br>the co-pilot can't turn these on</span></div>
+          <div class="screen" data-shape="none" data-lbl="6 · Audience R" data-dot="red" data-lbl2="🔒 audience: off" data-blocked="0,0,100,100"></div>
+        </div>
+      </div>
+
+      <div class="panel log">
+        <div class="row center between"><span class="ptitle">Log · latest</span><span class="row gap6"><span class="chip on" style="height:22px">All</span><span class="chip" style="height:22px">AUTO</span><span class="chip" style="height:22px">YOU</span></span></div>
+        <div class="lg"><span class="t">3·13</span><span><span class="you-tag">YOU</span></span><span class="w">HIT → star<small>you pressed H · HIT lane is yours for 2 bars</small></span></div>
+        <div class="lg" style="border-bottom:0"><span class="t">3·13</span><span><span class="auto-tag">AUTO</span></span><span class="w">ACCENT → beam fan + Zone swap<small>bar 13 is 1 of a 4-bar (Groove rule)</small></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="status"><span><span class="dot green"></span> <b>Streaming</b> 4 of 6 lasers</span><span>MIDI: <b>APC mini</b></span><span>Co-pilot: <b>ON</b> · decisions this phrase: 41 AUTO · 6 YOU</span><span style="margin-left:auto">Show lock: off</span></div>
+
+  <!-- callouts -->
+  <div class="callout" style="left:1150px;top:176px">1</div>
+  <div class="callout" style="left:500px;top:356px">2</div>
+  <div class="callout" style="left:22px;top:666px">3</div>
+  <div class="callout" style="left:578px;top:666px">4</div>
+  <div class="callout" style="left:584px;top:870px">5</div>
+  <div class="callout" style="left:992px;top:354px">6</div>
+  <div class="notes" style="right:16px;bottom:34px;width:408px">
+    <b>D1 · the app plays, you steer</b>
+    <ol>
+      <li>One chip says the co-pilot is on. The "why" line explains its last change. Frozen or off changes both the chip and the VIBE pad.</li>
+      <li>The phrase ruler is the plan for this phrase. Each rule is an AUTO marker, so nothing comes as a surprise.</li>
+      <li>HIT and ACCENT add a hit on top now and take that lane for 2 or 4 bars (YOU). Then the lane goes back to AUTO by itself.</li>
+      <li>Tap VIBE to skip ahead on the bar. Hold it to FREEZE every choice. Tap it again to hand them back.</li>
+      <li>Fader 2 is ENERGY. It sets density, reaction depth and the next vibe's tier, and it replaces Morph.</li>
+      <li>Anything you overrode gets an AUTO ↩ pill. One press hands it back, and AUTO ALL hands back everything.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+(function(){
+  var R = document.getElementById('ruler'), BW = 22, NOW = 12.15;
+  function x(bar){ return (bar-1)*BW; }
+  function el(tag, cls, style, html){ var e=document.createElement(tag); if(cls) e.className=cls; if(style) e.setAttribute('style',style); if(html!=null) e.innerHTML=html; return e; }
+  // header row
+  R.appendChild(el('div','lane-lbl','height:20px'));
+  var nums = el('div','nums'); [1,5,9,13,17,21,25,29,32].forEach(function(b){ nums.appendChild(el('span', b===13?'now':'', 'left:'+(x(b)+BW/2)+'px', b)); });
+  R.appendChild(nums); R.appendChild(el('div','', 'height:20px;padding-left:10px;font-size:11px;color:#8a8a8a', 'next phrase'));
+  function lane(name, rule, color, build, next, h){
+    var hs = h ? 'height:'+h+'px' : '';
+    R.appendChild(el('div','lane-lbl',hs, '<b style="color:'+color+'">'+name+'</b>'+rule));
+    var l = el('div','lane',hs); for(var g=1; g<=33; g+=4){ l.appendChild(el('div','grp','left:'+x(g)+'px')); }
+    build(l); l.appendChild(el('div','pastl','left:0;width:'+x(13)+'px')); R.appendChild(l); R.appendChild(el('div','nextc',hs,next));
+  }
+  lane('VIBE','on phrase only','var(--vibe)', function(l){
+    l.appendChild(el('div','seg-b','left:0;width:'+(28*BW-2)+'px;background:color-mix(in srgb,var(--v-groove) 42%,#111);color:#eaffea','Groove · energy 2'));
+    l.appendChild(el('div','seg-b','left:'+x(29)+'px;width:'+(4*BW-2)+'px;background:linear-gradient(90deg,color-mix(in srgb,var(--v-groove) 42%,#111),color-mix(in srgb,var(--v-build) 45%,#111));color:#fff','ramp'));
+    l.appendChild(el('div','pill','left:'+x(18)+'px','→ Build at bar 33 <span class="auto-tag">AUTO</span>'));
+  }, '<span class="seg-b" style="position:static;background:color-mix(in srgb,var(--v-build) 45%,#111);color:#fff;height:22px">33 → Build</span>');
+  lane('HIT','pulse + cue pick','var(--hit)', function(l){
+    for(var b=1;b<=32;b++){ if(b===13||b===14) continue; for(var k=0;k<4;k++){ var fut = b>14; l.appendChild(el('div','tick','left:'+(x(b)+2+k*5.2)+'px;height:'+(k===0?16:9)+'px;'+(fut?'opacity:.55':''))); } }
+    l.appendChild(el('div','seg-b hatchw','left:'+x(13)+'px;width:'+(2*BW-2)+'px;background-color:#2b4a5e;color:#fff;justify-content:center;padding:0','YOU'));
+    [[17,'spiral'],[21,'square']].forEach(function(p){ l.appendChild(el('div','pick','left:'+x(p[0])+'px',p[1])); });
+    l.appendChild(el('div','pill','left:'+x(27.6)+'px;top:-4px;display:none','')); 
+  }, 'bar 15 → AUTO', 40);
+  lane('ACCENT','cue + reaction','var(--accent)', function(l){
+    [1,5,9,13,17,21,25,29].forEach(function(b){ var c = b>13 ? 'acc plan' : 'acc'; l.appendChild(el('div',c,'top:21px;height:15px;width:15px;left:'+(x(b)+3)+'px;'+(b===13?'box-shadow:0 0 10px var(--accent)':''))); });
+    l.appendChild(el('div','pill','top:1px;height:18px;left:'+(x(18)+4)+'px','ACCENT on 1 of each 4-bar <span class="auto-tag">AUTO</span>'));
+  }, 'next: bar 17', 40);
+  lane('ZONES','map per 16 bars','var(--zone-b)', function(l){
+    l.appendChild(el('div','seg-b','left:0;width:'+(16*BW-2)+'px;background:linear-gradient(90deg,color-mix(in srgb,var(--zone-a) 45%,#111) 50%,color-mix(in srgb,var(--zone-b) 45%,#111) 50%);color:#fff','Left / Right'));
+    l.appendChild(el('div','seg-b','left:'+x(17)+'px;width:'+(16*BW-2)+'px;background:repeating-linear-gradient(90deg,color-mix(in srgb,var(--zone-a) 35%,#111) 0 22px,color-mix(in srgb,var(--zone-b) 35%,#111) 22px 44px);color:#fff;border:1px dashed #6a6a6a','Odd / Even'));
+  }, '17 → Odd/Even');
+  lane('COLOUR','you set it','#36e2ff', function(l){
+    l.appendChild(el('div','seg-b hatchw','left:0;width:'+(32*BW-2)+'px;background-color:#16454f;color:#fff','<span class="you-tag" style="margin-right:6px">YOU</span> cyan, set by you at bar 3·01 · the co-pilot\'s Step colour is paused'));
+  }, '<span class="handback">AUTO ↩</span>');
+  // overlays
+  R.style.position='relative';
+  var ov = el('div','', 'position:absolute;left:120px;top:0;width:704px;bottom:0;pointer-events:none');
+  
+  ov.appendChild(el('div','playhead','left:'+(NOW*BW)+'px'));
+  R.appendChild(ov);
+  // HIT rule pill
+  var hitLane = R.children[3*2+1+0]; 
+})();
+</script>
+<script>
+// add the HIT rule marker (placed after build so it sits over the ticks)
+(function(){ var lanes = document.querySelectorAll('#ruler .lane'); var hit = lanes[1];
+  var p = document.createElement('div'); p.className='pill'; p.style.left=(23*22)+'px'; p.style.top='1px'; p.style.height='18px';
+  p.innerHTML='HIT every beat <span class="auto-tag">AUTO</span>'; hit.appendChild(p); })();
+</script>
+</body></html>

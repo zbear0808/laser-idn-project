@@ -1,0 +1,256 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.tabbar .tright { margin-left: auto; display: flex; align-items: center; gap: 14px; padding: 0 14px; height: 36px; font-size: 12px; color: var(--text2); }
+.subbar { height: 46px; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-bottom: 1px solid #262626; }
+.main { flex: 1; display: flex; min-height: 0; }
+.lib { width: 640px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; border-right: 1px solid #2a2a2a; position: relative; }
+.cratepane { flex: 1; padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+.search { display: flex; gap: 8px; align-items: center; }
+.search .field { flex: 1; gap: 8px; color: #ddd; }
+.search .field .q { color: var(--muted); }
+.tags { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.tags .chip { height: 24px; font-size: 12px; }
+.tags .chip.on { background: #1e3b5a; box-shadow: 0 0 0 1px var(--blue) inset; }
+
+.cuegrid { display: grid; grid-template-columns: 22px repeat(8, 1fr); gap: 6px; }
+.cuegrid .rh { font-size: 12px; color: var(--muted); display: flex; align-items: center; justify-content: center; }
+.cuegrid .ch { font-size: 11px; color: var(--muted); text-align: center; }
+.cue { height: 104px; border-radius: 6px; background: #262626; border: 1px solid #343434; position: relative; padding: 4px; display: flex; flex-direction: column; gap: 3px; }
+.cue .screen { height: 58px; border-radius: 4px; border: 0; }
+.cue .nm { font-size: 11px; color: #eee; text-align: center; white-space: nowrap; overflow: hidden; }
+.cue .tg { font-size: 9.5px; color: var(--muted); text-align: center; white-space: nowrap; overflow: hidden; }
+.cue.sel { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue) inset; background: #1b2c3e; }
+.cue.sel::after { content: "✓"; position: absolute; top: 3px; left: 4px; width: 15px; height: 15px; border-radius: 3px; background: var(--blue); color: #fff; font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; z-index: 3; }
+.cue.dim { opacity: .32; }
+.cue.empty { background: #1c1c1c; border-style: dashed; border-color: #2c2c2c; }
+.cue .in { position: absolute; top: 4px; right: 4px; display: flex; gap: 2px; z-index: 3; }
+.cue .in i { width: 7px; height: 7px; border-radius: 2px; display: block; }
+.cue.aud .screen { position: relative; }
+.selbar { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; background: #1b2c3e; border: 1px solid #2c5684; font-size: 13px; }
+
+.smart { border-radius: 8px; border: 1px dashed #4a4f7a; background: #17182a; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.smart .row { align-items: center; gap: 8px; }
+.rule { font-size: 12px; padding: 3px 9px; border-radius: 10px; background: #262a48; color: #d8dcff; border: 1px solid #3d437a; }
+
+/* crate cards */
+.cards { display: grid; grid-template-columns: repeat(5, 1fr) 128px; gap: 10px; }
+.ccard { border-radius: 9px; background: #1c1c1c; border: 1.5px solid #333; padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; position: relative; min-height: 104px; }
+.ccard .n { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 7px; }
+.ccard .n .sw { width: 11px; height: 11px; border-radius: 3px; }
+.ccard .e { font-size: 12px; color: #ccc; letter-spacing: 1px; }
+.rolebar { display: flex; gap: 3px; }
+.rolebar span { font-size: 10.5px; padding: 1px 6px; border-radius: 7px; color: #111; font-weight: 700; }
+.lint { font-size: 11px; color: #cfe0f5; display: flex; gap: 5px; align-items: flex-start; line-height: 1.3; }
+.lint::before { content: "ⓘ"; color: var(--blue); font-weight: 700; }
+.ccard.open { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue) inset; background: #19222c; }
+.ccard.new { border-style: dashed; align-items: center; justify-content: center; color: var(--text2); text-align: center; font-size: 12px; }
+.ccard.smartc { border-color: #4a4f7a; border-style: dashed; }
+
+/* opened crate */
+.open-crate { flex: none; border-radius: 10px; background: #171a1e; border: 1px solid #2c3e52; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-height: 0; position: relative; }
+.oc-head { display: flex; align-items: center; gap: 12px; }
+.oc-head .nm { font-size: 22px; font-weight: 800; display: flex; align-items: center; gap: 9px; }
+.oc-head .nm .sw { width: 15px; height: 15px; border-radius: 4px; }
+.energy-pick { display: inline-flex; gap: 3px; }
+.energy-pick i { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid #bbb; display: block; }
+.energy-pick i.on { background: #ddd; }
+.btn.amber { background: #5a4100; border: 1px solid var(--warn); color: #ffe2a0; font-weight: 700; }
+.autobar { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; background: #151933; border: 1px solid #3d437a; font-size: 12.5px; color: #dfe2ff; }
+.lanes { display: flex; flex-direction: column; gap: 8px; }
+.lane { display: grid; grid-template-columns: 118px 1fr; gap: 4px 10px; align-items: center; padding: 7px 10px; border-radius: 8px; background: #1e1e1e; border-left: 4px solid var(--rc); min-height: 66px; }
+.lane .lr { display: flex; flex-direction: column; gap: 2px; }
+.lane .lr b { font-size: 15px; letter-spacing: .04em; color: var(--rc); }
+.lane .lr span { font-size: 11px; color: var(--muted); }
+.slots { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.slot { display: flex; align-items: center; gap: 7px; height: 46px; padding: 0 9px 0 4px; border-radius: 7px; background: #2a2a2a; border: 1px solid color-mix(in srgb, var(--rc) 55%, #333); }
+.slot .hd { color: #777; font-size: 14px; letter-spacing: -2px; padding: 0 2px; }
+.slot .screen { width: 46px; height: 34px; border-radius: 4px; border: 0; }
+.slot .t { font-size: 13px; color: #eee; display: flex; flex-direction: column; line-height: 1.2; }
+.slot .t small { font-size: 10.5px; color: var(--muted); }
+.drop { height: 46px; padding: 0 14px; border-radius: 7px; border: 1.5px dashed #444; color: var(--muted); font-size: 12px; display: flex; align-items: center; }
+.drop.hot { border-color: var(--accent); color: #ffd27a; background: color-mix(in srgb, var(--accent) 12%, #1e1e1e); }
+.lane .ln { font-size: 12px; color: var(--text2); line-height: 1.35; grid-column: 2; }
+.lane .lr { grid-row: span 2; }
+.lane .ln.ok::before { content: "✓ "; color: #6fd08a; font-weight: 700; }
+.lane .ln.tip { color: #cfe0f5; }
+.lane .ln.tip::before { content: "ⓘ "; color: var(--blue); font-weight: 700; }
+.dragghost { position: absolute; z-index: 20; display: flex; align-items: center; gap: 7px; height: 46px; padding: 0 10px 0 4px; border-radius: 7px; background: #3a3a3a; border: 1.5px solid var(--accent); box-shadow: 0 10px 26px rgba(0,0,0,.6); transform: rotate(-2deg); }
+.dragghost .screen { width: 46px; height: 34px; border-radius: 4px; border: 0; }
+.audstrip { display: flex; gap: 6px; align-items: center; padding: 8px 10px; border-radius: 8px; background: #17140c; border: 1.5px solid var(--warn); }
+.audstrip .screen { width: 92px; height: 58px; border: 1px dashed #7a5d10; }
+.audstrip .lab { font-size: 12px; color: #ffd27a; font-weight: 800; letter-spacing: .08em; }
+.bottomrow { display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--text2); margin-top: auto; }
+.summ { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 8px; background: #1b1b1b; border: 1px solid #2a2a2a; }
+.srow { display: flex; align-items: center; gap: 8px; }
+.srow .k { width: 80px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
+.rchip { font-size: 12px; padding: 3px 9px; border-radius: 10px; background: color-mix(in srgb, var(--rc) 20%, #262626); border: 1px solid color-mix(in srgb, var(--rc) 50%, transparent); color: #eee; }
+.checks { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 12px; border-radius: 8px; background: #1a1a1a; border: 1px solid #2a2a2a; }
+.checks .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; margin-right: 4px; }
+.ck { font-size: 12px; padding: 3px 9px; border-radius: 10px; background: #242424; color: #ddd; }
+.ck.ok::before { content: "✓ "; color: #6fd08a; font-weight: 700; }
+.ck.tip::before { content: "ⓘ "; color: var(--blue); font-weight: 700; }
+</style></head><body>
+<div class="page tall">
+  <div class="caption-bar"><b>B2 · Crate builder (setup)</b><span class="tag">Design B · Now &amp; Next</span><span class="tag">dragging 5 cues into Build filled its roles; now moving one by hand</span></div>
+  <div class="menubar"><span class="logo"></span><span>File</span><span>Edit</span><span>Transport</span><span>View</span><span>Help</span><span class="title">Laser Show — club-friday.show</span></div>
+  <div class="tabbar">
+    <div class="tab">Grid</div><div class="tab active">Vibes</div><div class="tab">Perform</div><div class="tab">Effects</div><div class="tab">Projectors</div><div class="tab">Zone Groups</div><div class="tab">Settings</div>
+    <div class="tright"><span>BPM <b class="mono" style="color:#fff">128.0</b></span><span><span class="dot"></span> Not streaming · audition plays in preview only</span></div>
+  </div>
+  <div class="subbar">
+    <span class="seg"><span class="on">Crates</span><span>Transitions</span><span>Reactions</span></span>
+    <span class="hint">A vibe is a crate of cues. Select cues, drag them onto a crate, and the roles fill themselves. Aim: one minute per vibe.</span>
+    <span style="margin-left:auto" class="btn sm ghost">↶ Undo  ⌘Z</span>
+  </div>
+
+  <div class="main">
+    <!-- LIBRARY -->
+    <div class="lib">
+      <div class="row between center"><h3>Cue library · Grid 8 × 4</h3><span class="seg"><span class="on">Grid</span><span>List</span></span></div>
+      <div class="search"><div class="field"><span class="q">⌕</span>tunnel, beams, red …</div><span class="btn sm ghost">Clear</span></div>
+      <div class="tags"><span class="hint">Tags:</span><span class="chip on">beams</span><span class="chip">shapes</span><span class="chip">slow</span><span class="chip">fast</span><span class="chip">red</span><span class="chip">violet</span><span class="chip">text</span><span class="chip">big</span><span class="chip outline">🔒 audience</span><span class="hint">· tags come from the cue's look; edit with T</span></div>
+
+      <div class="cuegrid">
+        <span></span><span class="ch">1</span><span class="ch">2</span><span class="ch">3</span><span class="ch">4</span><span class="ch">5</span><span class="ch">6</span><span class="ch">7</span><span class="ch">8</span>
+        <span class="rh">A</span>
+        <div class="cue"><div class="in"><i style="background:#4d7bff"></i></div><div class="screen" data-shape="circle" data-color="#39ff6a" data-scale=".8"></div><div class="nm">circle</div><div class="tg">shapes · slow</div></div>
+        <div class="cue"><div class="in"><i style="background:#4d7bff"></i></div><div class="screen" data-shape="square" data-color="#39ff6a" data-scale=".8"></div><div class="nm">square</div><div class="tg">shapes</div></div>
+        <div class="cue"><div class="in"><i style="background:#4d7bff"></i></div><div class="screen" data-shape="triangle" data-color="#39ff6a" data-scale=".8"></div><div class="nm">triangle</div><div class="tg">shapes</div></div>
+        <div class="cue"><div class="in"><i style="background:#4d7bff"></i></div><div class="screen" data-shape="star" data-color="#39ff6a" data-scale=".8"></div><div class="nm">star</div><div class="tg">shapes · fast</div></div>
+        <div class="cue sel"><div class="in"><i style="background:#b05cff"></i></div><div class="screen" data-shape="spiral" data-color="#b05cff" data-scale=".8"></div><div class="nm">spiral</div><div class="tg">violet · slow</div></div>
+        <div class="cue"><div class="in"><i style="background:#4d7bff"></i><i style="background:#36e2ff"></i></div><div class="screen" data-shape="wave" data-color="#36e2ff" data-scale=".8"></div><div class="nm">wave</div><div class="tg">slow · bed</div></div>
+        <div class="cue sel"><div class="in"><i style="background:#b05cff"></i></div><div class="screen" data-shape="fan" data-color="#ff3bd4" data-scale=".8"></div><div class="nm">beam fan</div><div class="tg">beams · big</div></div>
+        <div class="cue"><div class="in"><i style="background:#4d7bff"></i></div><div class="screen" data-shape="line" data-color="#36e2ff"></div><div class="nm">horizontal line</div><div class="tg">beams</div></div>
+        <span class="rh">B</span>
+        <div class="cue sel"><div class="in"><i style="background:#b05cff"></i></div><div class="screen" data-shape="tunnel" data-color="#b05cff" data-scale=".8"></div><div class="nm">tunnel</div><div class="tg">violet</div></div>
+        <div class="cue sel"><div class="in"><i style="background:#b05cff"></i></div><div class="screen" data-shape="grid" data-color="#b05cff" data-scale=".8"></div><div class="nm">grid</div><div class="tg">violet · fast</div></div>
+        <div class="cue"><div class="in"><i style="background:#1ABC9C"></i></div><div class="screen" data-shape="dots" data-color="#1ABC9C" data-scale=".8"></div><div class="nm">dots</div><div class="tg">slow</div></div>
+        <div class="cue sel"><div class="in"><i style="background:#b05cff"></i><i style="background:#ff3bd4"></i></div><div class="screen" data-shape="text" data-text="DROP" data-color="#ff3bd4"></div><div class="nm">"DROP" text</div><div class="tg">text · big</div></div>
+        <div class="cue"><div class="in"><i style="background:#ff3bd4"></i></div><div class="screen" data-shape="ring2" data-color="#ff3bd4" data-scale=".8"></div><div class="nm">ring burst</div><div class="tg">fast · big</div></div>
+        <div class="cue"><div class="screen" data-shape="beams" data-color="#b05cff" data-scale=".8"></div><div class="nm">cone</div><div class="tg">beams</div></div>
+        <div class="cue aud"><div class="screen hatch" data-shape="fan" data-color="#ff3bd4" data-scale=".7"></div><div class="nm">crowd fan</div><div class="tg">🔒 audience</div></div>
+        <div class="cue empty"></div>
+        <span class="rh">C</span>
+        <div class="cue"><div class="screen" data-shape="circle" data-color="#ff3b3b" data-scale=".8"></div><div class="nm">circle red</div><div class="tg">red · slow</div></div>
+        <div class="cue"><div class="screen" data-shape="wave" data-color="#ff3b3b" data-scale=".8"></div><div class="nm">wave red</div><div class="tg">red · slow</div></div>
+        <div class="cue"><div class="screen" data-shape="tunnel" data-color="#ff3b3b" data-scale=".8"></div><div class="nm">tunnel red</div><div class="tg">red · slow</div></div>
+        <div class="cue"><div class="screen" data-shape="star" data-color="#ff3b3b" data-scale=".8"></div><div class="nm">star red</div><div class="tg">red · fast</div></div>
+        <div class="cue"><div class="screen" data-shape="spiral" data-color="#ff3b3b" data-scale=".8"></div><div class="nm">spiral red</div><div class="tg">red · slow</div></div>
+        <div class="cue"><div class="screen" data-shape="dots" data-color="#ff3b3b" data-scale=".8"></div><div class="nm">dots red</div><div class="tg">red · slow</div></div>
+        <div class="cue empty"></div><div class="cue empty"></div>
+        <span class="rh">D</span>
+        <div class="cue empty"></div><div class="cue empty"></div><div class="cue empty"></div><div class="cue empty"></div><div class="cue empty"></div><div class="cue empty"></div><div class="cue empty"></div><div class="cue empty"></div>
+      </div>
+
+      <div class="selbar"><span class="check on"></span><b>5 selected</b><span class="text2">spiral, beam fan, tunnel, grid, "DROP" text</span><span style="margin-left:auto" class="btn sm blue">New crate from selection ⏎</span></div>
+      <div class="hint" style="margin-top:-4px">Click = select · ⇧-click = range · ⌘-click = add · drag the selection onto a crate. Coloured marks = crates the cue is already in.</div>
+
+      <div class="smart">
+        <div class="row between"><b style="font-size:13px">✦ Smart crate</b><span class="hint">builds itself from tags and stays up to date</span></div>
+        <div class="row"><span class="text2 small">cues tagged</span><span class="rule">red</span><span class="small text2">and</span><span class="rule">slow</span><span class="btn sm ghost">+ rule</span><span style="margin-left:auto" class="small text2">→ 5 cues now</span><span class="btn sm">Make "Red slow"</span></div>
+      </div>
+    </div>
+
+    <!-- CRATES -->
+    <div class="cratepane">
+      <div class="row between center"><h3>Crates (vibes) · in energy order</h3><span class="hint">Drag a card to reorder · its energy sets "follow: energy up/down"</span></div>
+      <div class="cards">
+        <div class="ccard"><div class="n"><span class="sw" style="background:#1ABC9C"></span>Warm-up</div><div class="e">●○○○</div>
+          <div class="rolebar"><span style="background:var(--hit)">H 3</span><span style="background:var(--accent)">A 1</span><span style="background:var(--flash)">F 1</span></div><div class="lint" style="color:#8fd19e">ready</div></div>
+        <div class="ccard"><div class="n"><span class="sw" style="background:#4d7bff"></span>Groove</div><div class="e">●●○○</div>
+          <div class="rolebar"><span style="background:var(--hit)">H 4</span><span style="background:var(--accent)">A 2</span><span style="background:var(--flash)">F 1</span></div><div class="lint" style="color:#8fd19e">ready</div></div>
+        <div class="ccard open"><div class="n"><span class="sw" style="background:#b05cff"></span>Build</div><div class="e">●●●○</div>
+          <div class="rolebar"><span style="background:var(--hit)">H 3</span><span style="background:var(--accent)">A 1</span><span style="background:var(--flash)">F 1</span></div><div class="lint">ACCENT has 1 cue</div></div>
+        <div class="ccard"><div class="n"><span class="sw" style="background:#ff3bd4"></span>Peak</div><div class="e">●●●●</div>
+          <div class="rolebar"><span style="background:var(--hit)">H 4</span><span style="background:var(--accent)">A 2</span><span style="background:var(--flash)">F 1</span></div><div class="lint">audience allowed: 1 cue</div></div>
+        <div class="ccard"><div class="n"><span class="sw" style="background:#36e2ff"></span>Breakdown</div><div class="e">●○○○</div>
+          <div class="rolebar"><span style="background:var(--hit)">H 1</span><span style="background:#444;color:#aaa">A –</span><span style="background:#444;color:#aaa">F –</span></div><div class="lint">HIT has 1 cue — it will repeat</div></div>
+        <div class="ccard new"><b style="font-size:20px;color:#ddd">+</b>New crate<br><span class="small muted">or drop cues here</span></div>
+      </div>
+
+      <div class="open-crate">
+        <div class="oc-head">
+          <div class="nm"><span class="sw" style="background:#b05cff"></span>Build</div>
+          <span class="energy-pick"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span><span class="hint">energy 3</span>
+          <span class="divider-v" style="height:24px"></span>
+          <span class="toggle"></span><span class="small text2">Allow audience lasers</span>
+          <span style="margin-left:auto" class="btn amber">◐ Audition in NEXT preview</span>
+        </div>
+        <div class="autobar"><span class="auto-tag">AUTO</span><span>Filled from the 5 cues you dropped: the first 3 → <b style="color:var(--hit)">HIT</b>, the biggest (beam fan, 9 beams) → <b style="color:var(--accent)">ACCENT</b>, the most dramatic ("DROP" text) → <b style="color:var(--flash)">FLASH</b>. Drag to change anything.</span><span style="margin-left:auto" class="btn sm ghost">Undo fill</span></div>
+
+        <div class="lanes">
+          <div class="lane role-hit">
+            <div class="lr"><b>HIT ▶</b><span>pool · plays the next one each press</span></div>
+            <div class="slots">
+              <div class="slot"><span class="hd">⋮⋮</span><div class="screen" data-shape="tunnel" data-color="#b05cff" data-scale=".8"></div><span class="t">tunnel<small>1st</small></span></div>
+              <div class="slot"><span class="hd">⋮⋮</span><div class="screen" data-shape="spiral" data-color="#b05cff" data-scale=".8"></div><span class="t">spiral<small>2nd</small></span></div>
+              <div class="slot"><span class="hd">⋮⋮</span><div class="screen" data-shape="grid" data-color="#b05cff" data-scale=".8"></div><span class="t">grid<small>3rd</small></span></div>
+              <div class="drop">+ drop</div>
+            </div>
+            <div class="ln ok">3 cues · shuffle, never the same twice in a row</div>
+          </div>
+          <div class="lane role-accent">
+            <div class="lr"><b>ACCENT ▶</b><span>pool · bigger moments</span></div>
+            <div class="slots">
+              <div class="slot" style="opacity:.35"><span class="hd">⋮⋮</span><div class="screen" data-shape="fan" data-color="#ff3bd4" data-scale=".8"></div><span class="t">beam fan<small>moving…</small></span></div>
+              <div class="slot"><span class="hd">⋮⋮</span><div class="screen" data-shape="beams" data-color="#b05cff" data-scale=".8"></div><span class="t">cone<small>added</small></span></div>
+              <div class="drop">+ drop</div>
+            </div>
+            <div class="ln tip">ACCENT will have 1 cue once beam fan moves — every ACCENT plays cone. Fine for a build; add one for variety.</div>
+          </div>
+          <div class="lane role-flash">
+            <div class="lr"><b>FLASH ▮</b><span>one cue · while held</span></div>
+            <div class="slots">
+              <div class="slot"><span class="hd">⋮⋮</span><div class="screen" data-shape="text" data-text="DROP" data-color="#ff3bd4"></div><span class="t">"DROP" text<small>most dramatic</small></span></div>
+            </div>
+            <div class="ln ok">1 cue · a held FLASH replaces the look</div>
+          </div>
+          <div class="lane" style="--rc:#9a9a9a">
+            <div class="lr"><b>BED ⟳</b><span>one cue · runs underneath</span></div>
+            <div class="slots">
+              <div class="drop hot" style="width:330px">drop here</div>
+            </div>
+            <div class="ln tip">Empty BED: Build would start dark between presses. Dropping beam fan here fixes it.</div>
+          </div>
+        </div>
+
+        <div class="summ">
+          <div class="srow"><span class="k">Reactions</span><span class="rchip" style="--rc:var(--hit)">HIT · pump bright</span><span class="rchip" style="--rc:var(--accent)">ACCENT · zone chase A→D</span><span class="rchip" style="--rc:var(--flash)">FLASH · strobe</span><span class="hint">defaults for energy 3</span><span style="margin-left:auto" class="btn sm ghost">Reactions ›</span></div>
+          <div class="srow"><span class="k">Leaves</span><span class="text2" style="font-size:13px">after <b style="color:#fff">32 bars</b> → <b style="color:#fff">energy up</b> · take on <b style="color:#fff">bar</b> · <b style="color:#fff">1-bar blend</b> · bed rises over the change</span><span style="margin-left:auto" class="btn sm ghost">Transitions ›</span></div>
+        </div>
+        <div class="audstrip">
+          <span class="lab">PREVIEW<br>NOT SENT</span>
+          <div class="screen" data-shape="beams" data-color="#ff3bd4" data-lbl="1" data-lbl2="bed"></div>
+          <div class="screen" data-shape="tunnel" data-color="#b05cff" data-lbl="2" data-lbl2="HIT"></div>
+          <div class="screen" data-shape="tunnel" data-color="#b05cff" data-lbl="3" data-lbl2="HIT"></div>
+          <div class="screen" data-shape="beams" data-color="#ff3bd4" data-lbl="4" data-lbl2="bed"></div>
+          <div class="col gap6" style="margin-left:8px"><span class="small" style="color:#ffd27a">Audition plays Build on the NEXT deck's preview: HIT on every beat, ACCENT every bar, FLASH on bar 4.</span><span class="small muted">Lasers stay as they are. Space = stop · ←/→ = previous / next crate.</span></div>
+          <span style="margin-left:auto" class="btn sm ghost">■ Stop</span>
+        </div>
+      </div>
+      <div class="checks"><span class="k">Before the show</span><span class="ck ok">5 crates, in energy order</span><span class="ck ok">every crate has a HIT</span><span class="ck tip">Breakdown: HIT repeats</span><span class="ck tip">Build: BED empty</span><span class="ck ok">5 controls learned · Launchpad Mini</span></div>
+    </div>
+  </div>
+  <div class="status"><span><span class="dot"></span> Not streaming</span><span>5 crates · 18 cues used · 2 hints</span><span style="margin-left:auto">Last saved 18:47</span></div>
+
+  <!-- drag ghost: beam fan moving from ACCENT to BED -->
+  <div class="dragghost" style="left:880px;top:700px"><div class="screen" data-shape="fan" data-color="#ff3bd4" data-scale=".8"></div><span style="font-size:13px">beam fan</span><span class="small" style="color:#ffd27a">→ BED</span></div>
+  <svg style="position:absolute;left:1010px;top:728px;z-index:21" width="18" height="24" viewBox="0 0 18 24"><path d="M1 1 L1 19 L6 14 L10 23 L13 22 L9 13 L16 13 Z" fill="#fff" stroke="#000" stroke-width="1.2"/></svg>
+
+  <div class="callout" style="left:4px;top:194px">1</div>
+  <div class="callout" style="left:4px;top:722px">2</div>
+  <div class="callout" style="left:1272px;top:178px">3</div>
+  <div class="callout" style="left:660px;top:360px">4</div>
+  <div class="callout" style="left:1060px;top:690px">5</div>
+  <div class="callout" style="left:1000px;top:856px">6</div>
+
+  <div class="notes" style="left:14px;bottom:36px;width:612px;font-size:11.5px;line-height:1.4"><b>B2 · build a crate in under a minute</b><ol>
+    <li>Library: the 8 × 4 grid as thumbnails. Search and tag chips narrow it; marks show which crates use a cue.</li>
+    <li>Multi-select, then drag onto a crate (or ⏎). A smart crate fills itself from tag rules.</li>
+    <li>Crate cards say if they are ready, with friendly hints ("HIT has 1 cue — it will repeat"). Hints never block.</li>
+    <li>Roles auto-fill (AUTO bar, one Undo). Each cue has a drag handle to move it to another role.</li>
+    <li>Live drag: beam fan leaves ACCENT for the empty BED; the hint says what that will change.</li>
+    <li>Audition plays the crate on the NEXT preview only. The lasers don't change.</li>
+  </ol></div>
+</div></body></html>

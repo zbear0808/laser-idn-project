@@ -1,0 +1,130 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.role-bed { --rc: #D8D8D8; }
+.wrapc3 { flex: 1; display: flex; gap: 22px; padding: 18px 20px; min-height: 0; }
+.left { position: relative; width: 640px; }
+.colhdr { position: absolute; top: 0; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; letter-spacing: .05em; color: var(--rc); border-top: 3px solid var(--rc); background: color-mix(in srgb, var(--rc) 18%, #121212); border-radius: 4px 4px 0 0; white-space: nowrap; }
+.rowlab { position: absolute; left: 0; width: 104px; height: 52px; display: flex; flex-direction: column; justify-content: center; align-items: flex-end; text-align: right; padding-right: 10px; }
+.rowlab b { font-size: 13px; }
+.rowlab span { font-size: 11px; color: var(--text2); }
+.rowlab::after { content: ""; position: absolute; right: 0; top: 18px; width: 4px; height: 16px; border-radius: 2px; background: var(--vc, transparent); }
+.lp { position: absolute; left: 112px; top: 30px; width: 520px; height: 520px; border-radius: 18px; background: linear-gradient(160deg, #2a2a2c, #19191b); border: 1px solid #3a3a3a; box-shadow: 0 18px 40px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.06); }
+.grid9 { position: absolute; left: 22px; top: 20px; display: grid; grid-template-columns: repeat(8, 52px) 52px; grid-template-rows: 34px repeat(8, 52px); gap: inherit; column-gap: 1px; row-gap: 1px; }
+.p { position: absolute; width: 52px; height: 52px; border-radius: 6px; background: #2b2b2d; border: 1px solid #333; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #111; text-align: center; line-height: 1.05; }
+.p.top { height: 30px; border-radius: 5px; background: #262628; color: #888; font-weight: 600; font-size: 11px; }
+.p.side { border-radius: 50%; width: 40px; height: 40px; margin: 6px; background: #262628; color: #888; font-weight: 600; font-size: 12px; }
+.p.dim { background: color-mix(in srgb, var(--rc) 32%, #232323); border-color: color-mix(in srgb, var(--rc) 55%, #333); }
+.p.bright { background: var(--rc); border-color: #fff; box-shadow: 0 0 16px var(--rc), 0 0 4px var(--rc); }
+.p.flash { background: repeating-linear-gradient(90deg, var(--rc) 0 7px, #232323 7px 14px); border-color: var(--rc); }
+.p.pulse { background: radial-gradient(circle, var(--rc) 0 30%, color-mix(in srgb, var(--rc) 30%, #232323) 75%); border-color: var(--rc); }
+.p.next::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: #fff; box-shadow: 0 0 6px #fff; }
+.p.white { --rc: #e8e8e8; }
+.p.green { --rc: #39d465; }
+.p .t { color: #0b0b0b; }
+.p.dim .t { color: #e8e8e8; }
+.brand { position: absolute; right: 26px; top: 22px; width: 30px; height: 30px; border-radius: 6px; background: #1f1f21; display: flex; align-items: center; justify-content: center; color: #777; font-size: 10px; }
+.devname { position: absolute; left: 112px; top: 560px; width: 520px; text-align: center; font-size: 12px; color: var(--text2); }
+
+.right { flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.right h2 { font-size: 17px; }
+table.map { border-collapse: collapse; width: 100%; font-size: 12px; }
+table.map td { padding: 5px 6px; border-bottom: 1px solid #262626; vertical-align: top; color: #ddd; }
+table.map td:first-child { width: 112px; color: #fff; font-weight: 700; white-space: nowrap; }
+.legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 10px; }
+.legend .it { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #ddd; }
+.legend .it small { display: block; color: var(--muted); font-size: 11px; }
+.sw { position: relative; width: 26px; height: 26px; border-radius: 5px; flex: none; }
+.five { background: #16222d; border: 1px solid #2e5578; border-radius: 8px; padding: 9px 11px; font-size: 12px; line-height: 1.45; color: #d6e8f7; }
+</style></head><body>
+<div class="page small">
+  <div class="caption-bar"><b>C3 · Hardware mirror</b><span class="tag">Launchpad Mini = the set grid, 1:1</span><span class="tag">r03 #1 #13 · r02 #16 · r04 rule 6</span></div>
+  <div class="wrapc3">
+    <div class="left" id="left">
+      <div class="lp" id="lp"></div>
+      <div class="devname">Launchpad Mini · 8 × 8 pads, 8 side buttons, 8 top buttons</div>
+    </div>
+    <div class="right">
+      <h2>One grid, on screen and under your hands</h2>
+      <table class="map">
+        <tr><td>Rows 1–5</td><td>The set's rows (vibes), in order. Row 6 = the next row, if any.</td></tr>
+        <tr><td>Side ▶</td><td>Launch that row on the bar (same as ▶ on screen). Lit in the row's colour; green = playing.</td></tr>
+        <tr><td>Columns</td><td>1–4 HIT · 5–6 ACCENT · 7 FLASH · 8 BED, in role colours. A cell plays that cue now; in another row it launches that row, starting with it.</td></tr>
+        <tr><td>Bottom row</td><td>The five pads: HIT, ACCENT, FLASH, VIBE, then a gap and <b>BLACKOUT on pad 8</b>, the far corner (same as <span class="kbd">;</span>, not remappable).</td></tr>
+        <tr><td>▲ ▼  ◀ ▶</td><td>Page the rows by 6 (16+ vibes); slide the HIT window when a pool is wider than 4.</td></tr>
+        <tr><td>FX, REACT</td><td>Not on pads: they run with the row. The screen shows them.</td></tr>
+      </table>
+      <div>
+        <h3 style="margin-bottom:8px">Light grammar (same as the screen)</h3>
+        <div class="legend">
+          <div class="it"><span class="sw p" style="position:relative;width:26px;height:26px"></span><div>Off<small>empty cell</small></div></div>
+          <div class="it"><span class="sw p dim role-hit" style="position:relative;width:26px;height:26px"></span><div>Dim<small>ready to play</small></div></div>
+          <div class="it"><span class="sw p bright role-hit" style="position:relative;width:26px;height:26px"></span><div>Bright<small>playing now</small></div></div>
+          <div class="it"><span class="sw p flash green" style="position:relative;width:26px;height:26px"></span><div>Flashing<small>queued, 1 per beat</small></div></div>
+          <div class="it"><span class="sw p pulse role-bed" style="position:relative;width:26px;height:26px"></span><div>Pulsing<small>running by itself</small></div></div>
+          <div class="it"><span class="sw p dim next role-hit" style="position:relative;width:26px;height:26px"></span><div>White dot<small>next shuffle pick</small></div></div>
+        </div>
+      </div>
+      <div class="five"><b>Five-button players don't need this.</b> Bottom row only, or keys <span class="kbd">H</span> <span class="kbd">J</span> <span class="kbd">K</span> <span class="kbd">L</span> <span class="kbd">;</span>, or an APC mini's bottom row: same five pads, same colours. The Launchpad is the deluxe surface for people who want to pick rows and cues by hand.</div>
+      <div class="row center gap8 small text2" style="white-space:nowrap"><span class="dot green"></span><span>Controller <b style="color:#fff">Launchpad Mini</b></span><div class="seg" style="margin-left:auto"><span class="on">Set mirror</span><span>Five pads only</span></div></div>
+    </div>
+  </div>
+  <div class="callout" style="left:14px;top:212px">1</div>
+  <div class="callout" style="left:654px;top:270px">2</div>
+  <div class="callout" style="left:14px;top:548px">3</div>
+  <div class="callout" style="left:196px;top:40px">4</div>
+  <div class="notes" style="left:18px;bottom:14px;width:640px;padding:7px 12px;font-size:11.5px;line-height:1.35">
+    <b>Same grammar, same layout, no extra mapping</b>
+    <ol style="columns:2;column-gap:20px">
+      <li>Groove plays: triangle bright, star has the next dot, BED pulses.</li>
+      <li>Build's side button flashes green: it lands on the bar.</li>
+      <li>Bottom row = the five pads. BLACKOUT sits alone in the corner.</li>
+      <li>Top buttons page rows and slide wide pools; Session lit = mirror on.</li>
+    </ol>
+  </div>
+</div>
+<script>
+var lp = document.getElementById("lp"), left = document.getElementById("left");
+var X0 = 22, Y0 = 64, S = 56; /* pad pitch */
+function pad(x, y, cls, txt, style) { var d = document.createElement("div"); d.className = "p " + (cls || ""); d.style.left = (X0 + x * S) + "px"; d.style.top = (Y0 + y * S) + "px"; if (style) d.setAttribute("style", d.getAttribute("style") + ";" + style); if (txt) d.innerHTML = '<span class="t">' + txt + '</span>'; lp.appendChild(d); return d; }
+/* top row */
+["▲", "▼", "◀", "▶", "Session", "Drums", "Keys", "User"].forEach(function (t, i) {
+  var d = document.createElement("div"); d.className = "p top" + (i === 4 ? " " : ""); d.style.left = (X0 + i * S) + "px"; d.style.top = "22px"; d.textContent = t;
+  if (i === 4) { d.style.background = "#39d465"; d.style.color = "#06240f"; d.style.boxShadow = "0 0 10px #39d465"; }
+  if (i < 4) { d.style.background = "#3a3a3c"; d.style.color = "#ddd"; }
+  lp.appendChild(d);
+});
+var R = "role-hit", A = "role-accent", F = "role-flash", B = "role-bed";
+var roleOf = [R, R, R, R, A, A, F, B];
+var rows = [
+  ["dim", "dim", "dim", "", "dim", "", "dim", "dim"],
+  ["dim", "dim", "bright", "dim next", "dim", "dim", "dim", "pulse"],
+  ["dim", "dim", "dim", "dim", "dim", "dim", "dim", "dim"],
+  ["dim", "dim", "dim", "dim", "dim", "dim", "dim", "dim"],
+  ["dim", "dim", "", "", "", "", "", "dim"],
+  ["", "", "", "", "", "", "", ""],
+  ["", "", "", "", "", "", "", ""]
+];
+rows.forEach(function (r, y) { r.forEach(function (st, x) { pad(x, y, st ? st + " " + roleOf[x] : ""); }); });
+/* bottom row: five pads */
+pad(0, 7, "bright role-hit", "HIT"); pad(1, 7, "dim role-accent", "ACC"); pad(2, 7, "dim role-flash", "FLASH"); pad(3, 7, "flash role-vibe", "VIBE");
+pad(4, 7, ""); pad(5, 7, ""); pad(6, 7, ""); pad(7, 7, "dim role-blackout", "BLACK<br>OUT");
+/* side buttons */
+var sideCol = ["#1ABC9C", "#39d465", "#39d465", "#E91E63", "#9B59B6"];
+for (var y = 0; y < 8; y++) {
+  var d = document.createElement("div"); d.className = "p side"; d.style.left = (X0 + 8 * S) + "px"; d.style.top = (Y0 + y * S) + "px"; d.textContent = "▶";
+  if (y < 5) { d.style.setProperty("--rc", sideCol[y]); d.className += y === 1 ? " pulse" : y === 2 ? " flash" : " dim"; d.style.color = y === 1 ? "#06240f" : "#eee"; }
+  lp.appendChild(d);
+}
+/* column headers and row labels around the device */
+var lpLeft = 112, lpTop = 30;
+[[0, 4, "role-hit", "HIT ×4"], [4, 2, "role-accent", "ACCENT ×2"], [6, 1, "role-flash", "FLASH"], [7, 1, "role-bed", "BED"]].forEach(function (g) {
+  var h = document.createElement("div"); h.className = "colhdr " + g[2]; h.style.left = (lpLeft + X0 + g[0] * S) + "px"; h.style.width = (g[1] * S - 4) + "px"; h.style.top = "0px"; h.textContent = g[3]; left.appendChild(h);
+});
+lp.style.top = "30px";
+var labs = [["Warm-up", "●○○○", "#1ABC9C"], ["Groove", "now", "#4A90D9"], ["Build", "queued", "#E67E22"], ["Peak", "●●●●", "#E91E63"], ["Breakdown", "●○○○", "#9B59B6"], ["(row 6)", "no row yet", ""], ["", "kept dark", ""], ["Five pads", "busk row", ""]];
+labs.forEach(function (l, y) {
+  var d = document.createElement("div"); d.className = "rowlab"; d.style.top = (lpTop + Y0 + y * S) + "px"; if (l[2]) d.style.setProperty("--vc", l[2]);
+  d.innerHTML = (l[0] ? "<b>" + l[0] + "</b>" : "") + "<span>" + l[1] + "</span>"; left.appendChild(d);
+});
+</script>
+</body></html>

@@ -1,0 +1,193 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+:root { --v-warm:#3fb6a8; --v-groove:#6cc26a; --v-build:#b38be8; --v-peak:#ff6f91; --v-break:#5d8fd6; }
+.panel { background:#181818; border:1px solid #2c2c2c; border-radius:10px; }
+.ptitle { display:flex; align-items:center; gap:10px; font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text2); }
+.subhdr { height:52px; display:flex; align-items:center; gap:14px; padding:0 16px; border-bottom:1px solid #262626; }
+.main { flex:1; display:flex; gap:12px; padding:12px 16px; min-height:0; }
+.tray { width:282px; padding:12px; display:flex; flex-direction:column; gap:10px; }
+.cuecard { background:#232323; border:1px solid #363636; border-radius:8px; padding:6px; position:relative; }
+.cuecard .screen { height:64px; }
+.cuecard .nm { font-size:12.5px; margin-top:5px; color:#eee; display:flex; justify-content:space-between; align-items:center; }
+.cuecard.focus { border:2px solid var(--blue); box-shadow:0 0 0 4px rgba(73,146,219,.25); padding:5px; }
+.traygrid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.keys { display:flex; gap:4px; flex-wrap:wrap; margin-top:7px; }
+.keys span { font-size:11px; color:#ddd; display:inline-flex; align-items:center; gap:4px; }
+.suggest { margin-top:7px; font-size:11.5px; color:#cfd5ff; display:flex; align-items:center; gap:6px; }
+.side { border-radius:8px; padding:8px; display:flex; gap:8px; align-items:center; }
+.side .screen { width:72px; height:46px; flex:none; }
+.side .tx { font-size:11.5px; color:var(--text2); line-height:1.35; }
+.side .tx b { color:#eee; font-size:12.5px; }
+.never { background:#232016; border:1px solid #5a4d1c; }
+.leftout { background:#221616; border:1px solid #5b2a2a; }
+
+.bins { flex:1; display:flex; flex-direction:column; gap:10px; min-width:0; }
+.binrow { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; flex:1; min-height:0; }
+.bin { padding:10px; display:flex; flex-direction:column; gap:7px; border-top:4px solid var(--bc); }
+.bin .bh { display:flex; align-items:center; justify-content:space-between; }
+.bin .bh b { font-size:16px; }
+.bin .bh .n { font-size:12px; color:var(--text2); }
+.bin .kb { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); }
+.bcard { display:flex; gap:8px; align-items:center; background:#222; border:1px solid #333; border-radius:7px; padding:4px; }
+.bcard .screen { width:64px; height:40px; flex:none; }
+.bcard .nm { font-size:12.5px; color:#eee; }
+.bcard .nm small { display:block; font-size:11px; color:var(--muted); margin-top:1px; }
+.drop { border:1.5px dashed #444; border-radius:7px; height:40px; display:flex; align-items:center; justify-content:center; font-size:11.5px; color:#777; }
+.bin.target { box-shadow:0 0 0 2px var(--bc) inset; background:color-mix(in srgb, var(--bc) 9%, #181818); }
+.bin.target .drop { border-color:var(--bc); color:#ddd; }
+.palette { padding:10px 12px; }
+.palrow { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:8px; }
+.pal { display:flex; gap:5px; align-items:center; }
+.pal i { width:26px; height:20px; border-radius:4px; display:inline-block; border:1px solid rgba(255,255,255,.15); }
+.pal .plus { width:26px; height:20px; border-radius:4px; border:1px dashed #555; color:#888; font-size:13px; display:inline-flex; align-items:center; justify-content:center; }
+.pal .lbl { font-size:11px; color:var(--text2); margin-left:4px; }
+
+.preview { width:380px; padding:12px 14px; display:flex; flex-direction:column; gap:8px; }
+.vrow { border:1px solid #2f2f2f; background:#1f1f1f; border-radius:8px; padding:8px 10px; position:relative; }
+.vrow::before { content:""; position:absolute; left:0; top:0; bottom:0; width:5px; border-radius:8px 0 0 8px; background:var(--vc); }
+.vrow .t { display:flex; align-items:center; justify-content:space-between; font-size:14px; font-weight:700; }
+.vrow .t span.c { font-size:12px; color:var(--text2); font-weight:500; }
+.vrow .p { font-size:11.5px; color:var(--text2); margin-top:3px; line-height:1.4; }
+.vrow .p b { color:#ddd; font-weight:600; }
+.vrow .warn { font-size:11.5px; color:#ffd36b; margin-top:3px; }
+.dots i { display:inline-block; width:8px; height:8px; border-radius:50%; border:1.3px solid #ccc; margin-right:2px; }
+.dots i.f { background:#ccc; }
+.footer { height:40px; display:flex; align-items:center; gap:16px; padding:0 16px; border-top:1px solid #262626; font-size:12px; color:var(--text2); }
+</style></head><body>
+<div class="page">
+  <div class="caption-bar"><b>D2 · Energy sort: set up in a minute</b><span class="tag">design D · co-pilot</span><span class="tag">card sorting: press 1–4 on each cue, and the vibes are built for you</span></div>
+  <div class="menubar"><span class="logo"></span><span>File</span><span>Edit</span><span>Transport</span><span>View</span><span>Help</span><span class="title">Laser Show — club-friday.show</span></div>
+  <div class="toolbar">
+    <span class="tb-btn">▶</span><span class="tb-btn">⟲</span><span class="tb-sep"></span>
+    <span class="tb-label">BPM</span><span class="tb-field mono">128.0</span><span class="beat"><i class="on"></i><i></i><i></i><i></i></span><span class="tb-btn">TAP</span>
+    <span style="margin-left:auto" class="row center gap8"><span class="dot green"></span><span class="tb-label">Streaming · 4 lasers</span><span class="tb-btn">Stream</span></span>
+  </div>
+  <div class="tabbar"><span class="tab">Grid</span><span class="tab active">Vibes</span><span class="tab">Perform</span><span class="tab">Co-pilot</span><span class="tab">Effects</span><span class="tab">Projectors</span><span class="tab">Zone Groups</span><span class="tab">Settings</span></div>
+
+  <div class="subhdr">
+    <span class="seg"><span class="on">Energy sort</span><span>Vibe editor</span></span>
+    <div class="col"><span style="font-size:16px;font-weight:700">How much energy does each cue have?</span><span class="hint">Focus a card and press 1–4, or drag it into a bin. The co-pilot builds the vibes from the bins.</span></div>
+    <div style="margin-left:auto" class="row center gap12">
+      <span class="small text2">10 of 13 sorted</span><div class="meter" style="width:160px"><i style="width:77%"></i></div>
+      <span class="btn ghost sm">Undo <span class="kbd" style="margin-left:4px">Z</span></span>
+      <span class="row center gap6 small text2"><span class="toggle"></span>Preview on lasers (blind)</span>
+    </div>
+  </div>
+
+  <div class="main">
+    <!-- tray -->
+    <div class="panel tray">
+      <div class="ptitle">Not sorted <span class="badge">3</span></div>
+      <div class="cuecard focus">
+        <div class="screen" data-shape="ring2" data-color="#ff3bd4" data-scale="1.2"></div>
+        <div class="nm"><b>ring burst</b><span class="hint">Grid A6</span></div>
+        <div class="suggest"><span class="auto-tag">GUESS</span>Peak? fast and bright</div>
+        <div class="keys"><span><span class="kbd">1</span></span><span><span class="kbd">2</span></span><span><span class="kbd">3</span></span><span><span class="kbd" style="border-color:var(--v-peak);color:#fff">4</span></span><span><span class="kbd">N</span>never auto</span></div>
+      </div>
+      <div class="traygrid">
+        <div class="cuecard"><div class="screen" data-shape="grid" data-color="#39ff6a" data-scale=".9"></div><div class="nm">grid</div></div>
+        <div class="cuecard"><div class="screen" data-shape="spiral" data-color="#36e2ff"></div><div class="nm">spiral</div></div>
+      </div>
+      <div class="ptitle" style="margin-top:4px">By hand only <span class="badge">1</span></div>
+      <div class="side never">
+        <div class="screen" data-shape="text" data-text="DROP" data-color="#ffe23b" data-scale="1.1"></div>
+        <div class="tx"><b>✋ "DROP" text</b> · never auto<br>becomes every vibe's FLASH. Only your hold plays it.</div>
+      </div>
+      <div class="ptitle" style="margin-top:4px">Left out <span class="badge red">1</span></div>
+      <div class="side leftout">
+        <div class="screen" data-shape="fan" data-color="#4d7bff" data-scale=".7" data-blocked="0,60,100,40"></div>
+        <div class="tx"><b>🔒 cone</b> · can reach the audience (lasers 5, 6)<br>Kept out of auto vibes. Allow audience on a vibe to use it.</div>
+      </div>
+    </div>
+
+    <!-- bins -->
+    <div class="bins">
+      <div class="binrow">
+        <div class="panel bin" style="--bc:var(--v-warm)">
+          <div class="bh"><b>Calm</b><span class="n">4 cues</span></div>
+          <div class="kb"><span class="kbd">1</span><span class="dots"><i class="f"></i><i></i><i></i><i></i></span>slow, few lines</div>
+          <div class="bcard"><div class="screen" data-shape="circle" data-color="#36e2ff"></div><div class="nm">circle</div></div>
+          <div class="bcard"><div class="screen" data-shape="wave" data-color="#39ff6a"></div><div class="nm">wave</div></div>
+          <div class="bcard"><div class="screen" data-shape="line" data-color="#4d7bff"></div><div class="nm">horizontal line</div></div>
+          <div class="bcard"><div class="screen" data-shape="dots" data-color="#36e2ff" data-scale="1.2"></div><div class="nm">dots</div></div>
+        </div>
+        <div class="panel bin" style="--bc:var(--v-groove)">
+          <div class="bh"><b>Groove</b><span class="n">3 cues</span></div>
+          <div class="kb"><span class="kbd">2</span><span class="dots"><i class="f"></i><i class="f"></i><i></i><i></i></span>steady, mid</div>
+          <div class="bcard"><div class="screen" data-shape="square" data-color="#39ff6a"></div><div class="nm">square</div></div>
+          <div class="bcard"><div class="screen" data-shape="triangle" data-color="#ffe23b"></div><div class="nm">triangle</div></div>
+          <div class="bcard"><div class="screen" data-shape="star" data-color="#ff3bd4"></div><div class="nm">star</div></div>
+          <div class="drop">drop or press 2</div>
+        </div>
+        <div class="panel bin" style="--bc:var(--v-build)">
+          <div class="bh"><b>Build</b><span class="n">1 cue</span></div>
+          <div class="kb"><span class="kbd">3</span><span class="dots"><i class="f"></i><i class="f"></i><i class="f"></i><i></i></span>rising, moving</div>
+          <div class="bcard"><div class="screen" data-shape="tunnel" data-color="#4d7bff"></div><div class="nm">tunnel</div></div>
+          <div class="drop">drop or press 3</div>
+          <div class="hint">Thin: 2–4 cues per bin play best</div>
+        </div>
+        <div class="panel bin target" style="--bc:var(--v-peak)">
+          <div class="bh"><b>Peak</b><span class="n">1 cue</span></div>
+          <div class="kb"><span class="kbd">4</span><span class="dots"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i></span>fast, wide</div>
+          <div class="bcard"><div class="screen" data-shape="fan" data-color="#ff3b3b"></div><div class="nm">beam fan</div></div>
+          <div class="drop">ring burst lands here on 4</div>
+          <div class="hint">Thin: 2–4 cues per bin play best</div>
+        </div>
+      </div>
+      <div class="panel palette">
+        <div class="row center between"><span class="ptitle">Colour palette per energy</span><span class="hint">the co-pilot steps colour only inside these · drag a swatch to change</span></div>
+        <div class="palrow">
+          <div class="pal"><i style="background:#2f6bff"></i><i style="background:#1fc8c8"></i><i style="background:#7a5cff"></i><span class="plus">+</span><span class="lbl">cool</span></div>
+          <div class="pal"><i style="background:#39ff6a"></i><i style="background:#36e2ff"></i><i style="background:#ff3bd4"></i><span class="plus">+</span><span class="lbl">mixed</span></div>
+          <div class="pal"><i style="background:#ff3bd4"></i><i style="background:#ffe23b"></i><i style="background:#4d7bff"></i><span class="plus">+</span><span class="lbl">warmer</span></div>
+          <div class="pal"><i style="background:#ffffff"></i><i style="background:#ff3b3b"></i><i style="background:#36e2ff"></i><i style="background:#ffe23b"></i><span class="lbl">full</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- preview -->
+    <div class="panel preview">
+      <div class="row center between"><span class="ptitle">Vibes built from the bins</span><span class="auto-tag">AUTO</span></div>
+      <div class="hint" style="margin-top:-2px">HIT = its own bin, topped up to 4 from the bin below · ACCENT = the bin above · FLASH = "DROP"</div>
+      <div class="vrow" style="--vc:var(--v-warm)"><div class="t">Warm-up <span class="c"><span class="dots"><i class="f"></i><i></i><i></i><i></i></span> 5 cues</span></div>
+        <div class="p"><b>HIT</b> circle, wave, horizontal line, dots · <b>ACCENT</b> square</div></div>
+      <div class="vrow" style="--vc:var(--v-groove)"><div class="t">Groove <span class="c"><span class="dots"><i class="f"></i><i class="f"></i><i></i><i></i></span> 6 cues</span></div>
+        <div class="p"><b>HIT</b> square, triangle, star, +dots · <b>ACCENT</b> tunnel, beam fan</div></div>
+      <div class="vrow" style="--vc:var(--v-build)"><div class="t">Build <span class="c"><span class="dots"><i class="f"></i><i class="f"></i><i class="f"></i><i></i></span> 5 cues</span></div>
+        <div class="p"><b>HIT</b> tunnel, +star, +triangle, +square · <b>ACCENT</b> beam fan</div>
+        <div class="warn">▲ only 1 cue of its own: it will look like Groove</div></div>
+      <div class="vrow" style="--vc:var(--v-peak)"><div class="t">Peak <span class="c"><span class="dots"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i></span> 3 cues</span></div>
+        <div class="p"><b>HIT</b> beam fan, +tunnel · <b>ACCENT</b> beam fan</div>
+        <div class="warn">▲ sort ring burst or grid here</div></div>
+      <div class="vrow" style="--vc:var(--v-break)"><div class="t">Breakdown <span class="c"><span class="dots"><i class="f"></i><i></i><i></i><i></i></span> 3 cues</span></div>
+        <div class="p"><b>HIT</b> wave, horizontal line · <b>ACCENT</b> dots · slowest Calm cues, 60 % bright</div></div>
+      <div class="vrow" style="--vc:#444;background:#1a1a1a"><div class="t" style="font-size:12.5px">Every vibe also gets</div>
+        <div class="p"><b>FLASH</b> "DROP" (by hand) + Swell · <b>Reactions</b> Punch on HIT, Zone swap on ACCENT (energy 2–4) · <b>Zone map</b> Left/Right, Map cycle at 3–4 · audience off</div></div>
+      <div class="row gap8" style="margin-top:auto">
+        <span class="btn green" style="flex:1">Accept · make 5 vibes</span><span class="btn ghost">Adjust…</span>
+      </div>
+      <div class="hint">Your own vibes stay. Undo removes all 5.</div>
+    </div>
+  </div>
+  <div class="footer">
+    <span><span class="kbd">1</span>–<span class="kbd">4</span> sort</span><span><span class="kbd">N</span> never auto</span><span><span class="kbd">←</span><span class="kbd">→</span> next card</span><span><span class="kbd">Space</span> preview on lasers</span><span><span class="kbd">Z</span> undo</span>
+    <span style="margin-left:auto">About 4 s per card · 13 cues ≈ 1 minute</span>
+  </div>
+  <div class="status"><span><span class="dot green"></span> <b>Streaming</b> 4 of 6 lasers</span><span>MIDI: <b>APC mini</b></span><span>Show lock: off</span></div>
+
+  <div class="callout" style="left:22px;top:248px">1</div>
+  <div class="callout" style="left:22px;top:600px">2</div>
+  <div class="callout" style="left:300px;top:776px">3</div>
+  <div class="callout" style="left:1034px;top:288px">4</div>
+  <div class="callout" style="left:1034px;top:760px">5</div>
+  <div class="notes" style="left:506px;top:508px;width:510px">
+    <b>D2 · sorting replaces filling slots</b>
+    <ol>
+      <li>One question per cue: how much energy? Press 1–4. A guess from the cue's speed and line count is shown, but it is never applied by itself.</li>
+      <li>"Never auto" (N) keeps a cue for your hands only: "DROP" becomes the FLASH. Cues that can reach the audience are left out, and the screen says why.</li>
+      <li>Each bin has a palette. The co-pilot steps colour only inside it.</li>
+      <li>The vibes are built from the bins, with the rule shown, and thin bins are flagged.</li>
+      <li>Accept makes 5 ordinary vibes, which the Vibe editor can still change (undo removes them).</li>
+    </ol>
+  </div>
+</div></body></html>

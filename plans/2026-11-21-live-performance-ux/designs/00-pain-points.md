@@ -1,0 +1,22 @@
+# Pain points, with evidence from the app today
+
+**Written:** 2026-11-21, against `master` at `979c6c8` (vibe Phases 1–8 and zones Z0–Z6 have landed).
+The screenshots in `../mockups/today/` were taken with a scratch TestFX tour at this commit: the starter content (8 cues, 2 vibes, the Master cell), and three lasers called Stage left, Center and Stage right, at 1000 × 860, headless.
+
+The IDs P1–P8 are the ones used in every research note and design.
+
+| ID | Pain point (in your words where we have them) | What the app does today | Evidence |
+|---|---|---|---|
+| **P1** | **Busking mental load.** "At most five buttons and one or two sliders"; "less mental load" | The Perform tab has five fixed pads, a vibe strip, a header and two fader meters. But every pad looks the same grey, each says "Right-click to learn a control" in its centre, the BLACKOUT label is cut off ("BLACKO…"), and nothing tells you what a pad will do *next* or how it will react | `today/03-perform.png`, `today/03b-perform-hit-held.png` |
+| **P2** | **Grouping must be easy to set up and use** ("easy to set up groups") | The Vibes tab works, but asks for a lot at once: 6 sub-tabs per vibe (HIT, ACCENT, FLASH cue, BED, FX set, FLASH effects), a Controls panel, a Faders panel, a checklist, the cue picker and Rules of thumb on one screen. At 1000 px wide, eight labels are cut off ("Ener…", "Tap reacti…", "Pl…", "De…", "G…", "Sust…", "Be…", "Or…", "Shu…") | `today/02-vibes.png` |
+| **P3** | **Presses should move effects** ("modulating effects. Like brightness. Or maybe some more complex effects"), and it should be clear what reacts to what | Tap reactions exist (Punch, Pump, Step colour, Step spin, Flip, Scatter, Swell, Strobe, Fade in, Energy, and the four zone ones). They are made from a menu in each role's section and listed there. On the pad, the reactions are a line of text | Vibes tab "Tap reactions ▾"; Perform pad text |
+| **P4** | **Multi-laser rig setup is one of the worst parts** (zones needs README) | Much is fixed (Z0–Z6, ZR): order the lasers on the rig strip and the groups appear, safety rectangles, Identify, a rig file. What is left: the strip is 1-D (front/back and audience lasers don't fit), the group rows under the cards are cramped and clipped, words such as "Middle laser: Split between Left and Right" and "Split width 75 %" need explaining, and the Zone Groups tab is a second place with three more concepts (lanes, zones, maps) | `today/05-projectors.png`, `today/06-zone-groups.png`; `plans/2026-11-19-zones-needs/08-rig-setup-ux-future.md` P-1…P-13 |
+| **P5** | **Cues shouldn't need to know the rig; zone effects live** ("zone based effects. Like a zone chase. Zone swap. Zone shift") | Built: zones A–D, zone maps (Left/Right, Odd/Even, Unison) switched on the beat, zone patterns, a step grid, the four zone reactions. The performer has to know which of map, pattern, reaction or step grid is moving the picture | zones plan §2 D-5, D-12; Z5, Z6 |
+| **P6** | **The screen must tell the truth** (UX plan F-1…F-10, all fixed) | Fixed: Stop, the status bar, effect cells, notices, NO OUTPUT. Still: four "No Preview" boxes for zones are the default right pane, the per-laser thumbnails live only on the Projectors tab, and nothing on Perform shows which laser draws what | `today/03-perform.png` right pane |
+| **P7** | **Too many concepts** (zones plan risk R-5) | Words a performer meets: vibe, role, pool, bed, FX set, flash FX, tap reaction, Restart on, Envelope, Step, Energy, Morph, zone group, automatic group, zone, zone map, lane, zone pattern, step grid, split, middle laser, fit guard. Each one is reasonable; together they are a lot to hold | all tabs |
+| **P8** | **Safety** (V2, V6, V10; zones D-29) | Sticky BLACKOUT, show lock, stuck-key watchdog, the audience rule, fail-closed safety zones. What is left is how they *look*: the show lock is a small button beside AUTO, and a laser's safety zone is visible only in its inspector | `today/03-perform.png` header |
+
+## What this means for the designs
+
+- Most of the **engine** work is done. The remaining pain is in **presentation, setup flow and the number of concepts**, so the designs below change screens and workflows, not the engine. Each design says which existing pieces it reuses.
+- Every design keeps the decisions already made unless it says otherwise: five pads (V1), sticky blackout (V2), Intensity + Morph (V5), the audience rule (V6, V10), vibe stuff on its own tabs (V8 B), one render per cue per tick (zones invariant 8).

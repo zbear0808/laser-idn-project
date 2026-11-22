@@ -1,0 +1,215 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.role-bed { --rc: #A8A8A8; } .role-fx { --rc: #A8A8A8; }
+.wrap16 { padding: 10px 16px 10px; display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+.tabbar .right { margin-left: auto; align-self: center; display: flex; gap: 10px; align-items: center; padding-right: 14px; }
+
+/* laser strip */
+.strip { display: flex; gap: 10px; align-items: stretch; height: 88px; }
+.strip .lead { width: 92px; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+.strip .lead b { font-size: 12px; letter-spacing: .06em; color: var(--text2); }
+.strip .tile { width: 148px; position: relative; }
+.strip .tile .screen { height: 88px; }
+.strip .tile .hitbar { position: absolute; left: 8px; right: 8px; bottom: -5px; height: 3px; border-radius: 2px; background: var(--hit); box-shadow: 0 0 6px var(--hit); }
+.tempo { margin-left: auto; width: 300px; background: #181818; border: 1px solid #2c2c2c; border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; justify-content: center; gap: 6px; }
+.tempo .bpm { font-size: 22px; font-weight: 800; }
+.tempo .beats { display: flex; gap: 4px; }
+.tempo .beats i { width: 26px; height: 10px; border-radius: 2px; border: 1px solid #555; display: block; }
+.tempo .beats i.on { background: #ddd; border-color: #fff; }
+
+/* set grid */
+.sg-head, .sgrow { display: grid; grid-template-columns: 210px repeat(4, 1fr) 6px repeat(2, 1fr) 6px 1fr 6px 1fr 6px repeat(2, 1fr) 6px 1.55fr; column-gap: 6px; }
+.sg-head { padding: 0 6px; }
+.grp { --rc: #888; height: 24px; border-radius: 5px 5px 0 0; background: color-mix(in srgb, var(--rc) 22%, #181818); border-top: 3px solid var(--rc); display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 12px; font-weight: 800; letter-spacing: .06em; color: var(--rc); white-space: nowrap; }
+.grp small { color: var(--text2); font-weight: 500; letter-spacing: 0; font-size: 11px; }
+.grp .g { margin-left: auto; color: #ccc; font-weight: 500; }
+.sgrows { display: flex; flex-direction: column; gap: 5px; }
+.sgrow { padding: 5px 6px; border-radius: 9px; height: 74px; border: 1.5px solid transparent; }
+.sgrow.now { background: #1d2620; border-color: #3fbf66; box-shadow: 0 0 0 1px rgba(63,191,102,.25) inset; }
+.sgrow.queued { border: 1.5px dashed #3fbf66; background: repeating-linear-gradient(90deg, rgba(63,191,102,.06) 0 22px, transparent 22px 44px); }
+.rh { display: flex; align-items: center; gap: 10px; border-radius: 7px; background: #1b1b1b; border-left: 6px solid var(--vc); padding: 0 10px 0 8px; position: relative; }
+.launch { width: 40px; height: 40px; border-radius: 8px; border: 2px solid #555; display: flex; align-items: center; justify-content: center; font-size: 16px; color: #ccc; flex: none; background: #232323; }
+.now .launch { background: #2fbf5a; border-color: #8ff0a8; color: #06240f; box-shadow: 0 0 14px rgba(47,191,90,.6); }
+.queued .launch { border-color: #2fbf5a; color: #8ff0a8; background: repeating-linear-gradient(45deg, rgba(47,191,90,.45) 0 5px, #1a1a1a 5px 10px); position: relative; }
+.queued .launch::after { content: ""; position: absolute; inset: -6px; border-radius: 11px; border: 3px solid transparent; border-top-color: #2fbf5a; border-right-color: #2fbf5a; }
+.rh .nm { font-size: 16px; font-weight: 800; line-height: 1.1; }
+.rh .meta { font-size: 12px; color: var(--text2); margin-top: 3px; display: flex; gap: 8px; align-items: center; white-space: nowrap; }
+.rh .dots { letter-spacing: 1px; color: #ddd; font-size: 11px; }
+.rh .tagnow { position: absolute; right: 8px; top: 7px; font-size: 10px; font-weight: 800; letter-spacing: .06em; color: #8ff0a8; }
+.rh .tagq { position: absolute; right: 8px; top: 7px; font-size: 10px; font-weight: 800; letter-spacing: .06em; color: #8ff0a8; text-transform: uppercase; }
+.rh .bar { height: 3px; width: 100%; background: #333; border-radius: 2px; margin-top: 5px; overflow: hidden; }
+.rh .bar i { display: block; height: 100%; background: #2fbf5a; }
+
+.c { position: relative; border-radius: 6px; background: #1e1e1e; border: 1.5px solid color-mix(in srgb, var(--rc) 38%, #2a2a2a); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px 4px 5px; overflow: hidden; min-width: 0; }
+.c::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--rc); opacity: .65; }
+.c .screen { width: 50px; height: 30px; border-radius: 3px; border-color: #2b2b2b; flex: none; }
+.c .nm { font-size: 12px; color: #e4e4e4; line-height: 1.1; text-align: center; white-space: nowrap; }
+.c .nm.two { white-space: normal; font-size: 11.5px; }
+.c .tag { font-size: 11px; color: var(--text2); white-space: nowrap; }
+.c.empty { border-style: dashed; border-color: #3c3c3c; background: transparent; }
+.c.empty::before { opacity: .15; }
+.c.empty .nm { color: #6c6c6c; font-size: 11px; }
+.c.play { background: color-mix(in srgb, var(--rc) 80%, #000); border-color: var(--rc); box-shadow: 0 0 16px color-mix(in srgb, var(--rc) 70%, transparent); }
+.c.play .nm { color: #071018; font-weight: 800; }
+.c.play .screen { border-color: rgba(0,0,0,.5); }
+.c .decay { position: absolute; left: 0; bottom: 0; height: 5px; background: #fff; opacity: .9; }
+.c .nx { position: absolute; top: 6px; right: 5px; display: flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; color: var(--rc); }
+.c .nx i { width: 8px; height: 8px; border-radius: 50%; background: var(--rc); box-shadow: 0 0 5px var(--rc); display: block; }
+.c.run { background: linear-gradient(180deg, #1e1e1e, color-mix(in srgb, var(--rc) 22%, #1e1e1e)); border-color: #bdbdbd; }
+.c .runl { position: absolute; top: 6px; right: 5px; }
+.c.cur { border-color: color-mix(in srgb, var(--rc) 70%, #2a2a2a); }
+.c .lis { font-size: 11px; padding: 1px 6px; border-radius: 8px; color: #111; font-weight: 700; white-space: nowrap; }
+.react { border-radius: 6px; background: #1a1a1a; border: 1px solid #2c2c2c; padding: 5px 7px; display: flex; flex-direction: column; justify-content: center; gap: 3px; min-width: 0; }
+.react span { font-size: 11px; color: #ddd; white-space: nowrap; display: flex; align-items: center; gap: 5px; }
+.react span b { font-size: 11px; color: var(--rc); min-width: 30px; }
+.react.empty { border-style: dashed; color: #666; font-size: 11px; align-items: center; }
+
+/* bottom */
+.bottom { display: flex; gap: 16px; height: 178px; align-items: stretch; }
+.padsblk { display: flex; flex-direction: column; gap: 6px; }
+.padsblk .lab { font-size: 12px; color: var(--text2); display: flex; gap: 8px; align-items: center; }
+.pads { display: flex; gap: 10px; }
+.pads .rpad { width: 142px; height: 150px; }
+.pads .rpad .what { font-size: 16px; }
+.pads .gapbo { width: 22px; }
+.fadersblk { width: 250px; display: flex; flex-direction: column; gap: 10px; justify-content: flex-end; }
+.fadersblk .hfader.morph .fill { background: linear-gradient(90deg, #5a3a52, var(--vibe)); }
+.status .sep { color: #444; }
+</style></head><body>
+<div class="page">
+  <div class="caption-bar"><b>C1 · Set grid, live</b><span class="tag">Vibes tab · Set view · Live</span><span class="tag">rows = vibes · columns grouped by role</span><span class="tag">r01 #1 · r03 #1 #4</span></div>
+  <div class="menubar"><span class="logo"></span><span>File</span><span>Edit</span><span>Transport</span><span>View</span><span>Help</span><span class="title">Laser Show — club-set.lsp</span></div>
+  <div class="tabbar">
+    <div class="tab">Grid</div><div class="tab active">Vibes</div><div class="tab">Perform</div><div class="tab">Effects</div><div class="tab">Projectors</div><div class="tab">Zone Groups</div><div class="tab">Settings</div>
+    <div class="right"><span class="hint">Set view</span><div class="seg"><span>Build</span><span class="on">Live</span></div><span class="kbd">F11</span><span class="hint">full screen</span></div>
+  </div>
+  <div class="status-band live">● LIVE · 4 of 4 stage lasers · 2 audience lasers off · 128.0 BPM · Q: 1 BAR
+    <span style="margin-left:auto;font-weight:600;color:#bff5cc">Now: Groove · next: Build on the bar</span></div>
+
+  <div class="wrap16">
+    <!-- laser strip -->
+    <div class="strip">
+      <div class="lead"><b>RIG</b><span class="hint">left → right,<br>as it hangs</span></div>
+      <div class="tile"><div class="screen onair" data-shape="triangle" data-color="#36e2ff" data-scale=".9" data-lbl="1 · Stage left" data-dot="green" data-lbl2="HIT · zone A"></div><div class="hitbar"></div></div>
+      <div class="tile"><div class="screen onair" data-shape="triangle" data-color="#36e2ff" data-scale=".9" data-lbl="2 · Left center" data-dot="green" data-lbl2="HIT · zone A"></div><div class="hitbar"></div></div>
+      <div class="tile"><div class="screen onair" data-shape="grid" data-color="#39ff6a" data-scale=".9" data-lbl="3 · Right center" data-dot="green" data-lbl2="BED · zone B"></div></div>
+      <div class="tile"><div class="screen onair" data-shape="grid" data-color="#39ff6a" data-scale=".9" data-lbl="4 · Stage right" data-dot="green" data-lbl2="BED · zone B"></div></div>
+      <div class="tile"><div class="screen" data-shape="none" data-lbl="5 · Audience L" data-dot="red" data-lbl2="🔒 audience: off" data-blocked="0,0,100,100"></div></div>
+      <div class="tile"><div class="screen" data-shape="none" data-lbl="6 · Audience R" data-dot="red" data-lbl2="🔒 audience: off" data-blocked="0,0,100,100"></div></div>
+      <div class="tempo">
+        <div class="row between center"><span class="bpm">128.0 <span class="hint" style="font-size:12px;font-weight:500">BPM</span></span><div class="beats"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div></div>
+        <div class="row between center small text2"><span>Groove · bar <b style="color:#fff">31</b> of 32</span><span style="color:#8ff0a8;font-weight:700">Build lands in 1 bar</span></div>
+      </div>
+    </div>
+
+    <!-- set grid -->
+    <div class="col">
+      <div class="sg-head">
+        <div class="row center gap8" style="font-size:12px;color:var(--text2);font-weight:700;letter-spacing:.06em">SET<span class="hint" style="font-weight:500;letter-spacing:0">5 vibes · ▶ launches a row</span></div>
+        <div class="grp role-hit" style="grid-column:2 / span 4">HIT <small>shuffle bag · ×4</small><span class="g">▶</span></div>
+        <div></div>
+        <div class="grp role-accent" style="grid-column:7 / span 2">ACCENT <small>×2</small><span class="g">▶</span></div>
+        <div></div>
+        <div class="grp role-flash" style="grid-column:10">FLASH<span class="g">▮</span></div>
+        <div></div>
+        <div class="grp role-bed" style="grid-column:12">BED<span class="g">⟳</span></div>
+        <div></div>
+        <div class="grp role-fx" style="grid-column:14 / span 2">FX <small>on with the row</small></div>
+        <div></div>
+        <div class="grp role-fx" style="grid-column:17">REACT <small>a press moves</small></div>
+      </div>
+      <div class="sgrows" id="rows"></div>
+    </div>
+
+    <!-- pads + faders -->
+    <div class="bottom">
+      <div class="padsblk">
+        <div class="lab"><b style="color:#fff">The five pads play the current row</b><span>· Groove</span><span class="hint">· keys H J K L ; · Launchpad Mini bottom row</span></div>
+        <div class="pads">
+          <div class="rpad on role-hit"><span class="glyph">▶</span><div class="role">HIT</div><div class="what">triangle</div><div class="next">next: star</div><div class="chips"><span>bright</span><span>size</span></div><div class="key">H</div><div class="decay" style="width:58%"></div></div>
+          <div class="rpad ready role-accent"><span class="glyph">▶</span><div class="role">ACCENT</div><div class="what">spiral</div><div class="next">next: wave</div><div class="chips"><span>colour</span></div><div class="key">J</div></div>
+          <div class="rpad ready role-flash"><span class="glyph">▮</span><div class="role">FLASH</div><div class="what">beam fan</div><div class="next">while held</div><div class="chips"><span>zone chase</span></div><div class="key">K</div></div>
+          <div class="rpad queued role-vibe"><span class="glyph">⏱</span><div class="role">VIBE</div><div class="what">→ Build</div><div class="next">hold: lock</div><div class="key">L</div><div class="ring"></div></div>
+          <div class="gapbo"></div>
+          <div class="rpad ready role-blackout"><span class="glyph">⟳</span><div class="role">BLACK<br>OUT</div><div class="next">sticky</div><div class="key">;</div></div>
+        </div>
+      </div>
+      <div class="fadersblk">
+        <div class="row between center"><span class="chip outline"><span class="auto-tag">AUTO</span> advance on</span><span class="btn sm ghost">🔒 Show lock</span></div>
+        <div class="hfader"><div class="fill" style="width:100%"></div><span class="lbl">Intensity</span><span class="val">100 %</span></div>
+        <div class="hfader morph"><div class="fill" style="width:35%"></div><span class="lbl">Morph</span><span class="val">35 %</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="status"><span><span class="dot green"></span> <b>Streaming</b> · 4 lasers</span><span class="sep">|</span><span>MIDI: <b>Launchpad Mini</b> · Set mirror on</span><span class="sep">|</span><span>Last change: you pressed VIBE at bar 30</span><span style="margin-left:auto">Undo ⌘Z</span></div>
+
+  <!-- callouts -->
+  <div class="callout" style="left:8px;top:378px">1</div>
+  <div class="callout" style="left:518px;top:398px">2</div>
+  <div class="callout" style="left:8px;top:456px">3</div>
+  <div class="callout" style="left:430px;top:614px">4</div>
+  <div class="callout" style="left:6px;top:735px">5</div>
+  <div class="callout" style="left:100px;top:128px">6</div>
+  <div class="notes" style="right:14px;bottom:32px;width:330px;padding:8px 12px;font-size:11.5px;line-height:1.36">
+    <b>The whole set on one screen</b>
+    <ol>
+      <li>Rows are vibes. Current row: green frame, ▶ lit.</li>
+      <li>Glowing cell = HIT playing + decay; dot = next pick.</li>
+      <li>Queued row flashes on the beat, lands on the bar.</li>
+      <li>Dashed cell = empty role ("nothing to play").</li>
+      <li>The five pads still play the current row.</li>
+      <li>Rig tiles in hanging order; audience hatched.</li>
+    </ol>
+  </div>
+</div>
+<script>
+var CUE = {"circle":["circle","#36e2ff"],"square":["square","#39ff6a"],"triangle":["triangle","#36e2ff"],"star":["star","#ffe23b"],"spiral":["spiral","#ff3bd4"],"wave":["wave","#39ff6a"],"beam fan":["fan","#4d7bff"],"horizontal line":["line","#ff3b3b"],"tunnel":["tunnel","#36e2ff"],"grid":["grid","#39ff6a"],"dots":["dots","#ffe23b"],"DROP":["text","#ff3bd4"],"ring burst":["ring2","#ff3b3b"],"cone":["beams","#39ff6a"]};
+function cell(role, c) {
+  if (!c) return '<div class="c empty role-' + role + '"><span class="nm">empty</span></div>';
+  if (typeof c === "string") c = { n: c };
+  var cls = "c role-" + role + (c.st ? " " + c.st : "");
+  var h = '<div class="' + cls + '">';
+  if (c.fx) {
+    h += '<span class="nm" style="font-weight:700">' + c.n + '</span>';
+    if (c.lis) h += '<span class="lis" style="background:var(--' + c.lis[0] + ')">' + c.lis[1] + '</span>';
+    return h + '</div>';
+  }
+  var s = CUE[c.n];
+  h += '<div class="screen" data-shape="' + s[0] + '" data-color="' + s[1] + '" data-scale="' + (s[0] === "text" ? '1.3" data-text="DROP' : '.85') + '"></div>';
+  h += '<span class="nm' + (c.n.length > 11 ? ' two' : '') + '">' + (c.n === "DROP" ? '"DROP"' : c.n) + (c.st === "run" ? ' <span class="auto-tag">⟳ steady</span>' : '') + '</span>';
+  if (c.decay) h += '<div class="decay" style="width:' + c.decay + '%"></div>';
+  if (c.next) h += '<span class="nx"><i></i>next</span>';
+  return h + '</div>';
+}
+function react(list) {
+  if (!list.length) return '<div class="react empty">no reactions</div>';
+  return '<div class="react">' + list.map(function (r) { return '<span class="role-' + r[0] + '"><b>' + r[1] + '</b>' + r[2] + '</span>'; }).join("") + '</div>';
+}
+var ROWS = [
+  { name: "Warm-up", vc: "#1ABC9C", e: 1, follow: "→ 32 bars", hit: ["circle", "wave", "dots", null], acc: ["ring burst", null], flash: "beam fan", bed: "horizontal line", fx: [{ n: "Slow hue", fx: 1 }, null], re: [["hit", "HIT", "fade in"]] },
+  { name: "Groove", vc: "#4A90D9", e: 2, follow: "→ 32 bars", st: "now", hit: ["circle", "square", { n: "triangle", st: "play", decay: 58 }, { n: "star", next: 1 }], acc: [{ n: "spiral", st: "cur" }, { n: "wave", st: "cur" }], flash: { n: "beam fan", st: "cur" }, bed: { n: "grid", st: "run" }, fx: [{ n: "Pump", fx: 1, lis: ["hit", "↯ HIT"], st: "run" }, { n: "Step colour", fx: 1, lis: ["accent", "↯ ACC"], st: "run" }], re: [["hit", "HIT", "bright · size"], ["accent", "ACC", "colour"], ["flash", "FLASH", "zone chase"]] },
+  { name: "Build", vc: "#E67E22", e: 3, follow: "→ 16 bars", st: "queued", hit: ["star", "spiral", "tunnel", "cone"], acc: ["beam fan", "ring burst"], flash: "DROP", bed: "wave", fx: [{ n: "Step spin", fx: 1, lis: ["hit", "↯ HIT"] }, { n: "Strobe", fx: 1, lis: ["flash", "▮ FLASH"] }], re: [["hit", "HIT", "spin"], ["flash", "FLASH", "strobe"]] },
+  { name: "Peak", vc: "#E91E63", e: 4, follow: "→ 8 bars", hit: ["tunnel", "ring burst", "cone", "star"], acc: ["DROP", "beam fan"], flash: "beam fan", bed: "dots", fx: [{ n: "Scatter", fx: 1, lis: ["accent", "↯ ACC"] }, { n: "Zone hop", fx: 1, lis: ["hit", "↯ HIT"] }], re: [["hit", "HIT", "zone hop"], ["accent", "ACC", "scatter"]] },
+  { name: "Breakdown", vc: "#9B59B6", e: 1, follow: "→ Warm-up", hit: ["wave", "horizontal line", null, null], acc: [null, null], flash: null, bed: "circle", fx: [{ n: "Fade in", fx: 1, lis: ["hit", "↯ HIT"] }, null], re: [["hit", "HIT", "fade in"]] }
+];
+var out = "";
+ROWS.forEach(function (r) {
+  var dots = ""; for (var i = 1; i <= 4; i++) dots += i <= r.e ? "●" : "○";
+  var h = '<div class="sgrow ' + (r.st || "") + '">';
+  h += '<div class="rh" style="--vc:' + r.vc + '"><div class="launch">▶</div><div class="grow"><div class="nm">' + r.name + '</div><div class="meta"><span class="dots">' + dots + '</span><span>' + r.follow + '</span></div>';
+  if (r.st === "now") h += '<div class="bar"><i style="width:94%"></i></div>';
+  h += '</div>';
+  if (r.st === "now") h += '<span class="tagnow">NOW</span>';
+  if (r.st === "queued") h += '<span class="tagq">⏱ on the bar</span>';
+  h += '</div>';
+  r.hit.forEach(function (c) { h += cell("hit", c); });
+  h += '<div></div>';
+  r.acc.forEach(function (c) { h += cell("accent", c); });
+  h += '<div></div>' + cell("flash", r.flash) + '<div></div>' + cell("bed", r.bed) + '<div></div>';
+  r.fx.forEach(function (c) { h += cell("fx", c); });
+  h += '<div></div>' + react(r.re);
+  out += h + '</div>';
+});
+document.getElementById("rows").innerHTML = out;
+</script>
+</body></html>

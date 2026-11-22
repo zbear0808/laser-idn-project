@@ -1,0 +1,160 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.wrapA4 { flex: 1; display: flex; gap: 26px; padding: 18px 22px; min-height: 0; }
+.dev h2 { font-size: 15px; margin-bottom: 4px; }
+.dev .sub { font-size: 12px; color: var(--text2); margin-bottom: 10px; }
+
+/* APC mini */
+.apc { width: 520px; background: linear-gradient(180deg, #2b2b2d, #1f1f21); border: 1px solid #3a3a3d; border-radius: 14px; padding: 16px 16px 14px; position: relative; }
+.apc .brand { position: absolute; right: 18px; top: 8px; font-size: 10.5px; color: #888; letter-spacing: .12em; font-weight: 700; }
+.grid8 { display: grid; grid-template-columns: repeat(8, 44px) 26px; gap: 7px; margin-top: 12px; align-items: center; }
+.p { width: 44px; height: 30px; border-radius: 4px; background: #303033; border: 1px solid #3c3c40; position: relative; }
+.p.role { border-width: 2px; }
+.p.ready { background: color-mix(in srgb, var(--rc) 28%, #1a1a1a); border-color: color-mix(in srgb, var(--rc) 70%, #222); }
+.p.on { background: var(--rc); border-color: #fff; box-shadow: 0 0 12px var(--rc), 0 0 2px #fff; }
+.p.queued { background: color-mix(in srgb, var(--rc) 50%, #1a1a1a); border-color: var(--rc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--rc) 35%, transparent); }
+.p.queued::after { content: "≋"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; }
+.p.guard { background: repeating-linear-gradient(45deg, #2a2a2c 0 4px, #232325 4px 8px); border-style: dashed; border-color: #4a4a4a; }
+.scene { width: 22px; height: 22px; border-radius: 50%; background: #303033; border: 1px solid #444; justify-self: center; }
+.trk { display: grid; grid-template-columns: repeat(8, 44px) 26px; gap: 7px; margin-top: 10px; }
+.trk span { height: 14px; border-radius: 7px; background: #343437; border: 1px solid #444; }
+.faders9 { display: grid; grid-template-columns: repeat(8, 44px) 26px; gap: 7px; margin-top: 14px; }
+.fd { height: 120px; position: relative; display: flex; justify-content: center; }
+.fd .slot { width: 6px; height: 100%; background: #101010; border-radius: 3px; border: 1px solid #333; }
+.fd .cap { position: absolute; left: 50%; transform: translateX(-50%); width: 30px; height: 16px; border-radius: 3px; background: #555; border: 1px solid #777; }
+.fd.used .cap { background: #ddd; border-color: #fff; }
+.fd.used .slot { background: linear-gradient(0deg, #888 var(--v), #101010 var(--v)); }
+.fd.master .cap { width: 24px; }
+.flab { display: grid; grid-template-columns: repeat(8, 44px) 26px; gap: 7px; margin-top: 6px; font-size: 11px; color: #777; text-align: center; }
+.flab b { color: #fff; font-weight: 700; display: block; font-size: 11.5px; }
+.lbls { display: grid; grid-template-columns: repeat(8, 44px) 26px; gap: 7px; margin-top: 5px; font-size: 11px; text-align: center; font-weight: 700; }
+.bracket { position: absolute; font-size: 11px; color: #bbb; text-align: center; }
+.bracket i { display: block; height: 7px; border: 1.5px solid #777; border-top: 0; border-radius: 0 0 4px 4px; margin-bottom: 2px; }
+
+/* gamepad */
+.gp { position: relative; width: 470px; height: 270px; }
+.gp svg.body { position: absolute; inset: 0; }
+.gbtn { position: absolute; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; color: #111; border: 2px solid rgba(255,255,255,.25); }
+.gbtn.ready { background: color-mix(in srgb, var(--rc) 45%, #222); color: #fff; border-color: var(--rc); }
+.gbtn.on { background: var(--rc); box-shadow: 0 0 12px var(--rc); border-color: #fff; }
+.gbtn.queued { background: color-mix(in srgb, var(--rc) 55%, #222); color: #fff; border-color: var(--rc); box-shadow: 0 0 0 4px color-mix(in srgb, var(--rc) 35%, transparent); }
+.gtag { position: absolute; font-size: 11.5px; color: #ddd; white-space: nowrap; }
+.gtag b { color: var(--rc); }
+.gtag small { color: var(--muted); font-size: 11px; display: block; }
+.shoulder { position: absolute; height: 18px; border-radius: 9px 9px 3px 3px; display: flex; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 800; }
+
+/* legend */
+.legend { margin-top: 14px; background: #171717; border: 1px solid #2a2a2a; border-radius: 10px; padding: 12px 14px; }
+.legend h3 { font-size: 12px; margin-bottom: 8px; }
+.lg5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.lg5 .it { text-align: center; font-size: 12px; color: #ddd; }
+.lg5 .it small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; line-height: 1.3; }
+.lg5 .p { margin: 0 auto 6px; display: block; }
+.p.auto { background: linear-gradient(90deg, color-mix(in srgb, var(--rc) 20%, #1a1a1a), color-mix(in srgb, var(--rc) 60%, #1a1a1a), color-mix(in srgb, var(--rc) 20%, #1a1a1a)); border-color: color-mix(in srgb, var(--rc) 70%, #222); }
+.p.empty { background: #1b1b1b; border: 1.5px dashed #444; }
+.rolekey { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; font-size: 12px; color: #ddd; }
+.rolekey span { display: inline-flex; align-items: center; gap: 5px; }
+.rolekey i { width: 12px; height: 12px; border-radius: 3px; background: var(--rc); display: inline-block; }
+</style></head><body>
+<div class="page small">
+  <div class="caption-bar"><b>A4 · Controller mirror</b><span class="tag">Design A · The Instrument</span><span class="tag">same moment as A1: HIT on · VIBE queued → Build</span></div>
+  <div class="wrapA4">
+    <div class="dev">
+      <h2>Akai APC mini mk2</h2>
+      <div class="sub">Bottom row = the five pads, in screen order. The other 56 pads stay dark: five buttons only (V1).</div>
+      <div class="apc">
+        <span class="brand">APC MINI</span>
+        <div class="grid8">
+          <!-- rows 1-7 dark -->
+          <span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="scene"></span>
+          <span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="scene"></span>
+          <span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="scene"></span>
+          <span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="scene"></span>
+          <span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="scene"></span>
+          <span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="scene"></span>
+          <span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="p"></span><span class="scene"></span>
+          <!-- row 8: roles -->
+          <span class="p role on role-hit"></span>
+          <span class="p role ready role-accent"></span>
+          <span class="p role ready role-flash"></span>
+          <span class="p role queued role-vibe"></span>
+          <span class="p guard"></span><span class="p guard"></span><span class="p guard"></span>
+          <span class="p role ready role-blackout"></span>
+          <span class="scene"></span>
+        </div>
+        <div class="lbls"><span style="color:var(--hit)">HIT</span><span style="color:var(--accent)">ACC</span><span style="color:var(--flash)">FLASH</span><span style="color:var(--vibe)">VIBE</span><span style="grid-column: span 3;color:#999;font-weight:500">guard gap · always dark</span><span style="color:var(--blackout)">BLK</span><span></span></div>
+        <div class="trk"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span style="border-radius:4px"></span></div>
+        <div class="faders9">
+          <div class="fd used" style="--v:35%"><span class="slot"></span><span class="cap" style="bottom:calc(35% - 8px)"></span></div>
+          <div class="fd"><span class="slot"></span><span class="cap" style="bottom:-8px"></span></div>
+          <div class="fd"><span class="slot"></span><span class="cap" style="bottom:-8px"></span></div>
+          <div class="fd"><span class="slot"></span><span class="cap" style="bottom:-8px"></span></div>
+          <div class="fd"><span class="slot"></span><span class="cap" style="bottom:-8px"></span></div>
+          <div class="fd"><span class="slot"></span><span class="cap" style="bottom:-8px"></span></div>
+          <div class="fd"><span class="slot"></span><span class="cap" style="bottom:-8px"></span></div>
+          <div class="fd"><span class="slot"></span><span class="cap" style="bottom:-8px"></span></div>
+          <div class="fd used master" style="--v:100%"><span class="slot"></span><span class="cap" style="bottom:calc(100% - 8px)"></span></div>
+        </div>
+        <div class="flab"><span><b>Morph</b>35 %</span><span>–</span><span>–</span><span>–</span><span>–</span><span>–</span><span>–</span><span>–</span><span><b>Int.</b>100</span></div>
+      </div>
+    </div>
+
+    <div class="col grow">
+      <div class="dev">
+        <h2>Gamepad (Xbox / DualSense layout)</h2>
+        <div class="sub">No faders, so Morph is the left trigger (springs back to the screen value) and Intensity steps on the D-pad.</div>
+        <div class="gp">
+          <svg class="body" viewBox="0 0 470 270"><path d="M120,40 C150,28 320,28 350,40 C410,48 440,90 455,170 C468,240 430,262 395,240 C370,224 350,196 320,190 L150,190 C120,196 100,224 75,240 C40,262 2,240 15,170 C30,90 60,48 120,40 Z" fill="#242426" stroke="#3d3d42" stroke-width="2"/>
+            <circle cx="150" cy="150" r="26" fill="#1a1a1c" stroke="#3a3a3e"/><circle cx="300" cy="150" r="26" fill="#1a1a1c" stroke="#3a3a3e"/>
+            <rect x="92" y="78" width="18" height="52" rx="3" fill="#2f2f33"/><rect x="75" y="95" width="52" height="18" rx="3" fill="#2f2f33"/>
+            <text x="101" y="90" font-size="10" fill="#ccc" text-anchor="middle">▲</text><text x="101" y="127" font-size="10" fill="#ccc" text-anchor="middle">▼</text>
+          </svg>
+          <!-- shoulders -->
+          <div class="shoulder role-flash" style="left:300px;top:14px;width:90px;background:color-mix(in srgb,var(--flash) 45%,#222);color:#fff;border:2px solid var(--flash)">RB · FLASH ▮</div>
+          <div class="shoulder" style="left:80px;top:14px;width:90px;background:#3a3a3e;color:#ddd;border:2px solid #888">LT · Morph</div>
+          <!-- face buttons -->
+          <div class="gbtn on role-hit" style="left:353px;top:118px">A</div>
+          <div class="gbtn ready role-accent" style="left:318px;top:84px">X</div>
+          <div class="gbtn queued role-vibe" style="left:353px;top:50px">Y</div>
+          <div class="gbtn" style="left:388px;top:84px;background:#2c2c2f;color:#666">B</div>
+          <!-- blackout: center button -->
+          <div class="gbtn ready role-blackout" style="left:218px;top:64px;width:30px;height:30px;font-size:10px">☰</div>
+          <div style="position:absolute;left:174px;top:44px;width:118px;height:70px;border:1.5px dashed #6a4a3a;border-radius:12px"></div>
+          <!-- tags -->
+          <div class="gtag role-hit" style="left:396px;top:126px"><b>HIT</b> A</div>
+          <div class="gtag role-accent" style="left:244px;top:118px;text-align:right;width:70px"><b>ACCENT</b> X</div>
+          <div class="gtag role-vibe" style="left:396px;top:52px"><b>VIBE</b> Y</div>
+          <div class="gtag role-blackout" style="left:176px;top:20px;width:120px;text-align:center"><b>BLACKOUT</b> Menu</div>
+          <div class="gtag" style="left:20px;top:84px;width:60px;text-align:right">Intensity<small>±10 %</small></div>
+          <div class="gtag" style="left:178px;top:210px;width:120px;text-align:center;color:var(--text2)">light bar = status band<small>green LIVE · vermillion BLACKOUT</small></div>
+        </div>
+      </div>
+
+      <div class="legend">
+        <h3>One light grammar: screen = LEDs</h3>
+        <div class="lg5">
+          <div class="it role-hit"><span class="p empty"></span>Empty<small>off · nothing to play</small></div>
+          <div class="it role-hit"><span class="p role ready"></span>Ready<small>dim role colour</small></div>
+          <div class="it role-hit"><span class="p role on"></span>On<small>full bright</small></div>
+          <div class="it role-vibe"><span class="p role queued"></span>Queued<small>flashes once per beat until the bar</small></div>
+          <div class="it role-hit"><span class="p role auto"></span>Auto<small>slow pulse · app did it</small></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="callout" style="left:16px;top:392px">1</div>
+  <div class="callout" style="left:302px;top:380px">2</div>
+  <div class="callout" style="left:16px;top:530px">3</div>
+  <div class="callout" style="left:868px;top:162px">4</div>
+  <div class="callout" style="left:1064px;top:404px">5</div>
+  <div class="notes" style="right:22px;bottom:18px;width:510px">
+    <b>The controller is the same instrument</b>
+    <ol>
+      <li>The bottom row holds the five pads, in screen order and colour.</li>
+      <li>Three dark pads keep BLACKOUT about 6 cm away. It can't be remapped.</li>
+      <li>Fader 1 is Morph; fader 9 (master) is Intensity.</li>
+      <li>Gamepad: BLACKOUT is Menu, alone in the middle; FLASH is a held shoulder.</li>
+      <li>LEDs follow the engine, not the press: an empty pool stays off. BLACKOUT is the only red-family LED.</li>
+    </ol>
+  </div>
+</div></body></html>

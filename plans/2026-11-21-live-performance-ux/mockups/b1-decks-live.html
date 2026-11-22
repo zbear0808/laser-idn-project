@@ -1,0 +1,258 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.tabbar .right { margin-left: auto; display: flex; align-items: center; gap: 14px; padding: 0 14px; height: 36px; font-size: 12px; color: var(--text2); }
+.tabbar .right b { color: #fff; font-weight: 600; }
+.beat.sm i { width: 9px; height: 18px; }
+.main { flex: 1; padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+
+/* decks */
+.decks { display: grid; grid-template-columns: 1fr 200px 1fr; gap: 12px; flex: 1; min-height: 0; }
+.deck { border-radius: 12px; background: #161616; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; position: relative; }
+.deck.now { border: 2px solid #f2f2f2; box-shadow: 0 0 18px rgba(255,255,255,.12); }
+.deck.next { border: 2px solid var(--warn); background: #17140c; }
+.deck-head { display: flex; align-items: center; gap: 10px; }
+.deck-tag { font-size: 12px; font-weight: 800; letter-spacing: .08em; padding: 3px 9px; border-radius: 10px; }
+.now .deck-tag { background: #f2f2f2; color: #111; }
+.next .deck-tag { background: var(--warn); color: #111; }
+.vname { font-size: 30px; font-weight: 800; letter-spacing: .01em; display: flex; align-items: center; gap: 10px; }
+.vname .sw { width: 16px; height: 16px; border-radius: 4px; }
+.energy { font-size: 14px; color: #ddd; letter-spacing: 2px; }
+.deck-head .right { margin-left: auto; text-align: right; }
+.barct { font-family: "SF Mono", Menlo, monospace; font-size: 22px; font-weight: 700; }
+.barct small { font-size: 13px; color: var(--text2); font-weight: 500; }
+.bars { display: grid; grid-template-columns: repeat(32, 1fr); gap: 2px; }
+.bars i { height: 8px; border-radius: 1px; background: #333; display: block; }
+.bars i.done { background: #cfcfcf; }
+.bars i.cur { background: #fff; box-shadow: 0 0 6px #fff; }
+.bars i.ph { margin-left: 4px; }
+.bars i.end { background: color-mix(in srgb, var(--auto) 45%, #222); }
+.tiles6 { display: grid; grid-template-columns: repeat(4, 1fr) .62fr .62fr; gap: 8px; }
+.tiles6 .screen { height: 138px; }
+.prevwrap { position: relative; }
+.prevwrap .screen { opacity: .78; }
+.prevwrap .screen svg { filter: saturate(.8); }
+.prevband { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); text-align: center; z-index: 5; pointer-events: none; }
+.prevband span { background: rgba(23,20,12,.88); border: 1.5px solid var(--warn); color: var(--warn); font-weight: 800; letter-spacing: .12em; font-size: 13px; padding: 4px 12px; border-radius: 4px; }
+.sub { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--text2); text-transform: uppercase; }
+.uprows { display: flex; flex-direction: column; gap: 6px; }
+.uprow { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; background: #1f1f1f; font-size: 15px; }
+.uprow .r { font-weight: 800; font-size: 13px; letter-spacing: .04em; color: var(--rc); display: flex; align-items: center; gap: 6px; }
+.uprow .r::before { content: ""; width: 4px; height: 16px; border-radius: 2px; background: var(--rc); }
+.uprow .c { color: #eee; }
+.uprow .c .muted { font-size: 13px; }
+.uprow .c b { font-weight: 700; }
+.next .uprow { background: #221d11; }
+.aud { font-size: 11px; color: var(--text2); }
+.foot { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px; background: #1b1b1b; border: 1px solid #2a2a2a; font-size: 13px; color: #ddd; flex-wrap: wrap; }
+.foot .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; margin-right: 2px; }
+.next .foot { background: #201b0f; border-color: #4a3a12; }
+.diff { font-size: 12px; padding: 3px 8px; border-radius: 10px; background: #2c2513; color: #f0dcaa; white-space: nowrap; }
+.diff b { color: #fff; font-weight: 700; }
+
+/* take column */
+.take { border-radius: 12px; background: #141414; border: 1px solid #2c2c2c; display: flex; flex-direction: column; align-items: center; padding: 14px 12px; gap: 10px; text-align: center; }
+.take .lbl { font-size: 12px; font-weight: 800; letter-spacing: .12em; color: var(--vibe); }
+.ringbox { position: relative; width: 150px; height: 150px; }
+.ringbox svg { position: absolute; inset: 0; }
+.ringbox .in { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.ringbox .in b { font-size: 34px; font-weight: 800; font-family: "SF Mono", Menlo, monospace; }
+.ringbox .in span { font-size: 12px; color: var(--text2); }
+.arrow { font-size: 26px; color: var(--warn); line-height: 1; }
+.take .say { font-size: 15px; font-weight: 700; line-height: 1.3; }
+.take .say em { font-style: normal; color: var(--warn); }
+.why { width: 100%; background: #1d1d1d; border-radius: 8px; padding: 9px 10px; text-align: left; display: flex; flex-direction: column; gap: 6px; }
+.why .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
+.why .v { font-size: 13px; color: #eee; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.why .y { font-size: 12px; color: var(--text2); line-height: 1.35; }
+
+/* crate strip */
+.crow { display: flex; gap: 12px; height: 196px; flex: none; }
+.crates { width: 960px; display: flex; flex-direction: column; gap: 6px; }
+.crates .hd { display: flex; align-items: center; gap: 10px; }
+.crates .list { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; flex: 1; }
+.crate { border-radius: 9px; background: #1c1c1c; border: 1.5px solid #333; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; position: relative; }
+.crate .n { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 7px; }
+.crate .n .sw { width: 11px; height: 11px; border-radius: 3px; }
+.crate .e { font-size: 12px; color: #ccc; letter-spacing: 1px; }
+.crate .m { font-size: 11px; color: var(--muted); }
+.crate .t { font-size: 11px; color: var(--text2); margin-top: auto; }
+.crate .st { position: absolute; top: 8px; right: 9px; font-size: 10px; font-weight: 800; letter-spacing: .06em; padding: 2px 7px; border-radius: 8px; }
+.crate .kk { position: absolute; bottom: 7px; right: 8px; }
+.crate.isnow { border-color: #f2f2f2; }
+.crate.isnow .st { background: #f2f2f2; color: #111; }
+.crate.isnext { border-color: var(--warn); background: #1f1a0e; }
+.crate.isnext .st { background: var(--warn); color: #111; }
+.minis { display: flex; gap: 3px; margin-top: 2px; }
+.minis .screen { width: 40px; height: 30px; border-radius: 3px; }
+
+/* controls row */
+.ctrl { display: flex; gap: 12px; height: 184px; flex: none; }
+.ctrl .rpad { width: 168px; height: 100%; }
+.ctrl .rpad .what { font-size: 18px; }
+.faders { width: 470px; display: flex; flex-direction: column; gap: 8px; justify-content: center; padding: 0 6px; }
+.fhd { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text2); }
+.tfader { height: 52px; border-radius: 8px; border: 1px solid #3a3a3a; position: relative; overflow: hidden;
+  background: linear-gradient(90deg, #2a2a2a 0%, #262013 100%); }
+.tfader .end { position: absolute; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; font-size: 12px; font-weight: 700; padding: 0 12px; line-height: 1.25; }
+.tfader .end small { font-weight: 500; color: var(--text2); font-size: 11px; }
+.tfader .end.l { left: 10px; color: #f2f2f2; }
+.tfader .end.r { right: 0; text-align: right; color: var(--warn); }
+.tfader .knob { position: absolute; top: 4px; bottom: 4px; left: 4px; width: 10px; border-radius: 3px; background: #f2f2f2; box-shadow: 0 0 8px rgba(255,255,255,.5); }
+.tfader .mid { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); font-size: 11px; color: var(--muted); white-space: nowrap; }
+.bo-zone { margin-left: auto; display: flex; gap: 10px; align-items: stretch; padding-left: 22px; border-left: 1px dashed #3a3a3a; }
+.bo-zone .rpad { width: 172px; }
+.sep-note { font-size: 11px; color: var(--muted); writing-mode: vertical-rl; transform: rotate(180deg); text-align: center; }
+</style></head><body>
+<div class="page tall">
+  <div class="caption-bar"><b>B1 · Decks, live</b><span class="tag">Design B · Now &amp; Next</span><span class="tag">VIBE pressed at bar 13: the take is queued for the bar line</span></div>
+  <div class="menubar"><span class="logo"></span><span>File</span><span>Edit</span><span>Transport</span><span>View</span><span>Help</span><span class="title">Laser Show — club-friday.show</span></div>
+  <div class="tabbar">
+    <div class="tab">Grid</div><div class="tab">Vibes</div><div class="tab active">Perform</div><div class="tab">Effects</div><div class="tab">Projectors</div><div class="tab">Zone Groups</div><div class="tab">Settings</div>
+    <div class="right"><span>BPM <b class="mono">128.0</b></span><span class="beat sm"><i class="on"></i><i class="on"></i><i></i><i></i></span><span><span class="dot green"></span> Launchpad Mini</span><span class="btn sm ghost">⌘F Full screen</span></div>
+  </div>
+  <div class="status-band live">● LIVE · 4 of 4 lasers · 128.0 BPM · NOW Groove → NEXT Build on the bar <span style="margin-left:auto;font-weight:600;color:#bfe9ca">audience lasers 5–6: off (not allowed in Groove)</span></div>
+
+  <div class="main">
+    <div class="decks">
+      <!-- NOW -->
+      <div class="deck now">
+        <div class="deck-head">
+          <span class="deck-tag">● NOW · ON AIR</span>
+          <div class="vname"><span class="sw" style="background:#4d7bff"></span>Groove <span class="energy">●●○○</span></div>
+          <div class="right"><div class="barct">bar 13 <small>of 32</small></div><div class="hint">beat 3 · then follow action</div></div>
+        </div>
+        <div class="bars">
+          <i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i>
+          <i class="done ph"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="cur"></i><i></i><i></i><i></i>
+          <i class="ph"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          <i class="ph"></i><i></i><i></i><i></i><i class="end"></i><i class="end"></i><i class="end"></i><i class="end"></i>
+        </div>
+        <div class="tiles6">
+          <div class="screen onair" data-shape="wave" data-color="#36e2ff" data-lbl="1 · Stage left" data-dot="green" data-lbl2="bed · zone A"></div>
+          <div class="screen onair" data-shape="triangle" data-color="#39ff6a" data-scale="1.1" data-lbl="2 · Left center" data-dot="green" data-lbl2="HIT triangle"></div>
+          <div class="screen onair" data-shape="triangle" data-color="#39ff6a" data-scale="1.1" data-lbl="3 · Right center" data-dot="green" data-lbl2="HIT triangle"></div>
+          <div class="screen onair" data-shape="wave" data-color="#36e2ff" data-lbl="4 · Stage right" data-dot="green" data-lbl2="bed · zone B"></div>
+          <div class="screen" data-shape="none" data-lbl="5 · Aud L" data-lbl2="🔒 off" data-blocked="0,0,100,100"></div>
+          <div class="screen" data-shape="none" data-lbl="6 · Aud R" data-lbl2="🔒 off" data-blocked="0,0,100,100"></div>
+        </div>
+        <div class="sub">Coming up in Groove</div>
+        <div class="uprows">
+          <div class="uprow role-hit"><span class="r">HIT ▶</span><span class="c">next <b>star</b> <span class="muted">· then circle, square · pool of 4 · punch size</span></span></div>
+          <div class="uprow role-accent"><span class="r">ACCENT ▶</span><span class="c">next <b>beam fan</b> <span class="muted">· then horizontal line · zone swap A↔B</span></span></div>
+          <div class="uprow role-flash"><span class="r">FLASH ▮</span><span class="c"><b>ring burst</b> <span class="muted">while held · all lasers</span></span></div>
+          <div class="uprow" style="--rc:#9a9a9a"><span class="r">BED ⟳</span><span class="c"><b>wave</b> <span class="muted">· L/R map · slow colour step every 4 bars</span></span></div>
+        </div>
+        <div class="foot"><span class="k">Zones</span><span class="zchip zone-a">A</span><span class="small text2">lasers 1–2</span><span class="zchip zone-b">B</span><span class="small text2">lasers 3–4</span><span class="text2" style="margin-left:8px">L/R map</span>
+          <span style="margin-left:auto" class="k">Last auto</span><span class="auto-tag">AUTO</span><span class="small text2">HIT picked triangle (shuffle, never twice)</span></div>
+      </div>
+
+      <!-- TAKE -->
+      <div class="take">
+        <div class="lbl">TAKE QUEUED</div>
+        <div class="ringbox">
+          <svg viewBox="0 0 150 150">
+            <circle cx="75" cy="75" r="64" fill="none" stroke="#2c2c2c" stroke-width="10"/>
+            <circle cx="75" cy="75" r="64" fill="none" stroke="#CC79A7" stroke-width="10" stroke-dasharray="301.6 402.1" transform="rotate(-90 75 75)" stroke-linecap="butt"/>
+            <g stroke="#111" stroke-width="3"><line x1="75" y1="5" x2="75" y2="18"/><line x1="145" y1="75" x2="132" y2="75"/><line x1="75" y1="145" x2="75" y2="132"/><line x1="5" y1="75" x2="18" y2="75"/></g>
+            <circle cx="75" cy="11" r="5" fill="#fff"/>
+          </svg>
+          <div class="in"><b>1</b><span>beat to bar 14</span></div>
+        </div>
+        <div class="say">VIBE takes <em>NEXT</em><br>on the bar</div>
+        <div class="arrow">▶ ▶</div>
+        <div class="why">
+          <span class="k">How NEXT was chosen</span>
+          <span class="v">follow: <b>energy up</b> <span class="auto-tag">AUTO</span></span>
+          <span class="y">Groove is energy 2; Build is the nearest crate at 3.</span>
+        </div>
+        <div class="hint" style="line-height:1.35">Click a crate below to cue a different NEXT. Hold VIBE to lock.</div>
+      </div>
+
+      <!-- NEXT -->
+      <div class="deck next">
+        <div class="deck-head">
+          <span class="deck-tag">◐ NEXT · CUED</span>
+          <div class="vname"><span class="sw" style="background:#b05cff"></span>Build <span class="energy">●●●○</span></div>
+          <div class="right"><div class="barct" style="color:var(--warn)">32 <small>bars</small></div><div class="hint">then follow: energy up → Peak</div></div>
+        </div>
+        <div class="bars" style="opacity:.55">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="ph"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          <i class="ph"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="ph"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <div class="prevwrap">
+          <div class="tiles6">
+            <div class="screen" style="border:1px dashed #7a5d10" data-shape="beams" data-color="#ff3bd4" data-lbl="1 · Stage left" data-lbl2="preview · 10 fps"></div>
+            <div class="screen" style="border:1px dashed #7a5d10" data-shape="tunnel" data-color="#b05cff" data-lbl="2 · Left center" data-lbl2="HIT tunnel"></div>
+            <div class="screen" style="border:1px dashed #7a5d10" data-shape="tunnel" data-color="#b05cff" data-lbl="3 · Right center" data-lbl2="HIT tunnel"></div>
+            <div class="screen" style="border:1px dashed #7a5d10" data-shape="beams" data-color="#ff3bd4" data-lbl="4 · Stage right" data-lbl2="preview · 10 fps"></div>
+            <div class="screen" data-shape="none" data-lbl="5 · Aud L" data-lbl2="🔒 off" data-blocked="0,0,100,100"></div>
+            <div class="screen" data-shape="none" data-lbl="6 · Aud R" data-lbl2="🔒 off" data-blocked="0,0,100,100"></div>
+          </div>
+          <div class="prevband"><span>PREVIEW · NOT SENT</span></div>
+        </div>
+        <div class="sub" style="color:#d9b45a">Cue list in Build</div>
+        <div class="uprows">
+          <div class="uprow role-hit"><span class="r">HIT ▶</span><span class="c">first <b>tunnel</b> <span class="muted">· spiral, grid · pool of 3 · pump bright</span></span></div>
+          <div class="uprow role-accent"><span class="r">ACCENT ▶</span><span class="c"><b>cone</b> <span class="muted">· zone chase A→D</span></span></div>
+          <div class="uprow role-flash"><span class="r">FLASH ▮</span><span class="c"><b>"DROP" text</b> <span class="muted">while held · strobe</span></span></div>
+          <div class="uprow" style="--rc:#9a9a9a"><span class="r">BED ⟳</span><span class="c"><b>beam fan</b> <span class="muted">· rises from Groove's wave over 1 bar</span></span></div>
+        </div>
+        <div class="foot"><span class="k">Changes on take</span><span class="diff">colour <b>green → violet</b></span><span class="diff">map <b>L/R → chase A→D</b></span><span class="diff">HIT pool <b>4 → 3</b></span><span class="diff">transition <b>1-bar blend</b></span><span class="diff">audience <b>stays off</b></span></div>
+      </div>
+    </div>
+
+    <div class="crow">
+      <div class="crates">
+        <div class="hd"><h3>Crate</h3><span class="hint">Click a vibe to cue it into NEXT. Nothing reaches the lasers until the take. Keys 1–5 on the APC row do the same.</span></div>
+        <div class="list">
+          <div class="crate"><div class="n"><span class="sw" style="background:#1ABC9C"></span>Warm-up</div><div class="e">●○○○</div><div class="m">3 hits · 1 accent</div>
+            <div class="minis"><div class="screen" data-shape="circle" data-color="#1ABC9C"></div><div class="screen" data-shape="dots" data-color="#1ABC9C"></div><div class="screen" data-shape="line" data-color="#1ABC9C"></div></div><div class="t">⟶ after 16 bars → next</div><span class="kbd kk">1</span></div>
+          <div class="crate isnow"><span class="st">NOW</span><div class="n"><span class="sw" style="background:#4d7bff"></span>Groove</div><div class="e">●●○○</div><div class="m">4 hits · 2 accents</div>
+            <div class="minis"><div class="screen" data-shape="circle" data-color="#39ff6a"></div><div class="screen" data-shape="square" data-color="#39ff6a"></div><div class="screen" data-shape="star" data-color="#39ff6a"></div><div class="screen" data-shape="wave" data-color="#36e2ff"></div></div><div class="t">⟶ after 32 · energy up</div><span class="kbd kk">2</span></div>
+          <div class="crate isnext"><span class="st">NEXT</span><div class="n"><span class="sw" style="background:#b05cff"></span>Build</div><div class="e">●●●○</div><div class="m">3 hits · 1 accent</div>
+            <div class="minis"><div class="screen" data-shape="tunnel" data-color="#b05cff"></div><div class="screen" data-shape="spiral" data-color="#b05cff"></div><div class="screen" data-shape="grid" data-color="#b05cff"></div><div class="screen" data-shape="beams" data-color="#ff3bd4"></div></div><div class="t">⟶ after 32 · energy up</div><span class="kbd kk">3</span></div>
+          <div class="crate"><div class="n"><span class="sw" style="background:#ff3bd4"></span>Peak</div><div class="e">●●●●</div><div class="m">4 hits · 2 accents · audience ok</div>
+            <div class="minis"><div class="screen" data-shape="fan" data-color="#ff3bd4"></div><div class="screen" data-shape="ring2" data-color="#ff3bd4"></div><div class="screen" data-shape="text" data-text="DROP" data-color="#ff3bd4"></div></div><div class="t">⟶ after 16 · random</div><span class="kbd kk">4</span></div>
+          <div class="crate"><div class="n"><span class="sw" style="background:#36e2ff"></span>Breakdown</div><div class="e">●○○○</div><div class="m">2 hits · no accent</div>
+            <div class="minis"><div class="screen" data-shape="line" data-color="#36e2ff"></div><div class="screen" data-shape="wave" data-color="#36e2ff"></div></div><div class="t">⟶ stay (manual only)</div><span class="kbd kk">5</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ctrl">
+      <div class="rpad ready role-hit"><span class="glyph">▶</span><div class="role">HIT</div><div class="what">star</div><div class="next">then circle</div><div class="chips"><span>size</span></div><div class="key">Pad 1 · H</div></div>
+      <div class="rpad ready role-accent"><span class="glyph">▶</span><div class="role">ACCENT</div><div class="what">beam fan</div><div class="next">then line</div><div class="chips"><span>A↔B</span></div><div class="key">Pad 2 · J</div></div>
+      <div class="rpad ready role-flash"><span class="glyph">▮</span><div class="role">FLASH</div><div class="what">ring burst</div><div class="next">while held</div><div class="key">Pad 3 · K</div></div>
+      <div class="rpad queued role-vibe"><span class="glyph">⏱</span><div class="role">VIBE</div><div class="what">→ Build</div><div class="next">hold: lock</div><div class="ring"></div><div class="key">Pad 4 · L</div></div>
+      <div class="faders">
+        <div class="fhd"><b style="color:#fff">INTENSITY</b><span>never stored in a vibe</span></div>
+        <div class="hfader"><div class="fill" style="width:85%"></div><div class="lbl">Intensity</div><div class="val">85 %</div></div>
+        <div class="fhd" style="margin-top:4px"><b style="color:#fff">MORPH</b><span class="seg" style="transform:scale(.9);transform-origin:left"><span>morph</span><span class="on">transition</span></span><span>set in Settings · not switchable live</span></div>
+        <div class="tfader"><div class="knob"></div>
+          <div class="end l">NOW<small>Groove</small></div>
+          <div class="mid">push right to blend · reaching 100 % commits</div>
+          <div class="end r">NEXT<small>Build</small></div>
+        </div>
+      </div>
+      <div class="bo-zone">
+        <div class="sep-note">kept apart</div>
+        <div class="rpad ready role-blackout"><span class="glyph">⟳</span><div class="role">BLACK<br>OUT</div><div class="next">sticky · instant</div><div class="next">hold 1 s to bring light back</div><div class="key">Pad 8 · ;</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="status"><span><span class="dot green"></span> <b>Streaming</b> 4 of 4 · 62 fps</span><span>Preview render: NEXT at 10 fps, 4 lasers · 3 % CPU</span><span>Show lock: off</span><span style="margin-left:auto">MIDI: Launchpad Mini · APC mini</span></div>
+
+  <div class="callout" style="left:22px;top:206px">1</div>
+  <div class="callout" style="left:630px;top:150px">2</div>
+  <div class="callout" style="left:932px;top:206px">3</div>
+  <div class="callout" style="left:186px;top:700px">4</div>
+  <div class="callout" style="left:722px;top:1004px">5</div>
+
+  <div class="notes" style="right:12px;top:674px;width:448px;font-size:11.5px;line-height:1.4"><b>B1 · two decks: on air, and cued</b><ol>
+    <li>NOW (white frame): live tiles in rig order, bar count, what each role plays next.</li>
+    <li>TAKE: VIBE was tapped; the ring fills to the bar line. Below it: how NEXT was picked (AUTO), and why.</li>
+    <li>NEXT (amber): a 10 fps preview, PREVIEW · NOT SENT, and what the take will change.</li>
+    <li>Crate: click a vibe (or key 1–5) to cue it into NEXT. Never touches output.</li>
+    <li>Morph as transition fader: blend NOW→NEXT, 100 % commits. BLACKOUT has its own zone.</li>
+  </ol></div>
+</div></body></html>

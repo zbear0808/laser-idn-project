@@ -1,0 +1,216 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.tabbar .spacer { margin-left: auto; display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 36px; }
+.status-band.setup { background: #0f2438; color: #bfe0ff; border-bottom: 2px solid var(--blue); }
+.L { position: absolute; left: 14px; width: 1046px; }
+.walk { top: 158px; height: 118px; border-radius: 10px; background: #15202c; border: 1px solid #2c4a6b; display: flex; align-items: center; gap: 18px; padding: 0 16px; }
+.walk .screen { width: 168px; height: 96px; flex-shrink: 0; box-shadow: 0 0 0 3px #fff, 0 0 18px rgba(255,255,255,.5); }
+.walk .big { font-size: 21px; font-weight: 700; margin-top: 4px; }
+.walk .big .num { display: inline-flex; width: 34px; height: 34px; border-radius: 7px; background: #fff; color: #111; align-items: center; justify-content: center; font-weight: 900; margin: 0 4px; }
+.walk .hint { margin-top: 6px; font-size: 12.5px; color: #a9c4de; line-height: 1.4; }
+.prog { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; flex-shrink: 0; }
+.pips { display: flex; gap: 5px; }
+.pips i { width: 22px; height: 22px; border-radius: 5px; border: 1.5px solid #4a6a8a; font-style: normal; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; color: #6f8fae; }
+.pips i.done { background: #2fbf5a; border-color: #2fbf5a; color: #0b0b0b; }
+.pips i.now { border-color: #fff; color: #fff; box-shadow: 0 0 8px rgba(255,255,255,.6); }
+.tpl { top: 286px; height: 34px; display: flex; align-items: center; gap: 10px; }
+.tpl .seg span { padding: 6px 12px; font-size: 12.5px; }
+.guess { top: 328px; height: 36px; }
+.stage { top: 372px; height: 404px; border-radius: 10px; overflow: hidden; border: 1px solid #2a2a2a;
+         background: radial-gradient(ellipse at 50% 15%, #17191d 0%, #0d0d0f 65%, #0a0a0a 100%); }
+.stage > svg { position: absolute; inset: 0; width: 1046px; height: 404px; }
+.slot { position: absolute; width: 170px; }
+.slot .screen { width: 170px; height: 106px; }
+.slot .nm { display: flex; align-items: center; gap: 6px; margin-top: 7px; font-size: 13.5px; font-weight: 600; }
+.slot .nm .n { font-size: 17px; font-weight: 800; }
+.slot .ip { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.slot .gs { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; }
+.g { font-size: 11px; padding: 1px 7px; border-radius: 8px; background: #262626; border: 1px solid #3a3a3a; color: #ddd; display: inline-flex; align-items: center; gap: 4px; }
+.g i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.empty { width: 170px; height: 106px; border-radius: 6px; border: 2px dashed #4a4a4a; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--muted); font-size: 12px; text-align: center; }
+.empty .sn { font-size: 13px; color: #bbb; font-weight: 600; }
+.empty.target { border-color: #fff; background: rgba(255,255,255,.06); color: #e8e8e8; box-shadow: 0 0 16px rgba(255,255,255,.25); }
+.empty.target .sn { color: #fff; }
+.cursor { position: absolute; font-size: 22px; z-index: 5; filter: drop-shadow(0 1px 2px #000); }
+.house { position: absolute; font-size: 11px; letter-spacing: .12em; color: #6f6f6f; font-weight: 700; }
+.groups { top: 786px; height: 80px; border-radius: 10px; background: #171717; border: 1px solid #2e2e2e; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+.groups .row .g { font-size: 12px; padding: 3px 9px; border-radius: 10px; }
+.groups .row .g b { font-weight: 700; color: #fff; }
+.groups .row .g.none { border-style: dashed; color: var(--muted); }
+
+.R { position: absolute; left: 1072px; width: 354px; }
+.match { top: 158px; height: 540px; border-radius: 10px; background: #171717; border: 1px solid #2e2e2e; padding: 12px; display: flex; flex-direction: column; gap: 5px; }
+.leg { display: flex; gap: 10px; font-size: 11px; color: var(--text2); }
+.leg span { display: inline-flex; align-items: center; gap: 4px; }
+.sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.mrow { display: flex; align-items: center; gap: 6px; }
+.ms { width: 140px; height: 35px; border-radius: 6px; padding: 0 8px; display: flex; flex-direction: column; justify-content: center; font-size: 12px; background: #242424; border: 1px solid #3a3a3a; }
+.ms b { font-weight: 600; }
+.ms small { font-size: 11px; color: var(--muted); }
+.md { flex: 1; height: 35px; border-radius: 6px; padding: 0 8px; display: flex; flex-direction: column; justify-content: center; font-size: 12px; }
+.md small { font-size: 11px; }
+.md.live { background: #12301a; border: 1px solid #2fbf5a; } .md.live small { color: #8ff0a8; }
+.md.off { background: #262626; border: 1px solid #555; color: #9a9a9a; } .md.off small { color: #9a9a9a; }
+.md.white { background: #f2f2f2; color: #111; border: 1px solid #fff; } .md.white small { color: #444; }
+.arrow { color: #666; font-size: 12px; }
+.found { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; background: #202020; border: 1px solid #333; font-size: 12px; }
+</style></head><body>
+<div class="page">
+  <div class="caption-bar"><b>E2 · Rig walk (setup)</b><span class="tag">design E · stage view</span><span class="tag">Stage tab · Setup</span><span class="tag">placement answers back</span></div>
+  <div class="toolbar">
+    <span class="tb-btn">▶</span><span class="tb-btn">⟳</span><span class="tb-sep"></span>
+    <span class="tb-label">BPM</span><span class="tb-field mono">128.0</span>
+    <span class="beat"><i></i><i class="on"></i><i></i><i></i></span><span class="tb-btn">TAP</span>
+    <span class="tb-sep"></span><span class="tb-btn">Scan</span><span class="tb-label">6 IDN heads found</span>
+    <span style="margin-left:auto" class="row center gap8"><span class="dot blue"></span><span class="tb-label">Test patterns only</span><span class="tb-btn">Stream</span></span>
+  </div>
+  <div class="tabbar">
+    <div class="tab">Grid</div><div class="tab">Vibes</div><div class="tab">Perform</div><div class="tab">Effects</div><div class="tab active">Stage</div><div class="tab">Settings</div>
+    <div class="spacer"><span class="hint">Mode</span><span class="seg"><span>Live</span><span class="on">Setup</span></span></div>
+  </div>
+  <div class="status-band setup">◆ SETUP · test patterns only · 10 % power · numbers drawn inside each scan limit, above the horizon <span style="margin-left:auto;font-weight:600">Venue: Club Nova</span></div>
+
+  <!-- walk card -->
+  <div class="L walk">
+    <div class="screen" data-shape="text" data-text="3" data-scale="3.2" data-color="#ffffff"></div>
+    <div class="grow">
+      <h3 style="color:#8fb8e0">Walk the rig · laser 5 of 6</h3>
+      <div class="big">IDN 10.0.0.23 · head 1 is drawing <span class="num">3</span> now</div>
+      <div class="hint">Look at the stage. Click the slot where you see the 3, or press <span class="kbd">3</span>. Not there? <span class="kbd">→</span> skips it, <span class="kbd">←</span> goes back.</div>
+    </div>
+    <div class="prog">
+      <div class="row center gap8"><span style="font-size:15px;font-weight:700">4 of 6 placed</span><span class="pips"><i class="done">1</i><i class="done">2</i><i class="now">3</i><i class="done">4</i><i class="done">5</i><i>6</i></span></div>
+      <div class="row gap8"><span class="btn sm ghost">Skip ▸</span><span class="btn sm ghost">Not in this room</span><span class="btn sm">Stop walk</span></div>
+    </div>
+  </div>
+
+  <!-- template row -->
+  <div class="L tpl">
+    <span class="tb-label">Template</span>
+    <span class="seg"><span>2 sides</span><span>L / C / R</span><span>4 truss</span><span class="on">4 truss + 2 audience</span></span>
+    <span class="hint">sets the slots, rows and names · Left = house left</span>
+    <span style="margin-left:auto" class="btn"># Number all</span><span class="btn ghost">Show order</span>
+  </div>
+  <div class="L guess banner blue"><span>ⓘ</span><span>Guessed from names: “SL”, “LC”, “SR”, “AUD-L” placed 1, 2, 4 and 5. The walk only asks about the rest.</span><span style="margin-left:auto" class="btn sm ghost" >Undo guess</span><span class="btn sm ghost">Walk all 6</span></div>
+
+  <!-- stage -->
+  <div class="L stage">
+    <svg viewBox="0 0 1046 404">
+      <g stroke="#4a4a4a" stroke-width="1.5" fill="none"><line x1="130" y1="34" x2="916" y2="34"/><line x1="130" y1="45" x2="916" y2="45"/><path id="zig"/></g>
+      <g fill="#2c2c2c" stroke="#777"><rect x="230" y="47" width="30" height="16" rx="3"/><rect x="415" y="47" width="30" height="16" rx="3"/><rect x="601" y="47" width="30" height="16" rx="3" stroke="#fff"/><rect x="786" y="47" width="30" height="16" rx="3"/></g>
+      <rect x="130" y="66" width="393" height="240" fill="rgba(86,140,255,.06)"/>
+      <rect x="523" y="66" width="393" height="240" fill="rgba(180,140,255,.06)"/>
+      <line x1="523" y1="26" x2="523" y2="330" stroke="#8a8a8a" stroke-dasharray="5 5"/>
+      <polygon points="130,306 916,306 980,334 66,334" fill="#1a1a1c" stroke="#3a3a3a"/>
+      <line x1="14" y1="334" x2="1032" y2="334" stroke="#5a5a5a" stroke-width="2"/>
+      <rect x="67" y="318" width="30" height="14" rx="3" fill="#2c2c2c" stroke="#a33"/>
+      <rect x="949" y="318" width="30" height="14" rx="3" fill="#2c2c2c" stroke="#555" stroke-dasharray="3 2"/>
+      <g id="crowd"></g>
+    </svg>
+    <div style="position:absolute;left:530px;top:10px" class="small text2">centre · left of it = Left, right of it = Right</div>
+    <div class="house" style="left:150px;top:314px">◂ HOUSE LEFT</div>
+    <div class="house" style="right:150px;top:314px">HOUSE RIGHT ▸</div>
+    <div style="position:absolute;left:16px;top:10px" class="small text2"><b style="color:#ddd">TRUSS ROW</b> · 4 slots</div>
+    <div style="position:absolute;left:16px;top:346px" class="small text2"><b style="color:#ddd">FLOOR ROW</b> · front edge · 2 slots</div>
+
+    <div class="slot" style="left:160px;top:70px">
+      <div class="screen onair" data-shape="text" data-text="1" data-scale="3" data-color="#4d9bff"></div>
+      <div class="nm"><span class="n">1</span>Stage left</div><div class="ip">10.0.0.21 · head 1</div>
+      <div class="gs"><span class="g"><i style="background:#4d9bff"></i>Left</span><span class="g">Odd</span><span class="g">Truss</span></div>
+    </div>
+    <div class="slot" style="left:345px;top:70px">
+      <div class="screen onair" data-shape="text" data-text="2" data-scale="3" data-color="#4d9bff"></div>
+      <div class="nm"><span class="n">2</span>Left center</div><div class="ip">10.0.0.22 · head 1</div>
+      <div class="gs"><span class="g"><i style="background:#4d9bff"></i>Left</span><span class="g">Even</span><span class="g">Truss</span></div>
+    </div>
+    <div class="slot" style="left:531px;top:70px">
+      <div class="empty target"><span class="sn">slot 3 · Right center</span><span>click = put .23 here</span><span class="kbd">3</span></div>
+      <div class="nm" style="color:#bbb"><span class="n">3</span>Right center</div><div class="ip">from rig file · not bound</div>
+    </div>
+    <div class="cursor" style="left:652px;top:150px"><svg width="22" height="28" viewBox="0 0 22 28" style="display:block"><path d="M2,2 L2,22 L7,17 L11,26 L14,25 L10,16 L17,16 Z" fill="#fff" stroke="#111" stroke-width="1.5"/></svg></div>
+    <div class="slot" style="left:716px;top:70px">
+      <div class="screen onair" data-shape="text" data-text="4" data-scale="3" data-color="#b48cff"></div>
+      <div class="nm"><span class="n">4</span>Stage right</div><div class="ip">10.0.0.24 · head 1</div>
+      <div class="gs"><span class="g"><i style="background:#b48cff"></i>Right</span><span class="g">Even</span><span class="g">Truss</span></div>
+    </div>
+
+    <div class="slot" style="left:16px;top:178px;width:136px">
+      <div class="nm" style="margin:0 0 5px"><span class="n">5</span>Audience L</div>
+      <div class="screen" style="width:136px;height:84px" data-shape="none" data-blocked="0,0,100,100" data-lbl="🔒 placed · dark" data-dot="red"></div>
+      <div class="gs"><span class="g"><i style="background:#4d9bff"></i>Left</span><span class="g">Floor</span></div>
+    </div>
+    <div class="slot" style="left:894px;top:178px;width:136px">
+      <div class="nm" style="margin:0 0 5px;color:#bbb"><span class="n">6</span>Audience R</div>
+      <div class="empty" style="width:136px;height:84px"><span class="sn">slot 6</span><span>not found yet</span></div>
+      <div class="gs"><span class="g none">MISSING</span></div>
+    </div>
+  </div>
+
+  <!-- groups row -->
+  <div class="L groups">
+    <div class="row center gap8"><h3>Groups from placement</h3><span class="auto-tag">AUTO</span><span class="hint">they change as you drop · Left / Right from x · numbers run truss row first, then floor row</span></div>
+    <div class="row gap8 wrap">
+      <span class="g"><b>All</b> 1 2 4 5</span>
+      <span class="g"><i style="background:#4d9bff"></i><b>Left</b> 1 2 5</span>
+      <span class="g"><i style="background:#b48cff"></i><b>Right</b> 4</span>
+      <span class="g none">Center · none (even count)</span>
+      <span class="g"><b>Odd</b> 1 5</span><span class="g"><b>Even</b> 2 4</span>
+      <span class="g"><b>Truss</b> 1 2 4</span><span class="g"><b>Floor</b> 5</span>
+      <span class="g"><b>Audience</b> 5 · never rerouted</span>
+    </div>
+  </div>
+
+  <!-- matcher -->
+  <div class="R match">
+    <div class="row center between"><h3>Venue matcher</h3><span class="btn sm ghost">Hide ▴</span></div>
+    <div class="small text2">Rig file <b style="color:#fff">Groove rig</b> → venue <b style="color:#fff">Club Nova</b></div>
+    <div class="leg"><span><i class="sw" style="background:#f2f2f2"></i>in rig file only</span><span><i class="sw" style="background:#555"></i>bound, not answering</span><span><i class="sw" style="background:#2fbf5a"></i>live</span></div>
+    <div class="row between small muted" style="margin-top:2px"><span>RIG SLOT</span><span style="margin-right:96px">FOUND DEVICE</span></div>
+    <div class="mrow"><div class="ms"><b>1 Stage left</b><small>truss</small></div><span class="arrow">↔</span><div class="md live">10.0.0.21 · h1<small>live</small></div></div>
+    <div class="mrow"><div class="ms"><b>2 Left center</b><small>truss</small></div><span class="arrow">↔</span><div class="md live">10.0.0.22 · h1<small>live</small></div></div>
+    <div class="mrow"><div class="ms"><b>3 Right center</b><small>truss</small></div><span class="arrow">↔</span><div class="md white">walking .23 …<small>click slot 3 to bind</small></div></div>
+    <div class="mrow"><div class="ms"><b>4 Stage right</b><small>truss</small></div><span class="arrow">↔</span><div class="md live">10.0.0.24 · h1<small>live</small></div></div>
+    <div class="mrow"><div class="ms"><b>5 Audience L</b><small>floor · audience</small></div><span class="arrow">↔</span><div class="md live">10.0.0.31 · h1<small>live · SAFE (off)</small></div></div>
+    <div class="mrow"><div class="ms"><b>6 Audience R</b><small>floor · audience</small></div><span class="arrow">↔</span><div class="md off">unit 4F:2A:91<small>not answering</small></div></div>
+    <div class="row center gap8 small text2" style="margin-left:4px"><span class="check"></span>6 is optional → shows NOT HERE, not MISSING</div>
+    <div class="divider-h" style="margin:3px 0"></div>
+    <h3>Found, not in rig file</h3>
+    <div class="found"><span class="dot blue"></span><span class="grow">10.0.0.23 · head 1</span><span class="small" style="color:#bfe0ff">drawing 3</span></div>
+    <div class="found"><span class="dot green"></span><span class="grow">10.0.0.40 · head 1</span><span class="btn sm ghost">+ Add slot</span><span class="btn sm ghost">Ignore</span></div>
+    <div class="hint" style="margin-top:2px">Bound by IDN unit id, never by IP or list order. Drag a device onto a slot to bind by hand.</div>
+  </div>
+
+  <div class="status" style="position:absolute;left:0;right:0;bottom:0;background:var(--bg)"><span>6 heads found</span><span>4 of 6 placed</span><span>Rig file: <b>Groove rig</b> (unsaved changes)</span><span>Setup output ends 5 s after you leave this tab</span></div>
+
+  <div class="callout" style="left:22px;top:150px">1</div>
+  <div class="callout" style="left:700px;top:430px">2</div>
+  <div class="callout" style="left:1046px;top:280px">3</div>
+  <div class="callout" style="left:22px;top:334px">4</div>
+  <div class="callout" style="left:22px;top:778px">5</div>
+  <div class="callout" style="left:1064px;top:150px">6</div>
+  <div class="notes" style="left:1072px;top:708px;width:354px;font-size:11.5px;line-height:1.35;padding:8px 10px">
+    <b>E2 · Walk the rig, the groups appear</b>
+    <ol>
+      <li>One unplaced laser at a time draws a big number.</li>
+      <li>Click the slot where you saw it, or press the number.</li>
+      <li>Templates set slots and rows; “Number all” checks the room.</li>
+      <li>A name guess places what it can; the walk asks the rest.</li>
+      <li>Placed lasers draw their group colour; groups update on drop.</li>
+      <li>The matcher binds rig slots to found heads (white/grey/green).</li>
+    </ol>
+  </div>
+</div>
+<script>
+(function(){
+  var NS="http://www.w3.org/2000/svg", zig=document.getElementById('zig'), d="";
+  for (var x=130;x<916;x+=11){ d+="M"+x+",34 L"+(x+5.5)+",45 L"+(x+11)+",34 "; }
+  zig.setAttribute('d',d);
+  var crowd=document.getElementById('crowd');
+  for(var r=0;r<2;r++){ for(var c=0;c<26;c++){ var cx=200+c*34+(r%2)*17, cy=360+r*28;
+    var g=document.createElementNS(NS,'g'); g.setAttribute('fill','#1c1c1f');
+    var h=document.createElementNS(NS,'circle'); h.setAttribute('cx',cx);h.setAttribute('cy',cy);h.setAttribute('r',7);
+    var s=document.createElementNS(NS,'path'); s.setAttribute('d','M'+(cx-13)+','+(cy+19)+' Q'+cx+','+(cy+4)+' '+(cx+13)+','+(cy+19)+' Z');
+    g.appendChild(h);g.appendChild(s);crowd.appendChild(g);} }
+})();
+</script>
+</body></html>

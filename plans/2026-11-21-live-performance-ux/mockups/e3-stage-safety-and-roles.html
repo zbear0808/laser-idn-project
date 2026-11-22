@@ -1,0 +1,206 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.tabbar .spacer { margin-left: auto; display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 36px; }
+.stage { position: absolute; left: 14px; top: 158px; width: 1412px; height: 320px; border-radius: 10px; overflow: hidden; border: 1px solid #2a2a2a;
+         background: radial-gradient(ellipse at 50% 15%, #17191d 0%, #0d0d0f 65%, #0a0a0a 100%); }
+.stage > svg { position: absolute; inset: 0; width: 1412px; height: 320px; }
+.u { position: absolute; width: 210px; }
+.u .screen { width: 210px; height: 120px; }
+.u .nm { white-space: nowrap; }
+.u .nm { display: flex; align-items: center; gap: 7px; margin-top: 7px; font-size: 13.5px; font-weight: 600; }
+.u .nm .n { font-size: 17px; font-weight: 800; }
+.u .nm .st { margin-left: auto; }
+.st { font-size: 11px; font-weight: 800; letter-spacing: .05em; padding: 2px 7px; border-radius: 4px; white-space: nowrap; display: inline-block; }
+.st.live { background: #123d1e; color: #8ff0a8; border: 1px solid #2fbf5a; }
+.st.safe { background: #2a2a2a; color: #d0d0d0; border: 1px solid #6a6a6a; }
+.st.over { background: #3d2e00; color: #ffd36b; border: 1px solid var(--warn); }
+.st.miss { background: var(--warn); color: #111; border: 1px solid var(--warn); }
+.st.nothere { background: transparent; color: #8a8a8a; border: 1px dashed #666; }
+.st.fault { background: #5a1010; color: #ffb3b3; border: 1px solid var(--red); }
+.sel { box-shadow: 0 0 0 3px var(--blue), 0 0 18px rgba(73,146,219,.6); }
+.house { position: absolute; font-size: 11px; letter-spacing: .12em; color: #6f6f6f; font-weight: 700; }
+
+.insp { position: absolute; left: 14px; top: 490px; width: 1412px; height: 576px; border-radius: 10px; background: #161616; border: 1px solid #33506e; box-shadow: 0 -2px 0 var(--blue) inset, 0 10px 30px rgba(0,0,0,.5); }
+.wedge { position: absolute; left: 104px; top: -12px; width: 0; height: 0; border-left: 12px solid transparent; border-right: 12px solid transparent; border-bottom: 12px solid #33506e; }
+.ihead { position: absolute; left: 16px; right: 16px; top: 12px; height: 40px; display: flex; align-items: center; gap: 12px; }
+.ihead .bn { width: 36px; height: 36px; border-radius: 8px; background: #2a2a2a; border: 1px solid #555; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 800; }
+.ihead .t { font-size: 21px; font-weight: 700; }
+.c1 { position: absolute; left: 16px; top: 64px; width: 520px; }
+.leg span { white-space: nowrap; }
+.thumb { position: relative; width: 480px; height: 360px; }
+.thumb .screen { width: 480px; height: 360px; }
+.keep { position: absolute; border: 2px solid #3ddc84; border-radius: 2px; z-index: 3; }
+.keep span, .ko { position: absolute; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 3px; white-space: nowrap; }
+.keep span { top: -1px; left: -1px; background: #3ddc84; color: #08210f; }
+.ko { z-index: 4; background: #fd3636; color: #fff; }
+.hz { position: absolute; left: 0; right: 0; border-top: 2px dashed #e8e8e8; z-index: 4; }
+.hz .hl { position: absolute; left: 6px; top: -22px; font-size: 11px; font-weight: 700; color: #111; background: #e8e8e8; padding: 1px 6px; border-radius: 3px; }
+.hz .hl2 { position: absolute; left: 6px; top: 6px; font-size: 11px; color: #e8e8e8; }
+.below { position: absolute; right: 10px; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 6px; background: #3d2e00; border: 1px solid var(--warn); color: #ffd36b; font-size: 13px; font-weight: 800; letter-spacing: .05em; }
+.below i { width: 12px; height: 12px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 10px var(--warn); display: inline-block; }
+.below small { font-weight: 500; letter-spacing: 0; font-size: 11px; color: #f5d68a; }
+.proj { position: absolute; right: 10px; top: 10px; z-index: 5; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; background: rgba(0,0,0,.7); border: 1px solid #888; color: #ddd; }
+.leg { display: flex; gap: 14px; margin-top: 8px; font-size: 11.5px; color: var(--text2); align-items: center; }
+.leg span { display: inline-flex; align-items: center; gap: 5px; }
+.sw { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
+.vocab { margin-top: 10px; display: grid; grid-template-columns: repeat(3, auto); justify-content: start; gap: 6px 10px; font-size: 11.5px; color: var(--text2); }
+.vocab div { display: flex; align-items: center; gap: 7px; }
+
+.c2 { position: absolute; left: 556px; top: 64px; width: 400px; display: flex; flex-direction: column; gap: 12px; }
+.unv { border-radius: 8px; background: #3d2e00; border: 1.5px solid var(--warn); padding: 10px 12px; color: #ffe3a3; }
+.unv .h { font-weight: 800; letter-spacing: .04em; color: #ffd36b; font-size: 13px; }
+.unv p { margin: 5px 0 9px; font-size: 12px; line-height: 1.4; }
+.btn.amber { background: var(--warn); color: #111; font-weight: 700; }
+.box { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; background: #222; border: 1px solid #333; font-size: 12.5px; }
+.box .grow small { display: block; color: var(--muted); font-size: 11px; }
+.c3 { position: absolute; left: 976px; top: 64px; width: 420px; display: flex; flex-direction: column; gap: 10px; }
+.rchip { height: 34px; padding: 0 12px; border-radius: 17px; display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; background: #2a2a2a; border: 1.5px solid #4a4a4a; color: #ccc; }
+.rchip.on { background: #1e3b5a; border-color: var(--blue); color: #fff; }
+.rchip.aud { position: relative; overflow: hidden; border-color: #fd3636; color: #fff; background: repeating-linear-gradient(45deg, rgba(253,54,54,.22) 0 6px, #241515 6px 12px); }
+.rchip.aud .arm { position: absolute; left: 0; bottom: 0; height: 4px; width: 45%; background: #fff; }
+.rule { border-radius: 8px; background: #1c1c1c; border: 1px solid #3a3a3a; padding: 10px 12px; font-size: 12.5px; line-height: 1.45; color: #ddd; }
+.rule b { color: #fff; }
+</style></head><body>
+<div class="page tall">
+  <div class="caption-bar"><b>E3 · Safety and roles</b><span class="tag">design E · stage view</span><span class="tag">Stage tab · Setup · 5 Audience L selected</span></div>
+  <div class="toolbar">
+    <span class="tb-btn">▶</span><span class="tb-btn">⟳</span><span class="tb-sep"></span>
+    <span class="tb-label">BPM</span><span class="tb-field mono">128.0</span>
+    <span class="beat"><i class="on"></i><i></i><i></i><i></i></span><span class="tb-btn">TAP</span>
+    <span class="tb-sep"></span><span class="tb-btn">Scan</span><span class="tb-label">Venue: Club Nova</span>
+    <span style="margin-left:auto" class="row center gap8"><span class="dot orange"></span><span class="tb-label">Streaming · 3 of 4 truss lasers</span><span class="tb-btn green">Stream</span></span>
+  </div>
+  <div class="tabbar">
+    <div class="tab">Grid</div><div class="tab">Vibes</div><div class="tab">Perform</div><div class="tab">Effects</div><div class="tab active">Stage</div><div class="tab">Settings</div>
+    <div class="spacer"><span class="hint">Mode</span><span class="seg"><span>Live</span><span class="on">Setup</span></span></div>
+  </div>
+  <div class="status-band degraded">▲ DEGRADED · 4 Stage right MISSING · 3 Right center OVERLOADED · 5 Audience L unverified at this venue (capped 10 %)</div>
+
+  <div class="stage">
+    <svg viewBox="0 0 1412 320">
+      <g stroke="#4a4a4a" stroke-width="1.5" fill="none"><line x1="240" y1="40" x2="1172" y2="40"/><line x1="240" y1="51" x2="1172" y2="51"/><path id="zig"/></g>
+      <g fill="#2c2c2c" stroke="#777"><rect x="330" y="53" width="30" height="16" rx="3"/><rect x="556" y="53" width="30" height="16" rx="3"/><rect x="826" y="53" width="30" height="16" rx="3"/><rect x="1052" y="53" width="30" height="16" rx="3" stroke-dasharray="3 2"/></g>
+      <polygon points="240,240 1172,240 1250,272 162,272" fill="#1a1a1c" stroke="#3a3a3a"/>
+      <line x1="24" y1="272" x2="1388" y2="272" stroke="#5a5a5a" stroke-width="2"/>
+      <rect x="105" y="256" width="30" height="14" rx="3" fill="#2c2c2c" stroke="#4992db" stroke-width="2"/>
+      <rect x="1277" y="256" width="30" height="14" rx="3" fill="none" stroke="#555" stroke-dasharray="3 2"/>
+      <g id="crowd"></g>
+    </svg>
+    <div style="position:absolute;left:16px;top:12px" class="row center gap10"><h3 style="color:#cfcfcf">Stage</h3><span class="hint">click a laser to inspect it · every laser shows one status word</span></div>
+    <div class="house" style="left:260px;top:250px">◂ HOUSE LEFT</div>
+    <div class="house" style="right:260px;top:250px">HOUSE RIGHT ▸</div>
+
+    <div class="u" style="left:240px;top:76px"><div class="screen onair" data-shape="circle" data-color="#36e2ff" data-lbl="circle"></div><div class="nm"><span class="n">1</span>Stage left<span class="st live">LIVE</span></div></div>
+    <div class="u" style="left:466px;top:76px"><div class="screen onair" data-shape="circle" data-color="#36e2ff" data-lbl="circle"></div><div class="nm"><span class="n">2</span>Left center<span class="st live">LIVE</span></div></div>
+    <div class="u" style="left:736px;top:76px"><div class="screen onair" data-shape="grid" data-color="#39ff6a" data-lbl="grid" data-lbl2="⚠ 21 fps · too many points"></div><div class="nm"><span class="n">3</span>Right center<span class="st over">OVERLOADED</span></div></div>
+    <div class="u" style="left:962px;top:76px"><div class="screen offair" data-shape="none" data-lbl="4 · no signal" data-dot="orange" data-lbl2="not answering since 21:42"></div><div class="nm"><span class="n">4</span>Stage right<span class="st miss">MISSING</span></div></div>
+
+    <div class="u" style="left:40px;top:96px;width:170px">
+      <div class="nm" style="margin:0 0 6px"><span class="n">5</span>Audience L</div>
+      <div class="screen sel" style="width:170px;height:104px" data-shape="none" data-blocked="0,0,100,100" data-lbl="🔒 audience: off" data-dot="red"></div>
+      <div style="margin-top:6px"><span class="st safe">SAFE (off)</span></div>
+    </div>
+    <div class="u" style="left:1202px;top:96px;width:170px">
+      <div class="nm" style="margin:0 0 6px;color:#999"><span class="n">6</span>Audience R</div>
+      <div class="screen" style="width:170px;height:104px;border:1.5px dashed #555;background:#0c0c0c" data-shape="none" data-lbl="optional" data-lbl2="not at this venue"></div>
+      <div style="margin-top:6px"><span class="st nothere">NOT HERE</span></div>
+    </div>
+  </div>
+
+  <!-- inspector -->
+  <div class="insp">
+    <div class="wedge"></div>
+    <div class="ihead">
+      <span class="bn">5</span><span class="t">Audience L</span>
+      <span class="hint" style="font-size:12.5px">IDN 10.0.0.31 · head 1 · floor row, front edge · house left</span>
+      <span class="st safe" style="font-size:12px">SAFE (off)</span>
+      <span style="margin-left:auto" class="btn sm">Identify</span><span class="btn sm ghost">Hold to solo</span><span class="btn sm ghost">✕</span>
+    </div>
+
+    <div class="c1">
+      <div class="thumb">
+        <div class="screen" data-shape="fan" data-color="#36e2ff" data-scale="0.95" data-blocked="38,66,24,26;80,8,14,20"></div>
+        <div class="keep" style="left:8%;top:6%;width:84%;height:86%"><span>KEEP WITHIN · scan limit</span></div>
+        <div class="ko" style="left:38.6%;top:62%">KEEP OUT · DJ booth</div>
+        <div class="ko" style="left:72%;top:28.5%">KEEP OUT · camera</div>
+        <div class="hz" style="top:52%"><span class="hl">HORIZON · 3 m</span><span class="hl2">below this line = into the audience</span></div>
+        <div class="below" style="top:56%"><i></i>BELOW<small>31 % of points</small></div>
+        <div class="proj">OUTLINE ON LASER · 4 s</div>
+      </div>
+      <div class="leg"><span><i class="sw" style="border:2px solid #3ddc84"></i>keep within</span><span><i class="sw hatch" style="border:1px solid #fd3636"></i>keep out (red wins)</span><span><i class="sw" style="border-top:2px dashed #e8e8e8;height:0;width:18px"></i>horizon (drag)</span></div><div class="hint" style="margin-top:4px">Applied last in the output chain. Perform can't switch them off.</div>
+      <div class="vocab">
+        <div><span class="st live">LIVE</span>emitting</div>
+        <div><span class="st safe">SAFE (off)</span>found, off</div>
+        <div><span class="st over">OVERLOADED</span>drops frames</div>
+        <div><span class="st miss">MISSING</span>not answering</div>
+        <div><span class="st nothere">NOT HERE</span>optional</div>
+        <div><span class="st fault">FAULT</span>interlock / shutter</div>
+      </div>
+    </div>
+
+    <div class="c2">
+      <div class="unv">
+        <div class="h">▲ UNVERIFIED AT THIS VENUE</div>
+        <p>These boxes were checked at <b>Warehouse 9</b>. Project the outline, look at the room, then mark it checked. Until then this laser is capped at 10 %.</p>
+        <div class="row gap8"><span class="btn sm">◎ Project outline (5 s)</span><span class="btn sm amber">✓ Mark checked</span></div>
+      </div>
+      <h3>Safety boxes</h3>
+      <div class="col gap6">
+        <div class="box"><i class="sw" style="border:2px solid #3ddc84"></i><div class="grow">Keep within · scan limit<small>x 8–92 % · y 6–92 %</small></div><span class="btn sm ghost">Edit</span></div>
+        <div class="box"><i class="sw hatch" style="border:1px solid #fd3636"></i><div class="grow">Keep out · DJ booth<small>x 38–62 % · y 66–92 %</small></div><span class="btn sm ghost">Edit</span></div>
+        <div class="box"><i class="sw hatch" style="border:1px solid #fd3636"></i><div class="grow">Keep out · camera<small>x 80–94 % · y 8–28 %</small></div><span class="btn sm ghost">Edit</span></div>
+        <div class="box"><i class="sw" style="border-top:2px dashed #e8e8e8;height:0;width:14px"></i><div class="grow">Horizon · 3 m above the floor<small>line at 52 % of the frame · BELOW light on the tile</small></div><span class="btn sm ghost">Edit</span></div>
+        <span class="btn sm ghost" style="align-self:flex-start">+ Add keep-out box</span>
+      </div>
+      <div class="box" style="background:#1e2a38;border-color:#33506e">
+        <span style="font-size:18px">⇋</span><div class="grow"><b>Mirror safety to 6 Audience R</b><small>flips left ↔ right · 6 is marked unverified too</small></div><span class="btn sm blue">Mirror</span>
+      </div>
+    </div>
+
+    <div class="c3">
+      <h3>Roles</h3>
+      <div class="row gap8 wrap">
+        <span class="rchip on">✓ Beams</span>
+        <span class="rchip">Graphics</span>
+        <span class="rchip aud">🔒 Audience scanning · hold 2 s to arm<span class="arm"></span></span>
+      </div>
+      <div class="hint">Holding: 0.9 of 2 s. Let go early and nothing changes.</div>
+      <div class="rule"><b>Audience lasers never get rerouted cues.</b> Zone maps, chase, swap and hop skip this laser unless the cue itself is marked <b>audience-safe</b>. A wrong live press can't put beams in eyes.</div>
+      <div class="box"><div class="grow">Allowed in vibes<small>Peak only · audience-safe cues only</small></div><span class="chip outline" style="height:24px">Peak</span></div>
+    </div>
+  </div>
+
+  <div class="status" style="position:absolute;left:0;right:0;bottom:0;background:var(--bg)"><span>6 in rig: <b>2 live</b>, 1 overloaded, 1 missing, 1 safe (off), 1 not here</span><span>Safety: <b>1 unverified</b></span></div>
+
+  <div class="callout" style="left:22px;top:248px">1</div>
+  <div class="callout" style="left:4px;top:690px">2</div>
+  <div class="callout" style="left:500px;top:740px">3</div>
+  <div class="callout" style="left:556px;top:548px">4</div>
+  <div class="callout" style="left:968px;top:548px">5</div>
+  <div class="callout" style="left:556px;top:986px">6</div>
+  <div class="notes" style="left:990px;top:850px;width:420px">
+    <b>E3 · Safety lives on the laser, on the stage</b>
+    <ol>
+      <li>Every laser shows one word from a fixed list, right on the stage.</li>
+      <li>The big thumbnail draws keep-within (green), keep-out (red hatched) and the horizon.</li>
+      <li>BELOW lights whenever real output has points under the horizon.</li>
+      <li>A venue change marks safety UNVERIFIED: project, look, mark checked.</li>
+      <li>The audience role needs a 2 s hold; rerouted cues never reach it.</li>
+      <li>Mirror copies the boxes to the other side in one action.</li>
+    </ol>
+  </div>
+</div>
+<script>
+(function(){
+  var NS="http://www.w3.org/2000/svg", zig=document.getElementById('zig'), d="";
+  for (var x=240;x<1172;x+=11){ d+="M"+x+",40 L"+(x+5.5)+",51 L"+(x+11)+",40 "; }
+  zig.setAttribute('d',d);
+  var crowd=document.getElementById('crowd');
+  for(var r=0;r<2;r++){ for(var c=0;c<40;c++){ var cx=30+c*35+(r%2)*17, cy=290+r*22;
+    var g=document.createElementNS(NS,'g'); g.setAttribute('fill','#1c1c1f');
+    var h=document.createElementNS(NS,'circle'); h.setAttribute('cx',cx);h.setAttribute('cy',cy);h.setAttribute('r',6);
+    var s=document.createElementNS(NS,'path'); s.setAttribute('d','M'+(cx-11)+','+(cy+16)+' Q'+cx+','+(cy+3)+' '+(cx+11)+','+(cy+16)+' Z');
+    g.appendChild(h);g.appendChild(s);crowd.appendChild(g);} }
+})();
+</script>
+</body></html>
