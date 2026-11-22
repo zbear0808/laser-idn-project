@@ -77,7 +77,7 @@ Loading `laser-show.app` prints a `Reflection warning` from `cljfx/coerce.clj`. 
 Traps:
 
 - `(stop)` from `dev/user.clj` only stops an app started with `(start)`. After `start-test!` it prints "Stopped." and leaves the window open. Use `(laser-show.app/stop!)`.
-- `reload-styles!` and `watch-styles!` check the same flag, so they refuse after `start-test!`. Call `(require 'laser-show.css.reload)` and then `(laser-show.css.reload/reload-all-styles!)` directly; it returns `{:success? true}`.
+- `reload-styles!` and `watch-styles!` check the same flag, so they refuse after `start-test!`. Call `(require 'laser-show.css.reload)` and then `(laser-show.css.reload/reload-all-styles!)` directly; it returns `{:success? true}`, and the re-render follows by a `:dev/reloaded` event (`(laser-show.events.core/flush!)` waits for it).
 - `start!` does not stop an app that is already mounted. Call `(laser-show.app/stop!)` before `start!`.
 
 ## Reload changed code
@@ -92,6 +92,18 @@ Reload an edited namespace with `(require 'the.ns :reload)`. To be sure view cha
 ```
 
 For specific values, use the pure readers in `src/laser_show/state/extractors.clj`.
+
+## Change app state
+
+Only the event pipeline writes app state. Dispatch an event, then wait until it has run:
+
+```clojure
+(require 'laser-show.events.core)
+(laser-show.events.core/dispatch! {:event/type :timing/set-bpm :bpm 128.0})
+(laser-show.events.core/flush!)   ; true once every queued event has run; false after 2 s
+```
+
+For a raw write with no event for it, `(laser-show.events.core/write-state! assoc-in [:timing :bpm] 128.0)` runs `(apply swap-state! f args)` on the event thread and waits for it. It adds no undo step and leaves the unsaved flag alone. `state/swap-state!`, `assoc-in-state!` and the other write fns throw while an app started with `start-test!` runs, or one started with `(start)` in dev mode.
 
 ## UI work
 

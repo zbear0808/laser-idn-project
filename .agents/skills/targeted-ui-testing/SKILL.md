@@ -56,6 +56,7 @@ Always include a platform alias (`:win`, `:mac`, `:mac-arm` or `:linux`); withou
 - Put new UI tests in the feature namespace they belong to (or a new `laser-show.ui-test.<feature>-test`), with `(use-fixtures :once fixtures/with-toolkit)` and `(use-fixtures :each fixtures/with-app)` from `laser-show.ui-test.fixtures`, so each test mounts a fresh app and can run on its own.
 - Use `KeyCode/SHORTCUT` (Cmd on macOS, Ctrl elsewhere) for shortcut-modifier clicks; never hard-code `KeyCode/CONTROL`.
 - Wrap every state assertion that follows an interaction in `ui/wait-for!`; events are processed asynchronously.
+- Set up app state with `events/write-state!` and wait for a dispatched event with `events/flush!`; a direct `state/swap-state!` throws while the app from `with-app` runs.
 - Failure screenshots are written to `test-results/<ns>/<test>.png`.
 - Keep hardware, network discovery, MIDI, OSC, Link, and gamepad services disabled or mocked in UI tests.
 

@@ -9,10 +9,9 @@
    After loading this namespace, call (build-initial-state) to get the
    complete initial state map for the application.
    
-   State mutations use low-level primitives from laser-show.state.core:
-   - assoc-in-state! for setting values
-   - update-in-state! for updating values
-   - swap-state! for complex updates
+   State writes come from event handlers, which return {:state new-state}
+   for the event pipeline (laser-show.events.core) to write; tests and the
+   REPL use events/write-state!.
    
    NOTE: This is the single source of truth for ALL application state."
   (:require [laser-show.state.core :refer [defstate build-initial-state-from-domains]]))

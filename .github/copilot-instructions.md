@@ -25,7 +25,7 @@ UI Events → Event Handlers (pure) → Effects → State Update → Subscriptio
 ### State Management Pattern
 - **UI reads**: Use subscriptions in `subs.clj` with `fx/sub-ctx` (memoized)
 - **Backend reads**: Use `state/get-raw-state` with extractors (thread-safe, no memoization)
-- **Writes**: Always through events → `state/reset-state!` or `state/assoc-in-state!`
+- **Writes**: Only through events: a handler returns `{:state new-state}` and the event pipeline writes it on the event thread. Never call `state/swap-state!`, `assoc-in-state!` or `reset-state!` directly: while an app runs they throw off the event thread (dev mode, tests) or log an ERROR (production), and kondo flags them in `src/`. From another thread, dispatch an event. Tests and the REPL use `events/write-state!` and `events/flush!` (see `docs/CLJFX_STATE_MANAGEMENT.md`)
 - **Vibe presses are pure events** (`:vibe/press`, `:vibe/release`, handled by `vibes/engine.clj`); **faders never go through the agent**: a CC goes to the input store, and the render derives each fader from it every tick
 
 ```clojure

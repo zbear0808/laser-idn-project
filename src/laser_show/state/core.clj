@@ -5,15 +5,19 @@
    - A single cljfx context atom for all application state
    - The `defstate` macro for declarative state domain definitions
    - Context-aware state updates that preserve memoization cache
-   - Low-level mutation primitives for all state changes
+   - Low-level write primitives, which only the event pipeline calls while
+     an app runs (guard-writes!)
    
    For READ operations:
    - Backend/services: Use extractors directly with get-raw-state (thread-safe, no memoization)
    - UI components: Use laser-show.subs (memoized, context-based subscriptions)
    
    Usage:
-   1. Initialize with (init-state!)
-   2. Mutate via: (assoc-in-state! [:timing :bpm] 140.0)
+   1. Initialize with (init-state!), once at start-up
+   2. Write via event handlers: they return {:state new-state}, and the event
+      pipeline (laser-show.events.core) writes it on the event thread. While
+      an app runs, a write fn called off that thread is refused (see
+      guard-writes!). Tests and the REPL use events/write-state!
    3. Read in backend: (ex/bpm (state/get-raw-state))
    4. Read in UI: (fx/sub-ctx context subs/bpm)
    
@@ -246,10 +250,10 @@
    1. Registers the domain in the domain registry
    2. Defines a var with the initial state for this domain
    
-   State mutations should use the low-level primitives:
-   - assoc-in-state! for setting values
-   - update-in-state! for updating values
-   - swap-state! for complex updates
+   State writes come from event handlers, which return {:state new-state}
+   for the event pipeline to write; tests and the REPL use
+   laser-show.events.core/write-state!. The write fns here (swap-state!,
+   assoc-in-state!, ...) are the pipeline's primitives.
    
    State reads should use:
    - extractors directly with get-raw-state for backend/services (thread-safe, no memoization)
@@ -270,9 +274,8 @@
    - timing-initial (var with initial state map)
    - Domain registration for build-initial-state-from-domains
    
-   Usage:
-   (assoc-in-state! [:timing :bpm] 140.0)
-   (update-in-state! [:timing :bpm] + 1.0)"
+   Usage, in a handler:
+   {:state (assoc-in state [:timing :bpm] 140.0)}"
   [domain-name docstring field-specs]
   (let [domain-kw (keyword domain-name)
         initial-var-name (symbol (str domain-name "-initial"))

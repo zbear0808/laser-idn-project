@@ -7,6 +7,8 @@
    - Effect implementations for side-effects (IDN streaming, timing, etc.)
    - event-handler, the same pipeline run synchronously (tests, fallback)
    - dispatch! for programmatic event dispatch
+   - flush! and write-state!, for tests and the REPL
+   - event-executor and on-event-thread?: the one event thread
    
    Architecture:
    
@@ -15,7 +17,8 @@
    2. Event is queued to agent (returns immediately, non-blocking)
    3. Agent thread: co-effects inject :state and :time into event
    4. Agent thread: Pure handler processes event, returns effects map
-   5. Agent thread: effects execute (:state update, etc.)
+   5. Agent thread: effects execute, :state first (ordered-pipeline), then
+      the others in the map's order
    6. State atom watch triggers re-render on FX thread
    
    Threading (with the app running):
@@ -33,15 +36,20 @@
      runtime's own thread (backend/output_runtime.clj), which owns every engine
    - Nothing running on the agent may block waiting for an event it
      dispatched: that event only runs after the current one
-   - Writers outside the pipeline: start-up and shutdown (app.clj) and a
-     dev code reload. The clipboard ([:ui :clipboard]) is written only in
-     its handlers' :state; :clipboard/write and :clipboard/read talk to the
-     OS clipboard on the FX thread, and nothing waits for them. The show
-     clock's thread sends what it learns as events (:show-clock/*), and views
-     that move every frame draw its newest tick without app state. In dev
-     mode effect-state warns when any write landed between an event's
-     snapshot and its write-back
-   - State updates (atom swap) are thread-safe
+   - Nothing writes app state outside the pipeline: an event's :state, or an
+     effect of the same turn that runs after it (:output/write-status,
+     :dev/swap-state), on the event thread. Start-up's init-state! runs
+     before any agent exists. While an app runs, a write from any thread
+     other than the event thread is refused (state/guard-writes!): it throws
+     in dev mode and in app/start-test!, and is logged at ERROR in
+     production. Tests and the REPL use write-state! and flush!. The
+     clipboard ([:ui :clipboard]) is written only in its handlers' :state;
+     :clipboard/write and :clipboard/read talk to the OS clipboard on the FX
+     thread, and nothing waits for them. The show clock's thread sends what
+     it learns as events (:show-clock/*), and views that move every frame
+     draw its newest tick without app state. In dev mode effect-state warns
+     when any write landed between an event's snapshot and its write-back
+   - State updates (atom swap) are atomic
    - Re-rendering happens on FX thread via atom watch
    
    Without an app (tests, REPL), event-handler and dispatch! run everything

@@ -238,6 +238,12 @@ The cache is designed for the render cycle, not concurrent access. For worker th
 > (swap! *state fx/swap-context assoc :foo :bar)
 > ```
 
+> 🔒 **In this app:** only the event pipeline writes app state. A handler returns `:state`, and the pipeline writes it on the one event thread (`laser-show-events`).
+> - **From other threads** (futures, the show clock, device callbacks), dispatch an event with the result, as in [Pattern 6](#pattern-6-using-effects-pure-event-handling).
+> - **A `swap!` from another thread is atomic, but not safe here:** an event in flight writes back the state it read before your `swap!`, and your change is gone.
+> - **While an app runs**, a direct write (`state/swap-state!`, `assoc-in-state!`, `reset-state!`, …) from any thread other than the event thread throws in dev mode and in tests (`app/start-test!`), and is logged at ERROR in production. Kondo flags direct writers in `src/` (`.clj-kondo/config.edn`).
+> - **Tests and the REPL** write with `(events/write-state! f & args)`, and wait for a dispatched event with `(events/dispatch! e)` then `(events/flush!)`.
+
 ### How the Renderer Handles Cross-Thread Updates
 
 ```
@@ -257,6 +263,8 @@ The renderer:
 ---
 
 ## Async Patterns from UI Handlers
+
+> **In this app:** Patterns 1–5 `swap!` the state from a future or an executor. This app doesn't use them for app state: the worker dispatches an event with its result instead (Pattern 6, and the "In this app" note under [Modifying State from Other Threads](#modifying-state-from-other-threads)).
 
 ### Pattern 1: Simple Future from Handler
 
@@ -607,6 +615,8 @@ For maximum testability, use the effects system. cljfx provides helper functions
   (swap! *state fx/swap-context update :counter inc))
 ```
 
+In this app an atomic update is necessary but not enough: an event in flight can still undo it, so a worker dispatches an event instead.
+
 ### 3. Handle Errors Gracefully
 
 ```clojure
@@ -677,3 +687,5 @@ For data that updates very frequently (60+ fps), consider keeping it outside the
 | Debounced input | Executor + cancellable futures |
 
 The key insight: **Clojure atoms handle thread safety. The renderer handles getting updates onto the FX thread. You just need to use `fx/swap-context` for contexts.**
+
+In this app, though, only the event pipeline writes app state; see the "In this app" note under [Modifying State from Other Threads](#modifying-state-from-other-threads).
