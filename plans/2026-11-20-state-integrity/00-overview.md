@@ -1,7 +1,7 @@
 # State integrity — overview
 
 **Written:** 2026-11-20   **Written for commit:** `3229c95` (`master`)
-**Status:** Proposed. 01's E1–E3 answered A, the ★ options (2026-11-21), so 01 is ready to build; 02 needs W1–W6, and the clipboard step (keyboard plan, Step 4a) needs D8, D13 and D14   **Last verified against:** 01 at `fe7d554` (2026-11-21, re-checked after the output drivers, zones Z4–Z6, vibe Phase 8, Decimate's follow-ups and the Projectors layout pass; probes e1–e4 run three times there, e1i added); 02 and the clipboard update at `cc9e000` (each re-checked there after Decimate landed; probes w1–w6 and keyboard p5–p7, p9–p17 run at `3229c95` and again at `cc9e000`), not re-checked since
+**Status:** In progress. **01 done** (2026-11-21, `09b6db7`, `dba29bb`; its §11 As built), its E1–E3 answered A, the ★ options; 02 needs W1–W6, and the clipboard step (keyboard plan, Step 4a) needs D8, D13 and D14   **Last verified against:** 01 at `fe7d554` (2026-11-21, re-checked after the output drivers, zones Z4–Z6, vibe Phase 8, Decimate's follow-ups and the Projectors layout pass; probes e1–e4 run three times there, e1i added); 02 and the clipboard update at `cc9e000` (each re-checked there after Decimate landed; probes w1–w6 and keyboard p5–p7, p9–p17 run at `3229c95` and again at `cc9e000`), not re-checked since
 **Supersedes / Superseded by:** none   **Related findings:** review 02 M1, #2, #15, #21, #23; review 04 #23, MR7; keyboard K-6…K-11; output runtime O-9
 
 The 2026-11-20 cljfx state audit was done by six read-only auditors. It was reported in the session and isn't saved. It found three ways app state can be wrong for reasons unrelated to any handler's logic:
@@ -13,7 +13,7 @@ This folder plans the first two. The third already had a plan, so it was updated
 
 ## Start here
 
-**Do `01-engine-snapshot.md` first.** It is on the output path, it is the smallest (~1 day), and it needs nothing else: E1–E3 were answered A on 2026-11-21. The output drivers changed nothing in its design: every driver's engine calls the same frame provider, and no driver reads app state (01 §1.1).
+**`01-engine-snapshot.md` is done** (2026-11-21, `09b6db7`, `dba29bb`): every frame comes from one tick's snapshot, and no engine thread reads app state (01 §11). Its follow-ups are in 01 §10: the routing recomputed on every corner-pin drag step, and a device-paced add-on driver checked on hardware.
 
 **Then do clipboard Step 4a** (~1.25 days, D8, D13, D14). It fixes visible bugs: a list copy is undone, and Paste buttons stay off or light up for the wrong things. It also fixes the agent waits: every copy and list paste makes the event agent wait for the FX thread (503–579 ms behind a busy FX thread, keyboard p10), and live triggers queue behind it.
 
@@ -21,7 +21,7 @@ This folder plans the first two. The third already had a plan, so it was updated
 
 | Doc | What | Size | Needs | Depends on |
 |---|---|---|---|---|
-| `01-engine-snapshot.md` | Every frame comes from one snapshot | ~1 d (1–1.5 d with both full suites and the as-built note) | nothing (E1–E3 answered A, 2026-11-21) | nothing |
+| `01-engine-snapshot.md` | Every frame comes from one snapshot | **done** (`09b6db7`, `dba29bb`) | – | nothing |
 | `../2026-11-13-keyboard-focus-window-lifecycle/04-phase4-clipboard.md`, Step 4a | One clipboard | ~1.25 d | D8, D13, D14 | nothing; it no longer waits for keyboard Phase 3 (04 §0) |
 | `02-direct-state-writes.md` | No state writes outside the event pipeline | ~4½ d (~3½ with W2 B and W3 B) | W1–W6 | nothing; commit 9 is better after 4a |
 
@@ -33,7 +33,7 @@ Severities are this overview's own. Evidence is from probes that were run, unles
 
 | ID | Finding | Sev | Evidence | Plan |
 |---|---|---|---|---|
-| SI-1 | One frame can take its show from tick N and its calibration, safety zone, test pattern, Identify or BLACKOUT from a later state, or even its zone and its calibration from two different states. Two lasers can draw the same tick differently. Each engine reads app state once or twice per frame, besides the snapshot (`backend/multi_engine.clj:223-255`, the provider, which every output driver's engine calls) | H | e1a–e1i, e4 (01 §1.2). A safety narrowing just after a tick lights 0 of 64 points in that tick's frame (e1b); one frame takes its pin and its zone from two states (e1e); Decimate's recount follows the edit, not the tick (e1h), while its meter rule follows the tick (e1i) | 01 |
+| SI-1 (**fixed by 01**) | One frame can take its show from tick N and its calibration, safety zone, test pattern, Identify or BLACKOUT from a later state, or even its zone and its calibration from two different states. Two lasers can draw the same tick differently. Each engine reads app state once or twice per frame, besides the snapshot (`backend/multi_engine.clj:223-255`, the provider, which every output driver's engine calls) | H | e1a–e1i, e4 (01 §1.2). A safety narrowing just after a tick lights 0 of 64 points in that tick's frame (e1b); one frame takes its pin and its zone from two states (e1e); Decimate's recount follows the edit, not the tick (e1h), while its meter rule follows the tick (e1i) | 01 |
 | SI-2 | A list copy writes `[:ui :clipboard]` behind the pipeline (`state/clipboard.clj:31-34`), and the handler's `:state` then undoes it. The Cue Chain Editor's Paste buttons never light, and the projector chain's light only after a re-render | M | keyboard p5, p9, p11 | 04 Step 4a (K-7) |
 | SI-3 | Every copy and list paste makes the event agent wait for the FX thread (`state/clipboard.clj:64,82`) | M | keyboard p10: 514–535 ms behind a copy and 503–579 ms behind a paste, with the FX thread busy for 500 ms, against 1–2 ms on its own | 04 Step 4a (K-10) |
 | SI-4 | Two views read the OS clipboard while rendering, and one view copies behind the pipeline (`views/dialogs/effect_chain_editor.clj:95, 144-145`; `views/tabs/projectors.clj:560`) | M | keyboard p11, p12 | 04 Step 4a (K-10, K-11) |

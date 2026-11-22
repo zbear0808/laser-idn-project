@@ -274,7 +274,7 @@ A disabled button shows no tooltip in JavaFX, so where one is disabled the reaso
 7. **Last.** Only `sanitize-frame` and the encoder run after the stage. Neither can light a point. On the stage's output `sanitize-frame` can only add a dark copy in front or double a lone point, and the encoder's rounding moves a point by at most one step (1/32767 at 16 bits).
 8. **The test pattern goes through safety**, and BLACKOUT makes it dark. BLACKOUT doesn't change what grid cues do, and the effects grid (the Master included) doesn't touch the pattern.
 9. **Live widening needs a yes.** While a laser is outputting, no edit, Undo or Redo widens its allowed area without `:confirmed?`, and `normalize` never widens one. Two things put a larger area back without asking: Escape during a drag (the zone from before the drag), and Open (D-34, with its notice).
-10. **Applied at once.** An edit is in force from the next frame, with no engine restart.
+10. **Applied at once.** An edit is in force from the next frame, with no engine restart. *Since `plans/2026-11-20-state-integrity/01-engine-snapshot.md` (`dba29bb`): from the first tick that reads it, on every laser at once; the zone comes with the tick's snapshot, not from app state.*
 
 ## 9. Tests
 

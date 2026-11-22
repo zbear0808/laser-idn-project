@@ -344,7 +344,7 @@ One laser `:p1` at 25 kpps, example b: track 1 (circle, 33 points) → `:auto/le
 
 **Invariants**:
 1. One render per cue per tick (spec 8). Routing, composition, the guard, the laser cells and the cue warnings never render: they transform frames that were already rendered. The routing is made before the render, from the tick's one read of app state, and never from its frames (spec §5).
-2. The engines, the laser cells and the cue warnings compose from the snapshot alone. No composition step reads app state (spec 6). Only the projector effects and Z1's safety settings are still read live, as today.
+2. The engines, the laser cells and the cue warnings compose from the snapshot alone. No composition step reads app state (spec 6). Only the projector effects and Z1's safety settings are still read live, as today. *Since `plans/2026-11-20-state-integrity/01-engine-snapshot.md` (`dba29bb`) they come with the snapshot too (`multi-engine/engine-inputs`): no engine reads app state.*
 3. A laser draws each (cue, key) at most once, and each identical frame at most once per cue (spec 4). It has at most two regions, `:L` and `:R`, plus whole content (spec 5).
 4. Composition is deterministic: the same cue frames and routing give the same frame, whatever the order of the keys in the cue's map.
 5. Composition keeps every point. The frame has exactly the points of the distinct contributions (fitted ones moved, no colour changed), plus 2 per join, and `plan-points` equals its count.

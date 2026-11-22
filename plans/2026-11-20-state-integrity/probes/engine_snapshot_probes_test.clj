@@ -38,7 +38,9 @@
 ;; clock will, e1 should print "follows the tick" for every case, e1e reach
 ;; 0.80, e1h keep the guard's 1,800 points and record, e1i keep Decimate's
 ;; [833 833 833] for the tick, e2b no reads on the
-;; engine threads, e4 0 reads per frame.
+;; engine threads, e4 0 reads per frame. Run after the plan at dba29bb
+;; (2026-11-21): it does, in every run (01 "As built"). The line numbers in
+;; the labels below are fe7d554's, before the plan.
 ;;
 ;; Timings are medians (p95) of 5,000 calls after 3,000 warm-up calls, on
 ;; whatever else the machine is doing: compare them with each other, not
@@ -225,7 +227,7 @@
                 (#'me/projector-frame :p snap))
         all-new (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:all line-to-08}}]))]
     (say "e1e calibration and safety edited while the engine composes (inside fit-guard/guard): the frame is lit to x ="
-         (f2 (reach mixed)) "= the line's 0.8 through the NEW pin 0.5, clipped by the OLD limit 0.9;"
+         (f2 (reach mixed)) "(0.40 would be the line's 0.8 through the NEW pin 0.5, clipped by the OLD limit 0.9);"
          "all old would be 0.80, all new" (f2 (reach all-new)))))
 
 (defn- e1f []
@@ -295,7 +297,7 @@
       (say "e1i Decimate (25 kpps, 30 fps) removed from the calibration after the tick, a 3,000-point cue: the tick's routing has"
            ":decimate-budget" (get-in snap [:routing :outputs :p :decimate-budget])
            "| the tick's [points sent, record's :points, :effect-points] are" (pr-str (counts before)) "before the edit and"
-           (pr-str (counts after)) "after (the edit's chain, the tick's meter rule) | the next tick:" (pr-str (counts next-tick))))))
+           (pr-str (counts after)) "after ([1800 1800 1800] would be the edit's chain under the tick's meter rule) | the next tick:" (pr-str (counts next-tick))))))
 
 (deftest e1-a-frame-mixes-states
   (e1a) (e1b) (e1c) (e1d) (e1e) (e1f) (e1g) (e1h) (e1i))

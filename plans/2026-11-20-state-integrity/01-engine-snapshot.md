@@ -1,7 +1,7 @@
 # Every frame comes from one snapshot
 
 **Written:** 2026-11-20   **Written for commit:** `3229c95` (`master`)
-**Status:** Proposed. E1–E3 answered A, the ★ options (2026-11-21, §Decisions); ready to build   **Last verified against:** `fe7d554` (2026-11-21: every citation and claim re-checked after the output drivers (`5a9a41c`..`4b22368`), zones Z4–Z6, vibe Phase 8, Decimate's follow-ups Q-D-1…Q-D-4 B and the Projectors layout pass, `cc9e000`..`fe7d554`; probes e1–e4 run three times there, with e1i added, JDK 25.0.5, macOS arm64, load average 1.6–2.5; §1.5). Earlier: `cc9e000` and `3229c95`, three runs each, 2026-11-20
+**Status:** **Done** (2026-11-21, `09b6db7`, `dba29bb`; §11 As built). E1–E3 answered A, the ★ options (2026-11-21, §Decisions)   **Last verified against:** `fe7d554` (2026-11-21: every citation and claim re-checked after the output drivers (`5a9a41c`..`4b22368`), zones Z4–Z6, vibe Phase 8, Decimate's follow-ups Q-D-1…Q-D-4 B and the Projectors layout pass, `cc9e000`..`fe7d554`; probes e1–e4 run three times there, with e1i added, JDK 25.0.5, macOS arm64, load average 1.6–2.5; §1.5). Earlier: `cc9e000` and `3229c95`, three runs each, 2026-11-20
 **Supersedes / Superseded by:** supersedes the live reads Z1 put into `projector-frame` (`plans/2026-11-19-zones/03-phase-z1-safety.md` §4, built in `df65be4`, `fb801f2`, `1b14cc4`) and the "from the next frame" of its §8 invariant 10; Z3's "Only the projector effects and Z1's safety settings are still read live, as today" (`05-phase-z3-routing-core.md` §8 invariant 2). Takes over review 04 #23, the engines' part (`plans/2026-11-07-improvement-review/04-output-pipeline.md:174-179`), which the show clock's Phase 4 left as "Observed, not changed" (its §10, `git show 2d1f813~1:plans/2026-11-17-show-clock/04-phase4-one-timing-context.md`), and MR7's step "Pass `raw-state` into `apply-projector-effects`" (`04-output-pipeline.md:347`). Superseded by: none   **Related findings:** review 04 #23, MR7; show clock S-5 (its `00-overview.md` §2, `git show 2d1f813~1:plans/2026-11-17-show-clock/00-overview.md`); zones-needs T-12 ("use the same tick everywhere", `plans/2026-11-19-zones-needs/03-conflicts.md:118-126`); `docs/CLJFX_STATE_MANAGEMENT.md` Best Practice 1 (`:576-594`); output drivers C-6 ("Drivers get no access to app state", `plans/2026-11-19-output-drivers/01-driver-contract.md:81`)
 **Needs:** nothing. E1–E3 are answered; no dependency on the sibling plans (§10).   **Size:** ~1 d (1–1.5 d with both full suites, the probes in three plan folders and the as-built note)
 
@@ -223,6 +223,7 @@ An edit is in the first frame whose read comes after the edit's write (the `:sta
 The numbers use the medians of the `fe7d554` runs (§1.3): the 4-cue scene's d (0.18–0.19 ms), x₁ (0.08–0.09), x₂ (0.18–0.25) and s (1.21–1.53), on this machine. At `cc9e000` the same table gave increases of 0.24 and 0.33 ms; the difference is the machine (§1.3). Then up to D more at the DAC (16.7–40 ms for 418–1,000 points at 25 kpps). Under load the tails are longer: each part's p95 was between 0.16 and 1.14 ms in these runs (§1.3), a fifteenth of a tick or less. From the code with e2's numbers put in; not measured end to end, and *unverified* on a real DAC.
 
 - **Which edits get later.** Only those that land between the clock's read and the engines' reads. That window is d + x, about 0.3–0.4 ms of each 16.67 ms tick, so about 2 % of edits. They move to the next tick, the frame they belong with. Every other edit reaches the laser at the same moment as today. For a device-paced driver x can reach one interval, so more of its edits move to the next tick; the worst case after, T + d + s, doesn't depend on x (*unverified*, no such driver ships).
+- **Device-paced add-on drivers** (they wait for `:ready?` before asking for a frame, `streaming_engine.clj:397-399`): accepted as *unverified* for now (the user, 2026-11-21). Their provider call takes the newest snapshot like any other engine's, so their frames are one tick's too; the latency above is still to be checked with a real device-paced add-on on hardware (§10).
 - **BLACKOUT on the show itself is already per tick.** Pressing it returns `:dispatch {:event/type :transport/stop}` (`toggle-blackout`, `vibes/engine.clj:469-488`, the dispatch at `:488`), which the pipeline runs inline in the same turn (`effect-dispatch`, `events/core.clj:164-167`). `handle-transport-stop` sets `[:playback :playing?]` false (`events/handlers/timing.clj:92-101`, `:97`). The tick reads that (`show_clock.clj:283`). Only the pattern's BLACKOUT was live. After this plan both go through the snapshot.
 - **Identify**: E1 A times the flash by the tick, so each 250 ms half starts on a tick boundary, at most one tick (16.7 ms) late.
 - **The one case that gets slower: a stalled clock.** With no tick for 50–250 ms, today a keepalive resend (a new provider call, `streaming_engine.clj:389-390`, `:401`) re-reads app state, so a narrowing reaches the laser at the next resend (≤ 50 ms). After, the resend repeats the tick's frame, and the narrowing waits for the next tick. At 250 ms (`STALE_MS`) the engine sends empty frames anyway (S3 A). So the worst case during a stall grows from about 50 ms to 250 ms, and then the laser is dark. During a stall the show is frozen as well. From reading the code, not measured. Making resends re-read the zone is rejected (§10).
@@ -403,7 +404,8 @@ Run, in this order:
 - **Caching built calibration chains** (rgb-curves' LUTs, 45–48 µs per frame per laser, e3): later, as a performance item. It needs static effects told apart from modulated ones, and since Decimate it must keep a chain's per-frame count.
 - **An `apply-safety` that trusts an already normalized zone**, which would save its second normalize (6–22 µs): rejected for the safety stage.
 - **`apply-safety`'s cost with blocked areas** (652–662 µs per 1,000 points, e3) **and Decimate's in a calibration chain** (about 210–225 µs per frame on 1,800 points, e3; Q-Z3-7 is the same question for the guard): not this plan.
-- **The routing recomputed on every calibration edit** since Q-D-2 B (28–189 µs on the clock thread per change, e3), because `[:chains :projector-effects]` is one of its keys: not this plan; it changes no frame.
+- **The routing recomputed on every calibration edit** since Q-D-2 B (28–189 µs on the clock thread per change, e3; 34–213 µs after this plan), because `[:chains :projector-effects]` is one of its keys, so every corner-pin drag step recomputes it: **follow-up work**, a later performance item (the user, 2026-11-21), not this plan; it changes no frame. A fix would key the routing on each laser's Decimate budget rather than on the whole chains map.
+- **Device-paced add-on drivers on hardware** (follow-up): the frames are one tick's by construction (the provider is the only call), but the latency of §4.2 for a driver that waits on `:ready?` is *unverified* until a real device-paced add-on is run on hardware (the user, 2026-11-21; the output drivers' D5 is the natural place).
 - **The dead preview readers** (`frame_service.clj:71-91`) **and the 2-arity `generate-frames-by-zone`** (`:469-473`): out of scope. No frame reads them, and deleting changes no frame. The reader and its private helper are a two-test cleanup for a later commit (Z3 §11 left them too). The 2-arity has about 35 test call sites, and the clock's read count already guards against it.
 - **`multi-engine/create-engines`** (`:290-305`) reads app state, but no caller in `src` uses it (only `multi_engine_test.clj:116`, `:187`), and it builds engines rather than frames.
 - **The output status thread's read** (`output_runtime.clj:328`): it compares the status with app state every 250 ms and dispatches only on a change; it is not a frame input.
@@ -411,6 +413,110 @@ Run, in this order:
 - **A laser just turned off, whose engine is still being stopped**, keeps drawing the test pattern until the lifecycle thread stops it, as today (the tick still lists it in `[:projectors]`).
 - **Not here**: MIDI, OSC and Link callbacks that read live state; the direct `swap-state!` writers (`plans/2026-11-20-state-integrity/02-direct-state-writes.md`); the clipboard (`plans/2026-11-13-keyboard-focus-window-lifecycle/04-phase4-clipboard.md`).
 - **The sibling plans**: no dependency either way. The engines write no app state and, after this plan, read none. A calibration pasted into a laser's chain lands in `[:chains :projector-effects]` like any other edit, so the next tick carries it, however the clipboard plan has the paste written. The new tests set state as every engine test does today (`state/assoc-in-state!`, `multi_engine_test.clj:200`). If plan 02 fences that off for tests too, they follow whatever 02 gives tests.
+
+## 11. As built (2026-11-21, `09b6db7`, `dba29bb`)
+
+Built on branch `engine-snapshot` from `979c6c8`, in §9's order: commit 1 `09b6db7` (the snapshot carries `:engine-inputs`), commit 2 `dba29bb` (the engines read only the snapshot), commit 3 this note. JDK 25.0.5, macOS arm64.
+
+### What changed per namespace
+
+- `laser-show.backend.multi-engine`: NEW public `engine-inputs [state wall-ms]` (§7's map, the state's own `:projectors` and `[:chains :projector-effects]`). `apply-projector-effects [frame projector-id items timing-ctx]` reads no state. `guard-safety`, `test-pattern-mode`, `test-pattern-frame` and `show-frame` take `inputs`; `now-ms` is gone (E1 A). `projector-frame` keeps `[projector-id snapshot]`, draws nothing for a laser missing from `[:engine-inputs :projectors]` or a snapshot without `:engine-inputs`, and has no stale check. That check moved, unchanged, into `create-projector-frame-provider`. The recount and meter rule are as they were. The namespace docstring says no engine reads app state. `state.core` is still required, for `create-engines` (§10).
+- `laser-show.services.show-clock`: `tick!`'s snapshot gains `:engine-inputs (multi-engine/engine-inputs state (System/currentTimeMillis))` from the tick's one read; requires `multi-engine` (no cycle); docstring step 4.
+- `laser-show.animation.show-time`: the `!snapshot` docstring lists `:engine-inputs`.
+- `laser-show.backend.output-runtime`: the `fingerprint` docstring ("the routing, safety and calibration come with each tick").
+- Probes: `zones_probes_test.clj` (`snapshot`) and `vibe_probes_test.clj` (`zone-snapshot`) carry `:engine-inputs`; `output_probes_test.clj` p8 passes the chain. z1, v19–v22 and p8 were run after the change and draw as before. This plan's probe labels for e1e and e1i now say what the before-value would have been, since the printed value is now the tick's.
+- Not changed, as §4.1 says: `streaming_engine.clj`, `routing/*`, `animation/safety.clj`, `test_pattern.clj`, `fit_guard.clj`, `effects/points.clj`, `frame_service.clj`, `output/*`, `idn/driver.clj`, views and handlers.
+
+### Deviations (the plan's decisions kept; its text fixed here)
+
+1. Private helper `chain-of [inputs projector-id]` in `multi-engine`, to read a laser's chain from the inputs in one place (the pattern and the show frame).
+2. `test-pattern-mode` also checks that `:wall-ms` is there before it compares it with `until`, so an inputs map without a wall clock shows no Identify instead of throwing. `engine-inputs` always sets it.
+3. The multi-engine `snapshot` fixture builds the routing and `:engine-inputs` from **one** read of app state (§8 sketched two reads); it also takes a `:wall-ms` option.
+4. The show-clock and show-time docstrings went into commit 1 with the field they describe; `multi-engine`'s and `fingerprint`'s are in commit 2.
+5. The new engine tests sit in a section at the end of `multi_engine_test.clj`, because they use the file's `heavy`, `decimate` and `identity-curves`, which are defined late in the file. They add small fixtures of their own (`line-to-08`, `pin`, `box`, `reach`, `circle-points`, `laser`).
+6. `show_clock_test/with-engines` gains a 3-arity, `(with-engines n {:idn {…} :others {id projector}} f)`, and returns the engines so a test can read their stats. Existing callers are unchanged.
+7. In `engine-reads-no-app-state-test` the test pattern through a zone with a blocked area has 705 points, not 537 (the safety layer also outlines the blocked area), so the test checks for "more than 300".
+
+### Tests
+
+Added (all red first, against the engine of the commit before):
+
+| Test | Red result |
+|---|---|
+| `multi-engine-test/engine-inputs-are-the-ticks-own-maps-test` | 6 failures against a stub returning nil |
+| `show-clock-test/snapshot-carries-engine-inputs-test` | 8 failures (4 per tick, idle and playing): no `:engine-inputs` |
+| `calibration-edit-waits-for-the-next-tick-test` (e1g) | the tick's frame followed the edit (circle 0.50 → 0.25) |
+| `decimate-edit-waits-for-the-next-tick-test` (e1h) | 3: the tick's frame, its record and the provider's smoothed record were [833 833], not [1800 1800] |
+| `decimate-removal-waits-for-the-next-tick-test` (e1i, a test of its own as the user asked) | [1800 1800 1800], not [833 833 833] |
+| `safety-edit-waits-for-the-next-tick-test` (e1b) | 0 of 64 lit |
+| `blackout-and-test-pattern-wait-for-the-next-tick-test` (e1c, e1d, Identify) | 3: BLACKOUT gave 0 points, not the pattern's 537; the pattern replaced the tick's cue; Identify at `:wall-ms` 7000 didn't flash (the engine read its own clock) |
+| `edit-while-a-frame-is-made-leaves-it-alone-test` (e1e) | reach 0.40, not 0.80 |
+| `lasers-of-one-tick-share-its-state-test` (e1f) | `:b` 0.40 |
+| `engine-reads-no-app-state-test` | 7: all six frames threw "test: an engine read app state", and so `[:safety :p]` wasn't reported (plus one failure that was the test's own 537, fixed per deviation 7) |
+| `laser-the-tick-doesnt-know-draws-nothing-test` | 2: both snapshots drew the test pattern from app state |
+| `same-tick-same-frame-test` | the resend was the Identify pattern, not the tick's frame |
+| `show-clock-test/engines-read-no-app-state-test` | `{"idn-streaming-p1" 54, "idn-streaming-p2" 54, "idn-streaming-p3" 54, "output-streaming-p4" 54}` reads in the 60 hand ticks: 2 per frame |
+
+Commit 2's red run: 11 tests, 24 failures, 0 errors (`blackout-…` run on its own: 3 more). Commit 1's: 14 failures in its 2 tests.
+
+Existing tests changed, with the reason:
+- `multi-engine-test`'s `snapshot` fixture: carries `:engine-inputs` (deviation 3). No other test there changed.
+- `failing-calibration-effect-skips-only-itself-test`, `skipped-calibration-effect-is-reported-test`: pass the chain to `apply-projector-effects` instead of writing it to app state. Same assertions.
+- `identify-flashes-then-stops-test`: sets `:wall-ms` instead of redefining `me/now-ms`. Same table (7000, 7300, 7500, 10000).
+- `output-lifecycle-test`'s `stopping-every-engine` fixture: also `show-time/reset-runtime!` in its `finally` (§8). No assertion changed.
+- `show-clock-test/with-engines`: the 3-arity (deviation 6).
+
+### Probes e1–e4, before and after
+
+Before: one run at `979c6c8` (code identical to `fe7d554`), load 1.3–2.3 by `uptime`. e1a–e1i gave §1.2's results exactly. e2a d = 22.8 / 120.0 / 210.9 µs (idle / 1 cue / 4 cues). e2b: 720 reads in 2 s (240 per engine), x₁ 66.8 µs, x₂ 152.8 µs, s 1.27–1.32 ms. e4: 2 / 1 / 2 / 1. e3: the stand-in map 0.67 µs.
+
+After: three runs at `dba29bb`, load 2.1–3.0 by `uptime` before and after the runs (e3's own reading 2.1, 2.2, 3.0). e1 and e4 were the same in all three runs:
+
+| Probe | Before | After (every run) |
+|---|---|---|
+| e1a pin edited after the tick | 0.80 → 0.40 | 0.80 → **0.80**, follows the tick |
+| e1b limit narrowed after the tick | 64 → 0 lit | 64 → **64** lit; the next tick fits `[-0.08 0.00 0.22]` and keeps 64 |
+| e1c BLACKOUT after the tick | 537 → 0 | 537 → **537** |
+| e1d pattern on after the tick | 2 → 537 | 2 → **2** |
+| e1e edit inside the guard | 0.40 | **0.80** (all new: 0.30) |
+| e1f two lasers | 0.80 / 0.40 | **0.80 / 0.80** |
+| e1g through `tick!` | 0.50 → 0.25 | 0.50 → **0.50** |
+| e1h Decimate added | [1800 1800] → [833 833] | [1800 1800] → **[1800 1800]**; the next tick [833 833] |
+| e1i Decimate removed | [833 833 833] → [1800 1800 1800] | [833 833 833] → **[833 833 833]**; the next tick [1800 1800 nil] |
+| e2b engine reads in 2 s | 720 | **0** in each run |
+| e4 reads per frame (cue / idle / pattern / pattern in BLACKOUT) | 2 / 1 / 2 / 1 | **0 / 0 / 0 / 0** |
+
+After, the timings: e2a d = 22.5–26.0 µs idle, 108.8–127.7 µs for 1 cue, 184.7–221.5 µs for 4 cues (medians; within the noise of §1.3). e2b s = 0.35–1.44 ms, which isn't comparable with before: before, the probe's own wrapper of `get-raw-state` ran on the engine threads twice per frame, and after it never does. e3: the real `engine-inputs` costs 0.46–0.50 µs per tick. The whole engine frame costs 803–846 µs with two blocked areas and 135–153 µs without a zone. The routing costs 34–213 µs per change for 1–8 lasers.
+
+### Suites
+
+- Targeted unit tests (`multi-engine show-clock output-lifecycle engine-wire streaming-engine driver rig compose test-pattern safety fit-guard points show-time decimate output-runtime`): 511 tests, 508,565 assertions, 0 failures. `:test-timing` for `output-lifecycle multi-engine show-clock streaming-engine`: 4 tests, 0 failures.
+- UI namespaces, one at a time: `streaming-status-test` 10/53, `rig-card-test` 6/25, `rig-strip-test` 13/44, `projector-drivers-test` 18/99, `safety-editor-test` 8/13, `projectors-layout-test` 5/60, `setup-dialogs-test` 16/48, `perform-test` 23/154, `preview-test` 10/23 (tests/assertions), all 0 failures. `rig-card-test`'s log shows a "Show clock stalled" for laser `:a` after a `with-clock` block ends while its engine still runs. It goes through the same check and the same `[:provider id]` report as before, which now run in the provider instead of `projector-frame`.
+- Full unit suite (`clj -M:mac-arm:test`): 1,852 tests, 570,377 assertions, 0 failures, 0 errors (load 2.3–3.2).
+- Full headless UI suite: 273 tests, 1,461 assertions, 0 failures, 0 errors (load 2.2–2.7).
+- kondo (`--lint src test --parallel --fail-level error`): 0 errors, 17 warnings, none in a file this plan touched.
+- No timing failure in any run, so nothing had to be rerun.
+
+### Live check (app-repl and plorer)
+
+A headless REPL with `laser-show.rig-file` and `laser-show.addons-dir` set to temp folders, `start-test!`, the real show clock thread (`show-clock/start!`), and the test LSPS receiver on loopback. Nothing scanned the network. An LSPS laser was added by `:projectors/add-manual` and streamed with the Stream button. Cue A1 (a circle, 65 points on the wire) was given a rotation, so every tick's frame differs. Every published snapshot was recorded. Each frame the receiver reassembled was compared with the wire encoding of `(projector-frame pid s)` (after `sanitize-frame`) for every recorded snapshot `s`:
+
+| Phase | Frames received | Matched one tick | Ticks in order |
+|---|---|---|---|
+| A: rotating circle | 92 (91 distinct) | 92 | yes |
+| B: corner pin (`:chain/update-param`) and safety zone (`:projectors/set-safety`, ±1.0 ↔ ±0.5) edited every 7 ms, 140 edits | 113 (113 distinct; 96 of 65 points, 17 of 67 with the safety crossings) | 113 | yes |
+| C: Identify (button, then its confirm dialog) | 235: 90 pattern (537 points), 90 dark, 55 show | 235 | yes |
+| D: test pattern on, BLACKOUT on and off, pattern off | 156: 76 pattern, 40 dark, 40 show | 156 | yes |
+| E: Decimate (1 kpps, 30 fps: 33 points) added, then removed (`:chain/set-items`, the list's delete) | 149: 63 of 33 points, 86 of 65 | 149 | yes |
+
+So 0 frames out of 745 failed to match a single tick, while the pin and the zone were changing every few milliseconds. Identify's halves were exactly 15 frames each: the flash is timed by the tick. Engine stats after Decimate went in: `:points 33 :effect-points 33 :low? false`; after it came out, `:points 65` and no `:effect-points`. Over the whole session there were 11,749 packets and 11,251 complete frames, 0 LSPS rule violations (`lsps-receiver/violations`), 0 skipped frames, about 60.7 fps sent, and no output errors at the end. Screenshots are in `test-results/engine-snapshot/`: `es-1-streaming-pin-zone.png`, `es-2a-identify-confirm.png`, `es-2b-identify-flashing.png`, `es-3a-test-pattern.png`, `es-3b-blackout-on-pattern.png`, `es-4a-decimate-added.png` (the card's thumbnail and "−49% pts"), `es-4b-decimate-removed.png`. Not checked: a real DAC, and a device-paced driver (§10).
+
+### The user's answers (2026-11-21)
+
+1. Device-paced add-on drivers: accepted as *unverified*, to be checked on hardware (§4.2, §10).
+2. `decimate-removal-waits-for-the-next-tick-test` stays a test of its own.
+3. The routing recomputed on every corner-pin drag step since Q-D-2 B: a later performance item (§10, follow-up work).
+
 
 ---
 
