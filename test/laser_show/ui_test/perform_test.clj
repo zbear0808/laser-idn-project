@@ -57,21 +57,12 @@
   (ui/wait-for! #(= :perform (get-in (app-state) [:ui :active-tab])))
   (ui/assert-visible! "#vibe-pad-row"))
 
-(defn- flush-event-queue!
-  "Wait until every event dispatched so far has been handled: they are
-   handled in order, so a marker landing means the rest did."
-  []
-  (ui/sync-fx!)
-  (let [marker (+ 60.25 (rand-int 100))]
-    (events/dispatch! {:event/type :timing/set-bpm :bpm marker})
-    (ui/wait-for! #(= marker (get-in (app-state) [:timing :bpm])))))
-
 (defn- note [type n]
   {:type type :source :midi :channel 0 :note n :velocity (if (= :note-on type) 1.0 0.0)
    :timestamp (System/currentTimeMillis)})
 
 (defn- bind! [n role]
-  (state/swap-state! assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note n}] {:type :vibe :role role}))
+  (events/write-state! assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note n}] {:type :vibe :role role}))
 
 (defn- fire!
   "Fire events at the node found by selector, in order, on the FX thread."
@@ -150,7 +141,7 @@
 (deftest hit-pad-quick-click-leaves-a-decay-test
   (let [robot (ui/robot)]
     ;; A busy machine can't stretch the click into a hold
-    (state/swap-state! assoc-in [:config :vibes :settings :quick-tap-ms] 2000)
+    (events/write-state! assoc-in [:config :vibes :settings :quick-tap-ms] 2000)
     (open-perform! robot)
     (ui/mouse-click! robot "#vibe-pad-hit")
     (ui/wait-for! #(and (some? (rt :voices :hit)) (nil? (rt :held :hit))))
@@ -173,7 +164,7 @@
              (mouse MouseEvent/MOUSE_RELEASED :synthesized? true)
              (mouse MouseEvent/MOUSE_CLICKED :synthesized? true))
       (ui/wait-for! #(nil? (rt :held :hit)))
-      (flush-event-queue!)
+      (is (events/flush!))
       (is (= 1 (rt :started)) "one cue picked"))))
 
 (deftest vibe-pad-tap-switches-and-long-press-locks-test
@@ -224,7 +215,7 @@
       (fire! "#vibe-pad-hit"
              (mouse MouseEvent/MOUSE_PRESSED :button MouseButton/SECONDARY)
              (mouse MouseEvent/MOUSE_RELEASED :button MouseButton/SECONDARY))
-      (flush-event-queue!)
+      (is (events/flush!))
       (is (empty? (rt :held)))
       (is (zero? (rt :started))))
     (ui/right-click-node! robot (ui/query "#vibe-pad-hit"))
@@ -282,7 +273,7 @@
       (input-router/dispatch! (note :note-on 36))
       (ui/wait-for! #(= :input (rt :held :hit :src)))
       (ui/release-node! robot "#vibe-pad-hit")
-      (flush-event-queue!)
+      (is (events/flush!))
       (is (= :input (rt :held :hit :src))))
     (input-router/dispatch! (note :note-off 36))
     (input-router/dispatch! (note :note-off 37))
@@ -292,7 +283,7 @@
 ;; Auto-advance (plans/2026-11-18-vibe-mode/06 §4)
 
 (defn- vibe-runtime! [m]
-  (state/swap-state! update :vibe-runtime merge m))
+  (events/write-state! update :vibe-runtime merge m))
 
 (defn- countdown-opacity []
   (let [^Node n (first (ui/query-all "#vibe-countdown"))]
@@ -399,7 +390,7 @@
 
 (deftest effects-only-pad-says-so-test
   (let [robot (ui/robot)]
-    (state/swap-state! assoc-in [:config :vibes :library :vibe-1 :accent :cells] [])
+    (events/write-state! assoc-in [:config :vibes :library :vibe-1 :accent :cells] [])
     (events/dispatch! {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :scatter})
     (ui/wait-for! #(seq (get-in (app-state) [:config :vibes :library :vibe-1 :fx])))
     (open-perform! robot)
@@ -416,7 +407,7 @@
     (is (= {:id 1 :held? false} (pulse :accent)) "the pad's release lets go of the pulse")
     (ui/wait-for! #(not (ui/has-style-class? "#vibe-pad-accent" "vibe-pad-held")))
     (testing "a role with neither cues nor reactions says it has nothing to play"
-      (state/swap-state! assoc-in [:config :vibes :library :vibe-1 :hit :cells] [])
+      (events/write-state! assoc-in [:config :vibes :library :vibe-1 :hit :cells] [])
       (ui/mouse-click! robot "#vibe-pad-hit")
       (ui/assert-text! "#vibe-pad-hit-now" "Nothing to play"))))
 
@@ -444,8 +435,7 @@
                  (tick!))]
     (try
       (store/clear-continuous-values!)
-      (flush-event-queue!)
-      (state/swap-state! assoc-in [:config :input :macro-map] {[:midi 0 1] :slider-1 [:midi 0 2] :slider-2})
+      (events/write-state! assoc-in [:config :input :macro-map] {[:midi 0 1] :slider-1 [:midi 0 2] :slider-2})
       (open-perform! robot)
       (tick!)
       (ui/assert-text! "#vibe-meter-slider-1-text" "Intensity –")
@@ -478,8 +468,7 @@
         tick! (meter-ticks)]
     (try
       (store/clear-continuous-values!)
-      (flush-event-queue!)
-      (state/swap-state! assoc-in [:config :input :macro-map] {[:midi 0 7] :slider-1})
+      (events/write-state! assoc-in [:config :input :macro-map] {[:midi 0 7] :slider-1})
       (open-perform! robot)
       (input-router/dispatch! (input-events/control-change :midi 0 7 0.3))
       (tick!)
@@ -506,7 +495,7 @@
         move {:event/type :grid/move-cell :from-col 0 :from-row 0 :to-col 5 :to-row 2}
         cue-at #(get-in (app-state) [:chains :cue-chains %])]
     ;; A busy machine can't stretch the pad's click into a hold
-    (state/swap-state! assoc-in [:config :vibes :settings :quick-tap-ms] 2000)
+    (events/write-state! assoc-in [:config :vibes :settings :quick-tap-ms] 2000)
     (open-perform! robot)
     (is (not (ui/selected? "#vibe-show-lock")) "unlocked in a new project")
     (ui/click! robot "#vibe-show-lock")
@@ -530,7 +519,7 @@
 
 (deftest no-output-banner-test
   (let [robot (ui/robot)]
-    (state/swap-state! assoc-in [:config :vibes :settings :quick-tap-ms] 2000)
+    (events/write-state! assoc-in [:config :vibes :settings :quick-tap-ms] 2000)
     (open-perform! robot)
     (is (not (ui/visible? "#vibe-no-output")) "nothing played yet: the status line alone says it")
     (ui/mouse-click! robot "#vibe-pad-hit")
@@ -551,9 +540,9 @@
 (deftest audience-badge-and-pad-mark-test
   (let [robot (ui/robot)
         crowd {:items [{:type :preset :preset-id :circle}] :target :crowd}]
-    (state/swap-state! #(-> %
-                            (assoc-in [:chains :cue-chains [0 1]] crowd)
-                            (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [[0 0] [0 1]])))
+    (events/write-state! #(-> %
+                              (assoc-in [:chains :cue-chains [0 1]] crowd)
+                              (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [[0 0] [0 1]])))
     (open-perform! robot)
     (is (not (ui/visible? "#vibe-header-audience")) "Shapes doesn't allow audience cells")
     (is (not (ui/visible? "#vibe-pad-hit-audience")) "its HIT pool's crowd cue never plays (V6)")
@@ -570,7 +559,7 @@
 (deftest stuck-pad-shows-its-problem-test
   (let [robot (ui/robot)]
     ;; Half a second is a stuck key here
-    (state/swap-state! assoc-in [:config :vibes :settings :max-hold-secs] 0.5)
+    (events/write-state! assoc-in [:config :vibes :settings :max-hold-secs] 0.5)
     (open-perform! robot)
     (ui/press-node! robot "#vibe-pad-hit")
     (ui/wait-for! #(= :pad (rt :held :hit :src)))
@@ -583,10 +572,10 @@
     (ui/wait-for! #(not (ui/has-style-class? "#vibe-pad-hit" "vibe-pad-held")))
     (testing "the mouse's late release changes nothing"
       (ui/release-node! robot "#vibe-pad-hit")
-      (flush-event-queue!)
+      (is (events/flush!))
       (is (= {:role :hit :why :stuck-key} (rt :problem))))
     (testing "the next good press clears it"
-      (state/swap-state! assoc-in [:config :vibes :settings :quick-tap-ms] 2000)
+      (events/write-state! assoc-in [:config :vibes :settings :quick-tap-ms] 2000)
       (ui/mouse-click! robot "#vibe-pad-hit")
       (ui/wait-for! #(nil? (rt :problem)))
       (ui/wait-for! #(not= "Stuck key released" (ui/node-text "#vibe-pad-hit-now"))))))
@@ -604,18 +593,18 @@
     (testing "no zone anywhere: no ZONE MAP row"
       (is (not (ui/visible? "#zone-map-row"))))
     (testing "a cue draws into a zone: the row, one pad per map"
-      (state/swap-state! assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a)
+      (events/write-state! assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a)
       (ui/wait-for! #(ui/visible? "#zone-map-row"))
       (ui/assert-count! "#zone-map-row .zone-map-pad" 4) ; and CYCLE (zones plan Z5)
       (is (< (scene-y "#vibe-meter-row") (scene-y "#zone-map-row") (scene-y "#vibe-status"))
           "under the faders' meters, over the status line"))
     (testing "a column's default counts too"
-      (state/swap-state! #(-> %
-                              (update-in [:chains :cue-chains [0 0] :items 0] dissoc :target)
-                              (assoc-in [:grid :column-targets] {3 :zone/b})))
+      (events/write-state! #(-> %
+                                (update-in [:chains :cue-chains [0 0] :items 0] dissoc :target)
+                                (assoc-in [:grid :column-targets] {3 :zone/b})))
       (ui/wait-for! #(ui/visible? "#zone-map-row")))
     (testing "no zone again: gone"
-      (state/swap-state! assoc-in [:grid :column-targets] {})
+      (events/write-state! assoc-in [:grid :column-targets] {})
       (ui/wait-for! #(not (ui/visible? "#zone-map-row"))))))
 
 
@@ -627,16 +616,16 @@
     (testing "no zone pattern anywhere: no ZONE PATTERN row"
       (is (not (ui/visible? "#pattern-row"))))
     (testing "a cue's pattern: the row, under ZONE MAP, over the status line"
-      (state/swap-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns] [(zone-patterns/preset-instance :alternate :cue)])
+      (events/write-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns] [(zone-patterns/preset-instance :alternate :cue)])
       (ui/wait-for! #(ui/visible? "#pattern-row"))
       (ui/assert-count! "#pattern-row .pattern-pad" 9)
       (is (ui/visible? "#zone-map-row") "a pattern moves pictures between zones: the map pads show too")
       (is (< (scene-y "#vibe-meter-row") (scene-y "#zone-map-row") (scene-y "#pattern-row") (scene-y "#vibe-status"))))
     (testing "a cell's, off, counts too"
-      (state/swap-state! #(-> %
-                              (update-in [:chains :cue-chains [0 0]] dissoc :zone-patterns)
-                              (assoc-in [:chains :effect-chains [1 1]] {:active? false :items [(zone-patterns/preset-instance :chase :cell)]})))
+      (events/write-state! #(-> %
+                                (update-in [:chains :cue-chains [0 0]] dissoc :zone-patterns)
+                                (assoc-in [:chains :effect-chains [1 1]] {:active? false :items [(zone-patterns/preset-instance :chase :cell)]})))
       (ui/wait-for! #(ui/visible? "#pattern-row")))
     (testing "none again: gone"
-      (state/swap-state! update-in [:chains :effect-chains] dissoc [1 1])
+      (events/write-state! update-in [:chains :effect-chains] dissoc [1 1])
       (ui/wait-for! #(not (ui/visible? "#pattern-row"))))))

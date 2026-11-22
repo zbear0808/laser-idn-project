@@ -30,15 +30,6 @@
   (ui/wait-for! #(= (+ 1 (count item-ids))
                     (count (ui/query-all ".chain-item")))))
 
-(defn- flush-event-queue!
-  "Wait until every event dispatched so far has been processed.
-   Events are handled in order, so a marker event landing means the rest did."
-  []
-  (ui/sync-fx!)
-  (let [marker (+ 60.25 (rand-int 100))]
-    (events/dispatch! {:event/type :timing/set-bpm :bpm marker})
-    (ui/wait-for! #(= marker (get-in (state/get-raw-state) [:timing :bpm])))))
-
 (deftest grouped-list-items-respond-to-click-selection
   (let [robot (ui/robot)]
     (events/dispatch! {:event/type :cue-chain/open-editor :col 0 :row 0})
@@ -63,7 +54,7 @@
                                         [:list-ui component-id :selected-ids]))))
     (let [selected (get-in (state/get-raw-state) [:list-ui component-id :selected-ids])]
       (ui/right-click-node! robot (nth (ui/query-all ".chain-item") 1))
-      (flush-event-queue!)
+      (is (events/flush!))
       (is (= selected (get-in (state/get-raw-state)
                               [:list-ui component-id :selected-ids])))
       (ui/press! robot javafx.scene.input.KeyCode/ESCAPE))))
@@ -167,10 +158,7 @@
                          :items-path items-path
                          :on-change-event :chain/set-items
                          :on-change-params change-params})
-      (state/assoc-in-state! [:chains :cue-chains [0 0] :items]
-                             (conj (vec (rest (get-in (state/get-raw-state)
-                                                      [:chains :cue-chains [0 0] :items])))
-                                   (first (get-in (state/get-raw-state)
-                                                  [:chains :cue-chains [0 0] :items]))))
+      (events/write-state! update-in [:chains :cue-chains [0 0] :items]
+                           #(conj (vec (rest %)) (first %)))
       (is (= 3 (count (get-in (state/get-raw-state)
                               [:chains :cue-chains [0 0] :items])))))))

@@ -20,8 +20,8 @@
 (def ^:private ring-id #uuid "00000000-0000-0000-0000-0000000000a1")
 
 (defn- laser! []
-  (state/swap-state! assoc :projectors {:a {:name "Laser A" :host "10.0.0.1" :enabled? true :zone-groups []
-                                            :exclude-from-all? false :scan-rate 25000}}))
+  (events/write-state! assoc :projectors {:a {:name "Laser A" :host "10.0.0.1" :enabled? true :zone-groups []
+                                              :exclude-from-all? false :scan-rate 25000}}))
 
 (def ^:private ring
   "A circle of 3,000 points (a dark one and 2,999 lit)."
@@ -30,7 +30,7 @@
 (defn- play!
   "cue at cell, playing."
   [[col row :as cell] cue]
-  (state/swap-state! assoc-in [:chains :cue-chains cell] cue)
+  (events/write-state! assoc-in [:chains :cue-chains cell] cue)
   (events/dispatch! {:event/type :grid/trigger-cell :col col :row row})
   (ui/wait-for! #(some? (get-in (state/get-raw-state) [:playback :active-cues cell]))))
 
@@ -102,10 +102,10 @@
 (deftest decimate-that-keeps-the-count-is-named-test
   (testing "Q-D-4 B: Decimate at its 25 kpps in a 12 kpps laser's calibration chain keeps the cue at 833 points, 14 fps"
     (laser!)
-    (state/swap-state! #(-> %
-                            (assoc-in [:projectors :a :scan-rate] 12000)
-                            (assoc-in [:chains :projector-effects :a :items]
-                                      [{:id (random-uuid) :effect-id :decimate :enabled? true :params {:kpps 25 :fps 30}}])))
+    (events/write-state! #(-> %
+                              (assoc-in [:projectors :a :scan-rate] 12000)
+                              (assoc-in [:chains :projector-effects :a :items]
+                                        [{:id (random-uuid) :effect-id :decimate :enabled? true :params {:kpps 25 :fps 30}}])))
     (play! [7 3] {:destination-zone {:zone-group-id :all} :items [ring]})
     (fixtures/with-clock
       (fn [_]

@@ -133,10 +133,10 @@
 (deftest effects-cell-on-and-off-look-different-test
   (let [robot (ui/robot)
         on? #(get-in (state/get-raw-state) [:chains :effect-chains [0 0] :active?])]
-    (state/swap-state! assoc-in [:chains :effect-chains [0 0]]
-                       {:active? false
-                        :items [{:id (random-uuid) :type :effect :effect-id :scale :enabled? true :params {}}
-                                {:id (random-uuid) :type :effect :effect-id :hue-shift :enabled? true :params {}}]})
+    (events/write-state! assoc-in [:chains :effect-chains [0 0]]
+                         {:active? false
+                          :items [{:id (random-uuid) :type :effect :effect-id :scale :enabled? true :params {}}
+                                  {:id (random-uuid) :type :effect :effect-id :hue-shift :enabled? true :params {}}]})
     (ui/click! robot "#effects-tab")
     (ui/assert-visible! "#effects-cell-0-0")
     (move-away! robot "#effects-cell-0-0")
@@ -183,13 +183,13 @@
       (ui/wait-for! #(= "Click: on or off · Double-click or right-click: edit · Drag: move" (hint "#grid-hint")))
       (is (= "Effect cells change every playing cue. Double-click one to start" (hint "#grid-empty-hint"))))
     (testing "an empty grid too"
-      (state/swap-state! assoc-in [:chains :effect-chains] {})
+      (events/write-state! assoc-in [:chains :effect-chains] {})
       (ui/sync-fx!)
       (is (= "Effect cells change every playing cue. Double-click one to start" (hint "#grid-empty-hint"))))
     (testing "once a cell has one, the line goes"
-      (state/swap-state! assoc-in [:chains :effect-chains [3 1]]
-                         {:active? false
-                          :items [{:id (random-uuid) :type :effect :effect-id :scale :enabled? true :params {}}]})
+      (events/write-state! assoc-in [:chains :effect-chains [3 1]]
+                           {:active? false
+                            :items [{:id (random-uuid) :type :effect :effect-id :scale :enabled? true :params {}}]})
       (ui/wait-for! #(nil? (hint "#grid-empty-hint")))
       (is (some? (hint "#grid-hint"))))))
 

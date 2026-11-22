@@ -1,6 +1,7 @@
 (ns laser-show.ui-test.menu-bar-test
   "Menu bar in the title bar."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.events.core :as events]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
@@ -31,7 +32,7 @@
   (is (nil? (get-in (state/get-raw-state) [:project :current-file])) "a new project, never saved")
   (is (false? (ui/on-fx-thread #(.isDisable (file-item "Save As...")))) "it can be saved under a name")
   (testing "and once it has a file"
-    (state/swap-state! assoc-in [:project :current-file] "test-output/shows/friday.zip")
+    (events/write-state! assoc-in [:project :current-file] "test-output/shows/friday.zip")
     (ui/sync-fx!)
     (is (false? (ui/on-fx-thread #(.isDisable (file-item "Save As...")))))))
 

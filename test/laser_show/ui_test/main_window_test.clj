@@ -138,7 +138,7 @@
       (with-exit-counter
         (fn [exits]
           ;; a project that already has a file, so no native chooser is needed
-          (state/swap-state! assoc-in [:project :current-file] saved-project)
+          (events/write-state! assoc-in [:project :current-file] saved-project)
           (make-project-dirty!)
           (close-main-window!)
           (ui/wait-for! #(ui/visible? "#unsaved-save"))

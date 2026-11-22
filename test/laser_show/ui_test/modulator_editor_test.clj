@@ -24,23 +24,13 @@
   []
   (get-in (state/get-raw-state) [:chains :effect-chains [0 0] :items 0 :params :amount]))
 
-(defn- flush-events!
-  "Wait until every event dispatched so far has been handled (they are
-   handled in order, so a marker landing means the rest did): a direct
-   write to app state while one is handled is lost when it writes back."
-  []
-  (let [marker (+ 60.25 (rand-int 100))]
-    (events/dispatch! {:event/type :timing/set-bpm :bpm marker})
-    (ui/wait-for! #(= marker (get-in (state/get-raw-state) [:timing :bpm])))))
-
 (defn- open-amount-editor!
   "Effects cell [0 0] with one Intensity effect whose amount is modulator,
    in the effect chain editor (one effect: it is selected as it opens)."
   [modulator]
-  (flush-events!)
-  (state/swap-state! assoc-in [:chains :effect-chains [0 0]]
-                     {:active? false
-                      :items [{:id (random-uuid) :effect-id :intensity :enabled? true :params {:amount modulator}}]})
+  (events/write-state! assoc-in [:chains :effect-chains [0 0]]
+                       {:active? false
+                        :items [{:id (random-uuid) :effect-id :intensity :enabled? true :params {:amount modulator}}]})
   (events/dispatch! {:event/type :effect-chain/open-editor :col 0 :row 0})
   (ui/wait-for! #(= (:type modulator) (:id (some-> ^ComboBox (first (ui/query-all "#modulator-type-amount")) .getValue)))))
 
@@ -152,14 +142,13 @@
 
 (deftest keyframe-restart-on-combo-test
   (testing "a time-driven keyframe animation restarts on a press, chosen in its settings row"
-    (flush-events!)
-    (state/swap-state! assoc-in [:chains :effect-chains [0 0]]
-                       {:active? false
-                        :items [{:id (random-uuid) :effect-id :intensity :enabled? true :params {:amount 1.0}
-                                 :keyframe-modulator {:enabled? true :driver :time :period 2.0 :time-unit :beats
-                                                      :loop-mode :once :selected-keyframe 0
-                                                      :keyframes [{:position 0.0 :params {:amount 0.0}}
-                                                                  {:position 1.0 :params {:amount 1.0}}]}}]})
+      (events/write-state! assoc-in [:chains :effect-chains [0 0]]
+                         {:active? false
+                          :items [{:id (random-uuid) :effect-id :intensity :enabled? true :params {:amount 1.0}
+                                   :keyframe-modulator {:enabled? true :driver :time :period 2.0 :time-unit :beats
+                                                        :loop-mode :once :selected-keyframe 0
+                                                        :keyframes [{:position 0.0 :params {:amount 0.0}}
+                                                                    {:position 1.0 :params {:amount 1.0}}]}}]})
     (events/dispatch! {:event/type :effect-chain/open-editor :col 0 :row 0})
     (ui/wait-for! #(= "Its cue's start" (shown "#keyframe-restart-on")))
     (choose! "#keyframe-restart-on" :accent)

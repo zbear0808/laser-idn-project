@@ -79,8 +79,8 @@
             (format "#%02X%02X%02X" (byte (.getRed c)) (byte (.getGreen c)) (byte (.getBlue c))))))))
 
 (deftest trigger-editor-sections-are-spaced-test
-  (state/swap-state! assoc-in [:config :input :trigger-map {:source :keyboard :id :q}]
-                     {:type :trigger-cue :target [0 0] :behavior :follow})
+  (events/write-state! assoc-in [:config :input :trigger-map {:source :keyboard :id :q}]
+                       {:type :trigger-cue :target [0 0] :behavior :follow})
   (open-trigger-editor! 0 0 :cue)
   (ui/assert-visible! "#trigger-editor-done")
   (let [^VBox dialog (first (ui/query-all "#trigger-editor-dialog"))
@@ -146,8 +146,8 @@
   (ui/assert-visible! "#trigger-behavior-description")
   (ui/assert-no-node! "#trigger-decay-beats")
   (testing "a binding with an old behaviour shows as following the cue, as it plays"
-    (state/swap-state! assoc-in [:config :input :trigger-map {:source :keyboard :id :q}]
-                       {:type :trigger-cue :target [0 0] :behavior :quantized-decay})
+    (events/write-state! assoc-in [:config :input :trigger-map {:source :keyboard :id :q}]
+                         {:type :trigger-cue :target [0 0] :behavior :quantized-decay})
     (ui/assert-visible! "#trigger-mapped-list")
     (is (= follow (behavior-shown))))
   (testing "an effect cell has no cue mode to follow: a press toggles it"

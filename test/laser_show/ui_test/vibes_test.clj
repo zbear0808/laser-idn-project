@@ -45,15 +45,6 @@
 (defn- learning-target [] (get-in (app-state) [:backend :input :learning-target]))
 (defn- fx-on? [cell] (true? (get-in (app-state) [:chains :effect-chains cell :active?])))
 
-(defn- flush-event-queue!
-  "Wait until every event dispatched so far has been handled: they are
-   handled in order, so a marker landing means the rest did."
-  []
-  (ui/sync-fx!)
-  (let [marker (+ 60.25 (rand-int 100))]
-    (events/dispatch! {:event/type :timing/set-bpm :bpm marker})
-    (ui/wait-for! #(= marker (get-in (app-state) [:timing :bpm])))))
-
 (defn- open-vibes! [robot]
   (ui/click! robot "#vibes-tab")
   (ui/wait-for! #(= :vibes (get-in (app-state) [:ui :active-tab])))
@@ -67,8 +58,8 @@
 (defn- with-effect-cell
   "The app with an effect cell at cell, off."
   [cell]
-  (state/swap-state! assoc-in [:chains :effect-chains cell]
-                     {:active? false :items [{:id (random-uuid) :type :effect :effect-id :scale :enabled? true :params {}}]}))
+  (events/write-state! assoc-in [:chains :effect-chains cell]
+                       {:active? false :items [{:id (random-uuid) :type :effect :effect-id :scale :enabled? true :params {}}]}))
 
 (defn- note [type n]
   {:type type :source :midi :channel 0 :note n :velocity (if (= :note-on type) 1.0 0.0)
@@ -144,7 +135,7 @@
     (testing "an empty cell isn't put in"
       (let [steps (count (undo-stack))]
         (ui/click! robot "#pick-cell-0-2")
-        (flush-event-queue!)
+        (is (events/flush!))
         (is (= [[2 0]] (hit)))
         (is (= steps (count (undo-stack))))))
     (testing "the BED slot holds one cell; HIT's cells say they are HIT's"
@@ -190,7 +181,7 @@
       (let [steps (count (undo-stack))
             before (vibes)]
         (ui/click! robot "#vibe-make-from-rows")
-        (flush-event-queue!)
+        (is (events/flush!))
         (is (= before (vibes)))
         (is (= steps (count (undo-stack))))))))
 
@@ -208,7 +199,7 @@
                                          (get-in (app-state) [:config :input :trigger-map (note-key (+ 36 i))])))
                        (input-router/dispatch! (note :note-off (+ 36 i))))
                      (ui/wait-for! #(nil? (learning-target)))
-                     (flush-event-queue!))]
+                     (is (events/flush!)))]
     (open-vibes! robot)
     (learn-all!)
     (is (nil? (get-in (app-state) [:ui :vibes :wizard])) "invariant 8: it ends, nothing left learning")
@@ -242,7 +233,7 @@
         (input-router/dispatch! (note :note-on 36))
         (input-router/dispatch! (note :note-off 36))
         (cc! 7 0.50 0.52)
-        (flush-event-queue!)
+        (is (events/flush!))
         (is (learning-slider-1?) "still waiting")
         (is (empty? (macro-map)))
         (is (empty? (get-in (app-state) [:config :input :trigger-map]))))
@@ -283,8 +274,7 @@
     (is (= "Shapes · Morph: Size" (get-in (app-state) [:chains :effect-chains [1 3] :name])))
     (is (= "Add Morph" (undo-label)))
     (testing "the Master gone, Add master intensity puts one back"
-      (flush-event-queue!)
-      (state/swap-state! update-in [:chains :effect-chains] dissoc [0 3])
+      (events/write-state! update-in [:chains :effect-chains] dissoc [0 3])
       (ui/assert-enabled! "#vibe-add-master")
       (ui/click! robot "#vibe-add-master")
       (ui/wait-for! #(= "Master" (get-in (app-state) [:chains :effect-chains [0 3] :name])))
@@ -295,7 +285,7 @@
 (deftest deleting-the-current-vibe-keeps-perform-working-test
   (let [robot (ui/robot)]
     (with-effect-cell [0 3])
-    (state/swap-state! assoc-in [:config :vibes :library :vibe-1 :fx] [[0 3]])
+    (events/write-state! assoc-in [:config :vibes :library :vibe-1 :fx] [[0 3]])
     (events/dispatch! {:event/type :vibe/select :vibe :vibe-1})
     (ui/wait-for! #(fx-on? [0 3]))
     (open-vibes! robot)
@@ -308,7 +298,7 @@
     (ui/click! robot "#perform-tab")
     (ui/assert-text! "#vibe-header-name" "LINES")
     ;; A busy machine can't stretch the click into a hold, which cuts the cue
-    (state/swap-state! assoc-in [:config :vibes :settings :quick-tap-ms] 2000)
+    (events/write-state! assoc-in [:config :vibes :settings :quick-tap-ms] 2000)
     (ui/mouse-click! robot "#vibe-pad-hit")
     (ui/wait-for! #(#{[5 0] [7 0]} (rt :voices :hit :cell)))))
 
@@ -337,7 +327,7 @@
 (deftest tap-reaction-menu-adds-a-cell-to-the-vibe-test
   (let [robot (ui/robot)
         fx #(vibes :library :vibe-1 :fx)]
-    (state/swap-state! assoc-in [:config :input :trigger-map (note-key 37)] {:type :vibe :role :accent})
+    (events/write-state! assoc-in [:config :input :trigger-map (note-key 37)] {:type :vibe :role :accent})
     (events/dispatch! {:event/type :vibe/select :vibe :vibe-1})
     (ui/wait-for! #(= :vibe-1 (rt :current)))
     (open-vibes! robot)
@@ -390,8 +380,8 @@
       (testing "no laser yet: the hop is greyed, and says what it needs"
         (is (greyed? "#vibe-tap-menu-hit" "vibe-tap-zone-hop"))
         (is (not (greyed? "#vibe-tap-menu-hit" "vibe-tap-punch-size"))))
-      (state/swap-state! assoc :projectors {:p1 {:name "Laser 1" :host "10.0.0.1" :enabled? true :zone-groups []}
-                                            :p2 {:name "Laser 2" :host "10.0.0.2" :enabled? true :zone-groups []}})
+      (events/write-state! assoc :projectors {:p1 {:name "Laser 1" :host "10.0.0.1" :enabled? true :zone-groups []}
+                                              :p2 {:name "Laser 2" :host "10.0.0.2" :enabled? true :zone-groups []}})
       (ui/wait-for! #(not (greyed? "#vibe-tap-menu-hit" "vibe-tap-zone-hop")))
       (is (some #{"Zone hop: next zone (one zone at a time)"} (menu-button-texts "#vibe-tap-menu-hit"))
           "two lasers: the hop, with no hint")
@@ -446,8 +436,8 @@
   (let [robot (ui/robot)
         vibe-text? #(re-find #"(?i)vibe|\bHIT\b|ACCENT|FLASH|\bBED\b|Shapes|Lines" %)]
     (with-effect-cell [1 0])
-    (state/swap-state! assoc-in [:config :vibes :library :vibe-1 :fx] [[1 0]])
-    (state/swap-state! assoc-in [:config :vibes :library :vibe-1 :bed] [0 1])
+    (events/write-state! assoc-in [:config :vibes :library :vibe-1 :fx] [[1 0]])
+    (events/write-state! assoc-in [:config :vibes :library :vibe-1 :bed] [0 1])
     (testing "the Grid tab: cells in vibes (A1 in Shapes' HIT, A7 its FLASH cue, A5 in both vibes) look and read as any cell"
       (ui/assert-visible! "#grid-cell-0-0")
       (is (not-any? #(str/starts-with? % "vibe") (style-classes-under (first (ui/query-all "#main-layout"))))
@@ -469,7 +459,7 @@
   (let [robot (ui/robot)
         tab-text #(.getText ^Labeled (first (ui/query-all "#vibes-tab")))]
     (ui/wait-for! #(= "Vibes" (tab-text)))
-    (state/swap-state! assoc-in [:config :vibes :library :vibe-1 :hit :cells] [])
+    (events/write-state! assoc-in [:config :vibes :library :vibe-1 :hit :cells] [])
     (ui/wait-for! #(= "Vibes ⚠ 1" (tab-text)))
     (open-vibes! robot)
     (is (some #(re-find #"HIT does nothing" %) (texts ".vibe-lint-row")) "the error the badge counts")

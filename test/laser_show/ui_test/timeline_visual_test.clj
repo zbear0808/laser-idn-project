@@ -74,11 +74,11 @@
         (ui/wait-for! #(true? (get-in (cue) [:loop :enabled?])))
         (shot! "02-content")
         ;; Playing at beat 6.0: app state has the intent, the show clock's tick the position
-        (state/swap-state! assoc-in [:playback :active-cues [2 2]] {:run (random-uuid) :timeline? true})
+        (events/write-state! assoc-in [:playback :active-cues [2 2]] {:run (random-uuid) :timeline? true})
         (show-time/publish! {:at-ns (System/nanoTime) :playing? true :cues [] :positions {[2 2] 6.0}})
         (ui/wait-for! #(= "2.3.1" (ui/node-text "#timeline-readout")))
         (shot! "03-playing")
-        (state/swap-state! update-in [:playback :active-cues] dissoc [2 2])
+        (events/write-state! update-in [:playback :active-cues] dissoc [2 2])
         (show-time/publish! {:at-ns (System/nanoTime) :playing? false :cues [] :positions {}})
         ;; The browser opened with the empty timeline; open it if it was closed since
         (when-not (get-in (state/get-raw-state) [:ui :timeline-prefs :add-panel :open?])

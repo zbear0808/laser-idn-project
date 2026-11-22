@@ -3,6 +3,7 @@
    OSC card's one switch. Nothing here opens a device or a socket: the
    connected and listening states are put in the state by hand."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.events.core :as events]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
@@ -60,7 +61,7 @@
     (is (not (ui/enabled? "#midi-disconnect-all-button")))
     (is (= "#404040" (fill-hex "#midi-disconnect-all-button")) "a button's background, not bare text"))
   (testing "a controller connected: it can be clicked"
-    (state/swap-state! assoc-in [:backend :input :midi :connected-devices] #{"Launchpad"})
+    (events/write-state! assoc-in [:backend :input :midi :connected-devices] #{"Launchpad"})
     (ui/assert-enabled! "#midi-disconnect-all-button")
     (is (= "#505050" (fill-hex "#midi-disconnect-all-button")) "Auto-Connect's look")))
 
@@ -89,7 +90,7 @@
       (ui/submit! robot "#osc-port-field")
       (ui/wait-for! #(= 9100 (:port (osc)))))
     (testing "listening: Stop Server, a warning button, stops it and takes nothing in"
-      (state/swap-state! update-in [:backend :input :osc] assoc :server-running? true :enabled? true)
+      (events/write-state! update-in [:backend :input :osc] assoc :server-running? true :enabled? true)
       (ui/wait-for! #(= "Stop Server" (button-text "#osc-server-button")))
       (is (= "#7F4C00" (fill-hex "#osc-server-button")) "a button, not bare text")
       ;; Fired, not clicked: the card can be below the tab's scrolled view
