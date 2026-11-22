@@ -51,6 +51,11 @@ jobs:
 
   # Same headless UI suite on macOS and Windows, so platform-specific input
   # (Cmd vs Ctrl shortcuts) and native JavaFX libraries are covered.
+  # Timeouts, measured at 296 UI tests (run 45001123968, 2026-11-22): the
+  # suite takes about 15 min on Windows (and on an M-series Mac), but every
+  # namespace runs 3.5-4.6x slower on the macOS runner, about 60 min. No
+  # test waits out a timeout; the runner is slow. Each limit is about 1.5x
+  # that, so a slow day passes and a hang still stops.
   ui-tests:
     strategy:
       fail-fast: false
@@ -59,11 +64,13 @@ jobs:
           - os: macos-latest
             platform: mac-arm
             shell: bash
+            timeout: 90
           - os: windows-latest
             platform: win
             shell: pwsh
+            timeout: 30
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: ${{ matrix.timeout }}
 
     # `shell` can't take an expression on a step (GitHub rejects the whole
     # workflow file), but `matrix` is allowed in `defaults.run`.
@@ -118,9 +125,11 @@ jobs:
         if-no-files-found: ignore
         retention-days: 14
 
+  # Unit, integration and UI tests in turn, then the JAR: about 18 min at
+  # 296 UI tests (the UI suite runs about as fast here as on Windows).
   build-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
     # Checkout repository
@@ -161,9 +170,9 @@ jobs:
       run: clojure -M:linux:test-integration:test-ui-headless
 
     # TestFX UI tests on JavaFX's built-in headless platform: no display or
-    # Xvfb needed.
+    # Xvfb needed. About 15 min at 296 tests.
     - name: Run headless UI tests
-      timeout-minutes: 10
+      timeout-minutes: 25
       run: clojure -M:linux:test-ui:test-ui-headless
 
     # UI tests write screenshots and other artifacts to test-results/.

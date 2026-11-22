@@ -259,7 +259,9 @@ and `docs/STALE_CLOSURES.md` describes bugs that come from exactly this layer.
 **Q2. Remove CI duplication and add guard rails** (F4)
 - Delete the `Run all tests` step, or keep only `:test-all` and drop the separate unit and
   integration steps.
-- Add `timeout-minutes: 30` to the job and `timeout-minutes: 10` to the UI step.
+- Add `timeout-minutes: 30` to the job and `timeout-minutes: 10` to the UI step. *(2026-11-22: raised
+  to 40 and 25 when the UI suite reached 296 tests, about 15 min here; the macOS and Windows
+  `ui-tests` job's 20 became 90 and 30, since the macOS runner takes about 60 min. Run 45001123968.)*
 - Add top-level `permissions: contents: read`. For `ai-code-review.yml`, add
   `pull-requests: write` and pin the action to a commit SHA.
 - Add `concurrency: { group: ${{ github.ref }}, cancel-in-progress: true }`.
