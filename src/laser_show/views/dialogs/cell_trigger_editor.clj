@@ -28,7 +28,7 @@
      :padding 16
      ;; Not dialog-content: its -fx-spacing 0 would win over the 12
      :style-class ["container-primary"]
-     :pref-width 420
+     :pref-width 440
      :children
      [;; Header
       {:fx/type :v-box
@@ -67,6 +67,15 @@
          :on-action {:event/type :ui/close-dialog
                      :dialog-id :trigger-editor}}]}]}))
 
+(defn- cell-trigger-editor-sized
+  "The content, in a window sized to it (common/fit-window-to-content!): each
+   binding adds a row, and each platform's fonts and title bar take their own
+   height."
+  [_]
+  {:fx/type fx/ext-on-instance-lifecycle
+   :on-created common/fit-window-to-content!
+   :desc {:fx/type cell-trigger-editor-content}})
+
 (defn cell-trigger-editor-dialog
   "The cell trigger editor dialog window."
   [{:keys [fx/context]}]
@@ -78,10 +87,8 @@
     {:fx/type :stage
      :showing open?
      :title (str "Triggers — " mode-title " " (common/cell-label col row))
-     :width 440
-     :height 434
      :modality :none
      :on-close-request {:event/type :ui/close-dialog :dialog-id :trigger-editor}
      :scene {:fx/type :scene
              :stylesheets stylesheets
-             :root {:fx/type cell-trigger-editor-content}}}))
+             :root {:fx/type cell-trigger-editor-sized}}}))

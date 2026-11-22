@@ -78,6 +78,22 @@
           (let [byte (fn [v] (Math/round (* 255.0 (double v))))]
             (format "#%02X%02X%02X" (byte (.getRed c)) (byte (.getGreen c)) (byte (.getBlue c))))))))
 
+(defn- height-wanted-and-had
+  "The trigger editor's content: [its preferred height at its scene's width,
+   its scene's height]."
+  []
+  (let [^Region root (ui/query "#trigger-editor-dialog")]
+    (ui/on-fx-thread
+     #(let [scene (.getScene root)]
+        [(.prefHeight root (.getWidth scene)) (.getHeight scene)]))))
+
+(defn- fits-window? []
+  (let [[wanted had] (height-wanted-and-had)]
+    (<= wanted (+ had 0.5))))
+
+(defn- wait-fits? []
+  (try (ui/wait-for! fits-window?) (catch Exception _ false)))
+
 (deftest trigger-editor-sections-are-spaced-test
   (events/write-state! assoc-in [:config :input :trigger-map {:source :keyboard :id :q}]
                        {:type :trigger-cue :target [0 0] :behavior :follow})
@@ -92,9 +108,21 @@
     (ui/wait-for! #(every? (fn [gap] (<= 11.5 gap)) (gaps)))
     (is (every? #(<= 11.5 % 12.5) (gaps)) "12 px between them, not touching")
     (is (= "#121212" (fill-hex dialog)) "the dialog's background, as before")
-    (testing "with a binding, it still fits the window under a macOS title bar (28 px)"
-      (let [window-height (ui/on-fx-thread #(.getHeight (.getWindow (.getScene dialog))))]
-        (is (<= (ui/on-fx-thread #(.prefHeight dialog 420.0)) (- window-height 28)))))))
+    (testing "its window fits it, whatever the platform's fonts and title bar"
+      ;; The scene is what the window has inside its title bar on every
+      ;; platform (headless has none), so the content must get its
+      ;; preferred height there. A window of a fixed height fits one
+      ;; platform's fonts and title bar, not every one's: in a 434-px
+      ;; window, with one binding, Windows' fonts wanted 408 px at 420
+      ;; wide, more than a title bar leaves.
+      (is (fits-window?) (str "with a binding: " (height-wanted-and-had)))
+      (events/write-state! update-in [:config :input :trigger-map] assoc
+                           {:source :keyboard :id :w} {:type :trigger-cue :target [0 0] :behavior :follow}
+                           {:source :keyboard :id :e} {:type :trigger-cue :target [0 0] :behavior :follow})
+      (ui/wait-for! #(= 3 (count (ui/query-all "#trigger-mapped-list .button-danger"))))
+      (is (wait-fits?) (str "with three bindings: " (height-wanted-and-had)))
+      (ui/on-fx-thread #(.setStyle dialog "-fx-font-size: 16px"))
+      (is (wait-fits?) (str "in a taller font: " (height-wanted-and-had))))))
 
 (deftest trigger-editor-learns-input-and-configures-behavior
   (let [robot (ui/robot)

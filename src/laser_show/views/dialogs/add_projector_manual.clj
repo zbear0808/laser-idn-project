@@ -7,10 +7,8 @@
             [clojure.string :as str]
             [laser-show.subs :as subs]
             [laser-show.css.core :as css]
-            [laser-show.views.components.driver-fields :as driver-fields])
-  (:import [javafx.application Platform]
-           [javafx.beans.value ChangeListener]
-           [javafx.scene Parent]))
+            [laser-show.views.components.driver-fields :as driver-fields]
+            [laser-show.views.dialogs.common :as common]))
 
 
 ;; Dialog Content
@@ -81,23 +79,6 @@
   (into {} (map (fn [{k :key :as spec}]
                   [k (if (contains? inputs k) (get inputs k) (:default spec))]))
         fields))
-
-(defn- fit-window-to-content!
-  "Keep the dialog's window the size of its content: another type has
-   other fields, and a field's problem adds a line, so after any layout
-   change the window is sized to the scene again when the content's
-   preferred height isn't the window's. Reads only the node, never state."
-  [^Parent root]
-  (.addListener (.needsLayoutProperty root)
-                (reify ChangeListener
-                  (changed [_ _ _ needs?]
-                    (when needs?
-                      (Platform/runLater
-                       (fn []
-                         (when-let [scene (.getScene root)]
-                           (when-let [window (.getWindow scene)]
-                             (when (> (Math/abs (- (.prefHeight root (.getWidth scene)) (.getHeight scene))) 0.5)
-                               (.sizeToScene window)))))))))))
 
 (defn- add-projector-form
   "Content of the add projector dialog."
@@ -178,10 +159,11 @@
                                            :driver-config inputs})}]}]}))
 
 (defn- add-projector-content
-  "The form, in a window sized to it (fit-window-to-content!)."
+  "The form, in a window sized to it (common/fit-window-to-content!): another
+   type has other fields, and a field's problem adds a line."
   [_]
   {:fx/type fx/ext-on-instance-lifecycle
-   :on-created fit-window-to-content!
+   :on-created common/fit-window-to-content!
    :desc {:fx/type add-projector-form}})
 
 
