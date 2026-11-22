@@ -355,9 +355,9 @@
   (testing "the tooltips name the keys as the platform writes them"
     (is (= (str "Copy this grid (" (shortcuts/shortcut-text :c) ")") (tooltip-of "#step-grid-copy")))
     (is (= (str "Paste the grid you copied (" (shortcuts/shortcut-text :v) ")") (tooltip-of "#step-grid-paste"))))
-  (is (not (ui/enabled? "#step-grid-paste")) "nothing copied yet")
+  (is (ui/enabled? "#step-grid-paste") "nothing copied in this app yet: a paste would read the OS clipboard (keyboard plan D13 B)")
   (fire! "#step-grid-copy")
-  (ui/wait-for! #(some? (get-in (app-state) [:ui :step-grid :clipboard])))
+  (ui/wait-for! #(= :step-grid (get-in (app-state) [:ui :clipboard :type])))
   (fire! "#step-grid-close")
   (open-grid! cell-target)
   (ui/wait-for! #(ui/enabled? "#step-grid-paste"))

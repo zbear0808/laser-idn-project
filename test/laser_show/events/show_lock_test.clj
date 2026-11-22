@@ -184,12 +184,14 @@
   ;; the paste before its handler runs, so a locked paste reads nothing
   (let [s0 (-> (starter)
                (assoc-in [:ui :clipboard] nil)
+               (assoc-in [:chains :cue-chains [1 0] :zone-patterns] [(assoc (zone-patterns/preset-instance :steps :cue) :id :g1)])
                (assoc-in [:ui :active-tab] :grid)
                (assoc-in [:grid :selected-cell] [5 2])
                (history/mark-clean))]
     (doseq [event [{:event/type :grid/paste-cell :col 5 :row 2}
                    {:event/type :effects/paste-cell :col 5 :row 2}
-                   {:event/type :edit/paste}]]
+                   {:event/type :edit/paste}
+                   {:event/type :step-grid/paste :target {:domain :cue-zone-patterns :entity-key [1 0] :effect-path [0]}}]]
       (testing (str (:event/type event))
         (is (contains? (handle s0 event) :clipboard/read) "unlocked, it asks the OS clipboard")
         (let [effects (handle (lock s0) event)]
@@ -423,7 +425,7 @@
                        {:event/type :step-grid/start-from :target target :style :all-on}
                        {:event/type :step-grid/paste :target target}]]
           (testing (str (:event/type event))
-            (let [s1 (assoc-in s1 [:ui :step-grid :clipboard] {:zones [:zone/c] :steps [[:zone/c]]})]
+            (let [s1 (assoc-in s1 [:ui :clipboard] {:type :step-grid :grid {:zones [:zone/c] :steps [[:zone/c]]} :copied-at 1})]
               (is (not= (history/extract-document-state s1) (history/extract-document-state (run s1 event))) "unlocked, a real edit")
               (let [s (run (lock s1) event)]
                 (is (= (lock s1) (without-notices s)) "locked, only the notice")
@@ -451,7 +453,7 @@
                   (run {:event/type :step-grid/cursor :target grid-target :move [0 2]})
                   (run {:event/type :step-grid/copy :target grid-target}))]
         (is (= [0 2] (get-in s [:ui :dialogs :step-grid-editor :cursor])))
-        (is (= 8 (count (get-in s [:ui :step-grid :clipboard :steps]))))
+        (is (= 8 (count (get-in s [:ui :clipboard :grid :steps]))))
         (is (nil? (get-in s [:ui :show-lock-notice])))))
     (testing "a drag held when the lock goes on: its paint is refused, its release still commits it"
       (let [held (run s0 {:event/type :step-grid/paint-start :target grid-target :row 1 :step 0})

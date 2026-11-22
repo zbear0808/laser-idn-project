@@ -360,7 +360,7 @@
    Start from, Copy, Paste and Clear. Props: :fx/context :target :grid."
   [{:keys [fx/context target grid]}]
   (let [{:keys [length params]} grid
-        clipboard (fx/sub-ctx context subs/step-grid-clipboard)
+        can-paste? (fx/sub-ctx context subs/can-paste? :step-grid)
         keys (select-keys target [:domain :entity-key :effect-path])
         props {:current-params params
                :params-map (param-controls/params-vector->map zone-patterns/pattern-parameters)
@@ -410,7 +410,7 @@
                               (small-button "step-grid-copy" "Copy" (str "Copy this grid (" (shortcuts/shortcut-text :c) ")")
                                             (ev :step-grid/copy))
                               (small-button "step-grid-paste" "Paste" (str "Paste the grid you copied (" (shortcuts/shortcut-text :v) ")")
-                                            (ev :step-grid/paste) :disable (nil? clipboard))
+                                            (ev :step-grid/paste) :disable (not can-paste?))
                               (small-button "step-grid-clear" "Clear" "Clears every step: the rows and the length stay"
                                             (ev :step-grid/clear))]))}]))}))
 

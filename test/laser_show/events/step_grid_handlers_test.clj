@@ -261,8 +261,12 @@
   (let [s0 (-> (with-grids)
                (assoc-in [:chains :effect-chains [2 1] :items 0 :params] (:params (grid-pattern [[C] [A C] [] [B] [A]] :zones [C A :graphics])))
                (history/mark-clean))
+        copy-effects (events/handle-event-pipeline {:event/type :step-grid/copy :target cell-target :state s0 :time 1000})
         copied (run s0 {:event/type :step-grid/copy :target cell-target})]
-    (is (= {:zones [C A :graphics] :steps [[C] [C A] [] [] [A]]} (get-in copied [:ui :step-grid :clipboard])) "Copy: the rows and the steps")
+    (is (= {:type :step-grid :grid {:zones [C A :graphics] :steps [[C] [C A] [] [] [A]]} :copied-at 1000}
+           (get-in copied [:ui :clipboard]))
+        "Copy: the rows and the steps, in the one clipboard (keyboard plan Step 4a)")
+    (is (= (get-in copied [:ui :clipboard]) (:clipboard/write copy-effects)) "and on the OS clipboard")
     (is (= 0 (undo-depth copied)) "copying is no edit")
     (is (= (:chains s0) (:chains copied)))
     (let [pasted (run copied {:event/type :step-grid/paste :target cue-target})
@@ -273,6 +277,31 @@
       (is (= "Edit Step Grid" (undo-label pasted))))
     (is (= (params-at s0 cue-target) (params-at (run s0 {:event/type :step-grid/paste :target cue-target}) cue-target))
         "nothing copied: nothing pasted")))
+
+(deftest step-grid-paste-with-an-empty-slot-asks-for-the-system-clipboard-test
+  ;; Keyboard plan Step 4a (D8 A): with nothing copied in this app, Paste
+  ;; reads the OS clipboard first, then pastes the grid it found
+  (let [s0 (assoc-in (with-grids) [:ui :clipboard] nil)
+        effects (events/handle-event-pipeline {:event/type :step-grid/paste :target cue-target :state s0 :time 1000})]
+    (is (= {:clipboard/read {:then {:event/type :step-grid/paste :target cue-target}}}
+           (select-keys effects [:clipboard/read])))
+    (is (= s0 (or (:state effects) s0)) "nothing pasted yet")
+    (let [clip {:type :step-grid :grid {:zones [C] :steps [[C] [] [C]]} :copied-at 5}
+          pasted (run s0 {:event/type :step-grid/paste :target cue-target :clipboard/system clip})]
+      (is (= [[C] [] [C]] (steps-at pasted cue-target)))
+      (is (= clip (get-in pasted [:ui :clipboard])) "the slot keeps the grid it read")
+      (is (= "Edit Step Grid" (undo-label pasted))))
+    (let [nothing (run s0 {:event/type :step-grid/paste :target cue-target :clipboard/system nil})]
+      (is (= (params-at s0 cue-target) (params-at nothing cue-target)))
+      (is (= "Nothing to paste here" (get-in nothing [:ui :notice :text]))))))
+
+(deftest step-grid-paste-ignores-a-cue-clip-test
+  (let [s0 (assoc-in (with-grids) [:ui :clipboard] {:type :cue-chain-items :copied-at 1
+                                                    :items [{:type :preset :preset-id :circle}]})
+        s (run s0 {:event/type :step-grid/paste :target cue-target})]
+    (is (= (params-at s0 cue-target) (params-at s cue-target)))
+    (is (= 0 (undo-depth s)))
+    (is (nil? (get-in s [:ui :notice])) "the Paste button was off: no notice")))
 
 
 ;; The cursor

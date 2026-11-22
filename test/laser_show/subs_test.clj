@@ -1349,11 +1349,7 @@
              (:every-laser-note (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :dialogs :step-grid-editor :every-laser] [:zone/a :zone/b])
                                             subs/step-grid target)))))
     (testing "no zone pattern there: nothing"
-      (is (nil? (fx/sub-ctx ctx subs/step-grid {:domain :cue-zone-patterns :entity-key [5 0] :effect-path [0]}))))
-    (testing "the clipboard"
-      (is (nil? (fx/sub-ctx ctx subs/step-grid-clipboard)))
-      (is (= {:zones [:zone/a] :steps [[:zone/a]]}
-             (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :step-grid :clipboard] {:zones [:zone/a] :steps [[:zone/a]]}) subs/step-grid-clipboard))))))
+      (is (nil? (fx/sub-ctx ctx subs/step-grid {:domain :cue-zone-patterns :entity-key [5 0] :effect-path [0]}))))))
 
 (deftest can-paste-test
   ;; Keyboard plan Phase 4, Step 4a (D13 B): Paste follows the clipboard; an

@@ -1349,10 +1349,6 @@
          :every-laser-note (when (and (= target (:target dialog)) (seq (:every-laser dialog)))
                              (every-laser-note (:every-laser dialog)))}))))
 
-(defn step-grid-clipboard
-  "The grid Copy keeps for the session ({:zones :steps}), or nil."
-  [context]
-  (fx/sub-val context get-in [:ui :step-grid :clipboard]))
 
 
 ;; Level 2: The rig strip (views/components/rig_strip.clj)

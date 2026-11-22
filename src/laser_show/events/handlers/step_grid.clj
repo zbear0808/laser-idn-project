@@ -14,8 +14,11 @@
    makes the pattern a grid if it isn't one (routing.step-grid/as-grid), or
    gives a cue with none a new grid; while the show lock is on it only
    opens the window (events/show_lock.clj refuses the edits). The cursor
-   ([:ui :dialogs :step-grid-editor :cursor] [row step]) and Copy
-   ([:ui :step-grid :clipboard]) are UI state, never undone.
+   ([:ui :dialogs :step-grid-editor :cursor] [row step]) is UI state, never
+   undone. Copy and Paste use the one clipboard (keyboard plan Phase 4,
+   Step 4a): Copy puts a :step-grid clip in [:ui :clipboard] and its EDN on
+   the OS clipboard; Paste pastes the clipboard's grid, reading the OS
+   clipboard first while nothing is copied in this app (h/with-clipboard).
 
    :step-grid/pointer is the grid body's mouse: it reads the JavaFX event
    and dispatches :step-grid/paint-start (the press: begins the transaction
@@ -29,7 +32,8 @@
             [laser-show.events.show-lock :as show-lock]
             [laser-show.routing.rig :as rig]
             [laser-show.routing.step-grid :as step-grid]
-            [laser-show.routing.zone-patterns :as zone-patterns])
+            [laser-show.routing.zone-patterns :as zone-patterns]
+            [laser-show.state.clipboard :as clipboard])
   (:import [javafx.scene.input MouseButton MouseEvent]))
 
 (def ^:private dialog-path [:ui :dialogs :step-grid-editor])
@@ -284,11 +288,23 @@
 ;; Copy and paste
 
 (defn- handle-copy
-  "The grid at target as the session's clipboard: UI state, no edit."
-  [{:keys [target state]}]
+  "The grid at target as a :step-grid clip in [:ui :clipboard], and on the
+   OS clipboard (:clipboard/write): UI state, no edit."
+  [{:keys [target state] :as event}]
   (if-let [params (grid-params state target)]
-    {:state (assoc-in state [:ui :step-grid :clipboard] (step-grid/copy params))}
+    (let [clip (clipboard/grid-clip (step-grid/copy params) (h/current-time-ms event))]
+      {:state (assoc-in state [:ui :clipboard] clip)
+       :clipboard/write clip})
     {:state state}))
+
+(defn- handle-paste
+  "The clipboard's grid into the grid at target (routing.step-grid/paste),
+   one edit; a clip of another kind does nothing."
+  [{:keys [target] :as event}]
+  (h/with-clipboard event
+    (fn [state clip]
+      (when-let [grid (clipboard/payload clip :step-grid)]
+        {:state (edit state target #(step-grid/paste % grid))}))))
 
 
 ;; Public API
@@ -320,5 +336,5 @@
                                                  (step-grid/from-style p style (step-grid/length p))
                                                  p)))
     :step-grid/copy (handle-copy event)
-    :step-grid/paste (handle-edit event (fn [p _] (step-grid/paste p (get-in state [:ui :step-grid :clipboard]))))
+    :step-grid/paste (handle-paste event)
     {}))
