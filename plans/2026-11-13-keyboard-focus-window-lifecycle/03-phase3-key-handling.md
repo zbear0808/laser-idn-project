@@ -1,7 +1,7 @@
 # Phase 3 — Keys reach the right place
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)   **Re-checked:** 2026-11-22 at `2227bce`, 275 commits later (the timeline rework, vibe Phases 1–8, zones Z0–Z6 and ZR, the output drivers, the Projectors layout pass, plan 02's write guard, clipboard Phase 4): every citation re-checked, probes p1–p4 and p8 re-run, p19 added, the new key handlers added to §1
-**Status:** Proposed, ready to build. D5, D6 and D7 answered A (2026-11-22, the ★ options, taken under the user's standing choice to take the recommended options). Nothing in it has been built by other work   **Last verified against:** `2227bce` (probes p1–p4, p8, p19, `probes/keyboard_probes_test.clj`; headless JavaFX 28-ea+11, JDK 25.0.5, macOS arm64)
+**Status:** **Done** (2026-11-22, branch `keyboard-phase3` from `80eebe7`: `d2e23c1`, `2e374e7`, `8e741ba`, `c190f7c`; §10 has what was built, the deviations, the red-first results, the probes before and after and the suites). D5, D6 and D7 answered A (2026-11-22, the ★ options, taken under the user's standing choice to take the recommended options). §§0–9 are the plan as written at `2227bce`   **Last verified against:** `c190f7c` (probes p1–p4, p8, p19 re-run after the build, `probes/keyboard_probes_test.clj`; headless JavaFX 28-ea+11, JDK 25.0.5, macOS arm64)
 **Size:** ~0.5–1 day   **Needs:** nothing open   **Depends on:** nothing (see §0; it used to wait for Phase 2)
 **Supersedes / Superseded by:** replaces §§2–5 of `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md`   **Related findings:** K-4, K-5 (`00-overview.md` §4); review 01 F3 (done), F4, F20, L3, Q4; 02 #15 (list part)
 
@@ -191,6 +191,73 @@ Run `clj -M:test-ui:mac-arm:test-ui-headless -n laser-show.ui-test.cue-chain-lis
 - **Atomic list operations** (review 02 M5; D7 option C). A larger refactor of `handlers/list.clj`; schedule separately. Phase 4 has already moved one prop, the clipboard type, from the props to the list's id.
 - **Making the rig strip's Scan and Add Manual buttons (`rig_strip.clj:122`, `:128`) mouse-only.** They are on a setup tab, where Tab navigation is worth more than a global Space. Left as they are.
 - **`list-ordered-ids` re-evaluates on every context change for non-`:chains` lists.** Its `:else` branch reads the whole state (`subs.clj:868-869`). This is review 01 F17 / M6, not keyboard work. Noted because this phase touches the same props atom.
+
+## 10. As built (2026-11-22, branch `keyboard-phase3`, from `80eebe7`)
+
+| # | Commit | What |
+|---|---|---|
+| 1 | `d2e23c1` | NEW `laser-show.views.keys` (`typing-target?`, `focus-within?`, `list-key-target?`); the list's key filter asks `list-key-target?` and reads the props when a key comes; the props atom has one writer (`list-sidebar`) and its entry goes with the list editor (`:on-deleted`); the key and focus logging goes. K-4 (list part) and K-5 fixed |
+| 2 | `2e374e7` | D6 A: the toolbar's transport, Retrigger, trigger-mode combo, TAP, Link and Stream, and `styled-tab-button`, `:focus-traversable false`; `#main-layout` takes the focus when shown and when the node holding it leaves the window; a press on something that doesn't take the focus moves it out of the text field being typed in. K-4 (main-window part) fixed |
+| 3 | `8e741ba` | The rig strip's ←/→ and Alt+←/→ are a filter (with the typing guard), so a card's On box or a ◀ ▶ button no longer takes them for focus traversal |
+| 4 | `c190f7c` | Regression tests with real key presses for the step grid, the pattern window's undo and the timeline's track rename |
+
+**Changes per namespace**, beyond §4 as written:
+- `laser-show.views.keys` (NEW, 30 lines): `typing-target?` is also true for an editable `ComboBoxBase` or `Spinner` itself, not only its editor: for those the focus owner (and so the key's target) is the control.
+- `laser-show.views.components.list`: `!component-handler-props` maps id → props (it held an atom per id); NEW `remove-props-atom!`; `setup-keyboard-handlers!` takes no props atom and does nothing (consumes nothing) while the id has no props. `list-editor` no longer computes `handler-props`. The `clojure.tools.logging` require goes.
+- `laser-show.views.toolbar`, `laser-show.views.components.tabs`: as §4.
+- `laser-show.views.root` (not in §4): `main-layout` is wrapped in `fx/ext-on-instance-lifecycle`; NEW `take-focus-from-removed-owners!` (a listener on the main scene's focus owner) and NEW `leave-text-field-on-click` (an `:event-filter` on `#main-layout`, `MOUSE_PRESSED` only).
+- `laser-show.views.components.rig-strip` (not in §4): `key-handler` → `key-filter`, wired with `:event-filter` instead of `:on-key-pressed`; requires `views.keys`.
+
+**Deviations from the plan:**
+1. **D6 A alone moved the focus onto the BPM field.** With every other top-bar control mouse-only, `#bpm-input` is the first node that takes the focus, so the window started with it there (Space typed a space), and JavaFX put it there again whenever the node holding the focus went with its tab (the rig strip or the chain list, then a click on Grid). Found by `space-plays-at-startup-test` and `space-plays-after-leaving-the-projectors-tab-test`, both failing with the focus owner `TextField#bpm-input`. Fixed in `root.clj`: the layout takes the focus when it is shown, and takes it back when the old focus owner has no scene. A third effect: a click on a mouse-only button left the focus in the BPM field, so what was typed was not applied (before D6 the clicked button took the focus, and the field applies on focus loss). A press on something that doesn't take the focus now moves it from a text field to the layout (`a-click-off-the-bpm-field-applies-it-test`).
+2. **The rig strip did not already behave like D5 A.** §1 read it from JavaFX semantics. The new test showed a focused On box or ◀ ▶ button consuming ←/→ (the controls' focus-traversal mappings): the focus went to the next card's box and the selection stayed. Fixed by making the strip's handler a filter. Also, §1's "the group matrix's combo, slider" are not in the strip: they are in the header above it (`rig_strip.clj:140`, `group_matrix/rig-settings`); only "+ Group" and the row cells are.
+3. **The projector chain test** is `projector-chain-delete-after-focus-moves-to-its-copy-button-test`: it gives Copy the focus with `requestFocus` (as Tab does) instead of clicking it, so it never writes the OS clipboard.
+4. **Escape in `#bpm-input`** (p2): §7 decides "same (Phase 5, D10)": it still stops the show, and `escape-in-the-bpm-field-stops-the-show-test` pins it. That is D5 A's model too: the field doesn't consume Escape, so it reaches the scene. One change around it: with the focus on a list's own button, Escape now clears the list's selection, as it did with the list itself focused, so in the projector chain it no longer falls through to Stop. 05 already lists the list's Escape among the component keys (§1 there).
+5. **More tests than §8 names** (below), for the handlers the re-check listed and for deviation 1.
+
+**Tests added:**
+- `cue-chain-list-test`: `delete-after-clicking-a-row-still-works-test`, `delete-after-focus-moves-to-a-toolbar-button-test` (also Escape from `#chain-delete-selection`), `select-all-after-clicking-a-row-checkbox-test`, `list-shortcuts-do-not-act-while-renaming-test`.
+- `keys-test` (NEW): `typing-target-detects-text-inputs-test`, `focus-within-is-true-for-descendants-test`.
+- `toolbar-test`: `space-plays-at-startup-test`, `space-plays-after-clicking-tap-test`, `space-plays-after-clicking-a-tab-or-the-trigger-mode-combo-test` (also checks Retrigger, Play, Stop and Stream are not focus-traversable), `single-keys-stay-in-the-bpm-field-test` (p2), `escape-in-the-bpm-field-stops-the-show-test` (p2), `a-click-off-the-bpm-field-applies-it-test`.
+- `projectors-layout-test`: `projector-chain-delete-after-focus-moves-to-its-copy-button-test`, `space-plays-after-leaving-the-projectors-tab-test`.
+- `rig-strip-test`: `arrows-reach-the-strip-from-its-own-controls-test`.
+- `step-grid-test`: `keys-reach-the-grid-through-its-window-test` (robot keys through the window: arrows, Space, ⌘Z, the focus kept after a toolbar click).
+- `zone-patterns-test`: `undo-shortcut-in-the-pattern-window-test`.
+- `timeline-editor-test`: `escape-cancels-a-track-rename-test`.
+- The commit field's undo filter was already covered by `projector-drivers-test/undo-shortcut-in-a-committed-field-undoes-the-edit-test`, which stays green.
+
+**Existing tests changed:** none. `toolbar-test/bpm-commits-on-focus-loss-test` still leaves the field with `ui/focus!` on the now mouse-only combo; `requestFocus` works on a node that isn't focus-traversable.
+
+**Red first** (headless, before each fix):
+- `delete-after-focus-moves-to-a-toolbar-button-test`: timed out, 3 items stay, focus owner `Button#chain-new-group` (p4).
+- `select-all-after-clicking-a-row-checkbox-test`: timed out, 1 of 3 selected, focus owner `CheckBox`. (A click on the box toggles it, and the focus stays on it.)
+- `projector-chain-delete-after-focus-moves-to-its-copy-button-test`: timed out, both effects stay, focus owner `Button#chain-copy-selection`.
+- `keys-test`: did not load (`FileNotFoundException`, no `laser-show.views.keys`).
+- `space-plays-after-clicking-tap-test`: FAIL "TAP doesn't take the focus" and timed out not playing, focus owner `Button#tap-tempo-btn` (p8). `space-plays-after-clicking-a-tab-or-the-trigger-mode-combo-test`: the same with `Button#perform-tab` (p19).
+- `arrows-reach-the-strip-from-its-own-controls-test`: timed out, selection stays `:b`, focus owner `CheckBox#rig-card-enable-c`.
+- After D6's `:focus-traversable false` alone: `space-plays-at-startup-test` FAIL and timed out (focus owner `TextField#bpm-input`), `space-plays-after-leaving-the-projectors-tab-test` timed out the same way (deviation 1).
+- `a-click-off-the-bpm-field-applies-it-test` was written with its fix; with `leave-text-field-on-click` taken out it times out with the focus owner `TextField#bpm-input`.
+- Green before and after (regressions): `delete-after-clicking-a-row-still-works-test`, `list-shortcuts-do-not-act-while-renaming-test`, `single-keys-stay-in-the-bpm-field-test`, `escape-in-the-bpm-field-stops-the-show-test`, and the step grid, pattern window and track rename tests. With the typing guard taken out of `list-key-target?`, `list-shortcuts-do-not-act-while-renaming-test` times out: the guard is what it tests.
+
+**Probes** p1–p4, p8, p19 (`uptime` load averages: before 1.22 → 2.32; after 4.36 → 3.80, other work running on the machine):
+
+| Probe | Before (`80eebe7`) | After (`c190f7c`) |
+|---|---|---|
+| p1 | `playing? true` | same |
+| p2 | Space, R, Delete in `#bpm-input`: nothing fires; Escape there stops (`playing? false`, focus still `TextField#bpm-input`); Escape on `#main-layout` stops | same |
+| p3 | focus `VBox#list-editor-cue-chain-0-0`; 3 of 3; `3 0`. Main window's focus owner `Button#play-btn` | same, main window's focus owner `BorderPane#main-layout` |
+| p4 | `3 3`, 1 selected | **`3 2`**, 0 selected |
+| p8 | focus `Button#tap-tempo-btn`; the scene filter sees the press and the release (target `Button`), the second pass neither | focus **`BorderPane#main-layout`**; the second pass sees press, typed and release (target `BorderPane`); taps stay 1 |
+| p19 | the clicked control keeps focus; `playing? false` three times | focus stays **`BorderPane#main-layout`**; **`playing? true`** three times |
+
+**Suites** (2026-11-22, at `c190f7c`): targeted UI namespaces one at a time, all green: `cue-chain-list-test`, `keys-test`, `projectors-layout-test` (18 tests together, then 7 alone), `clipboard-test` (16), `toolbar-test` (13), `main-window-test` (13), `menu-bar-test` (3), `perform-test` (23), `vibes-test` (14), `trigger-editor-test` (5), `rig-strip-test` (14), `step-grid-test` (14), `timeline-editor-test` (26), `zone-patterns-test` (11). Full unit suite `clj -M:mac-arm:test`: 1900 tests, 570,659 assertions, 0 failures, 0 errors. Full headless UI suite `clj -M:test-ui:mac-arm:test-ui-headless`: 314 tests, 1630 assertions, 0 failures, 0 errors (17 min; load 3.76 → 1.77). Kondo `--lint src test --parallel --fail-level error`: 0 errors, 17 warnings, none in the files changed here. No timing test failed.
+
+**Live check** (headless REPL, `start-test!` with a temp rig file and add-ons folder, `-Dlaser-show.rig-file` and `-Dlaser-show.addons-dir` on temp paths too; screenshots in `test-results/keyboard-phase3/`, gitignored):
+- The window started with the focus on `#main-layout`. A click on Perform, on Grid, a pick of Toggle from the trigger-mode menu (`02-…`) and a click on TAP each left it there, and Space played and stopped after each (`01-…`, `03-…`); TAP's taps stayed 1.
+- Cue Chain Editor on A1, three items: a click on a row's On box turned it off and left the focus on the box; ⌘A then selected 3 of 3 (`04-…`). A click on New (which adds a group and selects it) left the focus on New, and Delete removed the new group (`05-…`, `06-…`). With Triangle selected, a click on Copy left the focus on Copy, and Delete removed Triangle (`07-…`).
+- Escape in the BPM field while playing stopped the show, the focus staying in the field (`08-…`). ⌘A and "128" typed there, then a click on Grid: 128 applied, the focus on the layout, Space played (`09-…`).
+- Step grid on A1's pattern: a click on the grid gave it the focus; ↑, →, Space, End, Enter, ⌘Z and Home did what they do there, and Space didn't play the show (`10-…`).
+- Rig strip, three lasers: a click on card A gave the strip the focus, → selected B. A click on B's On box (turning it off) left the focus on the box, and → selected C (`11-…`). A click on ◀ moved C left, the focus on ◀; ← selected A, Alt+→ moved A right (`12-…`). B's On box turned it back on.
 
 ---
 

@@ -43,6 +43,10 @@
 ;; new path and also prints the tap count after Space. p2 also presses Escape (D10's
 ;; audit note), in #bpm-input and on #main-layout. p19 (new) clicks main-window controls
 ;; and presses Space (D6).
+;; Re-run 2026-11-22 after Phase 3 (branch keyboard-phase3, c190f7c; 03 §10): p4 now prints
+;; 3 2; p8 and p19 show the focus staying on BorderPane#main-layout and Space playing; p1-p3
+;; and p2 print as before, except that the main window's focus owner is #main-layout, not
+;; #play-btn. p4, p8 and p19 are real tests now (cue-chain-list-test, toolbar-test).
 ;;
 ;; Run from the repo root (macOS Apple Silicon; use :win, :linux or :mac elsewhere).
 ;; The plan folder is the classpath root, so this namespace is probes.keyboard-probes-test:

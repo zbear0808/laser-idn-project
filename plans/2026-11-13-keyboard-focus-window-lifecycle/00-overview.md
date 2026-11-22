@@ -1,27 +1,27 @@
 # Keyboard, focus and window lifecycle — overview
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)
-**Status:** In progress. Phase 1 done (`93c638a`, 2026-11-14); Phase 4 done (2026-11-22: Step 4a `02ae75c`..`1113d9a`, 04 §9a; Steps 4b–4c `29bf152`..`71ab827`, 04 §9b); D0–D3 answered A; D8, D13 and D14 answered (2026-11-21, A, B, A); D9 answered A (2026-11-22, the ★ option); D4–D7, D10 and D12 answered A (2026-11-22, the ★ options, under the user's standing choice); **D11 re-opened** (2026-11-22, 05)   **Last verified against:** `2227bce` for docs 02, 03 and 05 (re-checked 2026-11-22, 275 commits after `cb32414`; probes p1–p4, p8 and p19, §3). §2 and §4's evidence column outside those docs are still as of `cb32414`
+**Status:** In progress. Phase 1 done (`93c638a`, 2026-11-14); Phase 3 done (2026-11-22, `d2e23c1`..`c190f7c`, 03 §10); Phase 4 done (2026-11-22: Step 4a `02ae75c`..`1113d9a`, 04 §9a; Steps 4b–4c `29bf152`..`71ab827`, 04 §9b); D0–D3 answered A; D8, D13 and D14 answered (2026-11-21, A, B, A); D9 answered A (2026-11-22, the ★ option); D4–D7, D10 and D12 answered A (2026-11-22, the ★ options, under the user's standing choice); **D11 re-opened** (2026-11-22, 05)   **Last verified against:** `2227bce` for docs 02, 03 and 05 (re-checked 2026-11-22, 275 commits after `cb32414`; probes p1–p4, p8 and p19, §3). §2 and §4's evidence column outside those docs are still as of `cb32414`
 **Supersedes / Superseded by:** supersedes `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md` (approved with D0 on 2026-11-14; that file is marked superseded and otherwise untouched)
 **Related findings:** review 01 F3, F4, F7, F18, F20, M5, L3, Q4, Q6; 02 #15, M4 (clipboard part); 05 F17, F9, L3; carry-overs "menu stubs" and "unsaved-changes guard"; undo plan §10
 
 ## Start here
 
-**Phase 1 (`01-phase1-unsaved-guard.md`) is done** (`93c638a`, 2026-11-14; results and differences from the plan in its §10). It was the only pending item that stopped real data loss: closing the window, File > Exit, File > New and File > Open discarded unsaved work without asking (`views/root.clj:167-169`, `events/handlers/menu.clj:28,133` at `cb32414`). **Phase 4 is done** too (2026-11-22). Docs 02, 03 and 05 were re-checked at `2227bce` on 2026-11-22.
+**Phase 1 (`01-phase1-unsaved-guard.md`) is done** (`93c638a`, 2026-11-14; results and differences from the plan in its §10). It was the only pending item that stopped real data loss: closing the window, File > Exit, File > New and File > Open discarded unsaved work without asking (`views/root.clj:167-169`, `events/handlers/menu.clj:28,133` at `cb32414`). **Phase 4 is done** too (2026-11-22). Docs 02, 03 and 05 were re-checked at `2227bce` on 2026-11-22. **Phase 3 is done** (2026-11-22, `d2e23c1`..`c190f7c`; results, deviations and probes in 03 §10): a list's keys work with the focus on its own buttons and boxes, and Space plays after a click on TAP, a tab or the trigger-mode menu.
 
-**Next is Phase 3 (`03-phase3-key-handling.md`).** It needs nothing open, depends on nothing (03 §0), and fixes the one verified key defect (p4), plus Space being eaten after a click on TAP, a tab or the trigger-mode combo (p8, p19). Phase 2 follows. Phase 5 needs D11 answered, then Phases 2 and 3.
+**Next is Phase 2 (`02-phase2-dialog-shell.md`).** It takes `keys/typing-target?` (now in `src/laser_show/views/keys.clj`) for the timeline's Space guard. Phase 5 needs D11 answered, then Phase 2.
 
 The CI fix (§1) is in `e87b272`.
 
 | Doc | Phase | Size | Needs |
 |---|---|---|---|
 | `01-phase1-unsaved-guard.md` | Unsaved-changes guard and an exit path | ~1 day | D1, D2, D3 (answered A). Done, `93c638a` |
-| `03-phase3-key-handling.md` | Keys reach the right place. Verified at `2227bce` | ~0.5–1 day | Nothing open (D5–D7 answered A, 2026-11-22). Depends on nothing; build it first |
+| `03-phase3-key-handling.md` | Keys reach the right place. Verified at `2227bce` | ~0.5–1 day | **Done** (2026-11-22, `d2e23c1`..`c190f7c`, 03 §10; D5–D7 answered A) |
 | `02-phase2-dialog-shell.md` | One dialog shell, now for eleven dialogs; `cell-label` and the add-projector close already done by other work (02 §0). Verified at `2227bce` | ~2 days | Nothing open (D4 answered A, with the menu-stub table, 2026-11-22) |
 | `04-phase4-clipboard.md` | One clipboard, in three steps; Step 4a (the one clipboard) ships on its own | ~2–2.5 days | **Done** (2026-11-22). 4a: 2026-11-21, `02ae75c`..`1113d9a`, 04 §9a; 4b–4c: D9 answered A, 2026-11-22, `29bf152`..`71ab827`, 04 §9b |
 | `05-phase5-keyboard-triggers.md` | Keyboard as a cue-trigger source (cells, vibe roles, map and pattern pads, the Zone step key). K-15 already fixed by other work (05 §0). Verified at `2227bce` | ~1–1.5 days | **D11 (re-opened)**; D10, D12 answered A. Phases 3 and 2 |
 
-About 4–4.5 days left (3 → 2 → 5), against roughly two weeks for the 2026-10-07 plan as written. Each phase ships on its own.
+About 3–3.5 days left (2 → 5), against roughly two weeks for the 2026-10-07 plan as written. Each phase ships on its own.
 
 ## 1. Step 0 — CI is red because the workflow file is invalid
 
@@ -87,6 +87,8 @@ Run by `probes/keyboard_probes_test.clj` (headless TestFX, JavaFX 28-ea+11, mast
 
 p5–p7 are Phase 4's and were re-run there (04 §9).
 
+After Phase 3 (2026-11-22, `c190f7c`; 03 §10): p4 prints `3 2` (Delete reaches the list from its New button); after a click on TAP, a tab or the trigger-mode combo the focus stays on `#main-layout` and Space plays (p8, p19); p1–p3 and p2's Escape are unchanged (Escape in `#bpm-input` still stops the show). The main window's focus owner at startup is `BorderPane#main-layout`.
+
 | Probe | Action | Result |
 |---|---|---|
 | p1 | focus `#main-layout`, Space | `playing? true` (the menu accelerator fires) |
@@ -107,8 +109,8 @@ p5–p7 are Phase 4's and were re-run there (04 §9).
 | K-1 | Window close, File > Exit, New and Open discard unsaved work without asking | H | `root.clj:167-169`, `menu.clj:28,133` | 1 (done, `93c638a`) |
 | K-2 | In dev mode, closing the main window kills the REPL JVM | M | `root.clj:169` vs `app.clj:130-132` | 1 (done, `93c638a`) |
 | K-3 | Exit stops no engines, no preview timer, no Carabiner; no IDN close is sent | L | `app.clj:186-199`; `link/disconnect-carabiner!` has no callers | 1 (done, `93c638a`) |
-| K-4 | List shortcuts die when focus moves to a toolbar button or checkbox inside the list; main-window buttons and combos eat Space after a click | M | `list.clj:769,784`; p4, p8, p19 (at `2227bce`) | 3 |
-| K-5 | Global props atom: two writers, never cleaned, `:ordered-ids` can be missing | L | `list.clj:60,619,887` (at `2227bce`) | 3 |
+| K-4 | List shortcuts die when focus moves to a toolbar button or checkbox inside the list; main-window buttons and combos eat Space after a click | M | `list.clj:769,784`; p4, p8, p19 (at `2227bce`) | 3 (done, `d2e23c1`, `2e374e7`; also the rig strip, `8e741ba`) |
+| K-5 | Global props atom: two writers, never cleaned, `:ordered-ids` can be missing | L | `list.clj:60,619,887` (at `2227bce`) | 3 (done, `d2e23c1`) |
 | K-6 | Cut is two events; if the OS write fails, the items are deleted and nothing can be pasted | M | p16; `views/components/list.clj:775-779`, `state/clipboard.clj:71-73` | 4a (no loss: done), 4c (one event: done, `71ab827`) |
 | K-7 | A list copy never reaches `[:ui :clipboard]`: the helper writes it behind the pipeline, and the handler's write-back undoes it. The Cue Chain Editor's Paste buttons never enable; the projector chain's enables only after a re-render | M | p5, p9, p11; `state/clipboard.clj:34` vs `events/handlers/list.clj:247` | 4a (done) |
 | K-8 | Lists paste each other's items: the effects grid's chain and an item's effects take a cue's presets and give effects to the cue list. Projector chains were fixed in `f044a31` (zones Z0, B-8b) | H (data) | p7, p13; `views/components/list.clj:875`; `effect_chain_editor.clj:143`, `cue_chain_editor.clj:559` | 4b (done, `29bf152`) |
