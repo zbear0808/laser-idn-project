@@ -264,19 +264,6 @@
   (log/info "Laser Show application started.")
   @*app)
 
-(defn- stop-input-devices!
-  "Stop the gamepad poller and release MIDI ports and the OSC socket."
-  []
-  (gamepad/stop!)
-  (try
-    (when (get-in (state/get-raw-state) [:backend :input])
-      (state/swap-state! (fn [s]
-                           (-> s
-                               (update-in [:backend :input :midi] midi/disconnect-all)
-                               (update-in [:backend :input :osc] osc/stop-server)))))
-    (catch Exception e
-      (log/warn "Error releasing input devices:" (.getMessage e)))))
-
 (defn- stop-streaming!
   "Drain the output runtime: every engine is stopped, so each DAC gets its IDN
    close packets instead of waiting for its link timeout, and nothing starts
@@ -287,12 +274,23 @@
     (catch Exception e
       (log/warn "Error stopping streaming engines:" (.getMessage e)))))
 
-(defn- disconnect-link!
-  "Disconnect from the Carabiner daemon if we connected to it."
-  []
-  (when (get-in (state/get-raw-state) [:backend :link :carabiner-connected?])
+(defn- release-devices!
+  "Close what state lists: the MIDI ports and the OSC server, and the
+   Carabiner connection when it is connected. Each is closed once, in its
+   own try, and nothing is written back: the next start replaces app state."
+  [state]
+  (when-let [{:keys [midi osc]} (get-in state [:backend :input])]
     (try
-      (state/swap-state! update-in [:backend :link] link/disconnect-carabiner!)
+      (midi/disconnect-all midi)
+      (catch Exception e
+        (log/warn "Error releasing MIDI ports:" (.getMessage e))))
+    (try
+      (osc/stop-server osc)
+      (catch Exception e
+        (log/warn "Error stopping the OSC server:" (.getMessage e)))))
+  (when (get-in state [:backend :link :carabiner-connected?])
+    (try
+      (link/disconnect-carabiner! (get-in state [:backend :link]))
       (catch Exception e
         (log/warn "Error disconnecting from Carabiner:" (.getMessage e))))))
 
@@ -308,31 +306,38 @@
 
 (defn stop!
   "Stop the mounted cljfx application and release application-owned services:
-   the UI, the show clock, the input mapper, the streaming engines (the
-   output runtime is drained), the add-ons' drivers (unregistered, their
-   jars closed), input devices, the Carabiner link and the rig
-   file (its pending change written, its lock let go). dispatch! falls back
-   to the synchronous handler afterwards.
+   the UI, the show clock, the input mapper, the gamepad poller, the
+   streaming engines (the output runtime is drained), the add-ons' drivers
+   (unregistered, their jars closed), input devices, the Carabiner link and
+   the rig file (its pending change written, its lock let go). dispatch!
+   falls back to the synchronous handler afterwards.
+
+   It writes nothing to app state. The devices are closed from one read,
+   after the events already queued have run (within 1 s; on the event
+   thread, as on Quit, it can't wait for them and doesn't), and only by the
+   call that claimed the app, so each is closed once.
 
    This is intentionally idempotent so UI fixtures can safely call it from
    `finally` blocks after a failed startup or test."
   []
-  (when-let [{:keys [renderer]} @*app]
-    (fx/unmount-renderer (state/get-context-atom) renderer))
-  (show-clock/stop!)
-  (input-mapper/stop-mapper!)
-  (stop-streaming!)
-  ;; Nothing streams now: the next start loads the add-ons again
-  (addons/unload-all!)
-  (stop-input-devices!)
-  (disconnect-link!)
-  (stop-rig-file!)
-  (events/set-exit-fn! nil)
-  (events/set-dispatch-fn! nil)
-  (reset! *app nil)
-  (when (dev-config/dev-mode?)
-    (Platform/setImplicitExit false))
-  nil)
+  (let [[app] (reset-vals! *app nil)]
+    (when-let [{:keys [renderer]} app]
+      (fx/unmount-renderer (state/get-context-atom) renderer))
+    (show-clock/stop!)
+    (input-mapper/stop-mapper!)
+    (gamepad/stop!)
+    (stop-streaming!)
+    ;; Nothing streams now: the next start loads the add-ons again
+    (addons/unload-all!)
+    (when app
+      (events/flush! 1000)
+      (release-devices! (state/get-raw-state)))
+    (stop-rig-file!)
+    (events/set-exit-fn! nil)
+    (events/set-dispatch-fn! nil)
+    (when (dev-config/dev-mode?)
+      (Platform/setImplicitExit false))
+    nil))
 
 (defn- exit!
   "End the application (the :system/exit effect calls this). In dev mode the JVM
