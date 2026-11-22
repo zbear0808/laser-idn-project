@@ -41,39 +41,48 @@
 ;; Helper Functions
 
 
-(defn init-test-state! []
-  (state/init-state! (domains/build-initial-state))
-  
-  ;; Add some test data
-  (state/assoc-in-state! [:timing :bpm] 140.0)
-  (state/assoc-in-state! [:grid :size] [8 4])
-  
-  ;; Add a test cue chain
-  (state/assoc-in-state! [:chains :cue-chains [0 0] :items]
-                         [{:type :preset
-                           :id #uuid "11111111-1111-1111-1111-111111111111"
-                           :preset-id :test-preset
-                           :params {:size 1.0}
-                           :effects []
-                           :enabled? true}])
-  
-  ;; Add a test effect chain
-  (state/assoc-in-state! [:chains :effect-chains [0 0] :items]
-                         [{:type :effect
-                           :id #uuid "22222222-2222-2222-2222-222222222222"
-                           :effect-id :test-effect
-                           :params {:amount 0.5}
-                           :enabled? true}])
-  
-  ;; Add a test projector (with zone-groups directly assigned)
-  ;; After flattening: :projectors IS the map of projector-id -> config
-  (state/assoc-in-state! [:projectors :test-proj]
-                         {:name "Test Projector"
-                          :host "192.168.1.100"
-                          :port 7255
-                          :enabled? true
-                          :zone-groups []
-                          :exclude-from-all? false}))
+(defn test-state []
+  (-> (domains/build-initial-state)
+      ;; Add some test data
+      (assoc-in [:timing :bpm] 140.0)
+      (assoc-in [:grid :size] [8 4])
+      ;; Add a test cue chain
+      (assoc-in [:chains :cue-chains [0 0] :items]
+                [{:type :preset
+                  :id #uuid "11111111-1111-1111-1111-111111111111"
+                  :preset-id :test-preset
+                  :params {:size 1.0}
+                  :effects []
+                  :enabled? true}])
+      ;; Add a test effect chain
+      (assoc-in [:chains :effect-chains [0 0] :items]
+                [{:type :effect
+                  :id #uuid "22222222-2222-2222-2222-222222222222"
+                  :effect-id :test-effect
+                  :params {:amount 0.5}
+                  :enabled? true}])
+      ;; Add a test projector (with zone-groups directly assigned)
+      ;; After flattening: :projectors IS the map of projector-id -> config
+      (assoc-in [:projectors :test-proj]
+                {:name "Test Projector"
+                 :host "192.168.1.100"
+                 :port 7255
+                 :enabled? true
+                 :zone-groups []
+                 :exclude-from-all? false})))
+
+(defn- save!
+  "What File > Save does: write the project zip, then mark state saved."
+  [state zip-path]
+  (when (persistent/write-project! zip-path (persistent/project-files state))
+    (persistent/mark-saved state zip-path (System/currentTimeMillis))))
+
+(defn- open
+  "What File > Open does: read the zip, then apply it over state.
+   nil if the zip can't be read."
+  [state zip-path]
+  (when-let [contents (persistent/read-project zip-path)]
+    (persistent/apply-loaded-project state contents zip-path)))
 
 
 ;; Tests
@@ -111,9 +120,7 @@
 
 (deftest test-save-project
   (testing "Save project creates zip file with correct contents"
-    (init-test-state!)
-    
-    (is (persistent/save-project! test-project-file))
+    (is (save! (test-state) test-project-file))
     
     (testing "Zip file is created"
       (is (.exists (io/file test-project-file))))
@@ -152,39 +159,39 @@
 
 (deftest test-load-project
   (testing "Load project restores the show from zip; this machine's rig stays as it is"
-    (init-test-state!)
-    (persistent/save-project! test-project-file)
+    (save! (test-state) test-project-file)
     
     ;; Reset state to initial
-    (state/reset-state! (domains/build-initial-state))
-    
-    ;; Verify state is reset (BPM back to default, cue chains back to initial defaults)
-    (is (= 120.0 (state/get-in-state [:timing :bpm])))
-    (let [initial-cue (state/get-in-state [:chains :cue-chains [0 0]])]
-      ;; Initial state has default cues, verify it's not our test data
-      (is (not= :test-preset (get-in initial-cue [:items 0 :preset-id]))))
-    
-    ;; Load project
-    (is (persistent/load-project! test-project-file))
-    
-    (testing "BPM is restored"
-      (is (= 140.0 (state/get-in-state [:timing :bpm]))))
-    
-    (testing "Grid size is restored"
-      (is (= [8 4] (state/get-in-state [:grid :size]))))
-    
-    (testing "Cue chains are restored"
-      (let [cue-chain (state/get-in-state [:chains :cue-chains [0 0] :items])]
-        (is (= 1 (count cue-chain)))
-        (is (= :test-preset (get-in cue-chain [0 :preset-id])))))
-    
-    (testing "Effect chains are restored"
-      (let [effect-chain (state/get-in-state [:chains :effect-chains [0 0] :items])]
-        (is (= 1 (count effect-chain)))
-        (is (= :test-effect (get-in effect-chain [0 :effect-id])))))
-    
-    (testing "Projectors are the rig's, not the show's: this machine had none"
-      (is (= {} (state/get-in-state [:projectors]))))
+    (let [initial (domains/build-initial-state)]
+      
+      ;; Verify state is reset (BPM back to default, cue chains back to initial defaults)
+      (is (= 120.0 (get-in initial [:timing :bpm])))
+      (let [initial-cue (get-in initial [:chains :cue-chains [0 0]])]
+        ;; Initial state has default cues, verify it's not our test data
+        (is (not= :test-preset (get-in initial-cue [:items 0 :preset-id]))))
+      
+      ;; Load project
+      (let [loaded (open initial test-project-file)]
+        (is loaded)
+        
+        (testing "BPM is restored"
+          (is (= 140.0 (get-in loaded [:timing :bpm]))))
+        
+        (testing "Grid size is restored"
+          (is (= [8 4] (get-in loaded [:grid :size]))))
+        
+        (testing "Cue chains are restored"
+          (let [cue-chain (get-in loaded [:chains :cue-chains [0 0] :items])]
+            (is (= 1 (count cue-chain)))
+            (is (= :test-preset (get-in cue-chain [0 :preset-id])))))
+        
+        (testing "Effect chains are restored"
+          (let [effect-chain (get-in loaded [:chains :effect-chains [0 0] :items])]
+            (is (= 1 (count effect-chain)))
+            (is (= :test-effect (get-in effect-chain [0 :effect-id])))))
+        
+        (testing "Projectors are the rig's, not the show's: this machine had none"
+          (is (= {} (get-in loaded [:projectors]))))))
 
     (testing "the zip still holds the projectors, as a copy"
       (let [projector (get-in (ser/load-from-zip test-project-file) ["hardware.edn" :projectors :test-proj])]
@@ -194,25 +201,23 @@
 
 (deftest test-round-trip
   (testing "Save and load preserves the show with zip format, and leaves the rig"
-    (init-test-state!)
-    
-    ;; Capture original state
-    ;; After flattening: :projectors IS the map directly (no :items wrapper)
-    (let [original-bpm (state/get-in-state [:timing :bpm])
-          original-cues (state/get-in-state [:chains :cue-chains [0 0] :items])
-          original-effects (state/get-in-state [:chains :effect-chains [0 0] :items])
-          original-projector (state/get-in-state [:projectors :test-proj])]
-      
-      ;; Save and reload
-      (persistent/save-project! test-project-file)
-      (state/reset-state! (domains/build-initial-state))
-      (persistent/load-project! test-project-file)
+    (let [state (test-state)
+          ;; Capture original state
+          ;; After flattening: :projectors IS the map directly (no :items wrapper)
+          original-bpm (get-in state [:timing :bpm])
+          original-cues (get-in state [:chains :cue-chains [0 0] :items])
+          original-effects (get-in state [:chains :effect-chains [0 0] :items])
+          original-projector (get-in state [:projectors :test-proj])
+          
+          ;; Save and reload
+          _ (save! state test-project-file)
+          loaded (open (domains/build-initial-state) test-project-file)]
       
       ;; Verify everything matches
-      (is (= original-bpm (state/get-in-state [:timing :bpm])))
-      (is (= original-cues (state/get-in-state [:chains :cue-chains [0 0] :items])))
-      (is (= original-effects (state/get-in-state [:chains :effect-chains [0 0] :items])))
-      (is (nil? (state/get-in-state [:projectors :test-proj])) "the rig the load found: none")
+      (is (= original-bpm (get-in loaded [:timing :bpm])))
+      (is (= original-cues (get-in loaded [:chains :cue-chains [0 0] :items])))
+      (is (= original-effects (get-in loaded [:chains :effect-chains [0 0] :items])))
+      (is (nil? (get-in loaded [:projectors :test-proj])) "the rig the load found: none")
       (is (= original-projector (get-in (ser/load-from-zip test-project-file) ["hardware.edn" :projectors :test-proj]))
           "and the zip's copy of the projector, as it was"))))
 
@@ -400,17 +405,17 @@
       (is (= {} (get-in after [:projector-ui :identify])) label))))
 
 (deftest safety-round-trips-test
-  (let [zone {:limit [-0.9 -0.8 0.9 0.95] :blocked [[-0.2 -1.0 0.2 -0.4] [0.5 0.5 0.6 0.6]]}]
-    (state/init-state! (-> (domains/build-initial-state)
-                           (assoc-in [:projectors :p] {:name "Laser L" :host "10.0.0.5" :zone-groups [:all]
-                                                       :safety zone})))
-    (persistent/save-project! test-project-file)
+  (let [zone {:limit [-0.9 -0.8 0.9 0.95] :blocked [[-0.2 -1.0 0.2 -0.4] [0.5 0.5 0.6 0.6]]}
+        saved (save! (-> (domains/build-initial-state)
+                         (assoc-in [:projectors :p] {:name "Laser L" :host "10.0.0.5" :zone-groups [:all]
+                                                     :safety zone}))
+                     test-project-file)]
     (is (= zone (get-in (ser/load-from-zip test-project-file) ["hardware.edn" :projectors :p :safety]))
         "Save writes the zone into the zip's copy of the rig")
-    (state/swap-state! assoc-in [:projectors :p :safety] {:limit [-0.5 -0.5 0.5 0.5] :blocked []})
-    (persistent/load-project! test-project-file)
-    (is (= {:limit [-0.5 -0.5 0.5 0.5] :blocked []} (state/get-in-state [:projectors :p :safety]))
-        "and Open never puts it back over this machine's (D-30)")))
+    (let [loaded (open (assoc-in saved [:projectors :p :safety] {:limit [-0.5 -0.5 0.5 0.5] :blocked []})
+                       test-project-file)]
+      (is (= {:limit [-0.5 -0.5 0.5 0.5] :blocked []} (get-in loaded [:projectors :p :safety]))
+          "and Open never puts it back over this machine's (D-30)"))))
 
 
 ;; The rig in its own file (zones plan ZR): Open and New are the show's
@@ -553,8 +558,7 @@
           (finally
             (doseq [^java.io.File f (reverse (file-seq dir))] (.delete f))))))
     (testing "through the show's zip: its copy of the rig, and set up on an empty rig from it"
-      (state/init-state! state)
-      (persistent/save-project! test-project-file)
+      (save! state test-project-file)
       (let [hardware (get (ser/load-from-zip test-project-file) "hardware.edn")
             set-up (rig-file/set-up-from-show (domains/build-initial-state) hardware {}
                                               (rig-file/pin-map (domains/build-initial-state) hardware))]

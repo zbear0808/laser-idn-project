@@ -13,7 +13,6 @@
    This namespace decides what gets saved and loaded."
   (:require [clojure.string :as str]
             [clojure.tools.logging :as log]
-            [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
             [laser-show.state.migration :as migration]
@@ -287,37 +286,6 @@
     (catch Exception e
       (log/error "Error loading project:" (.getMessage e))
       nil)))
-
-
-;; Project Operations (REPL / tests - event handlers use the pure functions above)
-
-(defn save-project!
-  "Save the current state to a zip file and mark the project clean.
-   
-   Returns: true on success, false on failure"
-  [zip-path]
-  (if (write-project! zip-path (project-files (state/get-raw-state)))
-    (do (state/swap-state! mark-saved zip-path (System/currentTimeMillis))
-        true)
-    false))
-
-(defn load-project!
-  "Load a zip file, replacing the current document.
-   
-   Returns: true if successful, false if file doesn't exist or load fails"
-  [zip-path]
-  (if-let [contents (read-project zip-path)]
-    (do (state/swap-state! apply-loaded-project contents zip-path)
-        true)
-    false))
-
-(defn new-project!
-  "Replace the current document with a fresh starter project.
-   
-   Returns: true"
-  []
-  (state/swap-state! new-project-state)
-  true)
 
 (defn get-default-project-filename
   "Generate a default project filename with timestamp.
