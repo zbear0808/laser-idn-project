@@ -31,6 +31,9 @@
 ;; waits for it (a render or a file chooser keeps it busy the same way). The OS
 ;; clipboard here is the headless platform's, not the Mac's. All of p5-p17 were run
 ;; again at cc9e000 (2026-11-20) and at a38ea43 (2026-11-21) with the same findings.
+;; After Step 4a (2026-11-21) p11 and p16 wrap the functions Step 4a reads and writes the
+;; OS clipboard with (events/system-clipboard-text, events/put-system-clipboard-text!);
+;; the a38ea43 run wrapped the old ones (git history has that version).
 ;;
 ;; Run from the repo root (macOS Apple Silicon; use :win, :linux or :mac elsewhere).
 ;; The plan folder is the classpath root, so this namespace is probes.keyboard-probes-test:
@@ -49,7 +52,6 @@
             [laser-show.animation.chains :as chains]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.events.core :as events]
-            [laser-show.state.clipboard :as clipboard]
             [laser-show.state.core :as state]
             [laser-show.state.serialization :as ser]
             [laser-show.ui-test.fixtures :as fixtures]
@@ -390,6 +392,7 @@
      (cond (on? #"projector_config_panel") :rendering-projector-config-panel
            (on? #"effect_chain_editor_content") :rendering-effect-chain-editor
            (on? #"handle_paste_items") :paste-handler
+           (on? #"effect_clipboard_read") :clipboard-read-effect
            :else :other)]))
 
 (defn- disabled-now? [selector]
@@ -399,13 +402,15 @@
 (deftest p11-projector-chain-paste-reads-the-os-clipboard-while-rendering
   ;; EXPECT today: OS clipboard reads on the FX thread inside projector-config-panel; after
   ;; Copy, the same chain's Paste stays disabled until a selection change re-renders it
-  ;; with-redefs: a recorder around clipboard/read-from-system-clipboard (the original runs)
+  ;; with-redefs: a recorder around the function that reads the OS clipboard (the original
+  ;; runs): clipboard/read-from-system-clipboard before Step 4a, events/system-clipboard-text,
+  ;; the :clipboard/read effect's, since
   (let [robot (ui/robot)
         reads (atom [])
-        orig @#'clipboard/read-from-system-clipboard]
+        orig @#'events/system-clipboard-text]
     (set-os-clip! "")
     (with-two-projectors!)
-    (with-redefs [clipboard/read-from-system-clipboard (fn [] (swap! reads conj (reader-site)) (orig))]
+    (with-redefs [events/system-clipboard-text (fn [] (swap! reads conj (reader-site)) (orig))]
       (ui/click! robot "#projectors-tab")
       (ui/wait-for! #(some? (ui/query "#chain-copy-selection")))
       (let [n-mount (count @reads)]
@@ -439,7 +444,11 @@
       (say "p12 the editor's Paste disabled =" (disabled-now? "#chain-paste-items"))
       (ui/click-node! robot (ui/query "#chain-paste-items"))
       (flush!)
-      (say "p12 click Paste -> effects in cell [0 3] before/after =" n0 (n-items)))))
+      (ui/sync-fx!)
+      (say "p12 click Paste -> effects in cell [0 3] before/after =" n0 (n-items)
+           "; notice =" (pr-str (get-in (raw) [:ui :notice :text]))
+           "; [:ui :clipboard] type =" (get-in (raw) [:ui :clipboard :type])
+           "; Paste disabled now =" (disabled-now? "#chain-paste-items")))))
 
 (deftest p13-the-cue-editor-lists-take-each-others-items
   ;; EXPECT today: a preset lands in an item's effects, and an effect among the cue's items
@@ -502,15 +511,16 @@
 (deftest p16-cut-with-a-failing-os-write-deletes-and-leaves-nothing-to-paste
   ;; EXPECT today: items 3 -> 2, [:ui :clipboard] nil, the OS clipboard unchanged, then
   ;; paste 2 -> 2; the undo label is the delete's
-  ;; with-redefs: clipboard/copy-to-system-clipboard! returns false, what it returns when
-  ;; setContent throws (state/clipboard.clj:71-73)
+  ;; with-redefs: the OS write fails. Before Step 4a clipboard/copy-to-system-clipboard!
+  ;; returned false, what it returned when setContent threw (state/clipboard.clj:71-73);
+  ;; since Step 4a events/put-system-clipboard-text! throws, as setContent would
   (let [robot (ui/robot)]
     (set-os-clip! "")
     (open-cue-editor!)
     (add-cue-items! [:square :triangle])
     (ui/click-node! robot (nth (ui/query-all ".chain-item") 1))
     (ui/wait-for! #(seq (selected)))
-    (with-redefs [clipboard/copy-to-system-clipboard! (fn [_] false)]
+    (with-redefs [events/put-system-clipboard-text! (fn [_] (throw (IllegalStateException. "no pasteboard")))]
       (let [n0 (count (cue-items))]
         (push-combo! robot (ui/shortcut-key-code) KeyCode/X)
         (flush!)

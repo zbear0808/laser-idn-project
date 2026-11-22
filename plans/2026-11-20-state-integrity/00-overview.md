@@ -1,7 +1,7 @@
 # State integrity — overview
 
 **Written:** 2026-11-20   **Written for commit:** `3229c95` (`master`)
-**Status:** In progress. **01 done** (2026-11-21, `09b6db7`, `dba29bb`; its §11 As built), its E1–E3 answered A, the ★ options; 02 needs W1–W6; the clipboard step (keyboard plan, Step 4a) has D8, D13 and D14 answered (2026-11-21, the ★ options) and is next   **Last verified against:** 01 at `fe7d554` (2026-11-21, re-checked after the output drivers, zones Z4–Z6, vibe Phase 8, Decimate's follow-ups and the Projectors layout pass; probes e1–e4 run three times there, e1i added); the clipboard step at `a38ea43` (2026-11-21, keyboard probes p5–p7 and p9–p17 re-run there, p18 added for the step grid's clipboard); 02 at `cc9e000` (probes w1–w6 run at `3229c95` and again at `cc9e000`), not re-checked since
+**Status:** In progress. **01 done** (2026-11-21, `09b6db7`, `dba29bb`; its §11 As built), its E1–E3 answered A, the ★ options; 02 needs W1–W6; **the clipboard step (keyboard plan, Step 4a) done** (2026-11-21, `02ae75c`..`1113d9a`; keyboard 04 §9a), D8, D13 and D14 answered A, B, A   **Last verified against:** 01 at `fe7d554` (2026-11-21, re-checked after the output drivers, zones Z4–Z6, vibe Phase 8, Decimate's follow-ups and the Projectors layout pass; probes e1–e4 run three times there, e1i added); the clipboard step at `a38ea43` (2026-11-21, keyboard probes p5–p7 and p9–p17 re-run there, p18 added for the step grid's clipboard); 02 at `cc9e000` (probes w1–w6 run at `3229c95` and again at `cc9e000`), not re-checked since
 **Supersedes / Superseded by:** none   **Related findings:** review 02 M1, #2, #15, #21, #23; review 04 #23, MR7; keyboard K-6…K-11; output runtime O-9
 
 The 2026-11-20 cljfx state audit was done by six read-only auditors. It was reported in the session and isn't saved. It found three ways app state can be wrong for reasons unrelated to any handler's logic:
@@ -15,14 +15,14 @@ This folder plans the first two. The third already had a plan, so it was updated
 
 **`01-engine-snapshot.md` is done** (2026-11-21, `09b6db7`, `dba29bb`): every frame comes from one tick's snapshot, and no engine thread reads app state (01 §11). Its follow-ups are in 01 §10: the routing recomputed on every corner-pin drag step, and a device-paced add-on driver checked on hardware.
 
-**Then do clipboard Step 4a** (~1.25 days, D8, D13, D14). It fixes visible bugs: a list copy is undone, and Paste buttons stay off or light up for the wrong things. It also fixes the agent waits: every copy and list paste makes the event agent wait for the FX thread (503–579 ms behind a busy FX thread, keyboard p10), and live triggers queue behind it.
+**Clipboard Step 4a is done** (2026-11-21, `02ae75c`..`1113d9a`; keyboard 04 §9a). A copy writes `[:ui :clipboard]` in its handler's `:state`, the OS clipboard is written and read only by `:clipboard/write` and `:clipboard/read` on the FX thread, nothing reads it while rendering, and Paste follows the clipboard. Keyboard p9 reports no lost update and p10 no wait for the FX thread. It also folded in the step grid's clipboard (zones Z6), found at its re-check.
 
-**Then do `02-direct-state-writes.md`**, in its own commit order (02 §10). Its guard (commit 9) should land after 4a, so it doesn't need a temporary `[:ui :clipboard]` exemption (02, "Dependencies on the sibling plans").
+**Next is `02-direct-state-writes.md`**, in its own commit order (02 §10). 4a landed first, so its guard (commit 9) needs no `[:ui :clipboard]` exemption, and its §1.2 row 13 (`set-internal-clipboard!`) is gone (02, "Dependencies on the sibling plans"). 02 now edits what 4a left in `events/core.clj`: the effects map, the "Writers outside the pipeline" sentence and `effects-and-co-effects-are-shared-maps-test`.
 
 | Doc | What | Size | Needs | Depends on |
 |---|---|---|---|---|
 | `01-engine-snapshot.md` | Every frame comes from one snapshot | **done** (`09b6db7`, `dba29bb`) | – | nothing |
-| `../2026-11-13-keyboard-focus-window-lifecycle/04-phase4-clipboard.md`, Step 4a | One clipboard (and, since the `a38ea43` re-check, the step grid's clipboard folded into it) | ~1.25 d | D8, D13, D14 (answered) | nothing; it no longer waits for keyboard Phase 3 (04 §0) |
+| `../2026-11-13-keyboard-focus-window-lifecycle/04-phase4-clipboard.md`, Step 4a | One clipboard (and, since the `a38ea43` re-check, the step grid's clipboard folded into it) | **done** (`02ae75c`..`1113d9a`) | – | nothing |
 | `02-direct-state-writes.md` | No state writes outside the event pipeline | ~4½ d (~3½ with W2 B and W3 B) | W1–W6 | nothing; commit 9 is better after 4a |
 
 That is about 6¾ days in total (about 5¾ with W2 B and W3 B). Steps 4b and 4c of the clipboard plan (~1 day, D9: types, new ids on paste, one-step Cut) are not part of this batch.
@@ -34,9 +34,9 @@ Severities are this overview's own. Evidence is from probes that were run, unles
 | ID | Finding | Sev | Evidence | Plan |
 |---|---|---|---|---|
 | SI-1 (**fixed by 01**) | One frame can take its show from tick N and its calibration, safety zone, test pattern, Identify or BLACKOUT from a later state, or even its zone and its calibration from two different states. Two lasers can draw the same tick differently. Each engine reads app state once or twice per frame, besides the snapshot (`backend/multi_engine.clj:223-255`, the provider, which every output driver's engine calls) | H | e1a–e1i, e4 (01 §1.2). A safety narrowing just after a tick lights 0 of 64 points in that tick's frame (e1b); one frame takes its pin and its zone from two states (e1e); Decimate's recount follows the edit, not the tick (e1h), while its meter rule follows the tick (e1i) | 01 |
-| SI-2 | A list copy writes `[:ui :clipboard]` behind the pipeline (`state/clipboard.clj:31-34`), and the handler's `:state` then undoes it. The Cue Chain Editor's Paste buttons never light, and the projector chain's light only after a re-render | M | keyboard p5, p9, p11 | 04 Step 4a (K-7) |
-| SI-3 | Every copy and list paste makes the event agent wait for the FX thread (`state/clipboard.clj:64,82`) | M | keyboard p10: 514–535 ms behind a copy and 503–579 ms behind a paste, with the FX thread busy for 500 ms, against 1–2 ms on its own | 04 Step 4a (K-10) |
-| SI-4 | Two views read the OS clipboard while rendering, and one view copies behind the pipeline (`views/dialogs/effect_chain_editor.clj:95, 144-145`; `views/tabs/projectors.clj:560`) | M | keyboard p11, p12 | 04 Step 4a (K-10, K-11) |
+| SI-2 (**fixed by 4a**) | A list copy writes `[:ui :clipboard]` behind the pipeline (`state/clipboard.clj:31-34`), and the handler's `:state` then undoes it. The Cue Chain Editor's Paste buttons never light, and the projector chain's light only after a re-render | M | keyboard p5, p9, p11 | 04 Step 4a (K-7) |
+| SI-3 (**fixed by 4a**) | Every copy and list paste makes the event agent wait for the FX thread (`state/clipboard.clj:64,82`) | M | keyboard p10: 514–535 ms behind a copy and 503–579 ms behind a paste, with the FX thread busy for 500 ms, against 1–2 ms on its own | 04 Step 4a (K-10) |
+| SI-4 (**fixed by 4a**) | Two views read the OS clipboard while rendering, and one view copies behind the pipeline (`views/dialogs/effect_chain_editor.clj:95, 144-145`; `views/tabs/projectors.clj:560`) | M | keyboard p11, p12 | 04 Step 4a (K-10, K-11) |
 | SI-5 | The Link connection written at start-up (`app.clj:213-220`) can be lost to an event in flight, leaving the app believing Carabiner is disconnected | M | w1 (02 §1.2 row 6) | 02 commit 5 |
 | SI-6 | `stop!`'s teardown write is lost, so a second `stop!` disconnects again. Device closing runs inside a `swap!` fn and runs again when the swap retries (`app.clj:237-248`, `:260-267`) | L | w2a, w2b (02 §1.2 rows 7–8) | 02 commit 6 (W4) |
 | SI-7 | An old app instance's late event can run alongside the new instance's and undo its write (tests and the REPL restart the app) | L | w6 | 02 commit 2 (W3) |

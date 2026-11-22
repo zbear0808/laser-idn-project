@@ -1,7 +1,7 @@
 # Phase 4 — One clipboard
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)   **Updated:** 2026-11-20 at `3229c95`, re-checked at `cc9e000`: every citation re-checked, probes p5–p7 re-run and p9–p17 added, the phase split into Steps 4a–4c, D13 and D14 added. Re-checked 2026-11-21 at `a38ea43`, after the output drivers, zones Z4–Z6, vibe Phase 8, Decimate's follow-ups, the Projectors layout pass and the engine snapshot: every Step 4a citation re-checked, probes p5–p7 and p9–p17 re-run and p18 added, and Step 4a takes in the step grid's clipboard (zones Z6, §1 row 19)
-**Status:** In progress. D8, D13 and D14 answered (2026-11-21, the ★ options); Step 4a next. Steps 4b and 4c need D9   **Last verified against:** `a38ea43` (probes p5–p7, p9–p18, `probes/keyboard_probes_test.clj`, run at `3229c95`, `cc9e000` and `a38ea43`; headless JavaFX 28-ea+11, JDK 25.0.5, macOS arm64)
+**Status:** In progress. **Step 4a done** (2026-11-21, `02ae75c`..`1113d9a`; §9a As built), D8, D13 and D14 answered (2026-11-21, the ★ options). Steps 4b and 4c need D9   **Last verified against:** `a38ea43` (probes p5–p7, p9–p18, `probes/keyboard_probes_test.clj`, run at `3229c95`, `cc9e000` and `a38ea43`; headless JavaFX 28-ea+11, JDK 25.0.5, macOS arm64)
 **Supersedes / Superseded by:** replaces the clipboard parts of `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md` (§3.6, §3.7, §5.A.2). Takes over review 02 #15, the clipboard bullets of 02 #2, M1 step 2 and M4, the "clipboard effect stubs" carry-over (`02-events-state.md:363`), review 01 F7 and Q6, and "Left: the clipboard helper" in the improvement review's overview (row 11). Zones Z0 already fixed the projector chain's part of K-8 (B-8b, `f044a31`), and `95a510d` removed `:clipboard/paste-projector-effects`   **Related findings:** K-6…K-11 (`00-overview.md` §4); review 01 F7, Q6; 02 #2, #15, M1, M4
 **Size:** ~2–2.5 days (4a ~1.25, 4b ~0.75, 4c ~0.25)   **Needs:** none of Phases 2–3 (§0)
 
@@ -11,7 +11,7 @@ Copy and paste are written twice, with different type names and different read r
 
 | Step | What ships | Fixes | Needs | Size |
 |---|---|---|---|---|
-| **4a** One clipboard | `[:ui :clipboard]` is written only in the `:state` handlers return. Two NEW effects write and read the OS clipboard on the FX thread, and the event agent never waits for them. Nothing reads the OS clipboard while rendering. Paste buttons and menu items follow the clipboard. The dialog-local clipboards, the step grid's own clipboard and the dead code go | the lost update (K-7, p9), the waits (p10), the OS reads in handlers and render (K-10, p11), Paste buttons that never light or light wrongly (p5, p11, p12), the data-loss half of K-6 (p16), K-11, the step grid's second clipboard (p18) | D8, D13, D14 (answered) | ~1.25 d |
+| **4a** One clipboard (**done**, §9a) | `[:ui :clipboard]` is written only in the `:state` handlers return. Two NEW effects write and read the OS clipboard on the FX thread, and the event agent never waits for them. Nothing reads the OS clipboard while rendering. Paste buttons and menu items follow the clipboard. The dialog-local clipboards, the step grid's own clipboard and the dead code go | the lost update (K-7, p9), the waits (p10), the OS reads in handlers and render (K-10, p11), Paste buttons that never light or light wrongly (p5, p11, p12), the data-loss half of K-6 (p16), K-11, the step grid's second clipboard (p18) | D8, D13, D14 (answered) | ~1.25 d |
 | 4b Types and ids | each list's type comes from its component id; a copied cell pastes into a list; pasted things get new ids at every depth; an empty cell copies nothing | K-8 (p7, p13), K-9 (p6, p14, p15) | D9 | ~0.75 d |
 | 4c Cut | Cut is one event and one undo step, with a Cut button | the rest of K-6 | D9 | ~0.25 d |
 
@@ -383,6 +383,77 @@ Write the failing tests first in each step.
 | 6 | 4b | `feat(lists): a copied grid cell pastes into a cue list as its items, a copied effects cell into an effect list` | the conversion tests; UI `cell-copy-pastes-…` |
 | 7 | 4b | `fix(paste): every pasted item, effect, track and clip gets a new id, references kept; copying an empty cell copies nothing` | the `fresh-ids` tests, `paste-…-regenerates-ids-…`, `copy-an-empty-cell-…` |
 | 8 | 4c | `feat(lists): Cut is one step, "Cut Item(s)", with a Cut button next to Copy` | the cut tests; `list-buttons-say-what-they-do-test` |
+
+## 9a. Step 4a as built (2026-11-21, branch `clipboard-4a`, from `a38ea43`)
+
+| # | Commit | What |
+|---|---|---|
+| – | `f8a0d1f` | `plans:` the re-check at `a38ea43` (§0, §1 rows 1–19), D8/D13/D14 answered, probe p18 |
+| 1 | `02ae75c` | `state.clipboard`'s pure helpers (`list-clip`, `cell-clip`, NEW `grid-clip`, `->system-text`, `<-system-text`, `accepts?`, `payload`, `adopt`) and the effects `:clipboard/write`, `:clipboard/read` (private `put-system-clipboard-text!`, `system-clipboard-text`) |
+| 2 | `e0948d5` | list, grid and effects-cell copy write the slot in their `:state` plus `:clipboard/write`; paste through NEW `h/with-clipboard`; `parked` moved to `events/helpers.clj`; Edit > Copy and Paste pass `:time` |
+| 3 | `2243f4f` | NEW `subs/can-paste?`; the list toolbar's Paste, Edit > Paste and the cells' Paste items follow it; the render-time reads, `:clipboard-items`, `:on-copy`/`:on-copy-fn`, the Cue Chain Editor's own clipboards and `:cue-chain/set-clipboard`, `:cue-chain/set-item-effects-clipboard` go |
+| 3b | `d4e2c00` | the step grid's Copy and Paste through the one clipboard (§1 row 19); `[:ui :step-grid :clipboard]` and `subs/step-grid-clipboard` go |
+| 4 | `1113d9a` | `state/clipboard.clj` pure (no `state.core`, JavaFX or `fx/on-fx-thread`); `:clipboard/copy-effects`, `:clipboard/paste-effects`, `:effects/insert-pasted` and the helpers only tests used go; the docs |
+
+**Changes per namespace**, beyond §4 as written:
+- `laser-show.state.clipboard`: `payload` and `accepts?` also know `:timeline-tracks` (a list type, today's rule) and `:step-grid`. `<-system-text` also catches a `StackOverflowError` from deeply nested EDN. `max-system-text-length` (5,000,000) is public.
+- `laser-show.events.core`: `:clipboard/write` and `:clipboard/read` catch a `Platform/runLater` that throws (toolkit not running) as well; the read then continues with `:clipboard/system nil`.
+- `laser-show.events.helpers`: `handle-copy-to-clipboard` keeps today's "an empty cell's clip goes in the slot only": no `:clipboard/write` for a nil cell (4b makes an empty cell copy nothing).
+- `laser-show.events.handlers.step-grid` (3b): `handle-copy` and NEW `handle-paste` as §4 says.
+- `laser-show.views.components.step-grid`: Paste from `subs/can-paste? :step-grid`.
+- `laser-show.events.handlers.effects`: the unused `log` require went with the stub.
+
+**Deviations**
+- **3b is new**: the step grid's clipboard, found at the re-check, is folded into the one clipboard (the brief asked for any new copy/paste path to be). A copy in a list now replaces a copied grid and the reverse, and a grid's Paste is a "maybe" before the first copy (D13 B), where it was off.
+- **The UI tests set up projectors through events** (`:projectors/add-manual`, `:chain/set-items`, `:projectors/select-projector`, `:list/select-item`), not `state/swap-state!`, so the new namespace writes no state outside the pipeline. A new projector comes with its own calibration chain, so the setup sets both chains with `:chain/set-items`.
+- **`nothing-reads-the-system-clipboard-while-rendering-test`** counted the old helper's reads too (`clipboard/read-from-system-clipboard`) until commit 4 removed it, so it was red against commit 2 (4 reads) and is green with `events/system-clipboard-text` alone.
+- **Extra tests**: `grid-clip-shapes-test`, `paste-of-a-clip-this-list-does-not-take-does-nothing-test`, `step-grid-paste-ignores-a-cue-clip-test`, and UI `paste-is-a-maybe-before-the-first-copy-test`, `menu-paste-agrees-with-the-clipboard-test`, `step-grid-paste-follows-the-one-clipboard-test`.
+- **The old `clipboard-test`** (`cell-assignment-copy-paste-test`, `clipboard-description-test`, `item-effects-paste-as-effects-test`) was rewritten in commit 1, not commit 4: it wrote the Mac's pasteboard, and its last case is in `accepts-keeps-todays-rules-test`.
+- **`handle-grid-paste-cell-empty-clipboard`** became `paste-cell-with-an-empty-slot-asks-for-the-system-clipboard-test` (an empty slot is now a read, not a no-op).
+- **One red run wrote the Mac's pasteboard**: commit 2's handler tests, run red against commit 1, called the old `copy-*!` (§1 row 16). Since commit 2 the unit suite runs no clipboard effect.
+
+**Tests changed**: `core-test/effects-and-co-effects-are-shared-maps-test`; `grid-handlers-test/handle-grid-copy-cell-test`; `menu-handlers-test`'s three Edit > Copy tests; `list-handlers-test/timeline-track-copy-uses-own-clipboard-type-test`, `paste-effects-into-an-item-effects-list-test` (on state, no `with-redefs`); `show-lock-test/locked-zone-pattern-edits-are-refused-test` (the step grid's paste case), `locked-step-grid-opens-and-a-drag-lets-go-test`; `step-grid-handlers-test/paste-from-another-grid-test`; `subs-test/step-grid-test` (its clipboard part gone); UI `setup-dialogs-test/copy-an-effect-to-another-projector-test`, `step-grid-test/copy-and-paste-between-grids-test`.
+
+**Red first**
+- Commit 1: `clipboard-test` didn't compile (`No such var: clipboard/list-clip`); `core-test` 1 failure.
+- Commit 2: 37 failures in 15 handler tests (list, grid, menu, show-lock); UI `clipboard-test` 5 of 5 red: the slot stayed nil (`list-copy-…`, `cut-…`, `fresh-app-…` timed out), the OS text was pretty-printed and unlike the slot, and a paste behind a busy FX thread took 514 ms.
+- Commit 3: `subs-test` didn't compile (`No such var: subs/can-paste?`); UI 6 new tests red: 4 render-time reads, the effects grid's chain lit Paste and pasted nothing (p12), the projector chain's Paste stayed off after Copy, the Cue Chain Editor's Paste stayed off, Edit > Paste and the cells' Paste ignored the clip.
+- Commit 3b: 9 failures in 5 unit tests; UI `step-grid-paste-follows-…` and `copy-and-paste-between-grids-test` red.
+- Commit 4: `core-test` 1 failure (the old effects still registered).
+
+**Probes, before (`a38ea43`) and after (`1113d9a`)**, headless, 2026-11-21:
+
+| Probe | Before | After |
+|---|---|---|
+| p5 | slot `nil`; Paste buttons `[true true]`; ⌘V 3 → 4 | slot holds the clip; `[false false]`; ⌘V 3 → 4 |
+| p9 | lost update `[[:ui :clipboard]]` for the list copy and the cell copy | none for either; the cell's slot has `:copied-at` |
+| p10, FX busy 500 ms | alone 2 ms; behind a copy 513–532 ms; behind a paste 502–523 ms (3 runs, load 6–13) | alone 10–33 ms; behind a copy 29–64 ms; behind a paste 33–48 ms (3 runs, load 4–6) |
+| p10, FX idle | median 12.1–13.3 ms | median 25.8–57.5 ms |
+| p11 | 1 OS read while mounting, inside `projector_config_panel`; Paste off after Copy until a re-render | 0 reads; Paste on before Copy (D13 B) and after it |
+| p12 | Paste on, click pastes nothing (1 → 1), silently | Paste on (empty slot: a maybe), click pastes nothing (1 → 1), says "Nothing to paste here", the slot adopts the `:item-effects` clip and Paste goes off |
+| p16 | ⌘X 3 → 2, slot `nil`; ⌘V 2 → 2 | ⌘X 3 → 2, slot holds the cut item, OS `""`; ⌘V 2 → 3 |
+| p18 | grid's own slot; `[:ui :clipboard]` nil; OS keeps the cue items; Paste off before a copy | no own slot; `[:ui :clipboard]` `:step-grid`; OS `{:type :step-grid, :grid`; Paste on before a copy, off after a cue copy |
+| p6, p7, p13, p14, p15 | as §1 | unchanged (Steps 4b–4c) |
+| p17 | 2.0 / 0.03 / 0.06 ms; 56 / 1.4 / 3.2 ms; 253 / 1.9 / 7.4 ms | 18–21 / 0.13–0.27 / 0.24–0.37 ms; 236–260 / 3.6–3.8 / 9.7–10.8 ms; 1150–1239 / 9–15 / 35–48 ms |
+
+The after-runs came on a slower machine: p17 measures code Step 4a didn't change, and it took about 5× as long, and p10's "alone" baseline went from 2 ms to 10–33 ms. A user process was using about 83 % of a core and the WindowServer 41 %. So the after numbers are slower across the board, but no wait near 500 ms is left: an event behind a copy or a paste lands with the baseline.
+
+**Suites** (2026-11-21, headless JavaFX 28-ea+11, JDK 25.0.5, macOS arm64):
+- Unit, full: 1869 tests, 570,483 assertions, 0 failures (20:31, load 4.1). An earlier run (19:48, load 5) had 17 timing failures in `engine-wire-test`, `streaming-engine-test`, `output-lifecycle-test`, `fake-dac-test` and `show-clock-test`. Run on their own, they failed again, and they failed the same way at `a38ea43` in a scratch worktree at the same time, so they came from the machine's load, not from Step 4a.
+- UI, full: 285 tests, 1510 assertions, 0 failures (20:03–20:27).
+- Targeted on the way: unit `clipboard list-handlers grid-handlers menu-handlers show-lock core-test subs chains timeline-handlers step-grid-handlers cue-chain-handlers effects-handlers migration projector-handlers` (319 tests, 2107 assertions); UI `clipboard-test` (12 tests, 49 assertions), `setup-dialogs-test`, `cue-chain-list-test`, `grid-test`, `menu-bar-test`, `projectors-layout-test`, `step-grid-test`.
+- kondo (`--lint src test --parallel --fail-level error`): 0 errors, 17 warnings, none in a file Step 4a touched (the same count as before).
+
+**Live check** (headless REPL, `start-test!` with a temp rig file and add-ons folder; the headless clipboard; screenshots in `test-results/clipboard-4a/`, gitignored):
+- Before the first copy, with plain text on the OS clipboard: Edit > Paste and a cell's Paste item were on (`01-…`); ⌘V on an empty cell said "Nothing to paste here" and changed nothing (`13-…`).
+- Effects grid: Copy Effects on D1 (cell [0 3]), then the Paste item was on and pasted onto C6 (cell [5 2]) (`02-…`, `03-…`); after Copy Cue on A1 the effects cells' Paste was off.
+- Cue Chain Editor: with a copied cue both Paste buttons were off (`04-…`); after Copy both were on (`05-…`); ⌘V in A2's editor (cell [1 0]) pasted A1's circle into another chain (`06-…`).
+- Projector chain: Paste off with cue items on the clipboard, on right after Copy in the same chain (`07-…`), and pasted into the other laser's chain (`08-…`).
+- Step grid: A1's edited grid copied (OS text `{:type :step-grid, :grid`) and pasted into A2's (`09-…`, `10-…`).
+- Copy, quit, start: after `stop!` and `start-test!` the slot was empty and the OS clipboard held the copied cue item; both Paste buttons were on (`11-…`) and ⌘V pasted it into A1 (`12-…`), after which the slot held it.
+- Noticed, as planned for 4b: the item-effects list's Paste lights for copied cue items (both lists are `:cue-chain-items` until 4b).
+
+Not done here, as planned: Steps 4b and 4c (D9).
 
 ## 10. Out of scope / alternatives considered
 
