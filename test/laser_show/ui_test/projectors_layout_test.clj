@@ -255,3 +255,24 @@
       (ui/press! robot KeyCode/DELETE)
       (ui/wait-for! #(= [rgb] (chain)))
       (is (= cells (grid)) "and no grid cell was cleared"))))
+
+(deftest space-plays-after-leaving-the-projectors-tab-test
+  ;; Keyboard plan 03, D6 A: the rig strip or the chain list had the focus,
+  ;; and went with the tab; the tab button doesn't take it, so where it goes
+  ;; must not eat Space
+  (let [robot (ui/robot)
+        playing? #(true? (get-in (app-state) [:playback :playing?]))
+        owner #(ui/on-fx-thread (fn [] (.getFocusOwner (.getScene (ui/main-window)))))]
+    (with-lasers!)
+    (doseq [focus-on ["#rig-strip" "#list-editor-projector-effects-a"]]
+      (testing (str "with the focus on " focus-on)
+        (ui/click! robot "#projectors-tab")
+        (ui/wait-for! #(some? (ui/query focus-on)))
+        (ui/focus! robot focus-on)
+        (ui/wait-for! #(= (subs focus-on 1) (ui/on-fx-thread (fn [] (some-> ^Node (owner) .getId)))))
+        (ui/click! robot "#grid-tab")
+        (ui/wait-for! #(nil? (ui/query focus-on)))
+        (ui/press! robot KeyCode/SPACE)
+        (ui/wait-for! playing?)
+        (ui/press! robot KeyCode/SPACE)
+        (ui/wait-for! #(not (playing?)))))))

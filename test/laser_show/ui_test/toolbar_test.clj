@@ -7,7 +7,8 @@
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
-  (:import [javafx.scene.control Button]))
+  (:import [javafx.scene.control Button Labeled TextInputControl]
+           [javafx.scene.input KeyCode]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -144,3 +145,119 @@
       (tick! ms)
       (ui/wait-for! #(= #{beat} (active)))
       (is (= #{beat} (active)) (str (/ ms 500.0) " beats at 120 BPM")))))
+
+
+;; Single keys after a click on the toolbar or the tab bar (keyboard plan 03,
+;; D6 A): the buttons and the trigger-mode combo are mouse-only, so a click
+;; leaves the focus where it was, and Space, R and Escape still reach the
+;; Transport menu's accelerators
+
+(defn- playing? [] (true? (get-in (state/get-raw-state) [:playback :playing?])))
+
+(defn- focus-owner []
+  (ui/on-fx-thread #(.getFocusOwner (.getScene (ui/main-window)))))
+
+(defn- focus-desc []
+  (let [o (focus-owner)]
+    (ui/on-fx-thread #(when o (str (.getSimpleName (class o)) (some->> (.getId ^javafx.scene.Node o) (str "#")))))))
+
+(defn- space-toggles-play!
+  "Space plays, and Space again stops."
+  [robot what]
+  (testing (str "after " what ", Space plays and stops")
+    (ui/press! robot KeyCode/SPACE)
+    (ui/wait-for! playing?)
+    (ui/press! robot KeyCode/SPACE)
+    (ui/wait-for! #(not (playing?)))))
+
+(deftest space-plays-at-startup-test
+  (let [robot (ui/robot)]
+    (is (not (instance? TextInputControl (focus-owner)))
+        (str "the window starts with the focus off the text fields, on " (focus-desc)))
+    (space-toggles-play! robot "start-up")))
+
+(deftest space-plays-after-clicking-tap-test
+  (let [robot (ui/robot)
+        taps #(count (get-in (state/get-raw-state) [:timing :tap :taps]))]
+    (ui/click! robot "#tap-tempo-btn")
+    (ui/wait-for! #(= 1 (taps)))
+    (is (not= "Button#tap-tempo-btn" (focus-desc)) "TAP doesn't take the focus")
+    (space-toggles-play! robot "a click on TAP")
+    (is (= 1 (taps)) "Space doesn't tap")))
+
+(deftest space-plays-after-clicking-a-tab-or-the-trigger-mode-combo-test
+  (let [robot (ui/robot)
+        active-tab #(get-in (state/get-raw-state) [:ui :active-tab])]
+    (doseq [[tab id] [["#perform-tab" :perform] ["#grid-tab" :grid]]]
+      (ui/click! robot tab)
+      (ui/wait-for! #(= id (active-tab)))
+      (is (not= (str "Button" tab) (focus-desc)) (str tab " doesn't take the focus"))
+      (space-toggles-play! robot (str "a click on " tab)))
+    (testing "the trigger-mode combo: pick Toggle from its list"
+      (ui/click! robot "#trigger-mode-selector")
+      (ui/wait-for! #(some (fn [n] (= "Toggle" (ui/on-fx-thread (fn [] (.getText ^Labeled n)))))
+                           (ui/query-all ".list-cell")))
+      (ui/click-node! robot (some (fn [n] (when (= "Toggle" (ui/on-fx-thread (fn [] (.getText ^Labeled n)))) n))
+                                  (ui/query-all ".list-cell")))
+      (ui/wait-for! #(= :toggle (get-in (state/get-raw-state) [:config :cue :trigger-mode])))
+      (is (not= "ComboBox#trigger-mode-selector" (focus-desc)) "the combo doesn't take the focus"))
+    (space-toggles-play! robot "a pick from the trigger-mode combo")
+    (testing "and the other toolbar buttons"
+      (doseq [sel ["#retrigger-btn" "#play-btn" "#stop-btn" "#stream-btn"]]
+        (is (not (ui/on-fx-thread #(.isFocusTraversable ^javafx.scene.Node (ui/query sel)))) sel)
+        (when (= sel "#play-btn")
+          (ui/click! robot "#play-btn")
+          (ui/wait-for! playing?))
+        (when (= sel "#stop-btn")
+          (ui/click! robot "#stop-btn")
+          (ui/wait-for! #(not (playing?))))))))
+
+(deftest single-keys-stay-in-the-bpm-field-test
+  (let [robot (ui/robot)
+        restart #(get-in (state/get-raw-state) [:playback :requests :restart :id])]
+    (ui/focus! robot "#bpm-input")
+    (ui/press! robot KeyCode/SPACE)
+    (is (events/flush!))
+    (is (not (playing?)) "Space types into the field")
+    (events/write-state! #(-> % (assoc-in [:playback :playing?] true) (assoc-in [:grid :selected-cell] [0 0])))
+    (let [before (restart)
+          items (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :items])]
+      (ui/press! robot KeyCode/R)
+      (ui/press! robot KeyCode/DELETE)
+      (is (events/flush!))
+      (is (= before (restart)) "R doesn't retrigger")
+      (is (= items (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :items])) "Delete doesn't clear the cell")
+      (is (instance? TextInputControl (focus-owner))))))
+
+(deftest escape-in-the-bpm-field-stops-the-show-test
+  ;; Escape is the panic key: Stop fires whatever has the focus, a text field
+  ;; too (keyboard plan 03 §7, 05 D10 A)
+  (let [robot (ui/robot)]
+    (ui/focus! robot "#bpm-input")
+    (events/write-state! assoc-in [:playback :playing?] true)
+    (ui/press! robot KeyCode/ESCAPE)
+    (ui/wait-for! #(not (playing?)))
+    (is (= "TextField#bpm-input" (focus-desc)) "the focus stays in the field")))
+
+(deftest a-click-off-the-bpm-field-applies-it-test
+  ;; The buttons don't take the focus (D6 A), so a click on one would leave
+  ;; it in the field, with what was typed not applied and Space typing:
+  ;; a press on something that doesn't take the focus moves it off the field
+  (let [robot (ui/robot)
+        bpm #(get-in (state/get-raw-state) [:timing :bpm])]
+    (doseq [[sel typed] [["#grid-tab" "128"] ["#perform-tab" "131"] ["#tap-tempo-btn" "126"]]]
+      (testing (str "a click on " sel)
+        (ui/type! robot "#bpm-input" typed)
+        (ui/sync-fx!)
+        (is (= "TextField#bpm-input" (focus-desc)))
+        (ui/click! robot sel)
+        (ui/wait-for! #(not (instance? TextInputControl (focus-owner))))
+        (when-not (= sel "#tap-tempo-btn")
+          (ui/wait-for! #(= (parse-double typed) (bpm))))
+        (space-toggles-play! robot (str "typing " typed " and a click on " sel))))
+    (testing "a click in the field keeps the focus there"
+      (ui/type! robot "#bpm-input" "140")
+      (ui/click! robot "#bpm-input")
+      (ui/sync-fx!)
+      (is (= "TextField#bpm-input" (focus-desc)))
+      (is (= "140" (ui/node-text "#bpm-input"))))))

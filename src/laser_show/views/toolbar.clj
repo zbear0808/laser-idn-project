@@ -28,6 +28,10 @@
              :size 12}
    :style-class (if active? "transport-btn-active" "transport-btn")
    :tooltip {:fx/type :tooltip :text tooltip}
+   ;; Mouse-only, as the rest of the toolbar: a click leaves the focus where
+   ;; it was, so Space, R and Escape still reach the Transport menu
+   ;; (keyboard plan 03, D6 A)
+   :focus-traversable false
    :on-action on-action})
 
 (defn- cues-text
@@ -89,6 +93,7 @@
                  :id "trigger-mode-selector"
                  :value current-option
                  :pref-width 90
+                 :focus-traversable false
                  :items trigger-mode-options
                  :button-cell (fn [mode]
                                 {:text (or (:name mode) "Default")})
@@ -140,6 +145,7 @@
              :name :drum
              :size 16}
    :style-class "transport-btn"
+   :focus-traversable false
    :tooltip {:fx/type :tooltip :text "Tap to set BPM"}
    :on-action {:event/type :timing/tap-tempo}})
 
@@ -213,6 +219,7 @@
     :style-class (if (and link-enabled? sync-enabled?)
                    "transport-btn-active"
                    "transport-btn")
+    :focus-traversable false
     :tooltip {:fx/type :tooltip :text tooltip-text}
     :on-action {:event/type :timing/link-toggle}}))
 
@@ -297,6 +304,7 @@
                             :name :network-wired
                             :size 12}
                   :style-class "btn-sm"
+                  :focus-traversable false
                   :on-action {:event/type (if running?
                                             :idn/stop-multi-streaming
                                             :idn/start-multi-streaming)}}])}))

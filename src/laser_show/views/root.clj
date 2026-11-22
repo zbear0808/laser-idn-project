@@ -155,18 +155,60 @@
 ;; Main Layout
 
 
+(defn- leave-text-field-on-click
+  "A press outside the text field being typed in, on something that doesn't
+   take the focus (a toolbar or tab button, a grid cell, empty space): the
+   focus goes to the layout, so the field applies what was typed, as it
+   would if the button took the focus, and Space plays again (keyboard plan
+   03, D6 A)."
+  [^javafx.event.Event e]
+  (when (= javafx.scene.input.MouseEvent/MOUSE_PRESSED (.getEventType e))
+    (let [^javafx.scene.Node layout (.getSource e)
+          owner (some-> layout .getScene .getFocusOwner)]
+      (when (instance? javafx.scene.control.TextInputControl owner)
+        (when-not (loop [n (.getTarget e)]
+                    (cond
+                      (or (not (instance? javafx.scene.Node n)) (identical? n layout)) false
+                      (.isFocusTraversable ^javafx.scene.Node n) true
+                      :else (recur (.getParent ^javafx.scene.Node n))))
+          (.requestFocus layout))))))
+
+(defn- take-focus-from-removed-owners!
+  "When the node with the focus leaves the window (its tab's content goes),
+   JavaFX gives the focus to the next node that takes it, which is the BPM
+   field, as the toolbar's and tab bar's buttons don't (D6 A): give it to
+   layout instead, so Space still plays."
+  [^javafx.scene.Node layout]
+  (when-let [scene (.getScene layout)]
+    (.addListener (.focusOwnerProperty scene)
+                  ^javafx.beans.value.ChangeListener
+                  (reify javafx.beans.value.ChangeListener
+                    (changed [_ _ old _]
+                      (when (and (instance? javafx.scene.Node old)
+                                 (nil? (.getScene ^javafx.scene.Node old)))
+                        (javafx.application.Platform/runLater #(.requestFocus layout))))))))
+
 (defn main-layout
-  "Main application layout with HeaderBar in title bar area."
+  "Main application layout with HeaderBar in title bar area. It takes the
+   focus when it is shown, so the window starts with it off the BPM field:
+   the toolbar's and tab bar's buttons don't take it (keyboard plan 03,
+   D6 A), and Space, R and Delete must reach the Transport and Edit menus."
   [{:keys [fx/context]}]
-  {:fx/type :border-pane
-   :id "main-layout"
-   :style (str "-fx-background-color: " (css/bg-primary) ";")
-   :top {:fx/type :v-box
-         :children [{:fx/type title-bar/header-view}
-                    {:fx/type toolbar/toolbar}
-                    {:fx/type tab-bar}]}
-   :center {:fx/type main-content}
-   :bottom {:fx/type status-bar/status-bar}})
+  {:fx/type fx/ext-on-instance-lifecycle
+   :on-created (fn [^javafx.scene.Node node]
+                 (javafx.application.Platform/runLater
+                  #(do (.requestFocus node)
+                       (take-focus-from-removed-owners! node))))
+   :desc {:fx/type :border-pane
+          :id "main-layout"
+          :style (str "-fx-background-color: " (css/bg-primary) ";")
+          :event-filter leave-text-field-on-click
+          :top {:fx/type :v-box
+                :children [{:fx/type title-bar/header-view}
+                           {:fx/type toolbar/toolbar}
+                           {:fx/type tab-bar}]}
+          :center {:fx/type main-content}
+          :bottom {:fx/type status-bar/status-bar}}})
 
 
 ;; Root View

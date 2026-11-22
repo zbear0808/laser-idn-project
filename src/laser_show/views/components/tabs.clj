@@ -36,6 +36,9 @@
    :text label
    ;; Use CSS classes from buttons.clj
    :style-class (if active? "tab-btn-active" "tab-btn")
+   ;; Mouse-only: a clicked tab doesn't keep the focus, and with it the
+   ;; window's single-key shortcuts (keyboard plan 03, D6 A)
+   :focus-traversable false
    :on-action (if (map? on-action)
                 (assoc on-action :tab-id tab-id)
                 on-action)})
