@@ -50,9 +50,10 @@
                :input/await-learn :multi-engine/start :multi-engine/stop :multi-engine/refresh
                :output/write-status
                :project/save :project/load :fx/show-file-chooser :system/exit :system/open-url
-               :dev/reload :clipboard/copy-effects :clipboard/paste-effects
-               :clipboard/write :clipboard/read
+               :dev/reload :clipboard/write :clipboard/read
                :projectors/scan :addons/install :system/open-folder]))
+  (is (not-any? #(contains? events/effects %) [:clipboard/copy-effects :clipboard/paste-effects])
+      "no effect copies or pastes behind the clipboard's handlers (keyboard plan Step 4a)")
   (is (not (contains? events/effects :clipboard/paste-projector-effects))
       "a projector chain pastes through the list editor's own clipboard (zones Z0)")
   (is (not (contains? events/effects :timing/calculate-bpm)) "a tap sets the BPM in its own handler's state"))

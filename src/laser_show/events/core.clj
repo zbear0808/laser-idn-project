@@ -33,8 +33,10 @@
      runtime's own thread (backend/output_runtime.clj), which owns every engine
    - Nothing running on the agent may block waiting for an event it
      dispatched: that event only runs after the current one
-   - Writers outside the pipeline: start-up and shutdown (app.clj), the
-     clipboard helper (state/clipboard.clj) and a dev code reload. The show
+   - Writers outside the pipeline: start-up and shutdown (app.clj) and a
+     dev code reload. The clipboard ([:ui :clipboard]) is written only in
+     its handlers' :state; :clipboard/write and :clipboard/read talk to the
+     OS clipboard on the FX thread, and nothing waits for them. The show
      clock's thread sends what it learns as events (:show-clock/*), and views
      that move every frame draw its newest tick without app state. In dev
      mode effect-state warns when any write landed between an event's
@@ -213,25 +215,6 @@
                                    (cond-> {:event/type :rig/written :path path :seq seq :at at}
                                      then (assoc :then then)))))
                      (if now? 0 rig-store/write-delay-ms)))
-
-;; Clipboard Effects (for effect chain editor)
-
-(defn- effect-clipboard-copy-effects
-  "Effect that copies effects to clipboard as a chain."
-  [effects _dispatch]
-  (clipboard/copy-effect-chain! {:effects effects :active? true}))
-
-(defn- effect-clipboard-paste-effects
-  "Effect that pastes effects from clipboard into a chain.
-   Continues with :effects/insert-pasted with the effects to insert."
-  [{:keys [col row insert-pos]} dispatch]
-  (when-let [effects (clipboard/get-effects-to-paste)]
-    (run-inline {:event/type :effects/insert-pasted
-                 :col col
-                 :row row
-                 :insert-pos insert-pos
-                 :effects effects}
-                dispatch)))
 
 ;; The OS clipboard. JavaFX's Clipboard works only on the FX thread, so both
 ;; effects hand their call to it with Platform/runLater and never wait: the
@@ -664,8 +647,6 @@
      follow-up)
    - :clipboard/read - read the OS clipboard, then dispatch :then with
      :clipboard/system (later, FX thread)
-   - :clipboard/copy-effects - copy effects to clipboard
-   - :clipboard/paste-effects - paste effects from clipboard (effects grid) (inline)
    - :projectors/scan - scan for IDN devices and every driver's (later, future)"
   {:state effect-state
    :dispatch effect-dispatch
@@ -695,9 +676,6 @@
    ;; The OS clipboard
    :clipboard/write effect-clipboard-write
    :clipboard/read effect-clipboard-read
-   ;; Clipboard effects for effect chain editor
-   :clipboard/copy-effects effect-clipboard-copy-effects
-   :clipboard/paste-effects effect-clipboard-paste-effects
    ;; Projector scanning effects
    :projectors/scan effect-projectors-scan})
 

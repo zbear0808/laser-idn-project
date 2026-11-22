@@ -153,7 +153,7 @@
   {:selected-preset {:default nil
                      :doc "currently selected preset in browser"}
    :clipboard {:default nil
-               :doc "clipboard data for copy/paste"}
+               :doc "The clipboard: the last clip copied in this app ({:type :copied-at ...}, state/clipboard.clj), or one a paste read from the OS clipboard while this was nil. Written only in the :state copy and paste handlers return; not saved, not undone, kept across Open and New"}
    :active-tab {:default :grid
                 :doc "currently active tab (:grid :effects :projectors :settings)"}
    :notice {:default nil

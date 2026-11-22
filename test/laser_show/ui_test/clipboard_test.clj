@@ -246,9 +246,10 @@
 (defn- chain-of [id] (mapv :effect-id (get-in (raw) [:chains :projector-effects id :items])))
 
 (def ^:private os-readers
-  "The functions that read the OS clipboard: the :clipboard/read effect's,
-   and, until Step 4a's last commit removes it, the old helper's."
-  [#'events/system-clipboard-text #'clipboard/read-from-system-clipboard])
+  "The functions that read the OS clipboard: the :clipboard/read effect's.
+   Before Step 4a's last commit this also counted the old helper,
+   state.clipboard/read-from-system-clipboard, which the views called."
+  [#'events/system-clipboard-text])
 
 (defn- count-os-reads
   "(f) with every OS clipboard read counted; the count."

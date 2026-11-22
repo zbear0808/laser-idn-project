@@ -16,8 +16,7 @@
    
    UI components should use :chain/* events with {:domain :effect-chains}
    for all effect-level operations."
- (:require [clojure.tools.logging :as log]
-           [laser-show.events.helpers :as h]
+ (:require [laser-show.events.helpers :as h]
            [laser-show.routing.zone-maps :as zone-maps]
            [laser-show.vibes.reactions :as reactions]
            [laser-show.vibes.refs :as refs]))
@@ -167,16 +166,6 @@
                 :mode :single}}))
 
 
-;; Insert Pasted Effects (from clipboard paste operations)
-
-
-;; TODO: Implement :effects/insert-pasted handler - insert pasted effects into effect chain at position
-(defn- handle-effects-insert-pasted
-  [event]
-  (log/error "TODO: Handler not implemented for :effects/insert-pasted" event)
-  {})
-
-
 ;; Public API
 
 
@@ -204,9 +193,6 @@
     :effect-chain/set-name (handle-effect-chain-set-name event)
     
     :effect-chain/add-effect-from-bank (handle-effect-chain-add-effect-from-bank event)
-    
-    ;; Paste insertion (from clipboard effect)
-    :effects/insert-pasted (handle-effects-insert-pasted event)
     
     ;; Unknown event in this domain
     {}))
