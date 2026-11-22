@@ -76,14 +76,13 @@
 
 (defn- copy-event []
   {:event/type :list/copy-selected :component-id [:cue-chain 0 0]
-   :items-path cue-items-path :clipboard-type :cue-chain-items})
+   :items-path cue-items-path})
 
 (def ^:private paste-event
   {:event/type :list/paste-items :component-id [:cue-chain 0 0]
    :items-path cue-items-path
    :on-change-event :chain/set-items
-   :on-change-params {:domain :cue-chains :entity-key [0 0]}
-   :clipboard-type :cue-chain-items})
+   :on-change-params {:domain :cue-chains :entity-key [0 0]}})
 
 
 ;; The slot and the OS clipboard (p5, p9)
@@ -315,7 +314,8 @@
     (shortcut! robot KeyCode/C)
     (ui/wait-for! #(= :cue-chain-items (:type (slot))))
     (ui/wait-for! #(not (disabled? cue-paste)))
-    (is (not (disabled? item-fx-paste)) "an item's effects take cue items too until Step 4b (§7, first table)")
+    (ui/wait-for! #(disabled? item-fx-paste))
+    (is (disabled? item-fx-paste) "Step 4b: an item's effects take no cue items")
     (ui/click! robot cue-paste)
     (ui/wait-for! #(= [:circle :square :square] (mapv :preset-id (cue-items))))))
 
@@ -351,19 +351,21 @@
       (ui/wait-for! #(= :item-effects (:type (slot))))
       (open-fx-editor!)
       (let [enabled? (not (disabled? fx-paste))]
+        (is enabled? "Step 4b: the effects grid's chain takes effects")
         (is (= enabled? (items-change-on-paste? robot fx-row fx-items)) "the effects grid's chain"))
       (close-fx-editor!)
       (let [enabled? (not (disabled? chain-paste))]
         (is enabled?)
         (is (= enabled? (items-change-on-paste? robot (str "#list-editor-projector-effects-" (name a) " .chain-item") #(chain-of a)))
             "the projector chain")))
-    (testing "cue items on the clipboard (the effects grid's chain copies as cue items until Step 4b)"
-      (open-fx-editor!)
-      (ui/click-node! robot (node fx-row))
-      (flush!)
-      (shortcut! robot KeyCode/C)
+    (testing "cue items on the clipboard (the cue list's Copy)"
+      (events/dispatch! {:event/type :list/select-item :component-id [:cue-chain 0 0]
+                         :item-id (:id (first (cue-items))) :mode :single :items-path cue-items-path})
+      (events/dispatch! (copy-event))
       (ui/wait-for! #(= :cue-chain-items (:type (slot))))
+      (open-fx-editor!)
       (let [enabled? (not (disabled? fx-paste))]
+        (is (not enabled?) "Step 4b: the effects grid's chain takes no cue items")
         (is (= enabled? (items-change-on-paste? robot fx-row fx-items)) "the effects grid's chain"))
       (close-fx-editor!)
       (let [enabled? (not (disabled? chain-paste))]
@@ -464,6 +466,53 @@
       (ui/wait-for! #(some? (node "#effects-cell-0-0")))
       (is (true? (cell-paste-disabled? "#effects-cell-0-0")))
       (ui/wait-for! #(true? (edit-paste-disabled?))))))
+
+
+;; Each list copies and pastes its own kind, from its id (Step 4b; p7, p13)
+
+(def ^:private item-fx-path (conj cue-items-path 0 :effects))
+(defn- item-fx [] (get-in (raw) item-fx-path))
+(def ^:private item-fx-row "#list-editor-item-effects-0-0 .chain-item")
+
+(deftest lists-refuse-each-others-items-test
+  ;; p7, p13: before Step 4b a cue's preset landed in an effect chain and in
+  ;; an item's effects, and an item's effect among a cue's presets
+  (let [robot (ui/robot)
+        fx-items #(get-in (raw) [:chains :effect-chains [0 3] :items])
+        fx-paste "#list-editor-effect-chain-0-3 #chain-paste-items"]
+    (set-os-text! "")
+    (open-cue-editor!)
+    (events/write-state! assoc-in item-fx-path [{:id (random-uuid) :effect-id :scale :enabled? true :params {}}])
+    (select-cue-item! robot 0)
+    (shortcut! robot KeyCode/C)
+    (ui/wait-for! #(= :cue-chain-items (:type (slot))))
+    (testing "a cue item copied: the item's effects take none"
+      (ui/wait-for! #(some? (node item-fx-row)))
+      (ui/wait-for! #(disabled? item-fx-paste))
+      (ui/click-node! robot (node item-fx-row))
+      (flush!)
+      (shortcut! robot KeyCode/V)
+      (flush!)
+      (is (= [:scale] (mapv :effect-id (item-fx))) "⌘V in the item's effects does nothing"))
+    (testing "an item's effect copied: it copies as effects, and the cue list takes none"
+      (shortcut! robot KeyCode/C)
+      (ui/wait-for! #(= :item-effects (:type (slot))))
+      (is (= [:scale] (mapv :effect-id (:effects (slot)))))
+      (ui/wait-for! #(disabled? cue-paste))
+      (select-cue-item! robot 0)
+      (shortcut! robot KeyCode/V)
+      (flush!)
+      (is (= [:circle] (mapv :preset-id (cue-items))))
+      (is (every? #(= :preset (:type %)) (cue-items)) "no effect among the cue's presets"))
+    (testing "the effects grid's chain takes it"
+      (events/dispatch! {:event/type :ui/close-dialog :dialog-id :cue-chain-editor})
+      (let [n (count (fx-items))]
+        (events/dispatch! {:event/type :effect-chain/open-editor :col 0 :row 3})
+        (ui/wait-for! #(some? (node fx-paste)))
+        (ui/wait-for! #(not (disabled? fx-paste)))
+        (ui/click! robot fx-paste)
+        (ui/wait-for! #(= (inc n) (count (fx-items))))
+        (is (= :scale (:effect-id (last (fx-items)))))))))
 
 
 ;; The step grid copies and pastes through the one clipboard (p18)

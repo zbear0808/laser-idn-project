@@ -422,16 +422,18 @@
         ;; item-a moved after item-b, so order is b, a
         (is (= [id-b id-a] (mapv :id new-items)))))))
 
-(deftest timeline-track-copy-uses-own-clipboard-type-test
+(deftest a-list-without-a-type-copies-nothing-test
+  ;; 4b: a list's type comes from its component id (clipboard/list-type),
+  ;; and the timeline's track sidebar has none: an event's :clipboard-type
+  ;; is ignored
   (let [state {:chains {:cue-chains {[0 0] {:tracks [{:id :t1 :type :track :name "T1"}]}}}
-               :list-ui {:timeline-tracks {:selected-ids #{:t1}}}}
+               :list-ui {[:timeline-tracks 0 0] {:selected-ids #{:t1}}}}
         result (list-handlers/handle {:event/type :list/copy-selected
-                                      :component-id :timeline-tracks
+                                      :component-id [:timeline-tracks 0 0]
                                       :items-path [:chains :cue-chains [0 0] :tracks]
                                       :clipboard-type :timeline-tracks
                                       :state state})]
-    (is (= :timeline-tracks (get-in result [:state :ui :clipboard :type])))
-    (is (= "T1" (:name (first (get-in result [:state :ui :clipboard :items])))))))
+    (is (= {:state state} result) "no clip, no OS write")))
 
 
 ;; Paste into a list of effects (a projector's calibration chain)
@@ -446,12 +448,10 @@
                                                 :items-path [:chains :projector-effects :p1 :items]
                                                 :on-change-event :chain/set-items
                                                 :on-change-params {:domain :projector-effects :entity-key :p1}
-                                                :clipboard-type :item-effects
                                                 :state (assoc-in state [:ui :clipboard] clip)}))]
-    (testing "effects copied as a chain paste, as the Paste button promises"
-      (is (= [:rgb-curves :axis-transform]
-             (mapv :effect-id (:items (:dispatch (paste {:type :effect-chain :copied-at 1
-                                                         :effects [{:effect-id :axis-transform :enabled? true :params {}}]})))))))
+    (testing "4b: a clip of a type nothing writes (:effect-chain) pastes nothing"
+      (is (nil? (:dispatch (paste {:type :effect-chain :copied-at 1
+                                   :effects [{:effect-id :axis-transform :enabled? true :params {}}]})))))
     (testing "effects copied from another list of effects paste too"
       (is (= [:rgb-curves :corner-pin]
              (mapv :effect-id (:items (:dispatch (paste (clipboard/list-clip :item-effects [{:effect-id :corner-pin :enabled? true :params {}}] 1))))))))
@@ -476,7 +476,7 @@
 
 (defn- copy-event [state]
   {:event/type :list/copy-selected :component-id [:cue-chain 0 0]
-   :items-path [:chains :cue-chains [0 0] :items] :clipboard-type :cue-chain-items
+   :items-path [:chains :cue-chains [0 0] :items]
    :state state :time 1763650000000})
 
 (defn- paste-event [state & {:as more}]
@@ -484,7 +484,6 @@
           :items-path [:chains :cue-chains [0 0] :items]
           :on-change-event :chain/set-items
           :on-change-params {:domain :cue-chains :entity-key [0 0]}
-          :clipboard-type :cue-chain-items
           :state state :time 1763650000001 :fx/event :an-action-event}
          more))
 
@@ -547,3 +546,73 @@
 (deftest paste-of-a-clip-this-list-does-not-take-does-nothing-test
   (let [state (cue-state {:type :item-effects :copied-at 1 :effects [{:effect-id :scale :params {}}]})]
     (is (= {:state state} (list-handlers/handle (paste-event state))) "no read, no notice, no paste")))
+
+
+;; Each list copies and pastes its own kind, from its id (keyboard plan
+;; Phase 4, Step 4b; probes p7, p13)
+
+
+(def ^:private fx-id #uuid "00000000-0000-0000-0000-0000000000ee")
+
+(defn- lists-state
+  "cue-state, with cue [0 0]'s first item holding a :scale effect (selected
+   in its effects list) and effects cell [0 0] a :rotate."
+  [clip]
+  (-> (cue-state clip)
+      (assoc-in [:chains :cue-chains [0 0] :items 0 :effects] [{:id fx-id :effect-id :scale :enabled? true :params {}}])
+      (assoc-in [:chains :effect-chains [0 0]] {:items [{:id #uuid "00000000-0000-0000-0000-0000000000ef"
+                                                         :effect-id :rotate :enabled? true :params {}}]
+                                                :active? true})
+      (assoc-in [:list-ui [:item-effects 0 0]] {:selected-ids #{fx-id} :last-selected-id fx-id})))
+
+(defn- effect-list-paste [component-id items-path on-change]
+  (merge {:event/type :list/paste-items :component-id component-id :items-path items-path
+          ;; what every list but a projector's sent before 4b: ignored now
+          :clipboard-type :cue-chain-items}
+         on-change))
+
+(def ^:private item-fx-paste
+  (effect-list-paste [:item-effects 0 0] [:chains :cue-chains [0 0] :items 0 :effects]
+                     {:on-change-event :cue-chain/set-item-effects :on-change-params {:col 0 :row 0 :item-path [0]}}))
+
+(def ^:private fx-chain-paste
+  (effect-list-paste [:effect-chain 0 0] [:chains :effect-chains [0 0] :items]
+                     {:on-change-event :chain/set-items :on-change-params {:domain :effect-chains :entity-key [0 0]}}))
+
+(deftest copy-takes-its-type-from-the-list-test
+  (let [s (lists-state nil)
+        copy (fn [component-id items-path]
+               (get-in (list-handlers/handle {:event/type :list/copy-selected :component-id component-id
+                                              :items-path items-path :clipboard-type :cue-chain-items :state s})
+                       [:state :ui :clipboard]))]
+    (is (= :cue-chain-items (:type (copy [:cue-chain 0 0] [:chains :cue-chains [0 0] :items]))))
+    (let [clip (copy [:item-effects 0 0] [:chains :cue-chains [0 0] :items 0 :effects])]
+      (is (= :item-effects (:type clip)) "an item's effects copy as effects, whatever the event says")
+      (is (= [:scale] (mapv :effect-id (:effects clip)))))))
+
+(deftest paste-refuses-another-lists-kind-test
+  ;; p7, p13: before 4b a cue's preset landed in effect chain [0 0] and in
+  ;; item 0's effects, and an effect among the cue's items
+  (let [cue-items (list-handlers/handle (copy-event (lists-state nil)))
+        clip (get-in cue-items [:state :ui :clipboard])]
+    (doseq [paste [item-fx-paste fx-chain-paste]]
+      (let [s (lists-state clip)]
+        (is (= {:state s} (list-handlers/handle (assoc paste :state s)))
+            (str "cue items into " (:component-id paste) ": no paste, no read"))))
+    (let [s (lists-state nil)
+          fx-clip (get-in (list-handlers/handle {:event/type :list/copy-selected :component-id [:item-effects 0 0]
+                                                 :items-path [:chains :cue-chains [0 0] :items 0 :effects]
+                                                 :state s})
+                          [:state :ui :clipboard])
+          s (assoc-in s [:ui :clipboard] fx-clip)]
+      (is (= {:state s} (list-handlers/handle (paste-event s))) "effects into the cue list: nothing"))))
+
+(deftest paste-between-effect-lists-test
+  (let [s (lists-state nil)
+        fx-clip (get-in (list-handlers/handle {:event/type :list/copy-selected :component-id [:item-effects 0 0]
+                                               :items-path [:chains :cue-chains [0 0] :items 0 :effects]
+                                               :state s})
+                        [:state :ui :clipboard])
+        result (list-handlers/handle (assoc fx-chain-paste :state (assoc-in s [:ui :clipboard] fx-clip)))]
+    (is (= [:rotate :scale] (mapv :effect-id (get-in result [:dispatch :items])))
+        "an item's effect pastes into the effects grid's chain")))

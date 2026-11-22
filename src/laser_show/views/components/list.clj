@@ -19,7 +19,8 @@
    Required props:
    - :on-change-event + :on-change-params - Event to dispatch when items change
    - :items-path - Path to items in state (for handlers to read current items)
-   - :clipboard-type - Type for clipboard operations (:cue-chain-items or :item-effects)
+   What a list copies and pastes comes from its :component-id
+   (state.clipboard/list-type).
    
    Public API:
    - list-editor - Complete list editor with keyboard handling, drag-drop,
@@ -34,6 +35,7 @@
    [laser-show.animation.chains :as chains]
    [laser-show.common.util :as u]
    [laser-show.events.core :as events]
+   [laser-show.state.clipboard :as clipboard]
    [laser-show.state.core :as state]
    [laser-show.subs :as subs]
    [laser-show.views.components.list-dnd :as dnd]
@@ -136,22 +138,20 @@
 (defn- dispatch-copy-selected!
   "Dispatch :list/copy-selected event."
   [props]
-  (let [{:keys [component-id items-path clipboard-type]} props]
+  (let [{:keys [component-id items-path]} props]
     (events/dispatch! {:event/type :list/copy-selected
                        :component-id component-id
-                       :items-path items-path
-                       :clipboard-type (or clipboard-type :cue-chain-items)})))
+                       :items-path items-path})))
 
 (defn- dispatch-paste-items!
   "Dispatch :list/paste-items event."
   [props]
-  (let [{:keys [component-id items-path on-change-event on-change-params clipboard-type]} props]
+  (let [{:keys [component-id items-path on-change-event on-change-params]} props]
     (events/dispatch! {:event/type :list/paste-items
                        :component-id component-id
                        :items-path items-path
                        :on-change-event on-change-event
-                       :on-change-params on-change-params
-                       :clipboard-type (or clipboard-type :cue-chain-items)})))
+                       :on-change-params on-change-params})))
 
 
 ;; Group Operations - All dispatch events to handlers/list.clj
@@ -595,7 +595,7 @@
    When :scrollable? is false, the items VBox is rendered directly
    (parent manages scrolling)."
   [{:keys [fx/context items get-item-label
-           clipboard-type header-label empty-text allow-groups?
+           header-label empty-text allow-groups?
            component-id on-change-event on-change-params items-path
            compact? scrollable?]
     :or {header-label "LIST"
@@ -612,8 +612,10 @@
         selection-count (count selected-ids)
         chain-depth (chains/nesting-depth items)
         can-create-group? (and allow-groups? (< chain-depth chains/max-nesting-depth))
-        ;; The clipboard says, not the list (keyboard plan D13 B)
-        can-paste? (fx/sub-ctx context subs/can-paste? (or clipboard-type :cue-chain-items))
+        ;; The clipboard says, for this list's type (keyboard plan D13 B,
+        ;; D9 A); a list without a type pastes nothing
+        list-type (clipboard/list-type component-id)
+        can-paste? (and (some? list-type) (fx/sub-ctx context subs/can-paste? list-type))
         items-vbox {:fx/type :v-box
                     :spacing 4
                     :children (u/mapv-indexed
@@ -862,8 +864,7 @@
         handler-props {:component-id component-id
                        :items-path items-path
                        :on-change-event on-change-event
-                       :on-change-params on-change-params
-                       :clipboard-type (get on-change-params :clipboard-type :cue-chain-items)}
+                       :on-change-params on-change-params}
 
         props-atom (get-or-create-props-atom! component-id)
         _ (update-props-atom! component-id handler-props)]
@@ -901,6 +902,4 @@
                         :fx/type list-sidebar
                         :fx/context context
                         :v-box/vgrow :always
-                        :get-item-label label-fn
-                        ;; The toolbar's Copy and Paste use the same type as ⌘C and ⌘V
-                        :clipboard-type (get on-change-params :clipboard-type :cue-chain-items))]}}))
+                        :get-item-label label-fn)]}}))

@@ -528,9 +528,9 @@
      :get-item-label (fn [item]
                        (get labels (:effect-id item) "Unknown Effect"))
      :on-change-event :chain/set-items
-     ;; Copied and pasted as effects: its Paste button (subs/can-paste?)
-     ;; and ⌘V both ask the clipboard about :item-effects
-     :on-change-params {:domain :projector-effects :entity-key projector-id :clipboard-type :item-effects}
+     ;; Copied and pasted as effects, from its component id
+     ;; (state.clipboard/list-type): its Paste button and ⌘V agree
+     :on-change-params {:domain :projector-effects :entity-key projector-id}
      :header-label "EFFECTS"
      :empty-text "No calibration effects\nAdd from menu above"}))
 

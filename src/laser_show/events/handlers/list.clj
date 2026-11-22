@@ -234,16 +234,17 @@
 
 
 (defn- handle-copy-selected
-  "Copy the selected items: a clip (clipboard/list-clip, of the event's
-   :clipboard-type, cue items by default) in [:ui :clipboard], copied at the
-   event's :time, and on the OS clipboard (:clipboard/write)."
-  [{:keys [component-id items-path clipboard-type state] :as event}]
+  "Copy the selected items: a clip (clipboard/list-clip, of the list's type,
+   clipboard/list-type of its component id) in [:ui :clipboard], copied at
+   the event's :time, and on the OS clipboard (:clipboard/write). A list
+   without a type copies nothing."
+  [{:keys [component-id items-path state] :as event}]
   (let [items (get-in state items-path [])
         selected-ids (get-in state [:list-ui component-id :selected-ids] #{})
         clip (when (seq selected-ids)
                (let [normalized-ids (helpers/normalize-selected-ids selected-ids items)
                      selected-items (helpers/collect-by-ids items normalized-ids)]
-                 (clipboard/list-clip (or clipboard-type :cue-chain-items)
+                 (clipboard/list-clip (clipboard/list-type component-id)
                                       (chains/deep-copy-items selected-items)
                                       (h/current-time-ms event))))]
     (if clip
@@ -256,19 +257,20 @@
   "Paste the clipboard's items after the selected item (or at the end),
    through h/with-clipboard: with nothing copied in this app yet, the OS
    clipboard is read first. A list takes what clipboard/payload gives its
-   :clipboard-type (cue items by default); a list of effects (:item-effects,
-   a projector's chain) takes effects, so a cue's presets never land in it."
-  [{:keys [component-id items-path on-change-event on-change-params clipboard-type] :as event}]
-  (let [expected-type (or clipboard-type :cue-chain-items)]
+   type (clipboard/list-type of its component id): a cue list cue items, an
+   effect list effects, so neither lands in the other. A list without a type
+   pastes nothing."
+  [{:keys [component-id items-path on-change-event on-change-params state] :as event}]
+  (if-let [list-type (clipboard/list-type component-id)]
     (h/with-clipboard
      event
      (fn [state clip]
-       (when-let [clipboard-items (not-empty (clipboard/payload clip expected-type))]
+       (when-let [clipboard-items (not-empty (clipboard/payload clip list-type))]
          (let [items (get-in state items-path [])
                last-selected-id (get-in state [:list-ui component-id :last-selected-id])
                items-to-paste (cond-> (chains/deep-copy-items clipboard-items)
                                 ;; presets and groups from an older build route as there
-                                (= expected-type :cue-chain-items) migration/items-z4)
+                                (= list-type :cue-chain-items) migration/items-z4)
                new-items (if last-selected-id
                            (helpers/insert-after-id items last-selected-id items-to-paste)
                            (into (vec items) items-to-paste))
@@ -282,7 +284,8 @@
             :dispatch (assoc on-change-params
                              :event/type on-change-event
                              :items new-items
-                             :history/description "Paste Item(s)")}))))))
+                             :history/description "Paste Item(s)")}))))
+    {:state state}))
 
 
 (defn- handle-group-selected

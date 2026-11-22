@@ -1,12 +1,15 @@
 (ns laser-show.state.clipboard
-  "The clipboard's rules, all pure (keyboard plan Phase 4, Step 4a).
+  "The clipboard's rules, all pure (keyboard plan Phase 4, Steps 4a and 4b).
 
    A clip is a map with a :type (clipboard-types), as copy builds it:
-     {:type :cue-chain-items :items [...] :copied-at ms}   a list's presets and groups
-     {:type :item-effects :effects [...] :copied-at ms}    a list's effects
+     {:type :cue-chain-items :items [...] :copied-at ms}   a cue list's presets and groups
+     {:type :item-effects :effects [...] :copied-at ms}    an effect list's effects
      {:type :cue-chain :data cell :copied-at ms}           a grid cell
      {:type :effects-cell :data cell :copied-at ms}        an effects cell
      {:type :step-grid :grid {:zones :steps} :copied-at ms} a step grid
+
+   A list's type comes from its component id (list-type), and each target
+   takes only what payload says.
 
    The clipboard is [:ui :clipboard] in app state, written only in the
    :state a handler returns: copy puts its clip there, and a paste whose
@@ -24,9 +27,8 @@
 
 
 (def clipboard-types
-  #{:cue :zone :projector :effect :effect-chain :cell-assignment
-    :cue-chain :effects-cell :cue-chain-items :item-effects :timeline-tracks
-    :step-grid})
+  "The types copy writes; a clip of any other type is read as nothing."
+  #{:cue-chain-items :item-effects :cue-chain :effects-cell :step-grid})
 
 (defn valid-clipboard-type?
   [type]
@@ -80,16 +82,28 @@
    about 197,000 characters (keyboard plan probe p17)."
   5000000)
 
+(defn list-type
+  "The clipboard type of the list with component-id (04 §7, Step 4b): a cue
+   list copies and pastes cue items (:cue-chain-items); an item's effects,
+   the effects grid's chain and a projector's chain copy and paste effects
+   (:item-effects). nil for any other list: it copies and pastes nothing."
+  [component-id]
+  (when (vector? component-id)
+    (case (first component-id)
+      :cue-chain :cue-chain-items
+      (:item-effects :effect-chain :projector-effects) :item-effects
+      nil)))
+
 (defn list-clip
   "The clip a list copy of items makes at now (ms): effects for
-   :item-effects, tracks for :timeline-tracks, cue items otherwise. nil
-   when there are no items."
+   :item-effects, cue items for :cue-chain-items (list-type). nil when there
+   are no items, or for any other type."
   [type items now]
   (when (seq items)
     (case type
       :item-effects {:type :item-effects :effects (serialize-effect-chain items) :copied-at now}
-      :timeline-tracks {:type :timeline-tracks :items (vec items) :copied-at now}
-      {:type :cue-chain-items :items (vec items) :copied-at now})))
+      :cue-chain-items {:type :cue-chain-items :items (vec items) :copied-at now}
+      nil)))
 
 (defn cell-clip
   "The clip a grid or effects cell's copy makes: {:type :data :copied-at}."
@@ -120,20 +134,18 @@
       (when (and (map? data) (valid-clipboard-type? (:type data)))
         data))))
 
-(def ^:private list-targets #{:cue-chain-items :item-effects :timeline-tracks})
+(def ^:private list-targets #{:cue-chain-items :item-effects})
 
 (defn payload
-  "What target takes from clip, or nil. A list of effects (:item-effects)
-   takes a clip of effects, an effect chain or one effect; any other list
-   the items of a clip of its own type; a cue or effects cell (:cue-chain,
-   :effects-cell) a cell of its type; a step grid (:step-grid) a grid."
+  "What target takes from clip, or nil (04 §7, second table). A list
+   (list-type) takes the items of a clip of its own type: a cue list
+   (:cue-chain-items) cue items, an effect list (:item-effects) effects. A
+   cue or effects cell (:cue-chain, :effects-cell) takes a cell of its type;
+   a step grid (:step-grid) a grid."
   [clip target]
   (cond
-    (= :item-effects target) (case (:type clip)
-                               :effect [(dissoc clip :type :copied-at)]
-                               (:effect-chain :item-effects) (:effects clip)
-                               nil)
-    (contains? list-targets target) (when (= target (:type clip)) (:items clip))
+    (= :cue-chain-items target) (when (= :cue-chain-items (:type clip)) (:items clip))
+    (= :item-effects target) (when (= :item-effects (:type clip)) (:effects clip))
     (contains? #{:cue-chain :effects-cell} target) (when (= target (:type clip)) (:data clip))
     (= :step-grid target) (when (= :step-grid (:type clip)) (:grid clip))
     :else nil))
@@ -145,7 +157,7 @@
   (boolean
    (if (contains? list-targets target)
      (seq (payload clip target))
-     (and (some? clip) (= target (:type clip))))))
+     (and (some? clip) (some? target) (= target (:type clip))))))
 
 (defn adopt
   "state with clip, read from the OS clipboard, as [:ui :clipboard], but
