@@ -106,21 +106,23 @@
 (defn handle-copy-to-clipboard
   "A cell's copy: the cell at source-path as a clip of clipboard-type
    (clipboard/cell-clip, copied at now) in [:ui :clipboard], and on the OS
-   clipboard (:clipboard/write). An empty cell's clip goes in the slot only.
+   clipboard (:clipboard/write). An empty cell copies nothing: the slot
+   keeps what it had, so a paste never empties a cell.
 
    Example:
    (handle-copy-to-clipboard state [:chains :effect-chains [0 1]] :effects-cell 1763650000000)
    => {:state (assoc-in state [:ui :clipboard] clip) :clipboard/write clip}"
   [state source-path clipboard-type now]
-  (let [data (get-in state source-path)
-        clip (clipboard/cell-clip clipboard-type data now)]
-    (cond-> {:state (assoc-in state [:ui :clipboard] clip)}
-      (some? data) (assoc :clipboard/write clip))))
+  (if-let [clip (clipboard/cell-clip clipboard-type (get-in state source-path) now)]
+    {:state (assoc-in state [:ui :clipboard] clip)
+     :clipboard/write clip}
+    {:state state}))
 
 (defn handle-paste-from-clipboard
   "A cell's paste (with-clipboard): a clip of expected-type written to
    target-path, through transform-fn when given (for example
-   migration/cue-z4); a clip of another type does nothing.
+   chains/fresh-ids, so the pasted cell has ids of its own); a clip of
+   another type, or of an empty cell, does nothing.
 
    Example:
    (handle-paste-from-clipboard event [:chains :effect-chains [0 2]] :effects-cell)"

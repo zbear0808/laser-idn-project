@@ -1,6 +1,7 @@
 (ns laser-show.animation.chains-test
   "Tests for chain management functions including deep copy and safe operations."
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [clojure.set]
+            [clojure.test :refer [deftest testing is]]
             [laser-show.animation.chains :as chains]))
 
 
@@ -296,3 +297,64 @@
       (is (contains? result (:id item-3)))
       ;; Does NOT include the root group's own ID
       (is (not (contains? result (:id root)))))))
+
+
+;; fresh-ids (keyboard plan Phase 4, Step 4b)
+
+
+(def ^:private t1 #uuid "00000000-0000-0000-0000-0000000000f1")
+(def ^:private c1 #uuid "00000000-0000-0000-0000-0000000000c1")
+(def ^:private e1 #uuid "00000000-0000-0000-0000-0000000000e1")
+
+(def ^:private timeline-cell
+  {:editor-type :timeline
+   :tracks [{:id t1 :type :track :name "Track 1"}]
+   :items [{:id c1 :track-id t1 :preset-id :circle :effects [{:id e1 :effect-id :scale}]}]
+   :destination-zone {:zone-group-id :all}})
+
+(defn- all-ids
+  "Every :id in x, at any depth."
+  [x]
+  (->> (tree-seq coll? seq x)
+       (keep #(when (map? %) (:id %)))
+       set))
+
+(deftest fresh-ids-renames-every-inner-id-test
+  (let [copy (chains/fresh-ids timeline-cell)]
+    (is (= 3 (count (all-ids copy))))
+    (is (empty? (clojure.set/intersection (all-ids timeline-cell) (all-ids copy))) "T1, C1 and E1 are new")
+    (is (every? uuid? (all-ids copy)))
+    (is (= (-> timeline-cell (update :tracks (partial mapv #(dissoc % :id)))
+               (update :items (partial mapv #(-> % (dissoc :id :track-id) (update :effects (partial mapv (fn [e] (dissoc e :id))))))))
+           (-> copy (update :tracks (partial mapv #(dissoc % :id)))
+               (update :items (partial mapv #(-> % (dissoc :id :track-id) (update :effects (partial mapv (fn [e] (dissoc e :id)))))))))
+        "nothing else changes"))
+  (testing "a group, its children and their effects"
+    (let [g {:id #uuid "00000000-0000-0000-0000-0000000000a0" :type :group
+             :items [{:id #uuid "00000000-0000-0000-0000-0000000000a1" :effects [{:id #uuid "00000000-0000-0000-0000-0000000000a2"}]}]}
+          copy (chains/fresh-ids g)]
+      (is (= 3 (count (all-ids copy))))
+      (is (empty? (clojure.set/intersection (all-ids g) (all-ids copy)))))))
+
+(deftest fresh-ids-keeps-inner-references-test
+  (let [copy (chains/fresh-ids timeline-cell)]
+    (is (= (get-in copy [:tracks 0 :id]) (get-in copy [:items 0 :track-id])) ":track-id follows its track")))
+
+(deftest fresh-ids-leaves-outside-references-test
+  (let [t #uuid "00000000-0000-0000-0000-0000000000f9"
+        copy (chains/fresh-ids [{:id c1 :track-id t}])]
+    (is (not= c1 (get-in copy [0 :id])))
+    (is (= t (get-in copy [0 :track-id])) "a duplicated clip keeps its track, which isn't inside"))
+  (is (= {:target :zone/a :items [{:preset-id :circle}]}
+         (chains/fresh-ids {:target :zone/a :items [{:preset-id :circle}]}))
+      "nothing to rename: the same value"))
+
+(deftest deep-copy-item-regenerates-nested-effect-ids-test
+  (let [item {:id c1 :type :preset :preset-id :circle :effects [{:id e1 :effect-id :scale}]}
+        copy (chains/deep-copy-item item)
+        in-group (chains/deep-copy-item {:id t1 :type :group :items [item]})]
+    (is (not= c1 (:id copy)))
+    (is (not= e1 (get-in copy [:effects 0 :id])) "p15: before Step 4b the effect kept its id")
+    (is (not= e1 (get-in in-group [:items 0 :effects 0 :id])) "in a group too")
+    (is (uuid? (:id (chains/deep-copy-item {:effect-id :scale}))) "an item without an id gets one")
+    (is (uuid? (:id (chains/deep-copy-item {:id :a :preset-id :circle}))) "and one with a keyword id a uuid, as before")))

@@ -654,3 +654,18 @@
         (is (= {:state s} (list-handlers/handle (paste-event s)))))
       (let [s (lists-state {:type :cue-chain :data {:items [{:id id-a :type :preset :preset-id :circle}]} :copied-at 1})]
         (is (= {:state s} (list-handlers/handle (assoc fx-chain-paste :state s))))))))
+
+
+(deftest paste-regenerates-ids-at-every-depth-test
+  ;; p15: before Step 4b a pasted item's effects kept their ids, in a group too
+  (let [e-id #uuid "00000000-0000-0000-0000-0000000000e1"
+        g-id #uuid "00000000-0000-0000-0000-0000000000e2"
+        p-id #uuid "00000000-0000-0000-0000-0000000000e3"
+        clip {:type :cue-chain-items :copied-at 1
+              :items [{:id g-id :type :group :name "G"
+                       :items [{:id p-id :type :preset :preset-id :star
+                                :effects [{:id e-id :effect-id :scale :params {}}]}]}]}
+        pasted (get-in (list-handlers/handle (paste-event (cue-state clip))) [:dispatch :items 1])]
+    (is (= :star (get-in pasted [:items 0 :preset-id])))
+    (is (not-any? #{g-id p-id e-id} [(:id pasted) (get-in pasted [:items 0 :id]) (get-in pasted [:items 0 :effects 0 :id])])
+        "the group, its preset and the preset's effect all get new ids")))

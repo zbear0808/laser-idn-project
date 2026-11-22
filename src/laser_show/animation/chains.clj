@@ -13,7 +13,8 @@
    - Items are identified by UUID in their :id field
    - Paths are vectors like [0], [1 :items 0], [1 :items 2 :items 0]
    - Items can be enabled/disabled via :enabled? field (default: true)
-   - Flattening respects enabled? at all levels")
+   - Flattening respects enabled? at all levels"
+  (:require [clojure.walk :as walk]))
 
 
 ;; Type Predicates
@@ -214,26 +215,54 @@
     :collapsed? collapsed?}))
 
 
+(defn fresh-ids
+  "x with a new uuid for every uuid that is the :id of a map inside it, at
+   any depth, wherever that uuid appears in x: so a clip's :track-id follows
+   its track, and a uuid not defined inside x (a track the clip isn't
+   copied with) stays. What a paste or a duplicate gives the things it
+   copies (keyboard plan Phase 4, Step 4b). x itself when nothing in it has
+   a uuid :id.
+
+   Example:
+   (fresh-ids {:tracks [{:id t1}] :items [{:id c1 :track-id t1 :effects [{:id e1}]}]})
+   => {:tracks [{:id T1}] :items [{:id C1 :track-id T1 :effects [{:id E1}]}]}"
+  [x]
+  (let [renames (reduce (fn [m node]
+                          (let [id (when (map? node) (:id node))]
+                            (if (and (uuid? id) (not (contains? m id)))
+                              (assoc m id (random-uuid))
+                              m)))
+                        {}
+                        (tree-seq coll? seq x))]
+    (if (empty? renames)
+      x
+      (walk/postwalk #(if (uuid? %) (get renames % %) %) x))))
+
+(defn- with-uuid
+  "item with a uuid :id: its own, or a new one when it has none (or a
+   keyword)."
+  [item]
+  (cond-> item (not (uuid? (:id item))) (assoc :id (random-uuid))))
+
 (defn deep-copy-item
-  "Deep copy an item, generating new UUIDs for it and all nested children.
-   This is essential for paste operations to avoid ID collisions.
+  "Deep copy an item: new UUIDs for it and everything inside it (children,
+   effects, any inner :id), references among them kept (fresh-ids). This
+   is essential for paste operations to avoid ID collisions.
    
    Parameters:
    - item: Item to copy (effect, preset, or group)
    
    Returns: New item with fresh UUIDs at all levels"
   [item]
-  (let [with-new-id (assoc item :id (random-uuid))]
-    (if (group? with-new-id)
-      (update with-new-id :items #(mapv deep-copy-item %))
-      with-new-id)))
+  (fresh-ids (with-uuid item)))
 
 (defn deep-copy-items
-  "Deep copy multiple items, generating new UUIDs for all items and nested children.
+  "Deep copy multiple items, as deep-copy-item does each; a reference from
+   one to another follows it.
    
    Parameters:
    - items: Vector of items to copy
    
    Returns: Vector of copied items with fresh UUIDs"
   [items]
-  (mapv deep-copy-item items))
+  (fresh-ids (mapv with-uuid items)))

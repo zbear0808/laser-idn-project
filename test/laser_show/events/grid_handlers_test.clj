@@ -287,3 +287,27 @@
       (is (= {2 :zone/a 0 :graphics} (targets (grid/handle {:event/type :grid/set-column-target :col 0 :target :graphics :state set})))))
     (is (history/derive-dirty sample-state-with-content (:state (set-target {:col 2 :target :zone/a}))))
     (is (= {:state sample-state-with-content} (set-target {})) "no column: nothing")))
+
+
+;; Step 4b: fresh ids, and an empty cell copies nothing
+
+
+(deftest paste-cell-regenerates-ids-test
+  ;; p14: before Step 4b A1 and B2 shared item ids after a copy and paste
+  (let [i-id #uuid "00000000-0000-0000-0000-0000000000b1"
+        e-id #uuid "00000000-0000-0000-0000-0000000000b2"
+        cell {:items [{:id i-id :type :preset :preset-id :circle :effects [{:id e-id :effect-id :scale}]}]}
+        result (grid/handle {:event/type :grid/paste-cell :col 1 :row 1
+                             :state (assoc-in sample-state-empty [:ui :clipboard] {:type :cue-chain :data cell :copied-at 1})})
+        pasted (get-in result [:state :chains :cue-chains [1 1]])]
+    (is (= :circle (get-in pasted [:items 0 :preset-id])))
+    (is (not= i-id (get-in pasted [:items 0 :id])))
+    (is (not= e-id (get-in pasted [:items 0 :effects 0 :id])))
+    (is (= cell (get-in result [:state :ui :clipboard :data])) "the clip keeps its ids: the next paste gets new ones again")))
+
+(deftest copy-an-empty-cell-copies-nothing-test
+  (let [state (assoc-in sample-state-with-content [:ui :clipboard] {:type :cue-chain :data {:items [{:preset-id :wave}]} :copied-at 1})]
+    (doseq [[label s] [["no cell" state]
+                       ["a cell without items" (assoc-in state [:chains :cue-chains [2 2]] {:items []})]]]
+      (is (= {:state s} (grid/handle {:event/type :grid/copy-cell :col 2 :row 2 :state s :time 9}))
+          (str label ": the clipboard keeps what it had, and no OS write")))))

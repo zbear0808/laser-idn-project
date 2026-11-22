@@ -6,6 +6,7 @@
    - Cell content management (clear, move)
    - Clipboard operations (copy, paste)"
   (:require [laser-show.events.helpers :as h]
+            [laser-show.animation.chains :as chains]
             [laser-show.state.migration :as migration]
             [laser-show.routing.targets :as targets]
             [laser-show.animation.cue-chains :as cue-chains]
@@ -166,12 +167,13 @@
   "Paste the clipboard's cue chain to a cell (h/with-clipboard: the OS
    clipboard first while nothing is copied in this app). A cue copied from an
    older build is converted as an old show is when it opens
-   (state.migration/cue-z4), so it routes the same."
+   (state.migration/cue-z4), so it routes the same, and everything in it
+   gets a new id (chains/fresh-ids), so two cells never share one."
   [{:keys [col row] :as event}]
   (h/handle-paste-from-clipboard event
                                  [:chains :cue-chains [col row]]
                                  :cue-chain
-                                 migration/cue-z4))
+                                 (comp chains/fresh-ids migration/cue-z4)))
 
 (defn- handle-grid-clear-cell
   "Clear a cell's cue chain, and the triggers and vibes that named it."

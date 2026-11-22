@@ -1364,6 +1364,12 @@
              (lit (with-clip {:type :cue-chain-items :items [{:type :preset :preset-id :circle}] :copied-at 1}))))
       (is (= #{:item-effects}
              (lit (with-clip {:type :item-effects :effects [{:effect-id :scale}] :copied-at 1}))))
-      (is (= #{:cue-chain} (lit (with-clip {:type :cue-chain :data {:items []} :copied-at 1}))))
-      (is (= #{:effects-cell} (lit (with-clip {:type :effects-cell :data {:items []} :copied-at 1}))))
+      (is (= #{:cue-chain :cue-chain-items}
+             (lit (with-clip {:type :cue-chain :data {:items [{:type :preset :preset-id :circle}]} :copied-at 1})))
+          "Step 4b: a cue list takes a copied cell's items")
+      (is (= #{:effects-cell :item-effects}
+             (lit (with-clip {:type :effects-cell :data {:items [{:effect-id :scale}]} :copied-at 1})))
+          "Step 4b: an effect list takes a copied effects cell's effects")
+      (is (= #{} (lit (with-clip {:type :cue-chain :data {:items []} :copied-at 1})))
+          "Step 4b: an empty cell's clip, nowhere")
       (is (= #{:step-grid} (lit (with-clip {:type :step-grid :grid {:zones [:zone/a] :steps [[:zone/a]]} :copied-at 1})))))))

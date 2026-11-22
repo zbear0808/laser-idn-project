@@ -16,7 +16,8 @@
    
    UI components should use :chain/* events with {:domain :effect-chains}
    for all effect-level operations."
- (:require [laser-show.events.helpers :as h]
+ (:require [laser-show.animation.chains :as chains]
+           [laser-show.events.helpers :as h]
            [laser-show.routing.zone-maps :as zone-maps]
            [laser-show.vibes.reactions :as reactions]
            [laser-show.vibes.refs :as refs]))
@@ -67,11 +68,13 @@
 
 (defn- handle-effects-paste-cell
   "Paste the clipboard's effects cell (h/with-clipboard: the OS clipboard
-   first while nothing is copied in this app)."
+   first while nothing is copied in this app), every effect with a new id
+   (chains/fresh-ids)."
   [{:keys [col row] :as event}]
   (h/handle-paste-from-clipboard event
                                  [:chains :effect-chains [col row]]
-                                 :effects-cell))
+                                 :effects-cell
+                                 chains/fresh-ids))
 
 (defn- handle-effects-move-cell
   "Move an effects cell from one position to another. Trigger-map bindings

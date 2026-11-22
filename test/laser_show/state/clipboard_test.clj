@@ -30,6 +30,23 @@
   (is (= {:type :effects-cell :data {:items [effect] :active? true} :copied-at 7}
          (clipboard/cell-clip :effects-cell {:items [effect] :active? true} 7))))
 
+(deftest an-empty-cell-makes-no-clip-test
+  ;; Step 4b: an empty cell copies nothing, so a paste never empties a cell
+  (doseq [cell [nil {} {:items []} {:items [] :active? true} {:tracks [] :items []}]]
+    (is (nil? (clipboard/cell-clip :cue-chain cell 7)) (pr-str cell)))
+  (is (some? (clipboard/cell-clip :cue-chain {:editor-type :timeline :tracks [{:id :t1}]} 7))
+      "a timeline cue with tracks and no clips yet is no empty cell")
+  (doseq [target [:cue-chain :effects-cell]]
+    (is (not (clipboard/accepts? {:type target :data nil :copied-at 1} target)) "another build's empty-cell clip")
+    (is (not (clipboard/accepts? {:type target :data {:items []} :copied-at 1} target)))))
+
+(deftest effect-copies-keep-groups-as-they-are-test
+  (let [group {:id #uuid "00000000-0000-0000-0000-00000000000b" :type :group :name "G" :enabled? true
+               :items [effect]}]
+    (is (= {:type :item-effects :effects [group effect] :copied-at 1}
+           (clipboard/list-clip :item-effects [group effect] 1))
+        "no :params nil on a group, and its effects as copy keeps them")))
+
 (deftest grid-clip-shapes-test
   (is (= {:type :step-grid :grid {:zones [:zone/a] :steps [[:zone/a] []]} :copied-at 9}
          (clipboard/grid-clip {:zones [:zone/a] :steps [[:zone/a] []]} 9))))

@@ -66,11 +66,14 @@
 
 (defn- serialize-effect-chain
   "Serialize an effect chain for clipboard.
-   Each effect in the chain has its params serialized."
+   Each effect in the chain has its params serialized, inside groups too; a
+   map without :params (a group) gets none."
   [effects]
   (when effects
     (mapv (fn [effect]
-            (update effect :params serialize-effect-params))
+            (cond-> effect
+              (contains? effect :params) (update :params serialize-effect-params)
+              (vector? (:items effect)) (update :items serialize-effect-chain)))
           effects)))
 
 
@@ -106,10 +109,18 @@
       :cue-chain-items {:type :cue-chain-items :items (vec items) :copied-at now}
       nil)))
 
+(defn empty-cell?
+  "Is cell (a cue or effects cell) empty: nil, or no :items and no :tracks?
+   An empty cell copies nothing, so a paste never empties a cell."
+  [cell]
+  (and (empty? (:items cell)) (empty? (:tracks cell))))
+
 (defn cell-clip
-  "The clip a grid or effects cell's copy makes: {:type :data :copied-at}."
+  "The clip a grid or effects cell's copy makes: {:type :data :copied-at};
+   nil for an empty cell (empty-cell?)."
   [type cell now]
-  {:type type :data cell :copied-at now})
+  (when-not (empty-cell? cell)
+    {:type type :data cell :copied-at now}))
 
 (defn grid-clip
   "The clip a step grid's Copy makes: grid is routing.step-grid/copy's
@@ -156,7 +167,9 @@
                                :item-effects (:effects clip)
                                :effects-cell (:items (:data clip))
                                nil)
-    (contains? #{:cue-chain :effects-cell} target) (when (= target (:type clip)) (:data clip))
+    (contains? #{:cue-chain :effects-cell} target) (when (and (= target (:type clip))
+                                                              (not (empty-cell? (:data clip))))
+                                                     (:data clip))
     (= :step-grid target) (when (= :step-grid (:type clip)) (:grid clip))
     :else nil))
 
@@ -167,7 +180,10 @@
   (boolean
    (if (contains? list-targets target)
      (seq (payload clip target))
-     (and (some? clip) (some? target) (= target (:type clip))))))
+     (and (some? clip) (some? target) (= target (:type clip))
+          (if (contains? #{:cue-chain :effects-cell} target)
+            (not (empty-cell? (:data clip)))
+            true)))))
 
 (defn adopt
   "state with clip, read from the OS clipboard, as [:ui :clipboard], but

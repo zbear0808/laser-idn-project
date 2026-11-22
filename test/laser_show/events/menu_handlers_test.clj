@@ -96,3 +96,18 @@
           result (menu/handle event)]
       (is (nil? (get-in result [:state :chains :cue-chains [0 0]])))
       (is (history/derive-dirty (:state event) (:state result))))))
+
+
+(deftest edit-copy-on-an-empty-cell-keeps-the-clipboard-test
+  ;; p14: before Step 4b Edit > Copy on an empty cell stored {:type :cue-chain
+  ;; :data nil}, and Edit > Paste of it emptied the cell it was pasted on
+  (let [clip {:type :cue-chain :data {:items [{:preset-id :star}]} :copied-at 1}
+        state (-> sample-state-with-cues
+                  (assoc-in [:grid :selected-cell] [5 2])
+                  (assoc-in [:ui :clipboard] clip))
+        result (menu/handle {:event/type :edit/copy :state state :time 9})]
+    (is (= {:state state} result) "nothing copied, nothing written"))
+  (testing "a clip of an empty cell (another build's, read from the OS clipboard) never empties a cell"
+    (let [state (assoc-in sample-state-with-cues [:ui :clipboard] {:type :cue-chain :data nil :copied-at 1})
+          result (menu/handle {:event/type :edit/paste :state state :time 9})]
+      (is (= {:items [{:preset-id :circle}]} (get-in result [:state :chains :cue-chains [0 0]]))))))
