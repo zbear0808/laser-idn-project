@@ -51,6 +51,7 @@
                :output/write-status
                :project/save :project/load :fx/show-file-chooser :system/exit :system/open-url
                :dev/reload :clipboard/copy-effects :clipboard/paste-effects
+               :clipboard/write :clipboard/read
                :projectors/scan :addons/install :system/open-folder]))
   (is (not (contains? events/effects :clipboard/paste-projector-effects))
       "a projector chain pastes through the list editor's own clipboard (zones Z0)")

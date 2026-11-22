@@ -72,6 +72,7 @@
             [laser-show.animation.show-time :as show-time])
   (:import [javafx.stage FileChooser FileChooser$ExtensionFilter Stage]
            [javafx.application Platform]
+           [javafx.scene.input Clipboard ClipboardContent]
            [java.awt Desktop Desktop$Action]
            [java.io File]
            [java.net URI]
@@ -231,6 +232,55 @@
                  :insert-pos insert-pos
                  :effects effects}
                 dispatch)))
+
+;; The OS clipboard. JavaFX's Clipboard works only on the FX thread, so both
+;; effects hand their call to it with Platform/runLater and never wait: the
+;; event agent goes on with the next event at once.
+
+(defn- put-system-clipboard-text!
+  "Put text on the OS clipboard. FX thread only."
+  [^String text]
+  (.setContent (Clipboard/getSystemClipboard) (doto (ClipboardContent.) (.putString text))))
+
+(defn- system-clipboard-text
+  "The OS clipboard's text, or nil. FX thread only."
+  []
+  (let [cb (Clipboard/getSystemClipboard)]
+    (when (.hasString cb) (.getString cb))))
+
+(defn- effect-clipboard-write
+  "Effect that puts a clip's EDN (clipboard/->system-text, serialized here)
+   on the OS clipboard, on the FX thread. Nothing waits for it and no event
+   follows; a failure is logged."
+  [clip _dispatch]
+  (let [text (clipboard/->system-text clip)]
+    (try
+      (Platform/runLater
+       (fn []
+         (try
+           (put-system-clipboard-text! text)
+           (catch Throwable t
+             (log/warn "Could not put the copy on the system clipboard:" (.getMessage t))))))
+      (catch Throwable t
+        (log/warn "Could not put the copy on the system clipboard:" (.getMessage t))))))
+
+(defn- effect-clipboard-read
+  "Effect that reads the OS clipboard on the FX thread and parses it
+   (clipboard/<-system-text), then dispatches :then with :clipboard/system,
+   the clip or nil, through dispatch (later, FX thread). The agent doesn't
+   wait for it.
+   Args: {:then event}"
+  [{:keys [then]} dispatch]
+  (let [read-clip #(try
+                     (clipboard/<-system-text (system-clipboard-text))
+                     (catch Throwable t
+                       (log/warn "Could not read the system clipboard:" (.getMessage t))
+                       nil))]
+    (try
+      (Platform/runLater #(dispatch (assoc then :clipboard/system (read-clip))))
+      (catch Throwable t
+        (log/warn "Could not read the system clipboard:" (.getMessage t))
+        (dispatch (assoc then :clipboard/system nil))))))
 
 ;; Projector Scanning Effects
 
@@ -610,6 +660,10 @@
      (Desktop, then xdg-open on Linux); :on-failed with its :path comes back
      when neither can (later, future)
    - :dev/reload - reload :styles or :app code (dev only)
+   - :clipboard/write - put a clip's EDN on the OS clipboard (FX thread, no
+     follow-up)
+   - :clipboard/read - read the OS clipboard, then dispatch :then with
+     :clipboard/system (later, FX thread)
    - :clipboard/copy-effects - copy effects to clipboard
    - :clipboard/paste-effects - paste effects from clipboard (effects grid) (inline)
    - :projectors/scan - scan for IDN devices and every driver's (later, future)"
@@ -638,6 +692,9 @@
    :system/open-url effect-system-open-url
    :system/open-folder effect-system-open-folder
    :dev/reload effect-dev-reload
+   ;; The OS clipboard
+   :clipboard/write effect-clipboard-write
+   :clipboard/read effect-clipboard-read
    ;; Clipboard effects for effect chain editor
    :clipboard/copy-effects effect-clipboard-copy-effects
    :clipboard/paste-effects effect-clipboard-paste-effects

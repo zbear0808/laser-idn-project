@@ -1,45 +1,94 @@
 (ns laser-show.state.clipboard-test
-  (:require [clojure.test :refer [deftest testing is use-fixtures]]
-            [laser-show.state.core :as state]
+  "The clipboard's pure helpers (keyboard plan Phase 4, Step 4a): what a clip
+   is, its text on the OS clipboard, and which target takes which clip. No
+   app state, no FX toolkit, no OS clipboard."
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest testing is]]
             [laser-show.state.clipboard :as clipboard]))
 
-(defn init-state-fixture [f] 
-  (state/init-state! {:ui {:clipboard nil}})
-  (f))
+(def ^:private item
+  {:id #uuid "00000000-0000-0000-0000-000000000001" :type :preset :preset-id :circle
+   :params {:radius 0.5} :effects []})
 
-(use-fixtures :each init-state-fixture)
+(def ^:private effect
+  {:id #uuid "00000000-0000-0000-0000-00000000000a" :effect-id :axis-transform :enabled? true
+   :params {:mirror-x? true}})
 
-(deftest cell-assignment-copy-paste-test
-  (testing "copy cell assignment"
-    (clipboard/clear-clipboard!)
-    (is (clipboard/copy-cell-assignment! :circle))
-    (is (not (clipboard/clipboard-empty?)))
-    (is (clipboard/clipboard-has-type? :cell-assignment))
-    (is (clipboard/can-paste-cell-assignment?)))
-  
-  (testing "paste cell assignment"
-    (is (= :circle (clipboard/paste-cell-assignment))))
-  
-  (testing "copy nil returns false"
-    (clipboard/clear-clipboard!)
-    (is (nil? (clipboard/copy-cell-assignment! nil)))
-    (is (clipboard/clipboard-empty?))))
+(deftest list-clip-shapes-test
+  (is (= {:type :cue-chain-items :items [item] :copied-at 42}
+         (clipboard/list-clip :cue-chain-items [item] 42)))
+  (is (= {:type :item-effects :effects [effect] :copied-at 42}
+         (clipboard/list-clip :item-effects [effect] 42)))
+  (is (= {:type :timeline-tracks :items [{:id :t1 :type :track}] :copied-at 42}
+         (clipboard/list-clip :timeline-tracks [{:id :t1 :type :track}] 42)))
+  (is (= {:type :cue-chain-items :items [item] :copied-at 42}
+         (clipboard/list-clip nil [item] 42))
+      "a list without a type copies as cue items, as today")
+  (is (nil? (clipboard/list-clip :cue-chain-items [] 42)) "nothing to copy: no clip"))
 
-(deftest clipboard-description-test
-  (testing "empty clipboard description"
-    (clipboard/clear-clipboard!)
-    (is (= "Empty" (clipboard/get-clipboard-description))))
-  
-  (testing "cell assignment description"
-    (clipboard/copy-cell-assignment! :spinning-square)
-    (is (= "Preset: spinning-square" (clipboard/get-clipboard-description)))))
+(deftest cell-clip-shapes-test
+  (is (= {:type :cue-chain :data {:items [item]} :copied-at 7}
+         (clipboard/cell-clip :cue-chain {:items [item]} 7)))
+  (is (= {:type :effects-cell :data {:items [effect] :active? true} :copied-at 7}
+         (clipboard/cell-clip :effects-cell {:items [effect] :active? true} 7))))
 
-(deftest item-effects-paste-as-effects-test
-  (with-redefs [clipboard/copy-to-system-clipboard! (fn [_] nil)
-                clipboard/read-from-system-clipboard (fn [] nil)]
-    (clipboard/clear-clipboard!)
-    (clipboard/copy-item-effects! [{:id #uuid "00000000-0000-0000-0000-00000000000a"
-                                    :effect-id :axis-transform :enabled? true :params {:mirror-x? true}}])
-    (is (= [:axis-transform] (mapv :effect-id (clipboard/get-effects-to-paste)))
-        "effects copied from a list of effects paste as effects")))
+(deftest grid-clip-shapes-test
+  (is (= {:type :step-grid :grid {:zones [:zone/a] :steps [[:zone/a] []]} :copied-at 9}
+         (clipboard/grid-clip {:zones [:zone/a] :steps [[:zone/a] []]} 9))))
 
+(deftest system-text-round-trip-test
+  (doseq [clip [(clipboard/list-clip :cue-chain-items [item] 1)
+                (clipboard/list-clip :item-effects [effect] 2)
+                (clipboard/cell-clip :cue-chain {:items [item] :destination-zone {:zone-group-id :all}} 3)
+                (clipboard/grid-clip {:zones [:zone/a :zone/b] :steps [[:zone/a] [:zone/b]]} 4)]]
+    (let [text (clipboard/->system-text clip)]
+      (is (not (str/includes? text "\n")) "one line of EDN")
+      (is (= clip (clipboard/<-system-text text)) (str "the clip back, uuids included: " (:type clip))))))
+
+(deftest system-text-ignores-foreign-text-test
+  (doseq [text ["hello" "" "   " "{:a 1}" "{:type :no-such-type :items []}" "[1 2]" "{:type"
+                "{:type :cue-chain-items #no/such-tag 1}" nil]]
+    (is (nil? (clipboard/<-system-text text)) (pr-str (some-> text (subs 0 (min 40 (count text)))))))
+  (testing "a text of 5,000,001 characters isn't read at all"
+    (is (nil? (clipboard/<-system-text (str "{" (apply str (repeat 5000000 " "))))))))
+
+(deftest accepts-keeps-todays-rules-test
+  (let [cue-items (clipboard/list-clip :cue-chain-items [item] 1)
+        item-effects (clipboard/list-clip :item-effects [effect] 1)
+        effect-chain {:type :effect-chain :effects [effect] :active? true :copied-at 1}
+        one-effect (assoc effect :type :effect :copied-at 1)
+        cue-cell (clipboard/cell-clip :cue-chain {:items [item]} 1)
+        fx-cell (clipboard/cell-clip :effects-cell {:items [effect]} 1)
+        grid (clipboard/grid-clip {:zones [:zone/a] :steps [[:zone/a]]} 1)
+        tracks (clipboard/list-clip :timeline-tracks [{:id :t1 :type :track}] 1)
+        clips [cue-items item-effects effect-chain one-effect cue-cell fx-cell grid tracks]
+        takes (fn [target] (set (map :type (filter #(clipboard/accepts? % target) clips))))]
+    (testing "the first table of 04 §7"
+      (is (= #{:cue-chain-items} (takes :cue-chain-items)))
+      (is (= #{:item-effects :effect-chain :effect} (takes :item-effects)))
+      (is (= #{:cue-chain} (takes :cue-chain)))
+      (is (= #{:effects-cell} (takes :effects-cell)))
+      (is (= #{:step-grid} (takes :step-grid)))
+      (is (= #{:timeline-tracks} (takes :timeline-tracks))))
+    (testing "what each target gets"
+      (is (= [item] (clipboard/payload cue-items :cue-chain-items)))
+      (is (= [effect] (clipboard/payload item-effects :item-effects)))
+      (is (= [effect] (clipboard/payload effect-chain :item-effects)))
+      (is (= [effect] (clipboard/payload one-effect :item-effects)))
+      (is (= {:items [item]} (clipboard/payload cue-cell :cue-chain)))
+      (is (= {:zones [:zone/a] :steps [[:zone/a]]} (clipboard/payload grid :step-grid)))
+      (is (nil? (clipboard/payload cue-items :item-effects)) "a cue's presets never land in a projector chain"))
+    (testing "nothing takes nothing"
+      (is (not-any? #(clipboard/accepts? nil %) [:cue-chain-items :item-effects :cue-chain :effects-cell :step-grid]))
+      (is (not (clipboard/accepts? (assoc cue-items :items []) :cue-chain-items)) "an empty list pastes nothing"))
+    (testing "an empty cell's copy still pastes onto a cell, as today (4b changes it)"
+      (is (clipboard/accepts? (clipboard/cell-clip :cue-chain nil 1) :cue-chain)))))
+
+(deftest adopt-fills-only-an-empty-slot-test
+  (let [mine (clipboard/list-clip :cue-chain-items [item] 1)
+        theirs (clipboard/cell-clip :cue-chain {:items [item]} 2)
+        empty-state {:ui {:clipboard nil}}]
+    (is (= theirs (get-in (clipboard/adopt empty-state theirs) [:ui :clipboard])) "an empty slot takes the read")
+    (is (= mine (get-in (clipboard/adopt (assoc-in empty-state [:ui :clipboard] mine) theirs) [:ui :clipboard]))
+        "a copy made while the read was out wins")
+    (is (identical? empty-state (clipboard/adopt empty-state nil)) "nothing read: nothing changes")))

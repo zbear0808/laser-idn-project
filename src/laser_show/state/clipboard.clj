@@ -39,7 +39,8 @@
 
 (def clipboard-types
   #{:cue :zone :projector :effect :effect-chain :cell-assignment
-    :cue-chain :effects-cell :cue-chain-items :item-effects :timeline-tracks})
+    :cue-chain :effects-cell :cue-chain-items :item-effects :timeline-tracks
+    :step-grid})
 
 (defn valid-clipboard-type?
   [type]
@@ -345,3 +346,88 @@
       :item-effects (str "Item Effects: " (count effects) " effects")
       "Unknown")
     "Empty"))
+
+
+;; Clips (pure): what copy puts in [:ui :clipboard], its text on the OS
+;; clipboard, and which target takes which clip
+
+
+(def max-system-text-length
+  "The longest OS clipboard text read as a clip. A 300-clip timeline cell is
+   about 197,000 characters (keyboard plan probe p17)."
+  5000000)
+
+(defn list-clip
+  "The clip a list copy of items makes at now (ms): effects for
+   :item-effects, tracks for :timeline-tracks, cue items otherwise. nil
+   when there are no items."
+  [type items now]
+  (when (seq items)
+    (case type
+      :item-effects {:type :item-effects :effects (serialize-effect-chain items) :copied-at now}
+      :timeline-tracks {:type :timeline-tracks :items (vec items) :copied-at now}
+      {:type :cue-chain-items :items (vec items) :copied-at now})))
+
+(defn cell-clip
+  "The clip a grid or effects cell's copy makes: {:type :data :copied-at}."
+  [type cell now]
+  {:type type :data cell :copied-at now})
+
+(defn grid-clip
+  "The clip a step grid's Copy makes: grid is routing.step-grid/copy's
+   {:zones :steps}."
+  [grid now]
+  {:type :step-grid :grid grid :copied-at now})
+
+(defn ->system-text
+  "clip as the OS clipboard's text: one line of EDN."
+  [clip]
+  (ser/serialize clip))
+
+(defn <-system-text
+  "The clip an OS clipboard text holds, or nil: text from another app, EDN
+   that isn't a map with a known :type, or a text longer than
+   max-system-text-length (not read at all)."
+  [text]
+  (when (and (string? text)
+             (<= (count text) max-system-text-length)
+             (str/starts-with? (str/triml text) "{"))
+    (let [data (try (ser/deserialize text :silent? true)
+                    (catch StackOverflowError _ nil))]
+      (when (and (map? data) (valid-clipboard-type? (:type data)))
+        data))))
+
+(def ^:private list-targets #{:cue-chain-items :item-effects :timeline-tracks})
+
+(defn payload
+  "What target takes from clip, or nil. A list of effects (:item-effects)
+   takes a clip of effects, an effect chain or one effect; any other list
+   the items of a clip of its own type; a cue or effects cell (:cue-chain,
+   :effects-cell) a cell of its type; a step grid (:step-grid) a grid."
+  [clip target]
+  (cond
+    (= :item-effects target) (case (:type clip)
+                               :effect [(dissoc clip :type :copied-at)]
+                               (:effect-chain :item-effects) (:effects clip)
+                               nil)
+    (contains? list-targets target) (when (= target (:type clip)) (:items clip))
+    (contains? #{:cue-chain :effects-cell} target) (when (= target (:type clip)) (:data clip))
+    (= :step-grid target) (when (= :step-grid (:type clip)) (:grid clip))
+    :else nil))
+
+(defn accepts?
+  "Does target take clip? A list when it has something to paste; a cell or
+   a step grid when the clip is of its type."
+  [clip target]
+  (boolean
+   (if (contains? list-targets target)
+     (seq (payload clip target))
+     (and (some? clip) (= target (:type clip))))))
+
+(defn adopt
+  "state with clip, read from the OS clipboard, as [:ui :clipboard], but
+   only while the slot is still empty: a copy made meanwhile wins."
+  [state clip]
+  (if (and (some? clip) (nil? (get-in state [:ui :clipboard])))
+    (assoc-in state [:ui :clipboard] clip)
+    state))
