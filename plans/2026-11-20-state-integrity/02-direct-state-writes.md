@@ -1,7 +1,7 @@
 # No state writes outside the event pipeline
 
 **Written:** 2026-11-20   **Written for commit:** `3229c95` (`master`)
-**Status:** Proposed. Needs W1–W6 answered   **Last verified against:** `cc9e000` (re-checked after `master` moved from `3229c95`: since then only the Decimate files changed in `src/` and `test/`, and this plan cites none of them by line; the counts in §1.3 are at `cc9e000`. Probes w1–w6 in `probes/state_write_probes_test.clj` were run four times on 2026-11-20, the first two at `3229c95` and the last at `cc9e000`: macOS arm64, JDK 25.0.5, load average 2–8)
+**Status:** In progress (2026-11-21, branch `direct-state-writes`). W1–W6 answered A, the ★ options   **Last verified against:** `cc9e000` (re-checked after `master` moved from `3229c95`: since then only the Decimate files changed in `src/` and `test/`, and this plan cites none of them by line; the counts in §1.3 are at `cc9e000`. Probes w1–w6 in `probes/state_write_probes_test.clj` were run four times on 2026-11-20, the first two at `3229c95` and the last at `cc9e000`: macOS arm64, JDK 25.0.5, load average 2–8)
 **Supersedes / Superseded by:** takes over the Link item of review 02 M1 step 2 and the `[:styles :menu-theme]` item of 02 M6 step 1, and the "link setup write … stays with review 02 M1" line of `plans/2026-11-16-output-runtime/03-phase3-event-reentry.md` §9 / none   **Related findings:** review 02 #2, #21, #23, M1, M6; output runtime O-9 (03 §1, §9, §10 "Observed, not changed"); keyboard K-7 and probes p5, p9 (the clipboard write: `plans/2026-11-13-keyboard-focus-window-lifecycle/04-phase4-clipboard.md`, Step 4a, not here)
 **Size:** about 4½ days (about 3½ with W2 B and W3 B)
 
@@ -613,7 +613,7 @@ Commits 2 and 3 come before 4, and 4 before 9: the strict guard needs the UI tes
 > | C | Fold the status into `:state`, with no lock | One writer | w4: without an app, the status thread undoes Stop |
 > | D | Leave the code; add a test that no event returns `:state` with a path write | Nothing changes | Inline follow-ups keep depending on map order, and a nine-key map breaks it (w3) |
 >
-> **Your answer:**
+> **Your answer:** A ★ (2026-11-21)
 
 > **DECISION W2 — What keeps direct writers from coming back?**
 >
@@ -625,7 +625,7 @@ Commits 2 and 3 come before 4, and 4 before 9: the strict guard needs the UI tes
 > | D | Make the dev detector fail the suites (a property on the test aliases) | Already written | Catches only collisions that happen during a run, so it is flaky as a guard |
 > | E | Make the write fns private, or move them to a test-support namespace | Structural | 90 unit-test lines plus 28 `init-state!` lines to move, and the REPL loses them; the guard gives the same protection while an app runs |
 >
-> **Your answer:**
+> **Your answer:** A ★ (2026-11-21)
 
 > **DECISION W3 — One event thread for every app instance?**
 >
@@ -634,7 +634,7 @@ Commits 2 and 3 come before 4, and 4 before 9: the strict guard needs the UI tes
 > | **A ★** | One daemon single-thread executor, `laser-show-events`, passed as cljfx's `:fx/executor` for every app's agent | An old app's late event can no longer run alongside the new app's (w6). The guard and `flush!` know the event thread exactly. Same semantics: an agent already runs one action at a time | `reentry_test` and `show_clock_test`'s copy of the wiring change; the thread name in logs changes |
 > | B | Keep the send pool, and recognise event threads by the prefix `clojure-agent-send-pool-` | No wiring change | w6 stays. The prefix covers every agent `send` in the JVM |
 >
-> **Your answer:**
+> **Your answer:** A ★ (2026-11-21)
 
 > **DECISION W4 — What does `stop!` do with the device handles in app state?**
 >
@@ -644,7 +644,7 @@ Commits 2 and 3 come before 4, and 4 before 9: the strict guard needs the UI tes
 > | B | Close the devices, then dispatch NEW `:app/devices-released` and `flush!` | State tells the truth after `stop!` | On the event thread (Quit) it can only be queued; one more event for a state that is about to be replaced |
 > | C | Keep the writes, but close outside the swap fn (read, close, `swap-state!` the result) | Smallest change | Still a write off the event thread: lost as in w2a, and refused by W2's guard |
 >
-> **Your answer:**
+> **Your answer:** A ★ (2026-11-21)
 
 > **DECISION W5 — How do UI tests and the REPL write app state while the app runs?**
 >
@@ -654,7 +654,7 @@ Commits 2 and 3 come before 4, and 4 before 9: the strict guard needs the UI tes
 > | B | Events only, plus `start-test!`'s initial state | Tests exercise real paths | Many writes have no event (fake MIDI devices, `[:vibe-runtime …]`, active cues). Set-up through events adds undo entries and dirty flags the tests don't expect |
 > | C | `flush!`, then a direct write | No new effect | Narrows the race without closing it: FX-thread events and the output status at 4 Hz can still land in between |
 >
-> **Your answer:**
+> **Your answer:** A ★ (2026-11-21)
 
 > **DECISION W6 — `persistent/save-project!`, `load-project!`, `new-project!`?**
 >
@@ -663,7 +663,7 @@ Commits 2 and 3 come before 4, and 4 before 9: the strict guard needs the UI tes
 > | **A ★** | Delete them. `persistent_test` uses the pure fns; the REPL uses the File events (`:file/save-as-result {:file-path}`, `:file/open-result {:file-path}`, `:file/new-project`) | Removes three direct writers, and a load path that skips the Open handler's rig report and every middleware | Four tests rewritten |
 > | B | Keep them as REPL helpers that dispatch the File events and `flush!` | REPL convenience | Three more fns that duplicate the events, for no caller in `src/` or `dev/` |
 >
-> **Your answer:**
+> **Your answer:** A ★ (2026-11-21)
 
 ---
 

@@ -1,7 +1,7 @@
 # State integrity — overview
 
 **Written:** 2026-11-20   **Written for commit:** `3229c95` (`master`)
-**Status:** In progress. **01 done** (2026-11-21, `09b6db7`, `dba29bb`; its §11 As built), its E1–E3 answered A, the ★ options; 02 needs W1–W6; **the clipboard step (keyboard plan, Step 4a) done** (2026-11-21, `02ae75c`..`1113d9a`; keyboard 04 §9a), D8, D13 and D14 answered A, B, A   **Last verified against:** 01 at `fe7d554` (2026-11-21, re-checked after the output drivers, zones Z4–Z6, vibe Phase 8, Decimate's follow-ups and the Projectors layout pass; probes e1–e4 run three times there, e1i added); the clipboard step at `a38ea43` (2026-11-21, keyboard probes p5–p7 and p9–p17 re-run there, p18 added for the step grid's clipboard); 02 at `cc9e000` (probes w1–w6 run at `3229c95` and again at `cc9e000`), not re-checked since
+**Status:** In progress. **01 done** (2026-11-21, `09b6db7`, `dba29bb`; its §11 As built), its E1–E3 answered A, the ★ options; 02 in progress (2026-11-21), W1–W6 answered A, the ★ options; **the clipboard step (keyboard plan, Step 4a) done** (2026-11-21, `02ae75c`..`1113d9a`; keyboard 04 §9a), D8, D13 and D14 answered A, B, A   **Last verified against:** 01 at `fe7d554` (2026-11-21, re-checked after the output drivers, zones Z4–Z6, vibe Phase 8, Decimate's follow-ups and the Projectors layout pass; probes e1–e4 run three times there, e1i added); the clipboard step at `a38ea43` (2026-11-21, keyboard probes p5–p7 and p9–p17 re-run there, p18 added for the step grid's clipboard); 02 at `cc9e000` (probes w1–w6 run at `3229c95` and again at `cc9e000`), not re-checked since
 **Supersedes / Superseded by:** none   **Related findings:** review 02 M1, #2, #15, #21, #23; review 04 #23, MR7; keyboard K-6…K-11; output runtime O-9
 
 The 2026-11-20 cljfx state audit was done by six read-only auditors. It was reported in the session and isn't saved. It found three ways app state can be wrong for reasons unrelated to any handler's logic:
@@ -60,7 +60,7 @@ None of the three depends on another, but they share some edits:
 
 ## 3. Decisions
 
-Each is written out in full, with options, in its doc (★ = recommended). E1–E3, D8, D13 and D14 are answered; the rest are open.
+Each is written out in full, with options, in its doc (★ = recommended). E1–E3, D8, D13, D14 and W1–W6 are answered; D9 is open.
 
 | ID | Question | Doc | Needed before | ★ |
 |---|---|---|---|---|
@@ -70,12 +70,12 @@ Each is written out in full, with options, in its doc (★ = recommended). E1–
 | D8 | The clipboard's source of truth, and when the OS clipboard is read | 04 | Step 4a | **Answered A** (2026-11-21): `[:ui :clipboard]`; the OS clipboard is read only while this instance hasn't copied anything |
 | D13 | When Paste buttons and menu items are enabled | 04 | Step 4a | **Answered B** (2026-11-21): when the clipboard holds something the target takes, or while it is still empty ("Nothing to paste here" on a miss) |
 | D14 | How the OS clipboard is read | 04 | Step 4a | **Answered A** (2026-11-21): an effect reads on the FX thread and dispatches the paste back; the agent never waits |
-| W1 | How a write inside a turn survives the event's `:state` | 02 | commit 1 | A: `:state` runs first in every event |
-| W2 | What keeps direct writers from coming back | 02 | commit 9 | A: a kondo `:discouraged-var` rule in CI, plus a runtime guard (throws in dev mode and tests, logs in production) |
-| W3 | One event thread for every app instance | 02 | commit 2 | A: yes |
-| W4 | What `stop!` does with device handles in app state | 02 | commit 6 | A: writes nothing; closes each device once |
-| W5 | How UI tests and the REPL write state while the app runs | 02 | commits 3–4 | A: `events/write-state!` and `events/flush!` (NEW) |
-| W6 | `save-project!`, `load-project!`, `new-project!` | 02 | commit 8 | A: delete them |
+| W1 | How a write inside a turn survives the event's `:state` | 02 | commit 1 | **Answered A** (2026-11-21): `:state` runs first in every event |
+| W2 | What keeps direct writers from coming back | 02 | commit 9 | **Answered A** (2026-11-21): a kondo `:discouraged-var` rule in CI, plus a runtime guard (throws in dev mode and tests, logs in production) |
+| W3 | One event thread for every app instance | 02 | commit 2 | **Answered A** (2026-11-21): yes |
+| W4 | What `stop!` does with device handles in app state | 02 | commit 6 | **Answered A** (2026-11-21): writes nothing; closes each device once |
+| W5 | How UI tests and the REPL write state while the app runs | 02 | commits 3–4 | **Answered A** (2026-11-21): `events/write-state!` and `events/flush!` (NEW) |
+| W6 | `save-project!`, `load-project!`, `new-project!` | 02 | commit 8 | **Answered A** (2026-11-21): delete them |
 | D9 | Clipboard types, conversions, Cut button | 04 | Steps 4b–4c | A (not part of this batch) |
 
 ## 4. Probes
