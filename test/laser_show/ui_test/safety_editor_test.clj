@@ -3,6 +3,7 @@
    limit, add and remove blocked areas, type the numbers, ask before growing
    a live projector's area, and Identify's reason when it can't run."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.events.core :as events]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
@@ -21,12 +22,12 @@
   "Projector :a, selected, with zone; :running? sets the stream on (the
    projector then counts as outputting: enabled, with a host)."
   [zone & {:keys [running?]}]
-  (state/swap-state! #(-> %
-                          (assoc :projectors {:a {:name "Fake 1" :host "127.0.0.1" :port 7255 :service-id 1
-                                                  :enabled? true :zone-groups [:all] :safety zone
-                                                  :output-config {:color-bit-depth 8 :xy-bit-depth 16}}})
-                          (assoc-in [:projector-ui :active-projector] :a)
-                          (assoc-in [:backend :streaming :running?] (boolean running?)))))
+  (events/write-state! #(-> %
+                            (assoc :projectors {:a {:name "Fake 1" :host "127.0.0.1" :port 7255 :service-id 1
+                                                    :enabled? true :zone-groups [:all] :safety zone
+                                                    :output-config {:color-bit-depth 8 :xy-bit-depth 16}}})
+                            (assoc-in [:projector-ui :active-projector] :a)
+                            (assoc-in [:backend :streaming :running?] (boolean running?)))))
 
 (defn- px
   "The canvas pixel of model x (the editor's 260 px canvas, 10 px margin)."
@@ -152,9 +153,9 @@
   (ui/assert-disabled! "#projector-identify-button")
   (ui/assert-text! "#projector-identify-note" "Turn on Stream to see it on the laser")
   (testing "a turned-off projector says so"
-    (state/swap-state! #(-> % (assoc-in [:backend :streaming :running?] true)
-                            (assoc-in [:projectors :a :enabled?] false)))
+    (events/write-state! #(-> % (assoc-in [:backend :streaming :running?] true)
+                              (assoc-in [:projectors :a :enabled?] false)))
     (ui/wait-for! #(= "Fake 1 is turned off" (ui/node-text "#projector-identify-note"))))
   (testing "streaming, on: Identify can run"
-    (state/swap-state! #(assoc-in % [:projectors :a :enabled?] true))
+    (events/write-state! assoc-in [:projectors :a :enabled?] true)
     (ui/wait-for! #(ui/enabled? "#projector-identify-button"))))

@@ -59,10 +59,10 @@
   (ui/on-fx-thread #(some-> ^Control (ui/query selector) .getTooltip .getText)))
 
 (defn- lasers! [n]
-  (state/swap-state! assoc :projectors
-                     (into {} (for [k (range 1 (inc n))]
-                                [(keyword (str "p" k)) {:name (str "Laser " k) :host (str "10.0.0." k) :enabled? true
-                                                        :zone-groups [] :exclude-from-all? false :scan-rate 25000}]))))
+  (events/write-state! assoc :projectors
+                       (into {} (for [k (range 1 (inc n))]
+                                  [(keyword (str "p" k)) {:name (str "Laser " k) :host (str "10.0.0." k) :enabled? true
+                                                          :zone-groups [] :exclude-from-all? false :scan-rate 25000}]))))
 
 (def ^:private window-title "Zone Pattern — Cue A1 \"Beams\"")
 
@@ -110,7 +110,7 @@
 
 (deftest pattern-window-shows-the-fold-test
   (lasers! 3)
-  (state/swap-state! assoc-in [:chains :cue-chains [0 0] :name] "Beams")
+  (events/write-state! assoc-in [:chains :cue-chains [0 0] :name] "Beams")
   (open-editor! 0 0)
   (ui/wait-for! #(some? (ui/query "#pattern-chip-cue")))
   (let [^MenuItem edit (some #(when (= "Edit pattern…" (item-text %)) %) (chip-items "#pattern-chip-cue"))]
@@ -129,11 +129,11 @@
     (is (nil? (ui/query "#zone-pattern-row-path")) "no Path")
     (is (nil? (ui/query "#zone-pattern-row-width")) "no Width"))
   (testing "the map switches, and so does the line"
-    (state/swap-state! assoc-in [:zone-map :active] :map/odd-even)
+    (events/write-state! assoc-in [:zone-map :active] :map/odd-even)
     (ui/wait-for! #(= "This rig (3 lasers, Odd / Even): A is Laser 1 and Laser 3; B Laser 2." (ui/node-text "#zone-pattern-fold")))
-    (state/swap-state! assoc-in [:zone-map :active] :map/unison)
+    (events/write-state! assoc-in [:zone-map :active] :map/unison)
     (ui/wait-for! #(= "Under Unison every zone is All, so this pattern doesn't move." (ui/node-text "#zone-pattern-fold")))
-    (state/swap-state! assoc-in [:zone-map :active] :map/left-right))
+    (events/write-state! assoc-in [:zone-map :active] :map/left-right))
   (testing "a place added from the lane's + menu"
     (fire-item! "#zone-pattern-lane-add" "New zone (C → Left)")
     (ui/wait-for! #(= [:zone/a :zone/b :zone/c] (get-in (cue-pattern) [:params :zones])))
@@ -142,7 +142,7 @@
     (ui/click! (ui/robot) "#zone-pattern-place-remove-2")
     (ui/wait-for! #(= [:zone/a :zone/b] (get-in (cue-pattern) [:params :zones]))))
   (testing "Chase shows Path and Width"
-    (state/swap-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :params :style] :chase)
+    (events/write-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :params :style] :chase)
     (ui/wait-for! #(some? (ui/query "#zone-pattern-row-path")))
     (is (some? (ui/query "#zone-pattern-row-width"))))
   (testing "Remove takes the pattern away and closes the window"
@@ -154,10 +154,10 @@
 (deftest offset-takes-a-modulator-test
   (let [robot (ui/robot)
         param #(get-in (cue-pattern) [:params %])]
-    (state/swap-state! #(-> %
-                            (assoc-in [:chains :cue-chains [0 0] :name] "Beams")
-                            (assoc-in [:chains :cue-chains [0 0] :zone-patterns]
-                                      [(assoc (zone-patterns/preset-instance :chase :cue) :id #uuid "00000000-0000-0000-0000-0000000000c1")])))
+    (events/write-state! #(-> %
+                              (assoc-in [:chains :cue-chains [0 0] :name] "Beams")
+                              (assoc-in [:chains :cue-chains [0 0] :zone-patterns]
+                                        [(assoc (zone-patterns/preset-instance :chase :cue) :id #uuid "00000000-0000-0000-0000-0000000000c1")])))
     (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
     (ui/wait-for! window-open?)
     (ui/wait-for! #(some? (ui/query "#zone-pattern-row-offset .modulator-toggle")))
@@ -227,7 +227,7 @@
     (events/dispatch! {:event/type :ui/close-dialog :dialog-id :cue-chain-editor})
     (events/dispatch! {:event/type :timeline-cue-editor/open :col 1 :row 0})
     (ui/wait-for! #(some? (ui/query "#timeline-track-target-0")))
-    (state/swap-state! assoc-in [:ui :timeline-prefs :add-panel :open?] true)
+    (events/write-state! assoc-in [:ui :timeline-prefs :add-panel :open?] true)
     (ui/wait-for! #(seq (ui/query-all "#timeline-browser-effects #shape-tab")))
     (is (empty? (ui/query-all "#zone-tab")))))
 
@@ -240,10 +240,10 @@
   "The cue at A1 alternates A ⇄ B; extra merges into its params."
   ([] (uses-a-pattern! {}))
   ([extra]
-   (state/swap-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns]
-                      [(-> (zone-patterns/preset-instance :alternate :cue)
-                           (assoc :id pattern-id)
-                           (update :params merge extra))])))
+   (events/write-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns]
+                        [(-> (zone-patterns/preset-instance :alternate :cue)
+                             (assoc :id pattern-id)
+                             (update :params merge extra))])))
 
 (defn- pads-style [] (get-in (app-state) [:pattern-pads :style]))
 
@@ -314,7 +314,7 @@
 
 (deftest pending-pattern-pad-blinks-test
   (uses-a-pattern!)
-  (state/swap-state! assoc-in [:pattern-pads :pending] {:id 7 :style :chase :at-beat 1.0e6 :bar? false})
+  (events/write-state! assoc-in [:pattern-pads :pending] {:id 7 :style :chase :at-beat 1.0e6 :bar? false})
   (ui/wait-for! #(ui/visible? "#pattern-chip-chase"))
   (testing "waiting: amber, and it says so"
     (is (has-class? "#pattern-chip-chase" "pattern-pad-pending"))
@@ -332,7 +332,7 @@
     (open-perform!)
     (ui/wait-for! #(ui/visible? "#pattern-pad-chase"))
     (ui/assert-text! "#pattern-pad-chase-state" "next beat")
-    (state/swap-state! assoc-in [:pattern-pads :pending :bar?] true)
+    (events/write-state! assoc-in [:pattern-pads :pending :bar?] true)
     (ui/assert-text! "#pattern-pad-chase-state" "next bar")))
 
 (deftest pattern-pad-learns-a-note-test
@@ -403,14 +403,14 @@
 (def ^:private cycle-cell [1 2])
 
 (defn- cycle-on! []
-  (state/swap-state! assoc-in [:chains :effect-chains cycle-cell]
-                     {:active? true :items [(assoc (zone-patterns/cycle-instance) :id #uuid "00000000-0000-0000-0000-0000000000d1")]}))
+  (events/write-state! assoc-in [:chains :effect-chains cycle-cell]
+                       {:active? true :items [(assoc (zone-patterns/cycle-instance) :id #uuid "00000000-0000-0000-0000-0000000000d1")]}))
 
 (defn- paused? [] (true? (get-in (app-state) [:zone-map :cycle-paused?])))
 
 (deftest cycle-pad-resumes-test
   (let [robot (ui/robot)]
-    (state/swap-state! assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a)
+    (events/write-state! assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a)
     (ui/wait-for! #(ui/visible? "#zone-map-chip-cycle"))
     (testing "no Map cycle cell on: CYCLE is dim and says why"
       (ui/assert-text! "#zone-map-chip-cycle" "↻ CYCLE")

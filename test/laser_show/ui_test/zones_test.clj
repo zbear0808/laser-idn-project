@@ -104,9 +104,9 @@
       (ui/assert-text! "#target-chip-item" "(All)"))))
 
 (deftest chip-says-where-an-inherited-target-comes-from-test
-  (state/swap-state! #(-> %
-                          (assoc-in [:grid :column-targets] {0 :zone/a})
-                          (assoc-in [:zones :labels :zone/a] "Beams")))
+  (events/write-state! #(-> %
+                            (assoc-in [:grid :column-targets] {0 :zone/a})
+                            (assoc-in [:zones :labels :zone/a] "Beams")))
   (open-editor! 0 0)
   (ui/assert-text! "#target-chip-item" "(A · Beams → Left)")
   (ui/assert-text! "#target-from-item" "from column 1")
@@ -121,10 +121,10 @@
     (ui/assert-text! "#target-chip-cue" "B → Right")
     (is (empty? (ui/query-all "#target-from-cue")) "the cue's own: no from"))
   (testing "neither: the show default"
-    (state/swap-state! #(-> %
-                            (update-in [:chains :cue-chains [0 0]] dissoc :target)
-                            (assoc-in [:grid :column-targets] {})
-                            (assoc-in [:config :default-target] :graphics)))
+    (events/write-state! #(-> %
+                              (update-in [:chains :cue-chains [0 0]] dissoc :target)
+                              (assoc-in [:grid :column-targets] {})
+                              (assoc-in [:config :default-target] :graphics)))
     (ui/assert-text! "#target-chip-item" "(Graphics)")
     (ui/assert-text! "#target-from-item" "from the show default")))
 
@@ -152,13 +152,13 @@
       "A and B, the zone the show uses now, then the next letter (Z4-Q3 A)"))
 
 (deftest pin-freezes-the-lane-test
-  (state/swap-state! assoc-in [:grid :column-targets] {0 :zone/a})
+  (events/write-state! assoc-in [:grid :column-targets] {0 :zone/a})
   (open-editor! 0 0)
   (fire-item! "#target-chip-item" "Pin: A → Left")
   (ui/wait-for! #(= :auto/left (item-target)))
   (ui/assert-text! "#target-chip-item" "Left")
   (testing "the map switches; the pinned item stays on Left"
-    (state/swap-state! assoc-in [:zone-map :active] :map/odd-even)
+    (events/write-state! assoc-in [:zone-map :active] :map/odd-even)
     (ui/wait-for! #(= "(A → Odd)" (ui/node-text "#target-chip-cue")))
     (ui/assert-text! "#target-chip-item" "Left")
     (is (= :auto/left (item-target)))))
@@ -196,7 +196,7 @@
   (:target (some #(when (= id (:id %)) %) (:items (cue 0 0)))))
 
 (defn- open-timeline! []
-  (state/swap-state! assoc-in [:chains :cue-chains [0 0]] timeline-cue)
+  (events/write-state! assoc-in [:chains :cue-chains [0 0]] timeline-cue)
   (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
   (ui/wait-for! #(some? (ui/query "#timeline-track-target-2"))))
 
@@ -262,10 +262,10 @@
   (ui/on-fx-thread #(boolean (some-> ^javafx.scene.Node (ui/query selector) .getStyleClass (.contains cls)))))
 
 (deftest grid-badge-and-column-target-test
-  (state/swap-state! #(-> %
-                          (assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a)
-                          (assoc-in [:chains :cue-chains [1 0]] {:items [{:type :preset :id :b1 :preset-id :wave
-                                                                          :params {} :effects []}]})))
+  (events/write-state! #(-> %
+                            (assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a)
+                            (assoc-in [:chains :cue-chains [1 0]] {:items [{:type :preset :id :b1 :preset-id :wave
+                                                                            :params {} :effects []}]})))
   (testing "a cue's badge, top right, and its line in the cell's tooltip"
     (ui/wait-for! #(some? (ui/query "#grid-cell-badge-0-0")))
     (is (= ["A"] (texts "#grid-cell-badge-0-0 .label")))
@@ -302,7 +302,7 @@
 ;; Zone map pads (06 §7.4)
 
 (defn- uses-zone-a! []
-  (state/swap-state! assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a))
+  (events/write-state! assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a))
 
 (defn- active-map [] (get-in (app-state) [:zone-map :active]))
 
@@ -364,7 +364,7 @@
 
 (deftest pending-pad-blinks-test
   (uses-zone-a!)
-  (state/swap-state! assoc-in [:zone-map :pending] {:id 7 :map :map/odd-even :at-beat 1.0e6 :bar? false})
+  (events/write-state! assoc-in [:zone-map :pending] {:id 7 :map :map/odd-even :at-beat 1.0e6 :bar? false})
   (ui/wait-for! #(ui/visible? "#zone-map-chip-odd-even"))
   (testing "pending: amber, and it says so"
     (is (has-class? "#zone-map-chip-odd-even" "zone-map-pad-pending"))
@@ -383,7 +383,7 @@
     (ui/wait-for! #(ui/visible? "#zone-map-pad-odd-even"))
     (ui/assert-text! "#zone-map-pad-odd-even-state" "next beat")
     (is (has-class? "#zone-map-pad-odd-even" "zone-map-pad-pending"))
-    (state/swap-state! assoc-in [:zone-map :pending :bar?] true)
+    (events/write-state! assoc-in [:zone-map :pending :bar?] true)
     (ui/assert-text! "#zone-map-pad-odd-even-state" "next bar")))
 
 (deftest map-pad-learns-a-note-test
@@ -479,10 +479,10 @@
   (let [robot (ui/robot)
         title "Delete \"Crowd sweep\"?"
         asking? #(boolean (some #{title} (ui/window-titles)))]
-    (state/swap-state! #(-> %
-                            (assoc-in [:zone-maps :map/custom-1] {:name "Crowd sweep" :lanes [:auto/left :graphics] :overrides {}})
-                            (assoc-in [:zone-map :active] :map/custom-1)
-                            (assoc-in [:ui :zone-maps :selected] :map/custom-1)))
+    (events/write-state! #(-> %
+                              (assoc-in [:zone-maps :map/custom-1] {:name "Crowd sweep" :lanes [:auto/left :graphics] :overrides {}})
+                              (assoc-in [:zone-map :active] :map/custom-1)
+                              (assoc-in [:ui :zone-maps :selected] :map/custom-1)))
     (open-zones-tab!)
     (ui/wait-for! #(ui/visible? "#zone-map-delete"))
     (ui/click! robot "#zone-map-delete")
@@ -521,7 +521,7 @@
     (ui/wait-for! #(empty? (ui/query-all "#shape-tab"))))
   (testing "the timeline's browser, a clip selected: none either"
     (open-timeline!)
-    (state/swap-state! assoc-in [:ui :timeline-prefs :add-panel :open?] true)
+    (events/write-state! assoc-in [:ui :timeline-prefs :add-panel :open?] true)
     (events/dispatch! {:event/type :timeline/select-items :col 0 :row 0 :ids #{:c1} :mode :replace})
     (ui/wait-for! #(seq (ui/query-all "#timeline-browser-effects #shape-tab")))
     (is (empty? (ui/query-all "#zone-tab")))))

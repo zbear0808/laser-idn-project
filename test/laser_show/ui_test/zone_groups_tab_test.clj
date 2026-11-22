@@ -6,6 +6,7 @@
    Projectors tab."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.events.core :as events]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
@@ -20,15 +21,15 @@
   "Lasers A, B and C at 10.0.0.1-3, B in Graphics, and a group of your own,
    Balcony."
   []
-  (state/swap-state! #(-> %
-                          (assoc :projectors
-                                 (into {} (for [[id n] [[:a 1] [:b 2] [:c 3]]]
-                                            [id {:name (str "Laser " (str/upper-case (name id))) :host (str "10.0.0." n)
-                                                 :port 7255 :service-id 1 :enabled? true :exclude-from-all? false
-                                                 :zone-groups (if (= :b id) [:graphics] [])
-                                                 :output-config {:color-bit-depth 8 :xy-bit-depth 16}}])))
-                          (assoc-in [:zone-groups :group-balcony] {:id :group-balcony :name "Balcony" :description ""
-                                                                   :color "#123456"}))))
+  (events/write-state! #(-> %
+                            (assoc :projectors
+                                   (into {} (for [[id n] [[:a 1] [:b 2] [:c 3]]]
+                                              [id {:name (str "Laser " (str/upper-case (name id))) :host (str "10.0.0." n)
+                                                   :port 7255 :service-id 1 :enabled? true :exclude-from-all? false
+                                                   :zone-groups (if (= :b id) [:graphics] [])
+                                                   :output-config {:color-bit-depth 8 :xy-bit-depth 16}}])))
+                            (assoc-in [:zone-groups :group-balcony] {:id :group-balcony :name "Balcony" :description ""
+                                                                     :color "#123456"}))))
 
 (defn- top-to-bottom
   "The ids of the nodes matching selector, top to bottom, without prefix."
@@ -86,7 +87,7 @@
 (deftest custom-group-boxes-toggle-in-rig-order-test
   (let [robot (ui/robot)]
     (with-rig!)
-    (state/swap-state! assoc-in [:rig :order] [:c :a :b])
+    (events/write-state! assoc-in [:rig :order] [:c :a :b])
     (ui/click! robot "#zones-tab")
     (ui/click! robot "#zone-group-item-graphics")
     (ui/wait-for! #(= ["c" "a" "b"] (left-to-right ".zone-output" "zone-output-")))

@@ -41,12 +41,12 @@
    and B, Alternate), extra merged into its params."
   ([] (grid-on-a1! {}))
   ([extra]
-   (state/swap-state! #(-> %
-                           (assoc-in [:chains :cue-chains [0 0] :name] "Beams")
-                           (assoc-in [:chains :cue-chains [0 0] :zone-patterns]
-                                     [(-> (zone-patterns/preset-instance :steps :cue)
-                                          (assoc :id #uuid "00000000-0000-0000-0000-00000000a6a1")
-                                          (update :params merge extra))])))))
+   (events/write-state! #(-> %
+                             (assoc-in [:chains :cue-chains [0 0] :name] "Beams")
+                             (assoc-in [:chains :cue-chains [0 0] :zone-patterns]
+                                       [(-> (zone-patterns/preset-instance :steps :cue)
+                                            (assoc :id #uuid "00000000-0000-0000-0000-00000000a6a1")
+                                            (update :params merge extra))])))))
 
 (defn- open-grid! [target]
   (events/dispatch! {:event/type :step-grid/open :target target})
@@ -133,7 +133,7 @@
 ;; Opening it (Z6-Q5 A: its own window)
 
 (deftest opens-from-a-cue-pattern-test
-  (state/swap-state! assoc-in [:chains :cue-chains [0 0] :name] "Beams")
+  (events/write-state! assoc-in [:chains :cue-chains [0 0] :name] "Beams")
   (testing "the Pattern chip's Step grid… gives a cue with no pattern a new grid, and opens it"
     (events/dispatch! {:event/type :cue-chain/open-editor :col 0 :row 0})
     (ui/wait-for! #(some? (ui/query "#pattern-chip-cue")))
@@ -156,10 +156,10 @@
     (fire! "#step-grid-close")
     (ui/wait-for! #(not (window-open? cue-title))))
   (testing "the pattern window's Step grid… makes the pattern a grid of its own first 8 steps"
-    (state/swap-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns]
-                       [(-> (zone-patterns/preset-instance :alternate :cue)
-                            (assoc :id #uuid "00000000-0000-0000-0000-00000000a6a2")
-                            (assoc-in [:params :zones] [A B C :zone/d]))])
+    (events/write-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns]
+                         [(-> (zone-patterns/preset-instance :alternate :cue)
+                              (assoc :id #uuid "00000000-0000-0000-0000-00000000a6a2")
+                              (assoc-in [:params :zones] [A B C :zone/d]))])
     (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
     (ui/wait-for! #(some? (ui/query "#zone-pattern-step-grid")))
     (ui/click! (ui/robot) "#zone-pattern-step-grid")
@@ -169,9 +169,9 @@
     (ui/assert-text! "#step-row-3" "D → Right")))
 
 (deftest opens-from-an-effect-cell-test
-  (state/swap-state! assoc-in [:chains :effect-chains [3 1]]
-                     {:name "Run" :active? false
-                      :items [(assoc (zone-patterns/preset-instance :chase :cell) :id #uuid "00000000-0000-0000-0000-00000000a6b1")]})
+  (events/write-state! assoc-in [:chains :effect-chains [3 1]]
+                       {:name "Run" :active? false
+                        :items [(assoc (zone-patterns/preset-instance :chase :cell) :id #uuid "00000000-0000-0000-0000-00000000a6b1")]})
   (events/dispatch! {:event/type :effect-chain/open-editor :col 3 :row 1})
   (ui/wait-for! #(some? (ui/query "#zone-pattern-step-grid")))
   (ui/click! (ui/robot) "#zone-pattern-step-grid")
@@ -346,11 +346,11 @@
 
 (deftest copy-and-paste-between-grids-test
   (grid-on-a1!)
-  (state/swap-state! assoc-in [:chains :effect-chains [3 1]]
-                     {:active? false
-                      :items [(-> (zone-patterns/preset-instance :steps :cell)
-                                  (assoc :id #uuid "00000000-0000-0000-0000-00000000a6b2")
-                                  (update :params merge {:zones [C] :steps [[C] [] [C] []]}))]})
+  (events/write-state! assoc-in [:chains :effect-chains [3 1]]
+                       {:active? false
+                        :items [(-> (zone-patterns/preset-instance :steps :cell)
+                                    (assoc :id #uuid "00000000-0000-0000-0000-00000000a6b2")
+                                    (update :params merge {:zones [C] :steps [[C] [] [C] []]}))]})
   (open-grid! cue-target)
   (testing "the tooltips name the keys as the platform writes them"
     (is (= (str "Copy this grid (" (shortcuts/shortcut-text :c) ")") (tooltip-of "#step-grid-copy")))
@@ -382,11 +382,11 @@
   (ui/assert-text! "#step-row-2" "C → Left")
   (ui/assert-text! "#step-grid-wrap-note" "A and C both go to Left under Left / Right.")
   (testing "the map switches, and so do the rows"
-    (state/swap-state! assoc-in [:zone-map :active] :map/odd-even)
+    (events/write-state! assoc-in [:zone-map :active] :map/odd-even)
     (ui/assert-text! "#step-row-0" "A → Odd")
     (ui/assert-text! "#step-row-1" "B → Even"))
   (testing "while the pattern's keyframes are on, the grid is greyed out and says why"
-    (state/swap-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :keyframe-modulator] {:enabled? true :keyframes []})
+    (events/write-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :keyframe-modulator] {:enabled? true :keyframes []})
     (ui/assert-text! "#step-grid-guard" "This pattern's keyframes are on. Switch them off to edit its grid.")
     (is (ui/on-fx-thread #(.isDisabled (body))))))
 
@@ -408,7 +408,7 @@
                (range (quot w (long step-grid/cell-w)))))))
 
 (deftest playhead-follows-the-clock-test
-  (state/swap-state! assoc-in [:timing :bpm] 120.0)
+  (events/write-state! assoc-in [:timing :bpm] 120.0)
   (grid-on-a1!)
   (open-grid! cue-target)
   (ui/assert-text! "#step-grid-now" "Not playing")
@@ -435,7 +435,7 @@
         (testing "it reads the snapshot only: the clock writes no app state (08 invariant 7)"
           (is (nil? (get-in (app-state) [:ui :dialogs :step-grid-editor :playhead]))))
         (testing "stopped: no playhead, and it says so"
-          (state/swap-state! assoc-in [:playback :active-cues] {})
+          (events/write-state! assoc-in [:playback :active-cues] {})
           (ui/wait-for! #(nil? (step)))
           (ui/assert-text! "#step-grid-now" "Not playing")
           (ui/wait-for! #(= [] (playhead-columns))))))))

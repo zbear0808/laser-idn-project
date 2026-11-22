@@ -46,10 +46,10 @@
 (deftest dispatch-later-runs-on-the-agent-test
   (let [threads (atom [])
         entity-key [0 0]]
-    (state/swap-state! assoc-in [:chains :effect-chains entity-key]
-                       {:items [{:effect-id :scale
-                                 :params {:x-scale 1.0}
-                                 :keyframe-modulator {:enabled? true}}]})
+    (events/write-state! assoc-in [:chains :effect-chains entity-key]
+                        {:items [{:effect-id :scale
+                                  :params {:x-scale 1.0}
+                                  :keyframe-modulator {:enabled? true}}]})
     (with-redefs [chain/handle (recording-threads chain/handle threads)
                   keyframe/handle (recording-threads keyframe/handle threads)]
       (events/dispatch! {:event/type :modulator/toggle
