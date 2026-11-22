@@ -1,194 +1,195 @@
 ;; What every laser drew and every preview cell showed of each fixture show's
-;; cues, before zones Z4 (laser-show.routing.legacy-shows-test/record-golden!).
+;; cues, before zones Z4 (laser-show.routing.legacy-shows-test/record-golden!),
+;; each frame's numbers hashed in steps of 1/65536 (digest).
 {"destination"
  {[0 0]
   {0.0
    {:lasers
-    {:p1 {:points 13, :hash -920707697, :regions 0},
-     :p2 {:points 13, :hash -920707697, :regions 0},
-     :p3 {:points 13, :hash -920707697, :regions 0},
+    {:p1 {:points 13, :hash -622100424, :regions 0},
+     :p2 {:points 13, :hash -622100424, :regions 0},
+     :p3 {:points 13, :hash -622100424, :regions 0},
      :p5 nil},
-    :preview [{:points 13, :hash -920707697} nil nil nil]},
+    :preview [{:points 13, :hash -622100424} nil nil nil]},
    1.5
    {:lasers
-    {:p1 {:points 13, :hash -1000145183, :regions 0},
-     :p2 {:points 13, :hash -1000145183, :regions 0},
-     :p3 {:points 13, :hash -1000145183, :regions 0},
+    {:p1 {:points 13, :hash -117784511, :regions 0},
+     :p2 {:points 13, :hash -117784511, :regions 0},
+     :p3 {:points 13, :hash -117784511, :regions 0},
      :p5 nil},
-    :preview [{:points 13, :hash -1000145183} nil nil nil]},
+    :preview [{:points 13, :hash -117784511} nil nil nil]},
    7.25
    {:lasers
-    {:p1 {:points 13, :hash -467441457, :regions 0},
-     :p2 {:points 13, :hash -467441457, :regions 0},
-     :p3 {:points 13, :hash -467441457, :regions 0},
+    {:p1 {:points 13, :hash 2056803713, :regions 0},
+     :p2 {:points 13, :hash 2056803713, :regions 0},
+     :p3 {:points 13, :hash 2056803713, :regions 0},
      :p5 nil},
-    :preview [{:points 13, :hash -467441457} nil nil nil]}},
+    :preview [{:points 13, :hash 2056803713} nil nil nil]}},
   [0 1]
   {0.0
    {:lasers
     {:p1 nil,
-     :p2 {:points 38, :hash 1394636418, :regions 0},
+     :p2 {:points 38, :hash -685534022, :regions 0},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 38, :hash 1394636418}
+    [{:points 38, :hash -685534022}
      nil
      nil
-     {:points 38, :hash 1394636418}]},
+     {:points 38, :hash -685534022}]},
    1.5
    {:lasers
     {:p1 nil,
-     :p2 {:points 38, :hash -1230730241, :regions 0},
+     :p2 {:points 38, :hash 1427283874, :regions 0},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 38, :hash -1230730241}
+    [{:points 38, :hash 1427283874}
      nil
      nil
-     {:points 38, :hash -1230730241}]},
+     {:points 38, :hash 1427283874}]},
    7.25
    {:lasers
     {:p1 nil,
-     :p2 {:points 38, :hash 724410484, :regions 0},
+     :p2 {:points 38, :hash -560805520, :regions 0},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 38, :hash 724410484}
+    [{:points 38, :hash -560805520}
      nil
      nil
-     {:points 38, :hash 724410484}]}},
+     {:points 38, :hash -560805520}]}},
   [1 0]
   {0.0
    {:lasers
-    {:p1 {:points 33, :hash 2141282216, :regions 0},
-     :p2 {:points 33, :hash 2141282216, :regions 0},
-     :p3 {:points 33, :hash 2141282216, :regions 0},
+    {:p1 {:points 33, :hash 1477762397, :regions 0},
+     :p2 {:points 33, :hash 1477762397, :regions 0},
+     :p3 {:points 33, :hash 1477762397, :regions 0},
      :p5 nil},
-    :preview [{:points 33, :hash 2141282216} nil nil nil]},
+    :preview [{:points 33, :hash 1477762397} nil nil nil]},
    1.5
    {:lasers
-    {:p1 {:points 33, :hash 2141282216, :regions 0},
-     :p2 {:points 33, :hash 2141282216, :regions 0},
-     :p3 {:points 33, :hash 2141282216, :regions 0},
+    {:p1 {:points 33, :hash 1477762397, :regions 0},
+     :p2 {:points 33, :hash 1477762397, :regions 0},
+     :p3 {:points 33, :hash 1477762397, :regions 0},
      :p5 nil},
-    :preview [{:points 33, :hash 2141282216} nil nil nil]},
+    :preview [{:points 33, :hash 1477762397} nil nil nil]},
    7.25
    {:lasers
-    {:p1 {:points 33, :hash 2141282216, :regions 0},
-     :p2 {:points 33, :hash 2141282216, :regions 0},
-     :p3 {:points 33, :hash 2141282216, :regions 0},
+    {:p1 {:points 33, :hash 1477762397, :regions 0},
+     :p2 {:points 33, :hash 1477762397, :regions 0},
+     :p3 {:points 33, :hash 1477762397, :regions 0},
      :p5 nil},
-    :preview [{:points 33, :hash 2141282216} nil nil nil]}},
+    :preview [{:points 33, :hash 1477762397} nil nil nil]}},
   [1 1]
   {0.0
    {:lasers
-    {:p1 {:points 19, :hash -1841956103, :regions 0},
+    {:p1 {:points 19, :hash -1576265409, :regions 0},
      :p2 nil,
-     :p3 {:points 19, :hash -1841956103, :regions 0},
+     :p3 {:points 19, :hash -1576265409, :regions 0},
      :p5 nil},
-    :preview [{:points 19, :hash -1841956103} nil nil nil]},
+    :preview [{:points 19, :hash -1576265409} nil nil nil]},
    1.5
    {:lasers
-    {:p1 {:points 19, :hash -1841956103, :regions 0},
+    {:p1 {:points 19, :hash -1576265409, :regions 0},
      :p2 nil,
-     :p3 {:points 19, :hash -1841956103, :regions 0},
+     :p3 {:points 19, :hash -1576265409, :regions 0},
      :p5 nil},
-    :preview [{:points 19, :hash -1841956103} nil nil nil]},
+    :preview [{:points 19, :hash -1576265409} nil nil nil]},
    7.25
    {:lasers
-    {:p1 {:points 19, :hash -1841956103, :regions 0},
+    {:p1 {:points 19, :hash -1576265409, :regions 0},
      :p2 nil,
-     :p3 {:points 19, :hash -1841956103, :regions 0},
+     :p3 {:points 19, :hash -1576265409, :regions 0},
      :p5 nil},
-    :preview [{:points 19, :hash -1841956103} nil nil nil]}},
+    :preview [{:points 19, :hash -1576265409} nil nil nil]}},
   [2 0]
   {0.0
    {:lasers
     {:p1 nil,
-     :p2 {:points 28, :hash 1015056401, :regions 0},
+     :p2 {:points 28, :hash -1720668913, :regions 0},
      :p3 nil,
      :p5 nil},
-    :preview [{:points 28, :hash 1015056401} nil nil nil]},
+    :preview [{:points 28, :hash -1720668913} nil nil nil]},
    1.5
    {:lasers
     {:p1 nil,
-     :p2 {:points 28, :hash 1015056401, :regions 0},
+     :p2 {:points 28, :hash -1720668913, :regions 0},
      :p3 nil,
      :p5 nil},
-    :preview [{:points 28, :hash 1015056401} nil nil nil]},
+    :preview [{:points 28, :hash -1720668913} nil nil nil]},
    7.25
    {:lasers
     {:p1 nil,
-     :p2 {:points 28, :hash 1015056401, :regions 0},
+     :p2 {:points 28, :hash -1720668913, :regions 0},
      :p3 nil,
      :p5 nil},
-    :preview [{:points 28, :hash 1015056401} nil nil nil]}},
+    :preview [{:points 28, :hash -1720668913} nil nil nil]}},
   [2 1]
   {0.0
    {:lasers
     {:p1 nil,
-     :p2 {:points 61, :hash -202375092, :regions 1},
-     :p3 {:points 61, :hash -121555686, :regions 0},
+     :p2 {:points 61, :hash 1368883229, :regions 1},
+     :p3 {:points 61, :hash 401868854, :regions 0},
      :p5 nil},
     :preview
-    [{:points 61, :hash -121555686}
+    [{:points 61, :hash 401868854}
      nil
-     {:points 61, :hash -121555686}
+     {:points 61, :hash 401868854}
      nil]},
    1.5
    {:lasers
     {:p1 nil,
-     :p2 {:points 61, :hash -202375092, :regions 1},
-     :p3 {:points 61, :hash -121555686, :regions 0},
+     :p2 {:points 61, :hash 1368883229, :regions 1},
+     :p3 {:points 61, :hash 401868854, :regions 0},
      :p5 nil},
     :preview
-    [{:points 61, :hash -121555686}
+    [{:points 61, :hash 401868854}
      nil
-     {:points 61, :hash -121555686}
+     {:points 61, :hash 401868854}
      nil]},
    7.25
    {:lasers
     {:p1 nil,
-     :p2 {:points 61, :hash -202375092, :regions 1},
-     :p3 {:points 61, :hash -121555686, :regions 0},
+     :p2 {:points 61, :hash 1368883229, :regions 1},
+     :p3 {:points 61, :hash 401868854, :regions 0},
      :p5 nil},
     :preview
-    [{:points 61, :hash -121555686}
+    [{:points 61, :hash 401868854}
      nil
-     {:points 61, :hash -121555686}
+     {:points 61, :hash 401868854}
      nil]}},
   [3 0]
   {0.0
    {:lasers
-    {:p1 {:points 51, :hash -780812317, :regions 0},
-     :p2 {:points 51, :hash -1353186603, :regions 1},
+    {:p1 {:points 51, :hash -564849057, :regions 0},
+     :p2 {:points 51, :hash 1890759136, :regions 1},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 51, :hash -780812317}
-     {:points 51, :hash -780812317}
+    [{:points 51, :hash -564849057}
+     {:points 51, :hash -564849057}
      nil
      nil]},
    1.5
    {:lasers
-    {:p1 {:points 51, :hash -2103943793, :regions 0},
-     :p2 {:points 51, :hash 1871031110, :regions 1},
+    {:p1 {:points 51, :hash 893920411, :regions 0},
+     :p2 {:points 51, :hash 773741740, :regions 1},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 51, :hash -2103943793}
-     {:points 51, :hash -2103943793}
+    [{:points 51, :hash 893920411}
+     {:points 51, :hash 893920411}
      nil
      nil]},
    7.25
    {:lasers
-    {:p1 {:points 51, :hash -250045271, :regions 0},
-     :p2 {:points 51, :hash 408301462, :regions 1},
+    {:p1 {:points 51, :hash -172389214, :regions 0},
+     :p2 {:points 51, :hash -1836192876, :regions 1},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 51, :hash -250045271}
-     {:points 51, :hash -250045271}
+    [{:points 51, :hash -172389214}
+     {:points 51, :hash -172389214}
      nil
      nil]}},
   [4 0]
@@ -196,349 +197,349 @@
    {:lasers
     {:p1 nil,
      :p2 nil,
-     :p3 {:points 11, :hash -357061749, :regions 0},
+     :p3 {:points 11, :hash 1179794065, :regions 0},
      :p5 nil},
-    :preview [{:points 11, :hash -357061749} nil nil nil]},
+    :preview [{:points 11, :hash 1179794065} nil nil nil]},
    1.5
    {:lasers
     {:p1 nil,
      :p2 nil,
-     :p3 {:points 11, :hash -357061749, :regions 0},
+     :p3 {:points 11, :hash 1179794065, :regions 0},
      :p5 nil},
-    :preview [{:points 11, :hash -357061749} nil nil nil]},
+    :preview [{:points 11, :hash 1179794065} nil nil nil]},
    7.25
    {:lasers
     {:p1 nil,
      :p2 nil,
-     :p3 {:points 11, :hash -357061749, :regions 0},
+     :p3 {:points 11, :hash 1179794065, :regions 0},
      :p5 nil},
-    :preview [{:points 11, :hash -357061749} nil nil nil]}},
+    :preview [{:points 11, :hash 1179794065} nil nil nil]}},
   [5 0]
   {0.0
    {:lasers
     {:p1 nil,
      :p2 nil,
      :p3 nil,
-     :p5 {:points 7, :hash -1006604491, :regions 0}},
-    :preview [{:points 7, :hash -1006604491} nil nil nil]},
+     :p5 {:points 7, :hash -1545235034, :regions 0}},
+    :preview [{:points 7, :hash -1545235034} nil nil nil]},
    1.5
    {:lasers
     {:p1 nil,
      :p2 nil,
      :p3 nil,
-     :p5 {:points 7, :hash -1006604491, :regions 0}},
-    :preview [{:points 7, :hash -1006604491} nil nil nil]},
+     :p5 {:points 7, :hash -1545235034, :regions 0}},
+    :preview [{:points 7, :hash -1545235034} nil nil nil]},
    7.25
    {:lasers
     {:p1 nil,
      :p2 nil,
      :p3 nil,
-     :p5 {:points 7, :hash -1006604491, :regions 0}},
-    :preview [{:points 7, :hash -1006604491} nil nil nil]}},
+     :p5 {:points 7, :hash -1545235034, :regions 0}},
+    :preview [{:points 7, :hash -1545235034} nil nil nil]}},
   [6 0]
   {0.0
    {:lasers
     {:p1 nil,
      :p2 nil,
-     :p3 {:points 24, :hash -681846569, :regions 0},
+     :p3 {:points 24, :hash 254661839, :regions 0},
      :p5 nil},
-    :preview [{:points 24, :hash -681846569} nil nil nil]},
+    :preview [{:points 24, :hash 254661839} nil nil nil]},
    1.5
    {:lasers
     {:p1 nil,
      :p2 nil,
-     :p3 {:points 24, :hash -681846569, :regions 0},
+     :p3 {:points 24, :hash 254661839, :regions 0},
      :p5 nil},
-    :preview [{:points 24, :hash -681846569} nil nil nil]},
+    :preview [{:points 24, :hash 254661839} nil nil nil]},
    7.25
    {:lasers
     {:p1 nil,
      :p2 nil,
-     :p3 {:points 24, :hash -681846569, :regions 0},
+     :p3 {:points 24, :hash 254661839, :regions 0},
      :p5 nil},
-    :preview [{:points 24, :hash -681846569} nil nil nil]}},
+    :preview [{:points 24, :hash 254661839} nil nil nil]}},
   [7 0]
   {0.0
    {:lasers {:p1 nil, :p2 nil, :p3 nil, :p5 nil},
-    :preview [{:points 8, :hash -752394114} nil nil nil]},
+    :preview [{:points 8, :hash -942327801} nil nil nil]},
    1.5
    {:lasers {:p1 nil, :p2 nil, :p3 nil, :p5 nil},
-    :preview [{:points 8, :hash -752394114} nil nil nil]},
+    :preview [{:points 8, :hash -942327801} nil nil nil]},
    7.25
    {:lasers {:p1 nil, :p2 nil, :p3 nil, :p5 nil},
-    :preview [{:points 8, :hash -752394114} nil nil nil]}}},
+    :preview [{:points 8, :hash -942327801} nil nil nil]}}},
  "item-zones"
  {[0 0]
   {0.0
    {:lasers
     {:p1 nil,
-     :p2 {:points 46, :hash 1313489488, :regions 1},
-     :p3 {:points 11, :hash 56267683, :regions 0},
+     :p2 {:points 46, :hash -896681000, :regions 1},
+     :p3 {:points 11, :hash 1032891810, :regions 0},
      :p5 nil},
     :preview
-    [{:points 46, :hash -74230096}
+    [{:points 46, :hash -1944626898}
      nil
-     {:points 11, :hash 56267683}
+     {:points 11, :hash 1032891810}
      nil]},
    1.5
    {:lasers
     {:p1 nil,
-     :p2 {:points 46, :hash 1313489488, :regions 1},
-     :p3 {:points 11, :hash 56267683, :regions 0},
+     :p2 {:points 46, :hash -896681000, :regions 1},
+     :p3 {:points 11, :hash 1032891810, :regions 0},
      :p5 nil},
     :preview
-    [{:points 46, :hash -74230096}
+    [{:points 46, :hash -1944626898}
      nil
-     {:points 11, :hash 56267683}
+     {:points 11, :hash 1032891810}
      nil]},
    7.25
    {:lasers
     {:p1 nil,
-     :p2 {:points 46, :hash 1313489488, :regions 1},
-     :p3 {:points 11, :hash 56267683, :regions 0},
+     :p2 {:points 46, :hash -896681000, :regions 1},
+     :p3 {:points 11, :hash 1032891810, :regions 0},
      :p5 nil},
     :preview
-    [{:points 46, :hash -74230096}
+    [{:points 46, :hash -1944626898}
      nil
-     {:points 11, :hash 56267683}
+     {:points 11, :hash 1032891810}
      nil]}},
   [1 0]
   {0.0
    {:lasers
-    {:p1 {:points 63, :hash 2145530749, :regions 0},
-     :p2 {:points 72, :hash 81949983, :regions 0},
-     :p3 {:points 63, :hash 2145530749, :regions 0},
+    {:p1 {:points 63, :hash 2029440385, :regions 0},
+     :p2 {:points 72, :hash -1233156923, :regions 0},
+     :p3 {:points 63, :hash 2029440385, :regions 0},
      :p5 nil},
-    :preview [{:points 84, :hash 1318712196} nil nil nil]},
+    :preview [{:points 84, :hash 1164601246} nil nil nil]},
    1.5
    {:lasers
-    {:p1 {:points 63, :hash 1325247218, :regions 0},
-     :p2 {:points 72, :hash 6510261, :regions 0},
-     :p3 {:points 63, :hash 1325247218, :regions 0},
+    {:p1 {:points 63, :hash -1185944770, :regions 0},
+     :p2 {:points 72, :hash -1306569274, :regions 0},
+     :p3 {:points 63, :hash -1185944770, :regions 0},
      :p5 nil},
-    :preview [{:points 84, :hash 65266197} nil nil nil]},
+    :preview [{:points 84, :hash -1664268646} nil nil nil]},
    7.25
    {:lasers
-    {:p1 {:points 63, :hash 1755295134, :regions 0},
-     :p2 {:points 72, :hash 517788145, :regions 0},
-     :p3 {:points 63, :hash 1755295134, :regions 0},
+    {:p1 {:points 63, :hash 1917271563, :regions 0},
+     :p2 {:points 72, :hash 1836024962, :regions 0},
+     :p3 {:points 63, :hash 1917271563, :regions 0},
      :p5 nil},
-    :preview [{:points 84, :hash 1949812660} nil nil nil]}},
+    :preview [{:points 84, :hash -2025633588} nil nil nil]}},
   [2 0]
   {0.0
    {:lasers
-    {:p1 {:points 17, :hash -686710130, :regions 0},
-     :p2 {:points 17, :hash -1477857464, :regions 1},
+    {:p1 {:points 17, :hash 57987522, :regions 0},
+     :p2 {:points 17, :hash 201068569, :regions 1},
      :p3 nil,
-     :p5 {:points 9, :hash 1595281521, :regions 0}},
+     :p5 {:points 9, :hash -1540896756, :regions 0}},
     :preview
-    [{:points 28, :hash -674527679}
-     {:points 17, :hash -686710130}
+    [{:points 28, :hash -1330198462}
+     {:points 17, :hash 57987522}
      nil
      nil]},
    1.5
    {:lasers
-    {:p1 {:points 17, :hash 718402698, :regions 0},
-     :p2 {:points 17, :hash 1337161196, :regions 1},
+    {:p1 {:points 17, :hash -1494680771, :regions 0},
+     :p2 {:points 17, :hash -940942795, :regions 1},
      :p3 nil,
-     :p5 {:points 9, :hash 1595281521, :regions 0}},
+     :p5 {:points 9, :hash -1540896756, :regions 0}},
     :preview
-    [{:points 28, :hash 852908187}
-     {:points 17, :hash 718402698}
+    [{:points 28, :hash 1856467922}
+     {:points 17, :hash -1494680771}
      nil
      nil]},
    7.25
    {:lasers
-    {:p1 {:points 17, :hash 1289590463, :regions 0},
-     :p2 {:points 17, :hash -1391028876, :regions 1},
+    {:p1 {:points 17, :hash -1772017365, :regions 0},
+     :p2 {:points 17, :hash 300130972, :regions 1},
      :p3 nil,
-     :p5 {:points 9, :hash 1595281521, :regions 0}},
+     :p5 {:points 9, :hash -1540896756, :regions 0}},
     :preview
-    [{:points 28, :hash 1967422444}
-     {:points 17, :hash 1289590463}
+    [{:points 28, :hash 418134991}
+     {:points 17, :hash -1772017365}
      nil
      nil]}},
   [3 0]
   {0.0
    {:lasers
     {:p1 nil,
-     :p2 {:points 7, :hash -1006604491, :regions 0},
+     :p2 {:points 7, :hash -1545235034, :regions 0},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 7, :hash -1006604491}
+    [{:points 7, :hash -1545235034}
      nil
      nil
-     {:points 7, :hash -1006604491}]},
+     {:points 7, :hash -1545235034}]},
    1.5
    {:lasers
     {:p1 nil,
-     :p2 {:points 7, :hash -1006604491, :regions 0},
+     :p2 {:points 7, :hash -1545235034, :regions 0},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 7, :hash -1006604491}
+    [{:points 7, :hash -1545235034}
      nil
      nil
-     {:points 7, :hash -1006604491}]},
+     {:points 7, :hash -1545235034}]},
    7.25
    {:lasers
     {:p1 nil,
-     :p2 {:points 7, :hash -1006604491, :regions 0},
+     :p2 {:points 7, :hash -1545235034, :regions 0},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 7, :hash -1006604491}
+    [{:points 7, :hash -1545235034}
      nil
      nil
-     {:points 7, :hash -1006604491}]}},
+     {:points 7, :hash -1545235034}]}},
   [4 0]
   {0.0
    {:lasers
-    {:p1 {:points 9, :hash -125400511, :regions 0},
-     :p2 {:points 19, :hash 476206785, :regions 1},
-     :p3 {:points 45, :hash 2020875606, :regions 0},
+    {:p1 {:points 9, :hash 248237778, :regions 0},
+     :p2 {:points 19, :hash -289793773, :regions 1},
+     :p3 {:points 45, :hash 1162117378, :regions 0},
      :p5 nil},
     :preview
-    [{:points 56, :hash -2090379828}
+    [{:points 56, :hash 1513372554}
      nil
-     {:points 19, :hash -1841956103}
+     {:points 19, :hash -1576265409}
      nil]},
    1.5
    {:lasers
-    {:p1 {:points 9, :hash -125400511, :regions 0},
-     :p2 {:points 19, :hash 476206785, :regions 1},
-     :p3 {:points 45, :hash 2020875606, :regions 0},
+    {:p1 {:points 9, :hash 248237778, :regions 0},
+     :p2 {:points 19, :hash -289793773, :regions 1},
+     :p3 {:points 45, :hash 1162117378, :regions 0},
      :p5 nil},
     :preview
-    [{:points 56, :hash -2090379828}
+    [{:points 56, :hash 1513372554}
      nil
-     {:points 19, :hash -1841956103}
+     {:points 19, :hash -1576265409}
      nil]},
    7.25
    {:lasers
-    {:p1 {:points 9, :hash -125400511, :regions 0},
-     :p2 {:points 19, :hash 476206785, :regions 1},
-     :p3 {:points 45, :hash 2020875606, :regions 0},
+    {:p1 {:points 9, :hash 248237778, :regions 0},
+     :p2 {:points 19, :hash -289793773, :regions 1},
+     :p3 {:points 45, :hash 1162117378, :regions 0},
      :p5 nil},
     :preview
-    [{:points 56, :hash -2090379828}
+    [{:points 56, :hash 1513372554}
      nil
-     {:points 19, :hash -1841956103}
+     {:points 19, :hash -1576265409}
      nil]}},
   [5 0]
   {0.0
    {:lasers
-    {:p1 {:points 60, :hash -552339978, :regions 0},
-     :p2 {:points 79, :hash 1674720039, :regions 2},
-     :p3 {:points 70, :hash 1443739059, :regions 0},
+    {:p1 {:points 60, :hash 531940725, :regions 0},
+     :p2 {:points 79, :hash 2099314350, :regions 2},
+     :p3 {:points 70, :hash 191211193, :regions 0},
      :p5 nil},
     :preview
-    [{:points 79, :hash -48111258}
-     {:points 7, :hash -810097040}
-     {:points 17, :hash -2105059024}
+    [{:points 79, :hash 541692353}
+     {:points 7, :hash 8108643}
+     {:points 17, :hash 57058912}
      nil]},
    1.5
    {:lasers
-    {:p1 {:points 60, :hash -552339978, :regions 0},
-     :p2 {:points 79, :hash 1674720039, :regions 2},
-     :p3 {:points 70, :hash 1443739059, :regions 0},
+    {:p1 {:points 60, :hash 531940725, :regions 0},
+     :p2 {:points 79, :hash 2099314350, :regions 2},
+     :p3 {:points 70, :hash 191211193, :regions 0},
      :p5 nil},
     :preview
-    [{:points 79, :hash -48111258}
-     {:points 7, :hash -810097040}
-     {:points 17, :hash -2105059024}
+    [{:points 79, :hash 541692353}
+     {:points 7, :hash 8108643}
+     {:points 17, :hash 57058912}
      nil]},
    7.25
    {:lasers
-    {:p1 {:points 60, :hash -552339978, :regions 0},
-     :p2 {:points 79, :hash 1674720039, :regions 2},
-     :p3 {:points 70, :hash 1443739059, :regions 0},
+    {:p1 {:points 60, :hash 531940725, :regions 0},
+     :p2 {:points 79, :hash 2099314350, :regions 2},
+     :p3 {:points 70, :hash 191211193, :regions 0},
      :p5 nil},
     :preview
-    [{:points 79, :hash -48111258}
-     {:points 7, :hash -810097040}
-     {:points 17, :hash -2105059024}
+    [{:points 79, :hash 541692353}
+     {:points 7, :hash 8108643}
+     {:points 17, :hash 57058912}
      nil]}}},
  "preview"
  {[0 0]
   {0.0
    {:lasers
-    {:p1 {:points 30, :hash -1126036873, :regions 0},
-     :p2 {:points 57, :hash -1784751557, :regions 1},
-     :p3 {:points 19, :hash -380113048, :regions 0},
+    {:p1 {:points 30, :hash 537118848, :regions 0},
+     :p2 {:points 57, :hash 1978833331, :regions 1},
+     :p3 {:points 19, :hash 960931612, :regions 0},
      :p5 nil},
     :preview
-    [{:points 57, :hash 497018072}
-     {:points 25, :hash -1252970094}
-     {:points 9, :hash -1532306173}
-     {:points 57, :hash -1784751557}
+    [{:points 57, :hash 667037507}
+     {:points 25, :hash 194260015}
+     {:points 9, :hash -1760353096}
+     {:points 57, :hash 1978833331}
      nil
      nil]},
    1.5
    {:lasers
-    {:p1 {:points 30, :hash 1746683399, :regions 0},
-     :p2 {:points 57, :hash 423451478, :regions 1},
-     :p3 {:points 19, :hash -1661639820, :regions 0},
+    {:p1 {:points 30, :hash -1291507997, :regions 0},
+     :p2 {:points 57, :hash 1521338155, :regions 1},
+     :p3 {:points 19, :hash -331865128, :regions 0},
      :p5 nil},
     :preview
-    [{:points 57, :hash 596973778}
-     {:points 25, :hash -1252970094}
-     {:points 9, :hash -1532306173}
-     {:points 57, :hash 423451478}
+    [{:points 57, :hash -263389539}
+     {:points 25, :hash 194260015}
+     {:points 9, :hash -1760353096}
+     {:points 57, :hash 1521338155}
      nil
      nil]},
    7.25
    {:lasers
-    {:p1 {:points 30, :hash 781199855, :regions 0},
-     :p2 {:points 57, :hash 419040840, :regions 1},
-     :p3 {:points 19, :hash -1388984235, :regions 0},
+    {:p1 {:points 30, :hash 1481019792, :regions 0},
+     :p2 {:points 57, :hash -1314058425, :regions 1},
+     :p3 {:points 19, :hash 2134800115, :regions 0},
      :p5 nil},
     :preview
-    [{:points 57, :hash -1516753646}
-     {:points 25, :hash -1252970094}
-     {:points 9, :hash -1532306173}
-     {:points 57, :hash 419040840}
+    [{:points 57, :hash -552785407}
+     {:points 25, :hash 194260015}
+     {:points 9, :hash -1760353096}
+     {:points 57, :hash -1314058425}
      nil
      nil]}},
   [1 0]
   {0.0
    {:lasers
     {:p1 nil,
-     :p2 {:points 51, :hash -780812317, :regions 0},
+     :p2 {:points 51, :hash -564849057, :regions 0},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 51, :hash -780812317}
+    [{:points 51, :hash -564849057}
      nil
      nil
-     {:points 51, :hash -780812317}
+     {:points 51, :hash -564849057}
      nil
      nil]},
    1.5
    {:lasers
     {:p1 nil,
-     :p2 {:points 51, :hash -780812317, :regions 0},
+     :p2 {:points 51, :hash -564849057, :regions 0},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 51, :hash -780812317}
+    [{:points 51, :hash -564849057}
      nil
      nil
-     {:points 51, :hash -780812317}
+     {:points 51, :hash -564849057}
      nil
      nil]},
    7.25
    {:lasers
     {:p1 nil,
-     :p2 {:points 51, :hash -780812317, :regions 0},
+     :p2 {:points 51, :hash -564849057, :regions 0},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 51, :hash -780812317}
+    [{:points 51, :hash -564849057}
      nil
      nil
-     {:points 51, :hash -780812317}
+     {:points 51, :hash -564849057}
      nil
      nil]}},
   [2 0]
@@ -546,74 +547,74 @@
    {:lasers
     {:p1 nil,
      :p2 nil,
-     :p3 {:points 9, :hash 1595281521, :regions 0},
-     :p5 {:points 7, :hash 1801099333, :regions 0}},
+     :p3 {:points 9, :hash -1540896756, :regions 0},
+     :p5 {:points 7, :hash 634303377, :regions 0}},
     :preview
-    [{:points 18, :hash 871898480}
+    [{:points 18, :hash -12085612}
      nil
      nil
      nil
-     {:points 9, :hash 1595281521}
-     {:points 7, :hash 1801099333}]},
+     {:points 9, :hash -1540896756}
+     {:points 7, :hash 634303377}]},
    1.5
    {:lasers
     {:p1 nil,
      :p2 nil,
-     :p3 {:points 9, :hash 1595281521, :regions 0},
-     :p5 {:points 7, :hash 1801099333, :regions 0}},
+     :p3 {:points 9, :hash -1540896756, :regions 0},
+     :p5 {:points 7, :hash 634303377, :regions 0}},
     :preview
-    [{:points 18, :hash 871898480}
+    [{:points 18, :hash -12085612}
      nil
      nil
      nil
-     {:points 9, :hash 1595281521}
-     {:points 7, :hash 1801099333}]},
+     {:points 9, :hash -1540896756}
+     {:points 7, :hash 634303377}]},
    7.25
    {:lasers
     {:p1 nil,
      :p2 nil,
-     :p3 {:points 9, :hash 1595281521, :regions 0},
-     :p5 {:points 7, :hash 1801099333, :regions 0}},
+     :p3 {:points 9, :hash -1540896756, :regions 0},
+     :p5 {:points 7, :hash 634303377, :regions 0}},
     :preview
-    [{:points 18, :hash 871898480}
+    [{:points 18, :hash -12085612}
      nil
      nil
      nil
-     {:points 9, :hash 1595281521}
-     {:points 7, :hash 1801099333}]}}},
+     {:points 9, :hash -1540896756}
+     {:points 7, :hash 634303377}]}}},
  "selectors"
  {[0 0]
   {0.0
    {:lasers
-    {:p1 {:points 11, :hash 630691083, :regions 0},
-     :p2 {:points 11, :hash 1066312830, :regions 1},
+    {:p1 {:points 11, :hash 2050670157, :regions 0},
+     :p2 {:points 11, :hash -1670884744, :regions 1},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 11, :hash 630691083}
-     {:points 11, :hash 630691083}
+    [{:points 11, :hash 2050670157}
+     {:points 11, :hash 2050670157}
      nil
      nil]},
    1.5
    {:lasers
-    {:p1 {:points 11, :hash 630691083, :regions 0},
-     :p2 {:points 11, :hash 1066312830, :regions 1},
+    {:p1 {:points 11, :hash 2050670157, :regions 0},
+     :p2 {:points 11, :hash -1670884744, :regions 1},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 11, :hash 630691083}
-     {:points 11, :hash 630691083}
+    [{:points 11, :hash 2050670157}
+     {:points 11, :hash 2050670157}
      nil
      nil]},
    7.25
    {:lasers
-    {:p1 {:points 11, :hash 630691083, :regions 0},
-     :p2 {:points 11, :hash 1066312830, :regions 1},
+    {:p1 {:points 11, :hash 2050670157, :regions 0},
+     :p2 {:points 11, :hash -1670884744, :regions 1},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 11, :hash 630691083}
-     {:points 11, :hash 630691083}
+    [{:points 11, :hash 2050670157}
+     {:points 11, :hash 2050670157}
      nil
      nil]}},
   [0 1]
@@ -621,546 +622,546 @@
    {:lasers
     {:p1 nil,
      :p2 nil,
-     :p3 {:points 10, :hash 1067040338, :regions 0},
+     :p3 {:points 10, :hash 1801981874, :regions 0},
      :p5 nil},
-    :preview [{:points 10, :hash 1067040338} nil nil nil]},
+    :preview [{:points 10, :hash 1801981874} nil nil nil]},
    1.5
    {:lasers
     {:p1 nil,
      :p2 nil,
-     :p3 {:points 10, :hash 1067040338, :regions 0},
+     :p3 {:points 10, :hash 1801981874, :regions 0},
      :p5 nil},
-    :preview [{:points 10, :hash 1067040338} nil nil nil]},
+    :preview [{:points 10, :hash 1801981874} nil nil nil]},
    7.25
    {:lasers
     {:p1 nil,
      :p2 nil,
-     :p3 {:points 10, :hash 1067040338, :regions 0},
+     :p3 {:points 10, :hash 1801981874, :regions 0},
      :p5 nil},
-    :preview [{:points 10, :hash 1067040338} nil nil nil]}},
+    :preview [{:points 10, :hash 1801981874} nil nil nil]}},
   [1 0]
   {0.0
    {:lasers
     {:p1 nil,
-     :p2 {:points 33, :hash 661621473, :regions 1},
-     :p3 {:points 33, :hash 2141282216, :regions 0},
+     :p2 {:points 33, :hash -1151228941, :regions 1},
+     :p3 {:points 33, :hash 1477762397, :regions 0},
      :p5 nil},
     :preview
-    [{:points 33, :hash 2141282216}
+    [{:points 33, :hash 1477762397}
      nil
-     {:points 33, :hash 2141282216}
+     {:points 33, :hash 1477762397}
      nil]},
    1.5
    {:lasers
     {:p1 nil,
-     :p2 {:points 33, :hash 661621473, :regions 1},
-     :p3 {:points 33, :hash 2141282216, :regions 0},
+     :p2 {:points 33, :hash -1151228941, :regions 1},
+     :p3 {:points 33, :hash 1477762397, :regions 0},
      :p5 nil},
     :preview
-    [{:points 33, :hash 2141282216}
+    [{:points 33, :hash 1477762397}
      nil
-     {:points 33, :hash 2141282216}
+     {:points 33, :hash 1477762397}
      nil]},
    7.25
    {:lasers
     {:p1 nil,
-     :p2 {:points 33, :hash 661621473, :regions 1},
-     :p3 {:points 33, :hash 2141282216, :regions 0},
+     :p2 {:points 33, :hash -1151228941, :regions 1},
+     :p3 {:points 33, :hash 1477762397, :regions 0},
      :p5 nil},
     :preview
-    [{:points 33, :hash 2141282216}
+    [{:points 33, :hash 1477762397}
      nil
-     {:points 33, :hash 2141282216}
+     {:points 33, :hash 1477762397}
      nil]}},
   [1 1]
   {0.0
    {:lasers
     {:p1 nil,
-     :p2 {:points 24, :hash -1339594293, :regions 1},
-     :p3 {:points 24, :hash -681846569, :regions 0},
+     :p2 {:points 24, :hash -170190185, :regions 1},
+     :p3 {:points 24, :hash 254661839, :regions 0},
      :p5 nil},
     :preview
-    [{:points 24, :hash -681846569}
+    [{:points 24, :hash 254661839}
      nil
-     {:points 24, :hash -681846569}
+     {:points 24, :hash 254661839}
      nil]},
    1.5
    {:lasers
     {:p1 nil,
-     :p2 {:points 24, :hash -1339594293, :regions 1},
-     :p3 {:points 24, :hash -681846569, :regions 0},
+     :p2 {:points 24, :hash -170190185, :regions 1},
+     :p3 {:points 24, :hash 254661839, :regions 0},
      :p5 nil},
     :preview
-    [{:points 24, :hash -681846569}
+    [{:points 24, :hash 254661839}
      nil
-     {:points 24, :hash -681846569}
+     {:points 24, :hash 254661839}
      nil]},
    7.25
    {:lasers
     {:p1 nil,
-     :p2 {:points 24, :hash -1339594293, :regions 1},
-     :p3 {:points 24, :hash -681846569, :regions 0},
+     :p2 {:points 24, :hash -170190185, :regions 1},
+     :p3 {:points 24, :hash 254661839, :regions 0},
      :p5 nil},
     :preview
-    [{:points 24, :hash -681846569}
+    [{:points 24, :hash 254661839}
      nil
-     {:points 24, :hash -681846569}
+     {:points 24, :hash 254661839}
      nil]}},
   [2 0]
   {0.0
    {:lasers
     {:p1 nil,
-     :p2 {:points 28, :hash -1644360022, :regions 1},
-     :p3 {:points 28, :hash 1015056401, :regions 0},
+     :p2 {:points 28, :hash 2056769611, :regions 1},
+     :p3 {:points 28, :hash -1720668913, :regions 0},
      :p5 nil},
     :preview
-    [{:points 28, :hash 1015056401}
+    [{:points 28, :hash -1720668913}
      nil
-     {:points 28, :hash 1015056401}
+     {:points 28, :hash -1720668913}
      nil]},
    1.5
    {:lasers
     {:p1 nil,
-     :p2 {:points 28, :hash -1644360022, :regions 1},
-     :p3 {:points 28, :hash 1015056401, :regions 0},
+     :p2 {:points 28, :hash 2056769611, :regions 1},
+     :p3 {:points 28, :hash -1720668913, :regions 0},
      :p5 nil},
     :preview
-    [{:points 28, :hash 1015056401}
+    [{:points 28, :hash -1720668913}
      nil
-     {:points 28, :hash 1015056401}
+     {:points 28, :hash -1720668913}
      nil]},
    7.25
    {:lasers
     {:p1 nil,
-     :p2 {:points 28, :hash -1644360022, :regions 1},
-     :p3 {:points 28, :hash 1015056401, :regions 0},
+     :p2 {:points 28, :hash 2056769611, :regions 1},
+     :p3 {:points 28, :hash -1720668913, :regions 0},
      :p5 nil},
     :preview
-    [{:points 28, :hash 1015056401}
+    [{:points 28, :hash -1720668913}
      nil
-     {:points 28, :hash 1015056401}
+     {:points 28, :hash -1720668913}
      nil]}},
   [3 0]
   {0.0
    {:lasers
     {:p1 nil,
-     :p2 {:points 51, :hash -780812317, :regions 0},
+     :p2 {:points 51, :hash -564849057, :regions 0},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 51, :hash -780812317}
+    [{:points 51, :hash -564849057}
      nil
      nil
-     {:points 51, :hash -780812317}]},
+     {:points 51, :hash -564849057}]},
    1.5
    {:lasers
     {:p1 nil,
-     :p2 {:points 51, :hash -780812317, :regions 0},
+     :p2 {:points 51, :hash -564849057, :regions 0},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 51, :hash -780812317}
+    [{:points 51, :hash -564849057}
      nil
      nil
-     {:points 51, :hash -780812317}]},
+     {:points 51, :hash -564849057}]},
    7.25
    {:lasers
     {:p1 nil,
-     :p2 {:points 51, :hash -780812317, :regions 0},
+     :p2 {:points 51, :hash -564849057, :regions 0},
      :p3 nil,
      :p5 nil},
     :preview
-    [{:points 51, :hash -780812317}
+    [{:points 51, :hash -564849057}
      nil
      nil
-     {:points 51, :hash -780812317}]}},
+     {:points 51, :hash -564849057}]}},
   [4 0]
   {0.0
    {:lasers
-    {:p1 {:points 9, :hash 1595281521, :regions 0},
+    {:p1 {:points 9, :hash -1540896756, :regions 0},
      :p2 nil,
-     :p3 {:points 9, :hash 1595281521, :regions 0},
+     :p3 {:points 9, :hash -1540896756, :regions 0},
      :p5 nil},
-    :preview [{:points 9, :hash 1595281521} nil nil nil]},
+    :preview [{:points 9, :hash -1540896756} nil nil nil]},
    1.5
    {:lasers
-    {:p1 {:points 9, :hash 1595281521, :regions 0},
+    {:p1 {:points 9, :hash -1540896756, :regions 0},
      :p2 nil,
-     :p3 {:points 9, :hash 1595281521, :regions 0},
+     :p3 {:points 9, :hash -1540896756, :regions 0},
      :p5 nil},
-    :preview [{:points 9, :hash 1595281521} nil nil nil]},
+    :preview [{:points 9, :hash -1540896756} nil nil nil]},
    7.25
    {:lasers
-    {:p1 {:points 9, :hash 1595281521, :regions 0},
+    {:p1 {:points 9, :hash -1540896756, :regions 0},
      :p2 nil,
-     :p3 {:points 9, :hash 1595281521, :regions 0},
+     :p3 {:points 9, :hash -1540896756, :regions 0},
      :p5 nil},
-    :preview [{:points 9, :hash 1595281521} nil nil nil]}},
+    :preview [{:points 9, :hash -1540896756} nil nil nil]}},
   [5 0]
   {0.0
    {:lasers
     {:p1 nil,
-     :p2 {:points 8, :hash -752394114, :regions 0},
+     :p2 {:points 8, :hash -942327801, :regions 0},
      :p3 nil,
      :p5 nil},
-    :preview [{:points 8, :hash -752394114} nil nil nil]},
+    :preview [{:points 8, :hash -942327801} nil nil nil]},
    1.5
    {:lasers
     {:p1 nil,
-     :p2 {:points 8, :hash -752394114, :regions 0},
+     :p2 {:points 8, :hash -942327801, :regions 0},
      :p3 nil,
      :p5 nil},
-    :preview [{:points 8, :hash -752394114} nil nil nil]},
+    :preview [{:points 8, :hash -942327801} nil nil nil]},
    7.25
    {:lasers
     {:p1 nil,
-     :p2 {:points 8, :hash -752394114, :regions 0},
+     :p2 {:points 8, :hash -942327801, :regions 0},
      :p3 nil,
      :p5 nil},
-    :preview [{:points 8, :hash -752394114} nil nil nil]}},
+    :preview [{:points 8, :hash -942327801} nil nil nil]}},
   [6 0]
   {0.0
    {:lasers
-    {:p1 {:points 17, :hash -607128722, :regions 0},
-     :p2 {:points 28, :hash -507083781, :regions 2},
-     :p3 {:points 9, :hash -1532306173, :regions 0},
-     :p5 {:points 19, :hash -1841956103, :regions 0}},
+    {:p1 {:points 17, :hash -1367955147, :regions 0},
+     :p2 {:points 28, :hash 1457132115, :regions 2},
+     :p3 {:points 9, :hash -1760353096, :regions 0},
+     :p5 {:points 19, :hash -1576265409, :regions 0}},
     :preview
-    [{:points 49, :hash 473887075}
-     {:points 17, :hash -607128722}
-     {:points 9, :hash -1532306173}
+    [{:points 49, :hash 299445978}
+     {:points 17, :hash -1367955147}
+     {:points 9, :hash -1760353096}
      nil]},
    1.5
    {:lasers
-    {:p1 {:points 17, :hash -607128722, :regions 0},
-     :p2 {:points 28, :hash -507083781, :regions 2},
-     :p3 {:points 9, :hash -1532306173, :regions 0},
-     :p5 {:points 19, :hash -1841956103, :regions 0}},
+    {:p1 {:points 17, :hash -1367955147, :regions 0},
+     :p2 {:points 28, :hash 1457132115, :regions 2},
+     :p3 {:points 9, :hash -1760353096, :regions 0},
+     :p5 {:points 19, :hash -1576265409, :regions 0}},
     :preview
-    [{:points 49, :hash 473887075}
-     {:points 17, :hash -607128722}
-     {:points 9, :hash -1532306173}
+    [{:points 49, :hash 299445978}
+     {:points 17, :hash -1367955147}
+     {:points 9, :hash -1760353096}
      nil]},
    7.25
    {:lasers
-    {:p1 {:points 17, :hash -607128722, :regions 0},
-     :p2 {:points 28, :hash -507083781, :regions 2},
-     :p3 {:points 9, :hash -1532306173, :regions 0},
-     :p5 {:points 19, :hash -1841956103, :regions 0}},
+    {:p1 {:points 17, :hash -1367955147, :regions 0},
+     :p2 {:points 28, :hash 1457132115, :regions 2},
+     :p3 {:points 9, :hash -1760353096, :regions 0},
+     :p5 {:points 19, :hash -1576265409, :regions 0}},
     :preview
-    [{:points 49, :hash 473887075}
-     {:points 17, :hash -607128722}
-     {:points 9, :hash -1532306173}
+    [{:points 49, :hash 299445978}
+     {:points 17, :hash -1367955147}
+     {:points 9, :hash -1760353096}
      nil]}},
   [7 0]
   {0.0
    {:lasers
     {:p1 nil,
-     :p2 {:points 61, :hash -1805031504, :regions 0},
+     :p2 {:points 61, :hash -1014031709, :regions 0},
      :p3 nil,
      :p5 nil},
-    :preview [{:points 61, :hash -1805031504} nil nil nil]},
+    :preview [{:points 61, :hash -1014031709} nil nil nil]},
    1.5
    {:lasers
     {:p1 nil,
-     :p2 {:points 61, :hash -1805031504, :regions 0},
+     :p2 {:points 61, :hash -1014031709, :regions 0},
      :p3 nil,
      :p5 nil},
-    :preview [{:points 61, :hash -1805031504} nil nil nil]},
+    :preview [{:points 61, :hash -1014031709} nil nil nil]},
    7.25
    {:lasers
     {:p1 nil,
-     :p2 {:points 61, :hash -1805031504, :regions 0},
+     :p2 {:points 61, :hash -1014031709, :regions 0},
      :p3 nil,
      :p5 nil},
-    :preview [{:points 61, :hash -1805031504} nil nil nil]}}},
+    :preview [{:points 61, :hash -1014031709} nil nil nil]}}},
  "starter"
  {[0 0]
   {0.0
    {:lasers
-    {:p1 {:points 65, :hash -1105678387, :regions 0},
-     :p2 {:points 65, :hash -1105678387, :regions 0},
-     :p3 {:points 65, :hash -1105678387, :regions 0},
+    {:p1 {:points 65, :hash -45502775, :regions 0},
+     :p2 {:points 65, :hash -45502775, :regions 0},
+     :p3 {:points 65, :hash -45502775, :regions 0},
      :p5 nil},
-    :preview [{:points 65, :hash -1105678387} nil nil nil]},
+    :preview [{:points 65, :hash -45502775} nil nil nil]},
    1.5
    {:lasers
-    {:p1 {:points 65, :hash -1105678387, :regions 0},
-     :p2 {:points 65, :hash -1105678387, :regions 0},
-     :p3 {:points 65, :hash -1105678387, :regions 0},
+    {:p1 {:points 65, :hash -45502775, :regions 0},
+     :p2 {:points 65, :hash -45502775, :regions 0},
+     :p3 {:points 65, :hash -45502775, :regions 0},
      :p5 nil},
-    :preview [{:points 65, :hash -1105678387} nil nil nil]},
+    :preview [{:points 65, :hash -45502775} nil nil nil]},
    7.25
    {:lasers
-    {:p1 {:points 65, :hash -1105678387, :regions 0},
-     :p2 {:points 65, :hash -1105678387, :regions 0},
-     :p3 {:points 65, :hash -1105678387, :regions 0},
+    {:p1 {:points 65, :hash -45502775, :regions 0},
+     :p2 {:points 65, :hash -45502775, :regions 0},
+     :p3 {:points 65, :hash -45502775, :regions 0},
      :p5 nil},
-    :preview [{:points 65, :hash -1105678387} nil nil nil]}},
+    :preview [{:points 65, :hash -45502775} nil nil nil]}},
   [1 0]
   {0.0
    {:lasers
-    {:p1 {:points 65, :hash -1494523748, :regions 0},
-     :p2 {:points 65, :hash -1494523748, :regions 0},
-     :p3 {:points 65, :hash -1494523748, :regions 0},
+    {:p1 {:points 65, :hash -1313776259, :regions 0},
+     :p2 {:points 65, :hash -1313776259, :regions 0},
+     :p3 {:points 65, :hash -1313776259, :regions 0},
      :p5 nil},
-    :preview [{:points 65, :hash -1494523748} nil nil nil]},
+    :preview [{:points 65, :hash -1313776259} nil nil nil]},
    1.5
    {:lasers
-    {:p1 {:points 65, :hash -1494523748, :regions 0},
-     :p2 {:points 65, :hash -1494523748, :regions 0},
-     :p3 {:points 65, :hash -1494523748, :regions 0},
+    {:p1 {:points 65, :hash -1313776259, :regions 0},
+     :p2 {:points 65, :hash -1313776259, :regions 0},
+     :p3 {:points 65, :hash -1313776259, :regions 0},
      :p5 nil},
-    :preview [{:points 65, :hash -1494523748} nil nil nil]},
+    :preview [{:points 65, :hash -1313776259} nil nil nil]},
    7.25
    {:lasers
-    {:p1 {:points 65, :hash -1494523748, :regions 0},
-     :p2 {:points 65, :hash -1494523748, :regions 0},
-     :p3 {:points 65, :hash -1494523748, :regions 0},
+    {:p1 {:points 65, :hash -1313776259, :regions 0},
+     :p2 {:points 65, :hash -1313776259, :regions 0},
+     :p3 {:points 65, :hash -1313776259, :regions 0},
      :p5 nil},
-    :preview [{:points 65, :hash -1494523748} nil nil nil]}},
+    :preview [{:points 65, :hash -1313776259} nil nil nil]}},
   [2 0]
   {0.0
    {:lasers
-    {:p1 {:points 64, :hash -23318871, :regions 0},
-     :p2 {:points 64, :hash -23318871, :regions 0},
-     :p3 {:points 64, :hash -23318871, :regions 0},
+    {:p1 {:points 64, :hash 1580575864, :regions 0},
+     :p2 {:points 64, :hash 1580575864, :regions 0},
+     :p3 {:points 64, :hash 1580575864, :regions 0},
      :p5 nil},
-    :preview [{:points 64, :hash -23318871} nil nil nil]},
+    :preview [{:points 64, :hash 1580575864} nil nil nil]},
    1.5
    {:lasers
-    {:p1 {:points 64, :hash -23318871, :regions 0},
-     :p2 {:points 64, :hash -23318871, :regions 0},
-     :p3 {:points 64, :hash -23318871, :regions 0},
+    {:p1 {:points 64, :hash 1580575864, :regions 0},
+     :p2 {:points 64, :hash 1580575864, :regions 0},
+     :p3 {:points 64, :hash 1580575864, :regions 0},
      :p5 nil},
-    :preview [{:points 64, :hash -23318871} nil nil nil]},
+    :preview [{:points 64, :hash 1580575864} nil nil nil]},
    7.25
    {:lasers
-    {:p1 {:points 64, :hash -23318871, :regions 0},
-     :p2 {:points 64, :hash -23318871, :regions 0},
-     :p3 {:points 64, :hash -23318871, :regions 0},
+    {:p1 {:points 64, :hash 1580575864, :regions 0},
+     :p2 {:points 64, :hash 1580575864, :regions 0},
+     :p3 {:points 64, :hash 1580575864, :regions 0},
      :p5 nil},
-    :preview [{:points 64, :hash -23318871} nil nil nil]}},
+    :preview [{:points 64, :hash 1580575864} nil nil nil]}},
   [3 0]
   {0.0
    {:lasers
-    {:p1 {:points 81, :hash -740362831, :regions 0},
-     :p2 {:points 81, :hash -740362831, :regions 0},
-     :p3 {:points 81, :hash -740362831, :regions 0},
+    {:p1 {:points 81, :hash 1723194012, :regions 0},
+     :p2 {:points 81, :hash 1723194012, :regions 0},
+     :p3 {:points 81, :hash 1723194012, :regions 0},
      :p5 nil},
-    :preview [{:points 81, :hash -740362831} nil nil nil]},
+    :preview [{:points 81, :hash 1723194012} nil nil nil]},
    1.5
    {:lasers
-    {:p1 {:points 81, :hash -740362831, :regions 0},
-     :p2 {:points 81, :hash -740362831, :regions 0},
-     :p3 {:points 81, :hash -740362831, :regions 0},
+    {:p1 {:points 81, :hash 1723194012, :regions 0},
+     :p2 {:points 81, :hash 1723194012, :regions 0},
+     :p3 {:points 81, :hash 1723194012, :regions 0},
      :p5 nil},
-    :preview [{:points 81, :hash -740362831} nil nil nil]},
+    :preview [{:points 81, :hash 1723194012} nil nil nil]},
    7.25
    {:lasers
-    {:p1 {:points 81, :hash -740362831, :regions 0},
-     :p2 {:points 81, :hash -740362831, :regions 0},
-     :p3 {:points 81, :hash -740362831, :regions 0},
+    {:p1 {:points 81, :hash 1723194012, :regions 0},
+     :p2 {:points 81, :hash 1723194012, :regions 0},
+     :p3 {:points 81, :hash 1723194012, :regions 0},
      :p5 nil},
-    :preview [{:points 81, :hash -740362831} nil nil nil]}},
+    :preview [{:points 81, :hash 1723194012} nil nil nil]}},
   [4 0]
   {0.0
    {:lasers
-    {:p1 {:points 129, :hash -1497646033, :regions 0},
-     :p2 {:points 129, :hash -1497646033, :regions 0},
-     :p3 {:points 129, :hash -1497646033, :regions 0},
+    {:p1 {:points 129, :hash -2058903793, :regions 0},
+     :p2 {:points 129, :hash -2058903793, :regions 0},
+     :p3 {:points 129, :hash -2058903793, :regions 0},
      :p5 nil},
-    :preview [{:points 129, :hash -1497646033} nil nil nil]},
+    :preview [{:points 129, :hash -2058903793} nil nil nil]},
    1.5
    {:lasers
-    {:p1 {:points 129, :hash -1497646033, :regions 0},
-     :p2 {:points 129, :hash -1497646033, :regions 0},
-     :p3 {:points 129, :hash -1497646033, :regions 0},
+    {:p1 {:points 129, :hash -2058903793, :regions 0},
+     :p2 {:points 129, :hash -2058903793, :regions 0},
+     :p3 {:points 129, :hash -2058903793, :regions 0},
      :p5 nil},
-    :preview [{:points 129, :hash -1497646033} nil nil nil]},
+    :preview [{:points 129, :hash -2058903793} nil nil nil]},
    7.25
    {:lasers
-    {:p1 {:points 129, :hash -1497646033, :regions 0},
-     :p2 {:points 129, :hash -1497646033, :regions 0},
-     :p3 {:points 129, :hash -1497646033, :regions 0},
+    {:p1 {:points 129, :hash -2058903793, :regions 0},
+     :p2 {:points 129, :hash -2058903793, :regions 0},
+     :p3 {:points 129, :hash -2058903793, :regions 0},
      :p5 nil},
-    :preview [{:points 129, :hash -1497646033} nil nil nil]}},
+    :preview [{:points 129, :hash -2058903793} nil nil nil]}},
   [5 0]
   {0.0
    {:lasers
-    {:p1 {:points 65, :hash -762192797, :regions 0},
-     :p2 {:points 65, :hash -762192797, :regions 0},
-     :p3 {:points 65, :hash -762192797, :regions 0},
+    {:p1 {:points 65, :hash -1690369521, :regions 0},
+     :p2 {:points 65, :hash -1690369521, :regions 0},
+     :p3 {:points 65, :hash -1690369521, :regions 0},
      :p5 nil},
-    :preview [{:points 65, :hash -762192797} nil nil nil]},
+    :preview [{:points 65, :hash -1690369521} nil nil nil]},
    1.5
    {:lasers
-    {:p1 {:points 65, :hash -762192797, :regions 0},
-     :p2 {:points 65, :hash -762192797, :regions 0},
-     :p3 {:points 65, :hash -762192797, :regions 0},
+    {:p1 {:points 65, :hash -1690369521, :regions 0},
+     :p2 {:points 65, :hash -1690369521, :regions 0},
+     :p3 {:points 65, :hash -1690369521, :regions 0},
      :p5 nil},
-    :preview [{:points 65, :hash -762192797} nil nil nil]},
+    :preview [{:points 65, :hash -1690369521} nil nil nil]},
    7.25
    {:lasers
-    {:p1 {:points 65, :hash -762192797, :regions 0},
-     :p2 {:points 65, :hash -762192797, :regions 0},
-     :p3 {:points 65, :hash -762192797, :regions 0},
+    {:p1 {:points 65, :hash -1690369521, :regions 0},
+     :p2 {:points 65, :hash -1690369521, :regions 0},
+     :p3 {:points 65, :hash -1690369521, :regions 0},
      :p5 nil},
-    :preview [{:points 65, :hash -762192797} nil nil nil]}},
+    :preview [{:points 65, :hash -1690369521} nil nil nil]}},
   [6 0]
   {0.0
    {:lasers
-    {:p1 {:points 56, :hash -1802253561, :regions 0},
-     :p2 {:points 56, :hash -1802253561, :regions 0},
-     :p3 {:points 56, :hash -1802253561, :regions 0},
+    {:p1 {:points 56, :hash 2130866589, :regions 0},
+     :p2 {:points 56, :hash 2130866589, :regions 0},
+     :p3 {:points 56, :hash 2130866589, :regions 0},
      :p5 nil},
-    :preview [{:points 56, :hash -1802253561} nil nil nil]},
+    :preview [{:points 56, :hash 2130866589} nil nil nil]},
    1.5
    {:lasers
-    {:p1 {:points 56, :hash -1802253561, :regions 0},
-     :p2 {:points 56, :hash -1802253561, :regions 0},
-     :p3 {:points 56, :hash -1802253561, :regions 0},
+    {:p1 {:points 56, :hash 2130866589, :regions 0},
+     :p2 {:points 56, :hash 2130866589, :regions 0},
+     :p3 {:points 56, :hash 2130866589, :regions 0},
      :p5 nil},
-    :preview [{:points 56, :hash -1802253561} nil nil nil]},
+    :preview [{:points 56, :hash 2130866589} nil nil nil]},
    7.25
    {:lasers
-    {:p1 {:points 56, :hash -1802253561, :regions 0},
-     :p2 {:points 56, :hash -1802253561, :regions 0},
-     :p3 {:points 56, :hash -1802253561, :regions 0},
+    {:p1 {:points 56, :hash 2130866589, :regions 0},
+     :p2 {:points 56, :hash 2130866589, :regions 0},
+     :p3 {:points 56, :hash 2130866589, :regions 0},
      :p5 nil},
-    :preview [{:points 56, :hash -1802253561} nil nil nil]}},
+    :preview [{:points 56, :hash 2130866589} nil nil nil]}},
   [7 0]
   {0.0
    {:lasers
-    {:p1 {:points 65, :hash -2107943786, :regions 0},
-     :p2 {:points 65, :hash -2107943786, :regions 0},
-     :p3 {:points 65, :hash -2107943786, :regions 0},
+    {:p1 {:points 65, :hash 907775371, :regions 0},
+     :p2 {:points 65, :hash 907775371, :regions 0},
+     :p3 {:points 65, :hash 907775371, :regions 0},
      :p5 nil},
-    :preview [{:points 65, :hash -2107943786} nil nil nil]},
+    :preview [{:points 65, :hash 907775371} nil nil nil]},
    1.5
    {:lasers
-    {:p1 {:points 65, :hash -2107943786, :regions 0},
-     :p2 {:points 65, :hash -2107943786, :regions 0},
-     :p3 {:points 65, :hash -2107943786, :regions 0},
+    {:p1 {:points 65, :hash 907775371, :regions 0},
+     :p2 {:points 65, :hash 907775371, :regions 0},
+     :p3 {:points 65, :hash 907775371, :regions 0},
      :p5 nil},
-    :preview [{:points 65, :hash -2107943786} nil nil nil]},
+    :preview [{:points 65, :hash 907775371} nil nil nil]},
    7.25
    {:lasers
-    {:p1 {:points 65, :hash -2107943786, :regions 0},
-     :p2 {:points 65, :hash -2107943786, :regions 0},
-     :p3 {:points 65, :hash -2107943786, :regions 0},
+    {:p1 {:points 65, :hash 907775371, :regions 0},
+     :p2 {:points 65, :hash 907775371, :regions 0},
+     :p3 {:points 65, :hash 907775371, :regions 0},
      :p5 nil},
-    :preview [{:points 65, :hash -2107943786} nil nil nil]}}},
+    :preview [{:points 65, :hash 907775371} nil nil nil]}}},
  "timeline"
  {[0 0]
   {0.0
    {:lasers
-    {:p1 {:points 9, :hash 1273659123, :regions 0},
-     :p2 {:points 36, :hash -1736374008, :regions 1},
+    {:p1 {:points 9, :hash 1961106922, :regions 0},
+     :p2 {:points 36, :hash -960543348, :regions 1},
      :p3 nil,
-     :p5 {:points 51, :hash -780812317, :regions 0}},
+     :p5 {:points 51, :hash -564849057, :regions 0}},
     :preview
-    [{:points 89, :hash 351782154}
-     {:points 9, :hash 1273659123}
+    [{:points 89, :hash -1698978192}
+     {:points 9, :hash 1961106922}
      nil
      nil]},
    1.5
    {:lasers
-    {:p1 {:points 9, :hash 1273659123, :regions 0},
-     :p2 {:points 57, :hash -1816964398, :regions 2},
-     :p3 {:points 19, :hash -1841956103, :regions 0},
-     :p5 {:points 51, :hash -780812317, :regions 0}},
+    {:p1 {:points 9, :hash 1961106922, :regions 0},
+     :p2 {:points 57, :hash 1772332853, :regions 2},
+     :p3 {:points 19, :hash -1576265409, :regions 0},
+     :p5 {:points 51, :hash -564849057, :regions 0}},
     :preview
-    [{:points 110, :hash 1804854821}
-     {:points 9, :hash 1273659123}
-     {:points 19, :hash -1841956103}
+    [{:points 110, :hash 876285229}
+     {:points 9, :hash 1961106922}
+     {:points 19, :hash -1576265409}
      nil]},
    7.25
    {:lasers
-    {:p1 {:points 7, :hash 1939033077, :regions 0},
-     :p2 {:points 44, :hash -258284667, :regions 0},
-     :p3 {:points 7, :hash 1939033077, :regions 0},
-     :p5 {:points 51, :hash -780812317, :regions 0}},
-    :preview [{:points 106, :hash -981468954} nil nil nil]}},
+    {:p1 {:points 7, :hash -2078502708, :regions 0},
+     :p2 {:points 44, :hash -818439948, :regions 0},
+     :p3 {:points 7, :hash -2078502708, :regions 0},
+     :p5 {:points 51, :hash -564849057, :regions 0}},
+    :preview [{:points 106, :hash -2002123207} nil nil nil]}},
   [1 0]
   {0.0
    {:lasers
-    {:p1 {:points 13, :hash -1669026394, :regions 0},
-     :p2 {:points 46, :hash -1225784539, :regions 1},
-     :p3 {:points 46, :hash 606047605, :regions 0},
+    {:p1 {:points 13, :hash 455956506, :regions 0},
+     :p2 {:points 46, :hash -2110894703, :regions 1},
+     :p3 {:points 46, :hash -1846870453, :regions 0},
      :p5 nil},
     :preview
-    [{:points 46, :hash -817055672}
+    [{:points 46, :hash -1402597056}
      nil
-     {:points 31, :hash 2121881778}
+     {:points 31, :hash -1258681334}
      nil]},
    1.5
    {:lasers
-    {:p1 {:points 13, :hash -1669026394, :regions 0},
-     :p2 {:points 46, :hash -1225784539, :regions 1},
-     :p3 {:points 46, :hash 606047605, :regions 0},
+    {:p1 {:points 13, :hash 455956506, :regions 0},
+     :p2 {:points 46, :hash -2110894703, :regions 1},
+     :p3 {:points 46, :hash -1846870453, :regions 0},
      :p5 nil},
     :preview
-    [{:points 46, :hash -817055672}
+    [{:points 46, :hash -1402597056}
      nil
-     {:points 31, :hash 2121881778}
+     {:points 31, :hash -1258681334}
      nil]},
    7.25
    {:lasers
-    {:p1 {:points 13, :hash -1669026394, :regions 0},
-     :p2 {:points 46, :hash -1225784539, :regions 1},
-     :p3 {:points 46, :hash 606047605, :regions 0},
+    {:p1 {:points 13, :hash 455956506, :regions 0},
+     :p2 {:points 46, :hash -2110894703, :regions 1},
+     :p3 {:points 46, :hash -1846870453, :regions 0},
      :p5 nil},
     :preview
-    [{:points 46, :hash -817055672}
+    [{:points 46, :hash -1402597056}
      nil
-     {:points 31, :hash 2121881778}
+     {:points 31, :hash -1258681334}
      nil]}},
   [2 0]
   {0.0
    {:lasers
-    {:p1 {:points 16, :hash 533574146, :regions 0},
-     :p2 {:points 16, :hash -1761144888, :regions 1},
-     :p3 {:points 7, :hash 1173478451, :regions 0},
+    {:p1 {:points 16, :hash -258029182, :regions 0},
+     :p2 {:points 16, :hash -568291743, :regions 1},
+     :p3 {:points 7, :hash 1940639128, :regions 0},
      :p5 nil},
     :preview
-    [{:points 16, :hash 182857388}
-     {:points 7, :hash 1801099333}
+    [{:points 16, :hash -1174812146}
+     {:points 7, :hash 634303377}
      nil
      nil]},
    1.5
    {:lasers
-    {:p1 {:points 16, :hash 533574146, :regions 0},
-     :p2 {:points 16, :hash -1761144888, :regions 1},
-     :p3 {:points 7, :hash 1173478451, :regions 0},
+    {:p1 {:points 16, :hash -258029182, :regions 0},
+     :p2 {:points 16, :hash -568291743, :regions 1},
+     :p3 {:points 7, :hash 1940639128, :regions 0},
      :p5 nil},
     :preview
-    [{:points 16, :hash 182857388}
-     {:points 7, :hash 1801099333}
+    [{:points 16, :hash -1174812146}
+     {:points 7, :hash 634303377}
      nil
      nil]},
    7.25
    {:lasers
-    {:p1 {:points 7, :hash 1173478451, :regions 0},
-     :p2 {:points 60, :hash 685367498, :regions 0},
-     :p3 {:points 7, :hash 1173478451, :regions 0},
+    {:p1 {:points 7, :hash 1940639128, :regions 0},
+     :p2 {:points 60, :hash -713955317, :regions 0},
+     :p3 {:points 7, :hash 1940639128, :regions 0},
      :p5 nil},
-    :preview [{:points 60, :hash 1658591805} nil nil nil]}},
+    :preview [{:points 60, :hash 536541983} nil nil nil]}},
   [3 0]
   {0.0
    {:lasers
     {:p1 nil,
-     :p2 {:points 46, :hash -124428019, :regions 0},
+     :p2 {:points 46, :hash -1699886134, :regions 0},
      :p3 nil,
      :p5 nil},
-    :preview [{:points 46, :hash -124428019} nil nil nil]},
+    :preview [{:points 46, :hash -1699886134} nil nil nil]},
    1.5
    {:lasers
     {:p1 nil,
-     :p2 {:points 46, :hash -124428019, :regions 0},
+     :p2 {:points 46, :hash -1699886134, :regions 0},
      :p3 nil,
      :p5 nil},
-    :preview [{:points 46, :hash -124428019} nil nil nil]},
+    :preview [{:points 46, :hash -1699886134} nil nil nil]},
    7.25
    {:lasers {:p1 nil, :p2 nil, :p3 nil, :p5 nil},
     :preview [nil nil nil nil]}}}}

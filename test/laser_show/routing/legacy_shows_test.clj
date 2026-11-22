@@ -6,7 +6,8 @@
    (routing.compose/projector-frame, the frame its engine composes before
    its calibration) and what every preview cell shows must be what
    golden.edn holds: record-golden! wrote it before Z4 changed anything
-   (at c067030), so Z4's conversion has to route every one the same.
+   (at c067030, and again at 64fab99 when digest moved to steps of 1/65536),
+   so Z4's conversion has to route every one the same.
 
    The rig: Laser 1, Laser 2 (in Graphics, a smaller safety zone), Laser 3
    (in the manual Left), Laser 4 (off, in Graphics) and Crowd (excluded from
@@ -77,14 +78,27 @@
   "Every quarter beat up to the last of beats."
   (mapv #(* 0.25 %) (range (inc (long (* 4 (peek beats)))))))
 
+(def ^:private steps-per-unit
+  "A frame's numbers are hashed in steps of 1/65536: finer than a 16-bit
+   coordinate (2/65535 from -1 to 1) and a 16-bit colour (1/65535), so any
+   change a laser could show changes the hash, but the last bits of a double
+   don't. Those differ from machine to machine: Math/sin and Math/cos are
+   only good to an ulp, and the JVM computes them differently on aarch64
+   and x86-64. A power of two keeps whole fractions such as 0.5 and 0.25 off
+   the rounding edges."
+  65536.0)
+
+(defn- step [v]
+  (Math/round (* steps-per-unit (double v))))
+
 (defn- digest
-  "A frame as {:points :hash}: its point count and the hash of its points as
-   doubles (two frames hash alike only when every number is the same). nil
-   for no frame."
+  "A frame as {:points :hash}: its point count and the hash of its points'
+   numbers in steps of 1/65536 (two frames hash alike only when every number
+   rounds to the same step). nil for no frame."
   [frame]
   (when frame
     {:points (count frame)
-     :hash (hash (mapv #(mapv double %) frame))}))
+     :hash (hash (mapv #(mapv step %) frame))}))
 
 (defn- lasers
   "{projector-id digest} of what each laser of the tick's routing draws,
@@ -142,7 +156,8 @@
     (binding [*out* w
               *print-namespace-maps* false]
       (println ";; What every laser drew and every preview cell showed of each fixture show's")
-      (println ";; cues, before zones Z4 (laser-show.routing.legacy-shows-test/record-golden!).")
+      (println ";; cues, before zones Z4 (laser-show.routing.legacy-shows-test/record-golden!),")
+      (println ";; each frame's numbers hashed in steps of 1/65536 (digest).")
       (pprint/pprint (routes)))))
 
 (defn- golden []
@@ -162,6 +177,22 @@
                   (str "every laser at beat " b))
               (is (= (get-in expected [show cell b :preview]) (get-in got [b :preview]))
                   (str "every preview cell at beat " b)))))))))
+
+(deftest digest-is-the-same-on-every-platform-test
+  (let [digest #'digest
+        ;; destination [0 0]'s sixth point at beat 1.5, as macOS (aarch64)
+        ;; and Linux (x86-64) computed it: their Math/sin and Math/cos differ
+        ;; in the last bits.
+        mac [[0.1 0.2 1.0 1.0 1.0] [-0.49899692895349707 -0.0316554086212551 1.0 1.0 1.0]]
+        linux [[0.1 0.2 1.0 1.0 1.0] [-0.498996928953497 -0.03165540862125513 1.0 1.0 1.0]]]
+    (is (= (digest mac) (digest linux)) "a last-bit difference isn't a different frame")
+    (is (= (digest [[0.0 0.0 0.5 0.5 0.5]]) (digest [[-0.0 -1e-17 0.5 0.5 0.5]])) "nor is -0.0")
+    (testing "a different frame is"
+      (is (not= (digest mac) (digest (assoc-in mac [1 0] (+ -0.49899692895349707 (/ 1.0 32767))))) "one 16-bit step of x")
+      (is (not= (digest mac) (digest (assoc-in mac [1 1] (- -0.0316554086212551 (/ 1.0 32767))))) "of y")
+      (is (not= (digest mac) (digest (assoc-in mac [0 3] (- 1.0 (/ 1.0 255))))) "one 8-bit step of a colour")
+      (is (not= (digest mac) (digest (rseq mac))) "the same points in another order")
+      (is (not= (digest mac) (digest (pop mac))) "a point fewer"))))
 
 (deftest legacy-loads-are-clean-test
   (doseq [show show-names]
