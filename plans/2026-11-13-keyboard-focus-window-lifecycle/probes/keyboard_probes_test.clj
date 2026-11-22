@@ -22,12 +22,15 @@
 ;;   p16  Cut with a failing OS write still deletes, and leaves nothing to paste
 ;;   p17  how long the clipboard's EDN takes to write (pretty-printed) and to read back,
 ;;        for a small, a large and a timeline-sized clip (no UI; any thread)
+;;   p18  the step grid (zones Z6) keeps a clipboard of its own: its Copy reaches neither
+;;        [:ui :clipboard] nor the OS clipboard, and its Paste ignores what lists copy
+;;        (added at a38ea43)
 ;; p9 sets -Dlaser-show.dev for its own duration only. p9, p11 and p16 wrap one
 ;; function with with-redefs (a recorder around the original, or a failing OS write);
 ;; each says which. p10 keeps the FX thread busy with a 500 ms sleep, to show what
 ;; waits for it (a render or a file chooser keeps it busy the same way). The OS
 ;; clipboard here is the headless platform's, not the Mac's. All of p5-p17 were run
-;; again at cc9e000 (2026-11-20) with the same findings.
+;; again at cc9e000 (2026-11-20) and at a38ea43 (2026-11-21) with the same findings.
 ;;
 ;; Run from the repo root (macOS Apple Silicon; use :win, :linux or :mac elsewhere).
 ;; The plan folder is the classpath root, so this namespace is probes.keyboard-probes-test:
@@ -545,3 +548,26 @@
         (say "p17" label ":" (count text) "chars; write (pprint)" (format "%.2f ms" (double (median-ms #(ser/serialize-for-clipboard clip))))
              "; write (pr-str)" (format "%.2f ms" (double (median-ms #(pr-str clip))))
              "; read back" (format "%.2f ms" (double (median-ms #(ser/deserialize text :silent? true)))))))))
+
+(deftest p18-the-step-grid-has-a-clipboard-of-its-own
+  ;; EXPECT at a38ea43: the step grid's Copy (zones Z6) writes [:ui :step-grid :clipboard]
+  ;; only, so the one clipboard and the OS clipboard keep what a list copied; its Paste is
+  ;; off before any copy and doesn't follow what the other lists copy
+  (set-os-clip! "")
+  (let [target {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]}
+        head #(when-let [s (os-clip)] (subs s 0 (min 24 (count s))))]
+    (events/dispatch! {:event/type :step-grid/open :target target})
+    (ui/wait-for! #(some? (ui/query "#step-grid-paste")))
+    (say "p18 the step grid's Paste disabled before any copy =" (disabled-now? "#step-grid-paste"))
+    (select-first-cue-item!)
+    (events/dispatch! (copy-event [:cue-chain 0 0] cue-items-path :cue-chain-items))
+    (flush!)
+    (say "p18 after a cue list copy: the step grid's Paste disabled =" (disabled-now? "#step-grid-paste")
+         "; OS head =" (pr-str (head)))
+    (events/dispatch! {:event/type :step-grid/copy :target target})
+    (flush!)
+    (say "p18 after the step grid's Copy: [:ui :step-grid :clipboard] keys ="
+         (vec (sort (keys (get-in (raw) [:ui :step-grid :clipboard]))))
+         "; [:ui :clipboard] type =" (get-in (raw) [:ui :clipboard :type])
+         "; OS head =" (pr-str (head))
+         "; Paste disabled =" (disabled-now? "#step-grid-paste"))))

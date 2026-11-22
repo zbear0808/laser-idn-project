@@ -1,7 +1,7 @@
 # State integrity — overview
 
 **Written:** 2026-11-20   **Written for commit:** `3229c95` (`master`)
-**Status:** In progress. **01 done** (2026-11-21, `09b6db7`, `dba29bb`; its §11 As built), its E1–E3 answered A, the ★ options; 02 needs W1–W6, and the clipboard step (keyboard plan, Step 4a) needs D8, D13 and D14   **Last verified against:** 01 at `fe7d554` (2026-11-21, re-checked after the output drivers, zones Z4–Z6, vibe Phase 8, Decimate's follow-ups and the Projectors layout pass; probes e1–e4 run three times there, e1i added); 02 and the clipboard update at `cc9e000` (each re-checked there after Decimate landed; probes w1–w6 and keyboard p5–p7, p9–p17 run at `3229c95` and again at `cc9e000`), not re-checked since
+**Status:** In progress. **01 done** (2026-11-21, `09b6db7`, `dba29bb`; its §11 As built), its E1–E3 answered A, the ★ options; 02 needs W1–W6; the clipboard step (keyboard plan, Step 4a) has D8, D13 and D14 answered (2026-11-21, the ★ options) and is next   **Last verified against:** 01 at `fe7d554` (2026-11-21, re-checked after the output drivers, zones Z4–Z6, vibe Phase 8, Decimate's follow-ups and the Projectors layout pass; probes e1–e4 run three times there, e1i added); the clipboard step at `a38ea43` (2026-11-21, keyboard probes p5–p7 and p9–p17 re-run there, p18 added for the step grid's clipboard); 02 at `cc9e000` (probes w1–w6 run at `3229c95` and again at `cc9e000`), not re-checked since
 **Supersedes / Superseded by:** none   **Related findings:** review 02 M1, #2, #15, #21, #23; review 04 #23, MR7; keyboard K-6…K-11; output runtime O-9
 
 The 2026-11-20 cljfx state audit was done by six read-only auditors. It was reported in the session and isn't saved. It found three ways app state can be wrong for reasons unrelated to any handler's logic:
@@ -22,7 +22,7 @@ This folder plans the first two. The third already had a plan, so it was updated
 | Doc | What | Size | Needs | Depends on |
 |---|---|---|---|---|
 | `01-engine-snapshot.md` | Every frame comes from one snapshot | **done** (`09b6db7`, `dba29bb`) | – | nothing |
-| `../2026-11-13-keyboard-focus-window-lifecycle/04-phase4-clipboard.md`, Step 4a | One clipboard | ~1.25 d | D8, D13, D14 | nothing; it no longer waits for keyboard Phase 3 (04 §0) |
+| `../2026-11-13-keyboard-focus-window-lifecycle/04-phase4-clipboard.md`, Step 4a | One clipboard (and, since the `a38ea43` re-check, the step grid's clipboard folded into it) | ~1.25 d | D8, D13, D14 (answered) | nothing; it no longer waits for keyboard Phase 3 (04 §0) |
 | `02-direct-state-writes.md` | No state writes outside the event pipeline | ~4½ d (~3½ with W2 B and W3 B) | W1–W6 | nothing; commit 9 is better after 4a |
 
 That is about 6¾ days in total (about 5¾ with W2 B and W3 B). Steps 4b and 4c of the clipboard plan (~1 day, D9: types, new ids on paste, one-step Cut) are not part of this batch.
@@ -60,16 +60,16 @@ None of the three depends on another, but they share some edits:
 
 ## 3. Decisions
 
-Each is written out in full, with options, in its doc (★ = recommended). E1–E3 are answered; the rest are open.
+Each is written out in full, with options, in its doc (★ = recommended). E1–E3, D8, D13 and D14 are answered; the rest are open.
 
 | ID | Question | Doc | Needed before | ★ |
 |---|---|---|---|---|
 | E1 | What clock times Identify's flash | 01 | 01 | **Answered A** (2026-11-21): the tick's wall clock in the snapshot; each half starts on a tick boundary, at most 16.7 ms late |
 | E2 | Where a laser's safety zone is normalized | 01 | 01 | **Answered A** (2026-11-21): per frame as today, from the snapshot |
 | E3 | Does the preview get the same consistency | 01 | 01 | **Answered A** (2026-11-21): no change; the thumbnail's outline can lead its frame by up to a tick while you drag |
-| D8 | The clipboard's source of truth, and when the OS clipboard is read | 04 | Step 4a | A: `[:ui :clipboard]`; the OS clipboard is read only while this instance hasn't copied anything |
-| D13 | When Paste buttons and menu items are enabled | 04 | Step 4a | B: when the clipboard holds something the target takes, or while it is still empty ("Nothing to paste here" on a miss) |
-| D14 | How the OS clipboard is read | 04 | Step 4a | A: an effect reads on the FX thread and dispatches the paste back; the agent never waits |
+| D8 | The clipboard's source of truth, and when the OS clipboard is read | 04 | Step 4a | **Answered A** (2026-11-21): `[:ui :clipboard]`; the OS clipboard is read only while this instance hasn't copied anything |
+| D13 | When Paste buttons and menu items are enabled | 04 | Step 4a | **Answered B** (2026-11-21): when the clipboard holds something the target takes, or while it is still empty ("Nothing to paste here" on a miss) |
+| D14 | How the OS clipboard is read | 04 | Step 4a | **Answered A** (2026-11-21): an effect reads on the FX thread and dispatches the paste back; the agent never waits |
 | W1 | How a write inside a turn survives the event's `:state` | 02 | commit 1 | A: `:state` runs first in every event |
 | W2 | What keeps direct writers from coming back | 02 | commit 9 | A: a kondo `:discouraged-var` rule in CI, plus a runtime guard (throws in dev mode and tests, logs in production) |
 | W3 | One event thread for every app instance | 02 | commit 2 | A: yes |
