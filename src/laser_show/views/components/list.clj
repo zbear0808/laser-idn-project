@@ -595,7 +595,7 @@
    When :scrollable? is false, the items VBox is rendered directly
    (parent manages scrolling)."
   [{:keys [fx/context items get-item-label
-           on-copy clipboard-items header-label empty-text allow-groups?
+           clipboard-type header-label empty-text allow-groups?
            component-id on-change-event on-change-params items-path
            compact? scrollable?]
     :or {header-label "LIST"
@@ -612,7 +612,8 @@
         selection-count (count selected-ids)
         chain-depth (chains/nesting-depth items)
         can-create-group? (and allow-groups? (< chain-depth chains/max-nesting-depth))
-        can-paste? (boolean (seq clipboard-items))
+        ;; The clipboard says, not the list (keyboard plan D13 B)
+        can-paste? (fx/sub-ctx context subs/can-paste? (or clipboard-type :cue-chain-items))
         items-vbox {:fx/type :v-box
                     :spacing 4
                     :children (u/mapv-indexed
@@ -767,8 +768,7 @@
                                true)
 
                            (and ctrl? (= code javafx.scene.input.KeyCode/V))
-                           (do (log/debug "Handling Ctrl+V (paste)"
-                                          {:clipboard-items-count (count (:clipboard-items props))})
+                           (do (log/debug "Handling Ctrl+V (paste)")
                                (dispatch-paste-items! props)
                                true)
 
@@ -827,9 +827,6 @@
    - :on-change-params - Base params for change event
    - :items-path - Direct path to items in state
    
-   - :on-copy-fn - Custom copy function
-   - :clipboard-items - Items for paste
-   
    UI customization:
    - :header-label - Header text (default 'LIST')
    - :empty-text - Empty state text
@@ -843,7 +840,6 @@
            get-context-menu get-group-context-menu
            item-id-key item-registry-fn
            on-change-event on-change-params items-path
-           on-copy-fn clipboard-items
            header-label empty-text allow-groups? fallback-label
            compact? scrollable? show-enable-toggle?]
     :or {header-label "LIST"
@@ -853,10 +849,6 @@
          compact? false
          scrollable? true
          show-enable-toggle? true}}]
-  #_(log/debug "list-editor render"
-               {:component-id component-id
-                :items-count (count items)
-                :clipboard-items-count (count clipboard-items)})
   (let [label-fn (cond
                    get-item-label
                    get-item-label
@@ -871,9 +863,7 @@
                        :items-path items-path
                        :on-change-event on-change-event
                        :on-change-params on-change-params
-                       :clipboard-items clipboard-items
-                       :clipboard-type (get on-change-params :clipboard-type :cue-chain-items)
-                       :on-copy on-copy-fn}
+                       :clipboard-type (get on-change-params :clipboard-type :cue-chain-items)}
 
         props-atom (get-or-create-props-atom! component-id)
         _ (update-props-atom! component-id handler-props)]
@@ -904,7 +894,7 @@
                                       component-id
                                       [component-id]))))
             :children [(u/->map&
-                        items clipboard-items header-label
+                        items header-label
                         empty-text allow-groups? component-id on-change-event on-change-params items-path
                         compact? scrollable? get-group-label get-context-menu get-group-context-menu
                         show-enable-toggle?
@@ -913,5 +903,4 @@
                         :v-box/vgrow :always
                         :get-item-label label-fn
                         ;; The toolbar's Copy and Paste use the same type as ⌘C and ⌘V
-                        :clipboard-type (get on-change-params :clipboard-type :cue-chain-items)
-                        :on-copy on-copy-fn)]}}))
+                        :clipboard-type (get on-change-params :clipboard-type :cue-chain-items))]}}))

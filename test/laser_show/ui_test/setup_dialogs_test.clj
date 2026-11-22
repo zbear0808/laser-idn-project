@@ -7,7 +7,6 @@
    shows whole."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
-            [laser-show.state.clipboard :as clipboard]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]))
@@ -281,7 +280,7 @@
     (ui/click! robot "#projectors-tab")
     (ui/wait-for! #(some? (ui/query "#chain-copy-selection")))
     (ui/click! robot "#chain-copy-selection")
-    (ui/wait-for! #(= :item-effects (:type (clipboard/get-clipboard))))
+    (ui/wait-for! #(= :item-effects (get-in (app-state) [:ui :clipboard :type])))
     (events/dispatch! {:event/type :projectors/select-projector :projector-id :b})
     (ui/wait-for! #(= "CONFIGURE: Fake 2" (ui/node-text "#projector-config-title")))
     (ui/wait-for! #(not (ui/on-fx-thread (fn [] (.isDisable ^javafx.scene.Node (ui/query "#chain-paste-items"))))))

@@ -102,8 +102,10 @@
 (defn- edit-menu-items
   "Create Edit menu items."
   [context]
-  (let [clipboard (fx/sub-ctx context subs/clipboard)
-        has-clipboard? (some? clipboard)
+  (let [;; Paste pastes onto the active tab's selected cell: on when the
+        ;; clipboard holds that kind of cell, or nothing yet (D13 B)
+        paste-target (case (fx/sub-ctx context subs/active-tab) :grid :cue-chain :effects :effects-cell nil)
+        can-paste? (and paste-target (fx/sub-ctx context subs/can-paste? paste-target))
         can-undo? (fx/sub-ctx context subs/can-undo?)
         can-redo? (fx/sub-ctx context subs/can-redo?)
         undo-label (fx/sub-ctx context subs/undo-label)
@@ -132,7 +134,7 @@
      {:fx/type :menu-item
       :text "Paste"
       :accelerator [:shortcut :v]
-      :disable (not has-clipboard?)
+      :disable (not can-paste?)
       :on-action {:event/type :edit/paste}}
      
      {:fx/type :separator-menu-item}

@@ -8,7 +8,6 @@
    - Editor lifecycle (open)
    - Preset management (add)
    - Tab switching (preset banks, effect banks)
-   - Clipboard operations
    - Targets: the cue's and each item's (zones plan Z4)
    
    Effect-level operations have moved to chain.clj:
@@ -22,8 +21,7 @@
   (:require [clojure.tools.logging :as log]
             [laser-show.events.helpers :as h]
             [laser-show.animation.cue-chains :as cue-chains]
-            [laser-show.routing.targets :as targets]
-            [laser-show.state.clipboard :as clipboard]))
+            [laser-show.routing.targets :as targets]))
 
 
 ;; Path Helpers
@@ -34,13 +32,6 @@
    Uses new unified :chains domain structure."
   [col row]
   [:chains :cue-chains [col row] :items])
-
-(defn- item-effects-ui-path
-  "Get the path to item effects UI state.
-   Stored separately per item to track selection, UI modes, etc.
-   FLATTENED: No :data nesting - fields directly in dialog map."
-  [col row item-path]
-  [:ui :dialogs :cue-chain-editor :item-effects-ui (vec item-path)])
 
 
 ;; Editor Lifecycle
@@ -59,7 +50,6 @@
                          {:open? true
                           :col col
                           :row row
-                          :clipboard nil
                           :active-preset-tab (or initial-tab :geometric)
                           :selected-effect-id nil
                           :item-effects-ui {}}))
@@ -151,28 +141,6 @@
   (let [effects-path (vec (concat (cue-chain-path col row) item-path [:effects]))]
     {:state (-> state
                 (assoc-in effects-path items))}))
-
-
-;; Clipboard Operations
-
-
-(defn- handle-cue-chain-set-item-effects-clipboard
-  "Set the clipboard for item effects (separate from cue chain clipboard).
-   Also copies to system clipboard as serialized EDN."
-  [{:keys [col row item-path effects state]}]
-  (let [ui-path (item-effects-ui-path col row item-path)]
-    (when (seq effects)
-      (clipboard/copy-item-effects! effects))
-    {:state (assoc-in state (conj ui-path :clipboard) effects)}))
-
-(defn- handle-cue-chain-set-clipboard
-  "Set the clipboard for cue chain items (presets and groups).
-   Also copies to system clipboard as serialized EDN.
-   FLATTENED: No :data nesting."
-  [{:keys [items state]}]
-  (when (seq items)
-    (clipboard/copy-cue-chain-items! items))
-  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :clipboard :items] items)})
 
 
 ;; Targets (zones plan Z4): where the cue's content goes
@@ -276,8 +244,6 @@
     
     ;; Hierarchical list integration
     :cue-chain/set-item-effects (handle-cue-chain-set-item-effects event)
-    :cue-chain/set-clipboard (handle-cue-chain-set-clipboard event)
-    :cue-chain/set-item-effects-clipboard (handle-cue-chain-set-item-effects-clipboard event)
     
     ;; Targets
     :cue-chain/set-target (handle-cue-chain-set-target event)

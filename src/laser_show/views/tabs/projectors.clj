@@ -17,7 +17,6 @@
             [laser-show.animation.chains :as chains]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.fit-guard :as fit-guard]
-            [laser-show.state.clipboard :as clipboard]
             [laser-show.common.util :as u]
             [laser-show.css.core :as css]
             [laser-show.idn.stream :as stream]
@@ -514,9 +513,8 @@
    Props:
    - :fx/context - Context for subscriptions
    - :projector-id - ID of the projector
-   - :selected-ids - Set of selected item IDs
-   - :clipboard-items - Items available for pasting"
-  [{:keys [fx/context projector-id selected-ids clipboard-items]}]
+   - :selected-ids - Set of selected item IDs"
+  [{:keys [fx/context projector-id]}]
   (let [;; Read effects from chains domain, not from projector config
         effects (fx/sub-ctx context subs/projector-effect-chain projector-id)
         ;; Build label map from calibration effects
@@ -530,10 +528,9 @@
      :get-item-label (fn [item]
                        (get labels (:effect-id item) "Unknown Effect"))
      :on-change-event :chain/set-items
-     ;; Copied and pasted as effects, so the Paste button (lit by
-     ;; clipboard/get-effects-to-paste) and ⌘V paste the same thing
+     ;; Copied and pasted as effects: its Paste button (subs/can-paste?)
+     ;; and ⌘V both ask the clipboard about :item-effects
      :on-change-params {:domain :projector-effects :entity-key projector-id :clipboard-type :item-effects}
-     :clipboard-items clipboard-items
      :header-label "EFFECTS"
      :empty-text "No calibration effects\nAdd from menu above"}))
 
@@ -684,8 +681,7 @@
         selected-effect-path (when first-selected-id
                                (chains/find-path-by-id effects first-selected-id))
         selected-effect (when selected-effect-path
-                          (chains/get-item-at-path effects selected-effect-path))
-        clipboard-items (clipboard/get-effects-to-paste)]
+                          (chains/get-item-at-path effects selected-effect-path))]
     (if projector
       {:fx/type :h-box
        :min-height 80
@@ -729,8 +725,7 @@
                                :fx/key projector-id  ;; Force recreation when projector changes to avoid stale closures
                                :fx/context context
                                :projector-id projector-id
-                               :selected-ids selected-ids
-                               :clipboard-items clipboard-items}
+                               :selected-ids selected-ids}
                               {:fx/type :separator}
                               {:fx/type :button
                                :id "projector-remove-button"

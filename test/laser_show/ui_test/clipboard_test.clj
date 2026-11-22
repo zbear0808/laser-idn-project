@@ -198,3 +198,268 @@
     (ui/wait-for! #(= [:circle :square] (mapv :preset-id (cue-items))))
     (ui/wait-for! #(= :cue-chain-items (:type (slot))))
     (is (= [:square] (mapv :preset-id (:items (slot)))) "the slot holds the clip it read")))
+
+
+;; Paste buttons and menu items follow the clipboard (p5, p11, p12; D13 B)
+
+(defn- node ^javafx.scene.Node [selector] (first (ui/query-all selector)))
+
+(defn- disabled? [selector]
+  (ui/wait-for! #(some? (node selector)))
+  (ui/on-fx-thread #(.isDisabled (node selector))))
+
+(def ^:private cue-paste "#list-editor-cue-chain-0-0 #chain-paste-items")
+(def ^:private item-fx-paste "#list-editor-item-effects-0-0 #chain-paste-items")
+(def ^:private chain-paste "#chain-paste-items")
+
+(defn- two-projectors!
+  "Fake 1 and Fake 2, added as the Add Projector dialog adds them; Fake 1's
+   chain an RGB curves and an Axis Transform, the Axis Transform selected,
+   Fake 1 selected. Returns their ids."
+  []
+  (events/dispatch! {:event/type :projectors/add-manual :name "Fake 1" :host "127.0.0.1"})
+  (flush!)
+  (Thread/sleep 2)
+  (events/dispatch! {:event/type :projectors/add-manual :name "Fake 2" :host "127.0.0.2"})
+  (flush!)
+  (let [id-of (fn [n] (some (fn [[id p]] (when (= n (:name p)) id)) (:projectors (raw))))
+        a (id-of "Fake 1")
+        b (id-of "Fake 2")]
+    ;; A new projector comes with a calibration chain of its own: set both
+    ;; as the chain list sets them
+    (events/dispatch! {:event/type :chain/set-items :domain :projector-effects :entity-key a
+                       :items [{:id (random-uuid) :effect-id :rgb-curves :enabled? true
+                                :params {:r-curve-points [[0.0 0.0] [1.0 1.0]]
+                                         :g-curve-points [[0.0 0.0] [1.0 1.0]]
+                                         :b-curve-points [[0.0 0.0] [1.0 1.0]]}}
+                               {:id (random-uuid) :effect-id :axis-transform :enabled? true
+                                :params {:mirror-x? false :mirror-y? false :swap-axes? false}}]})
+    (events/dispatch! {:event/type :chain/set-items :domain :projector-effects :entity-key b :items []})
+    (events/dispatch! {:event/type :projectors/select-projector :projector-id a})
+    (flush!)
+    (events/dispatch! {:event/type :list/select-item :component-id [:projector-effects a]
+                       :item-id (:id (second (get-in (raw) [:chains :projector-effects a :items])))
+                       :mode :single :items-path [:chains :projector-effects a :items]})
+    (flush!)
+    [a b]))
+
+(defn- chain-of [id] (mapv :effect-id (get-in (raw) [:chains :projector-effects id :items])))
+
+(def ^:private os-readers
+  "The functions that read the OS clipboard: the :clipboard/read effect's,
+   and, until Step 4a's last commit removes it, the old helper's."
+  [#'events/system-clipboard-text #'clipboard/read-from-system-clipboard])
+
+(defn- count-os-reads
+  "(f) with every OS clipboard read counted; the count."
+  [f]
+  (let [reads (atom 0)]
+    (with-redefs-fn (into {} (map (fn [v] (let [orig @v] [v (fn [& args] (swap! reads inc) (apply orig args))])))
+                          os-readers)
+      f)
+    @reads))
+
+(deftest nothing-reads-the-system-clipboard-while-rendering-test
+  ;; p11: before Step 4a the projector panel read the OS clipboard on every
+  ;; render, and the effects grid's chain editor did too
+  (let [robot (ui/robot)
+        [a _] (two-projectors!)
+        reads (count-os-reads
+               (fn []
+                 (ui/click! robot "#projectors-tab")
+                 (ui/wait-for! #(some? (node chain-paste)))
+                 (events/dispatch! {:event/type :list/select-item :component-id [:projector-effects a]
+                                    :item-id (:id (first (get-in (raw) [:chains :projector-effects a :items])))
+                                    :mode :single :items-path [:chains :projector-effects a :items]})
+                 (flush!)
+                 (ui/click! robot "#chain-copy-selection")
+                 (ui/wait-for! #(= :item-effects (:type (slot))))
+                 (events/dispatch! {:event/type :effect-chain/open-editor :col 0 :row 3})
+                 (ui/wait-for! #(some (fn [t] (and t (str/starts-with? t "Effects Chain"))) (ui/window-titles)))
+                 (ui/wait-for! #(some? (node "#list-editor-effect-chain-0-3")))
+                 (flush!)))]
+    (is (zero? reads) "no OS read while rendering: the slot held a clip, so no paste read either")))
+
+(deftest copy-lights-the-same-chains-paste-test
+  ;; p11: before Step 4a, after Copy the same chain's Paste stayed off until
+  ;; something else re-rendered the panel
+  (let [robot (ui/robot)
+        [a b] (two-projectors!)]
+    (events/dispatch! {:event/type :grid/copy-cell :col 0 :row 0})
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(= :cue-chain (:type (slot))))
+    (ui/wait-for! #(disabled? chain-paste))
+    (is (disabled? chain-paste) "a copied cue: nothing a calibration chain takes")
+    (ui/click! robot "#chain-copy-selection")
+    (ui/wait-for! #(not (disabled? chain-paste)))
+    (testing "and another projector's chain takes it"
+      (events/dispatch! {:event/type :projectors/select-projector :projector-id b})
+      (ui/wait-for! #(= "CONFIGURE: Fake 2" (ui/node-text "#projector-config-title")))
+      (ui/wait-for! #(not (disabled? chain-paste)))
+      (ui/click! robot chain-paste)
+      (ui/wait-for! #(= [:axis-transform] (chain-of b))))
+    (is (= [:rgb-curves :axis-transform] (chain-of a)))))
+
+(deftest cue-editor-paste-lights-after-a-copy-test
+  ;; p5: before Step 4a both of the Cue Chain Editor's Paste buttons stayed
+  ;; off after a copy ([true true])
+  (let [robot (ui/robot)]
+    (events/dispatch! {:event/type :grid/copy-cell :col 1 :row 0})
+    (open-cue-editor!)
+    (add-cue-items! [:square])
+    (select-cue-item! robot 1)
+    (ui/wait-for! #(some? (node item-fx-paste)))
+    (ui/wait-for! #(and (disabled? cue-paste) (disabled? item-fx-paste)))
+    (is (= [true true] [(disabled? cue-paste) (disabled? item-fx-paste)]) "a copied cell: neither list takes it")
+    (shortcut! robot KeyCode/C)
+    (ui/wait-for! #(= :cue-chain-items (:type (slot))))
+    (ui/wait-for! #(not (disabled? cue-paste)))
+    (is (not (disabled? item-fx-paste)) "an item's effects take cue items too until Step 4b (§7, first table)")
+    (ui/click! robot cue-paste)
+    (ui/wait-for! #(= [:circle :square :square] (mapv :preset-id (cue-items))))))
+
+(defn- items-change-on-paste?
+  "Does ⌘V in the list whose rows are row-selector change (items)? The
+   first row is clicked first, so the list has focus."
+  [robot row-selector items]
+  (let [before (items)]
+    (ui/click-node! robot (node row-selector))
+    (flush!)
+    (shortcut! robot KeyCode/V)
+    (flush!)
+    (not= before (items))))
+
+(deftest paste-button-and-shortcut-agree-test
+  ;; p12: before Step 4a, with effects on the clipboard the effects grid's
+  ;; chain editor lit Paste, and Paste then pasted nothing (1 → 1)
+  (let [robot (ui/robot)
+        [a _] (two-projectors!)
+        fx-items #(get-in (raw) [:chains :effect-chains [0 3] :items])
+        fx-row "#list-editor-effect-chain-0-3 .chain-item"
+        fx-paste "#list-editor-effect-chain-0-3 #chain-paste-items"
+        open-fx-editor! (fn []
+                          (events/dispatch! {:event/type :effect-chain/open-editor :col 0 :row 3})
+                          (ui/wait-for! #(some? (node fx-paste))))
+        close-fx-editor! (fn []
+                           (events/dispatch! {:event/type :ui/close-dialog :dialog-id :effect-chain-editor})
+                           (ui/wait-for! #(nil? (node fx-paste))))]
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(some? (node chain-paste)))
+    (testing "effects on the clipboard (a projector chain's Copy)"
+      (ui/click! robot "#chain-copy-selection")
+      (ui/wait-for! #(= :item-effects (:type (slot))))
+      (open-fx-editor!)
+      (let [enabled? (not (disabled? fx-paste))]
+        (is (= enabled? (items-change-on-paste? robot fx-row fx-items)) "the effects grid's chain"))
+      (close-fx-editor!)
+      (let [enabled? (not (disabled? chain-paste))]
+        (is enabled?)
+        (is (= enabled? (items-change-on-paste? robot (str "#list-editor-projector-effects-" (name a) " .chain-item") #(chain-of a)))
+            "the projector chain")))
+    (testing "cue items on the clipboard (the effects grid's chain copies as cue items until Step 4b)"
+      (open-fx-editor!)
+      (ui/click-node! robot (node fx-row))
+      (flush!)
+      (shortcut! robot KeyCode/C)
+      (ui/wait-for! #(= :cue-chain-items (:type (slot))))
+      (let [enabled? (not (disabled? fx-paste))]
+        (is (= enabled? (items-change-on-paste? robot fx-row fx-items)) "the effects grid's chain"))
+      (close-fx-editor!)
+      (let [enabled? (not (disabled? chain-paste))]
+        (is (not enabled?))
+        (is (= enabled? (items-change-on-paste? robot (str "#list-editor-projector-effects-" (name a) " .chain-item") #(chain-of a)))
+            "the projector chain")))))
+
+(defn- edit-paste-item ^javafx.scene.control.MenuItem []
+  (let [^javafx.scene.control.MenuButton menu (node "#edit-menu")]
+    (ui/on-fx-thread #(some (fn [^javafx.scene.control.MenuItem i] (when (= "Paste" (.getText i)) i))
+                            (.getItems menu)))))
+
+(defn- edit-paste-disabled? [] (ui/on-fx-thread #(.isDisable (edit-paste-item))))
+
+(defn- cell-paste-disabled?
+  "Is the Paste item of the right-click menu of the cell at selector disabled?"
+  [selector]
+  (let [cell (node selector)]
+    (ui/on-fx-thread
+     #(let [^javafx.scene.control.Labeled holder (.getParent cell)]
+        (first (some (fn [^javafx.scene.control.MenuItem i]
+                       (when (str/starts-with? (str (.getText i)) "Paste") [(.isDisable i)]))
+                     (.getItems (.getContextMenu holder))))))))
+
+(defn- shortcut-in-main-window!
+  "⌘V (Ctrl+V elsewhere) as the main window's scene gets it with nothing
+   focused taking it: the Edit menu's accelerator."
+  [^KeyCode code]
+  (let [meta? (= KeyCode/COMMAND (ui/shortcut-key-code))]
+    (ui/on-fx-thread #(javafx.event.Event/fireEvent
+                       (node "#main-layout")
+                       (javafx.scene.input.KeyEvent. javafx.scene.input.KeyEvent/KEY_PRESSED "" "" code
+                                                     false (not meta?) false meta?)))
+    (ui/sync-fx!)))
+
+(deftest paste-is-a-maybe-before-the-first-copy-test
+  ;; D13 B: with nothing copied in this app, every Paste is on, and a paste
+  ;; that finds nothing on the OS clipboard says so
+  (let [robot (ui/robot)
+        [a _] (two-projectors!)]
+    (set-os-text! "hello from another app")
+    (is (nil? (slot)))
+    (testing "the grid: Edit > Paste and a cell's menu"
+      (ui/click! robot "#grid-cell-5-2")
+      (ui/wait-for! #(= [5 2] (get-in (raw) [:grid :selected-cell])))
+      (ui/wait-for! #(false? (edit-paste-disabled?)))
+      (is (false? (cell-paste-disabled? "#grid-cell-5-2")))
+      (is (false? (cell-paste-disabled? "#grid-cell-0-0"))))
+    (testing "the projector chain"
+      (ui/click! robot "#projectors-tab")
+      (ui/wait-for! #(some? (node chain-paste)))
+      (is (not (disabled? chain-paste))))
+    (testing "the Cue Chain Editor's two lists, and a paste that finds nothing"
+      (open-cue-editor!)
+      (select-cue-item! robot 0)
+      (ui/wait-for! #(some? (node item-fx-paste)))
+      (is (= [false false] [(disabled? cue-paste) (disabled? item-fx-paste)]))
+      (ui/click! robot cue-paste)
+      (ui/wait-for! #(= "Nothing to paste here" (get-in (raw) [:ui :notice :text])))
+      (ui/wait-for! #(= "Nothing to paste here"
+                        (some-> (node "#status-notice-text") (as-> n (ui/on-fx-thread (fn [] (.getText ^javafx.scene.control.Labeled n)))))))
+      (is (= [:circle] (mapv :preset-id (cue-items))) "nothing pasted")
+      (is (nil? (slot)) "and nothing copied"))
+    (is (= [:rgb-curves :axis-transform] (chain-of a)))))
+
+(deftest menu-paste-agrees-with-the-clipboard-test
+  ;; Invariant 5: Edit > Paste, the cells' Paste and ⌘V agree. Before Step
+  ;; 4a Edit > Paste was on for any clip and the cells' Paste always on
+  (let [robot (ui/robot)
+        cell #(get-in (raw) [:chains :cue-chains %])]
+    (events/dispatch! {:event/type :list/select-item :component-id [:cue-chain 0 0]
+                       :item-id (:id (first (cue-items))) :mode :single :items-path cue-items-path})
+    (events/dispatch! (copy-event))
+    (ui/wait-for! #(= :cue-chain-items (:type (slot))))
+    (ui/click! robot "#grid-cell-5-2")
+    (ui/wait-for! #(= [5 2] (get-in (raw) [:grid :selected-cell])))
+    (testing "cue items copied: nothing a cell takes"
+      (ui/wait-for! #(true? (edit-paste-disabled?)))
+      (is (true? (cell-paste-disabled? "#grid-cell-5-2")))
+      (is (true? (cell-paste-disabled? "#grid-cell-0-0")))
+      (shortcut-in-main-window! KeyCode/V)
+      (flush!)
+      (is (nil? (cell [5 2])) "⌘V does nothing either"))
+    (testing "a cue copied: every cell's Paste is on, and ⌘V pastes it"
+      (ui/click! robot "#grid-cell-0-0")
+      (ui/wait-for! #(= [0 0] (get-in (raw) [:grid :selected-cell])))
+      (shortcut-in-main-window! KeyCode/C)
+      (ui/wait-for! #(= :cue-chain (:type (slot))))
+      (ui/click! robot "#grid-cell-5-2")
+      (ui/wait-for! #(= [5 2] (get-in (raw) [:grid :selected-cell])))
+      (ui/wait-for! #(false? (edit-paste-disabled?)))
+      (is (false? (cell-paste-disabled? "#grid-cell-5-2")))
+      (shortcut-in-main-window! KeyCode/V)
+      (ui/wait-for! #(= (mapv :preset-id (:items (cell [0 0]))) (mapv :preset-id (:items (cell [5 2])))))
+      (is (some? (cell [5 2]))))
+    (testing "on the effects tab, a cue on the clipboard: its cells' Paste is off"
+      (ui/click! robot "#effects-tab")
+      (ui/wait-for! #(some? (node "#effects-cell-0-0")))
+      (is (true? (cell-paste-disabled? "#effects-cell-0-0")))
+      (ui/wait-for! #(true? (edit-paste-disabled?))))))

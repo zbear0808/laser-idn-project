@@ -325,12 +325,14 @@
         open-editor-event (if timeline?
                             {:event/type :timeline-cue-editor/open}
                             {:event/type :cue-chain/open-editor})
+        paste-off? (not (fx/sub-ctx context subs/can-paste? :cue-chain))
         base-menu-items (if has-content?
                           [{:fx/type :menu-item
                             :text (str "Copy Cue (" (shortcuts/shortcut-text :c) ")")
                             :on-action {:event/type :grid/copy-cell :col col :row row}}
                            {:fx/type :menu-item
                             :text (str "Paste Cue (" (shortcuts/shortcut-text :v) ")")
+                            :disable paste-off?
                             :on-action {:event/type :grid/paste-cell :col col :row row}}
                            {:fx/type :menu-item
                             :text "Edit Cue..."
@@ -347,6 +349,7 @@
                             :on-action {:event/type :timeline-cue-editor/open :col col :row row}}
                            {:fx/type :menu-item
                             :text (str "Paste Cue (" (shortcuts/shortcut-text :v) ")")
+                            :disable paste-off?
                             :on-action {:event/type :grid/paste-cell :col col :row row}}])
         trigger-menu-items (filterv some?
                                     [{:fx/type :separator-menu-item}
@@ -495,6 +498,7 @@
                                       :on-action {:event/type :effects/copy-cell :col col :row row}}
                                      {:fx/type :menu-item
                                       :text (str "Paste Effects (" (shortcuts/shortcut-text :v) ")")
+                                      :disable (not (fx/sub-ctx context subs/can-paste? :effects-cell))
                                       :on-action {:event/type :effects/paste-cell :col col :row row}}
                                      {:fx/type :menu-item
                                       :text "Edit Effect Chain..."

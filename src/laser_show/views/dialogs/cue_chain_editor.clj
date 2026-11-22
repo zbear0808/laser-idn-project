@@ -9,7 +9,7 @@
    - Multi-select with Click, Ctrl+Click, Shift+Click for both cue items and effects
    - Keyboard shortcuts: Ctrl+C (copy), Ctrl+V (paste), Ctrl+A (select all), Delete
    - Drag-and-drop reordering in both cue chain and effects
-   - Copy/paste with separate clipboards for cue chain vs item effects
+   - Copy/paste through the one clipboard ([:ui :clipboard])
    - Effect grouping within items
    - Custom parameter renderers (RGB curves, spatial editors)"
   (:require [cljfx.api :as fx]
@@ -275,14 +275,6 @@
                                 :style-class "dialog-placeholder-text"}]})])}))
 
 
-;; Helper Functions for Item Effects UI State
-
-
-(defn- get-item-effects-clipboard
-  "Get the clipboard for item effects, specific to the selected item."
-  [item-effects-ui item-path]
-  (get-in item-effects-ui [(vec item-path) :clipboard] []))
-
 ;; NOTE: get-item-effects-selected-ids removed - now reading from subs/list-ui-state
 
 
@@ -296,7 +288,7 @@
   [{:keys [fx/context]}]
   (let [;; Get cue-chain-editor state from unified dialogs path
         dialog-data (fx/sub-ctx context subs/dialog-data :cue-chain-editor)
-        {:keys [col row active-preset-tab active-effect-tab clipboard item-effects-ui]} dialog-data
+        {:keys [col row active-preset-tab active-effect-tab item-effects-ui]} dialog-data
 
         ;; Read cue chain selection from canonical list-ui state
         cue-list-state (fx/sub-ctx context subs/list-ui-state [:cue-chain col row])
@@ -321,13 +313,6 @@
                         (chains/get-item-at-path (:items cue-chain) first-selected-path))
         has-item? (boolean selected-item)
         item-effects (:effects selected-item [])
-
-        ;; Clipboard check
-        clipboard-items (:items clipboard)
-
-        ;; Get clipboard for item effects
-        item-effects-clipboard (when has-item?
-                                 (get-item-effects-clipboard item-effects-ui first-selected-path))
 
         ;; Dialog data for custom renderers (UI modes, etc.)
         ;; Merge ui-modes and item-effects-ui together so effects can access both
@@ -388,10 +373,6 @@
                                                      :on-change-event :chain/set-items
                                                      :on-change-params {:domain :cue-chains :entity-key [col row]}
                                                      :items-path [:chains :cue-chains [col row] :items]
-                                                     :on-copy-fn (fn [items]
-                                                                   (events/dispatch! {:event/type :cue-chain/set-clipboard
-                                                                                      :items items}))
-                                                     :clipboard-items clipboard-items
                                                      :header-label "CUE CHAIN"
                                                      :empty-text "No presets\nAdd from bank →"}]}
 
@@ -415,12 +396,6 @@
                                                        ;; Direct path to items in state for async drag-drop
                                                        ;; Path: [:chains :cue-chains [col row] :items <first-selected-path...> :effects]
                                                        :items-path (vec (concat [:chains :cue-chains [col row] :items] first-selected-path [:effects]))
-                                                       :on-copy-fn (fn [items]
-                                                                     (events/dispatch! {:event/type :cue-chain/set-item-effects-clipboard
-                                                                                        :col col :row row
-                                                                                        :item-path first-selected-path
-                                                                                        :effects items}))
-                                                       :clipboard-items item-effects-clipboard
                                                        :header-label "ITEM EFFECTS"
                                                        :empty-text "No effects\nAdd from bank →"
                                                        :allow-groups? true}]

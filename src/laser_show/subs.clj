@@ -26,6 +26,7 @@
        ...))"
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
+            [laser-show.state.clipboard :as clipboard-rules]
             [laser-show.state.extractors :as ex]
             [laser-show.vibes.faders :as faders]
             [laser-show.vibes.library :as library]
@@ -95,6 +96,16 @@
 
 (defn clipboard [context]
   (fx/sub-val context ex/clipboard))
+
+(defn can-paste?
+  "Is a Paste into target (a clipboard target: :cue-chain-items,
+   :item-effects, :cue-chain, :effects-cell, :step-grid) on? When the
+   clipboard holds a clip target takes (state.clipboard/accepts?), and while
+   nothing is copied in this app yet: a paste then reads the OS clipboard,
+   and says when it finds nothing (keyboard plan D13 B)."
+  [context target]
+  (let [clip (fx/sub-ctx context clipboard)]
+    (or (nil? clip) (clipboard-rules/accepts? clip target))))
 
 (defn notice
   "The status bar's notice, {:id :text :level}, or nil."

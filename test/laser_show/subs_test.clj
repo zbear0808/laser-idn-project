@@ -1354,3 +1354,20 @@
       (is (nil? (fx/sub-ctx ctx subs/step-grid-clipboard)))
       (is (= {:zones [:zone/a] :steps [[:zone/a]]}
              (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :step-grid :clipboard] {:zones [:zone/a] :steps [[:zone/a]]}) subs/step-grid-clipboard))))))
+
+(deftest can-paste-test
+  ;; Keyboard plan Phase 4, Step 4a (D13 B): Paste follows the clipboard; an
+  ;; empty one is a maybe, since a paste then reads the OS clipboard
+  (let [targets [:cue-chain-items :item-effects :cue-chain :effects-cell :step-grid]
+        with-clip #(context (assoc-in base-state [:ui :clipboard] %))
+        lit (fn [ctx] (set (filter #(fx/sub-ctx ctx subs/can-paste? %) targets)))]
+    (testing "nothing copied in this app yet: every Paste is on"
+      (is (= (set targets) (lit (context (assoc-in base-state [:ui :clipboard] nil))))))
+    (testing "a clip: only the targets that take it"
+      (is (= #{:cue-chain-items}
+             (lit (with-clip {:type :cue-chain-items :items [{:type :preset :preset-id :circle}] :copied-at 1}))))
+      (is (= #{:item-effects}
+             (lit (with-clip {:type :item-effects :effects [{:effect-id :scale}] :copied-at 1}))))
+      (is (= #{:cue-chain} (lit (with-clip {:type :cue-chain :data {:items []} :copied-at 1}))))
+      (is (= #{:effects-cell} (lit (with-clip {:type :effects-cell :data {:items []} :copied-at 1}))))
+      (is (= #{:step-grid} (lit (with-clip {:type :step-grid :grid {:zones [:zone/a] :steps [[:zone/a]]} :copied-at 1})))))))

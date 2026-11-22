@@ -17,7 +17,6 @@
             [laser-show.subs :as subs]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
-            [laser-show.state.clipboard :as clipboard]
             [laser-show.css.core :as css]
             [laser-show.views.components.effect-bank :as effect-bank]
             [laser-show.views.components.effect-parameter-editor :as param-editor]
@@ -93,7 +92,6 @@
         cell-data (get-in chains-state [:effect-chains [col row]])
         effect-chain (:items cell-data [])
         active? (:active? cell-data false)
-        clipboard-items (clipboard/get-effects-to-paste)
         ;; For parameter editor - use first selected ID if single select
         first-selected-id (when (= 1 (count selected-ids))
                             (first selected-ids))
@@ -142,9 +140,6 @@
                             :fallback-label "Unknown Effect"
                             :on-change-event :chain/set-items
                             :on-change-params {:domain :effect-chains :entity-key [col row]}
-                            :on-copy-fn (fn [items]
-                                          (clipboard/copy-effect-chain! {:effects items}))
-                            :clipboard-items clipboard-items
                             :header-label "CHAIN"
                             :empty-text "No effects\nAdd from bank →"}
                                    
