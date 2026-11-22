@@ -766,3 +766,37 @@
         (is (not (contains? (fit-of 2700) :effect-points)))
         (state/assoc-in-state! [:chains :projector-effects :p :items] [identity-curves])
         (is (not (contains? (fit-of 2700) :effect-points)))))))
+
+
+;; Every frame from one tick (plans/2026-11-20-state-integrity/01): the
+;; snapshot carries what the engines took from app state, and no engine reads
+;; it
+
+(deftest engine-inputs-are-the-ticks-own-maps-test
+  (let [state {:projectors {:p1 {:host "10.0.0.5" :enabled? true
+                                 :safety {:limit [-0.9 -0.8 0.9 0.95] :blocked [[-0.2 -1.0 0.2 -0.4]]}}
+                            :p2 {:driver :lsps :driver-config {:host "10.0.0.6" :port 7266} :enabled? true}}
+               :chains {:projector-effects {:p1 {:items [identity-curves double-size-pin decimate]}
+                                            :p2 {:items [identity-curves double-size-pin]}}}
+               :projector-ui {:calibrating-projector-id :p2 :calibration-brightness 0.1 :identify {:p1 1763686500000}}
+               :vibe-runtime {:blackout? false}}
+        inputs (me/engine-inputs state 1763686498000)]
+    (is (= {:projectors (:projectors state)
+            :projector-effects (get-in state [:chains :projector-effects])
+            :calibrating :p2
+            :brightness 0.1
+            :identify {:p1 1763686500000}
+            :blackout? false
+            :wall-ms 1763686498000}
+           inputs))
+    (testing "the state's own maps, not copies"
+      (is (identical? (:projectors state) (:projectors inputs)))
+      (is (identical? (get-in state [:chains :projector-effects]) (:projector-effects inputs)))
+      (is (identical? (:projector-effects (rig/routing-inputs state nil)) (:projector-effects inputs))
+          "the chains the routing's Decimate budgets come from"))
+    (testing "a state with no test pattern, Identify or BLACKOUT"
+      (is (= {:calibrating nil :brightness 0.1 :identify nil :blackout? false}
+             (select-keys (me/engine-inputs {:projectors {}} 5) [:calibrating :brightness :identify :blackout?]))))
+    (testing "the calibration brightness and BLACKOUT as set"
+      (is (= [0.4 true] ((juxt :brightness :blackout?)
+                         (me/engine-inputs {:projector-ui {:calibration-brightness 0.4} :vibe-runtime {:blackout? :yes}} 5)))))))

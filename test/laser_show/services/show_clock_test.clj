@@ -273,6 +273,31 @@
       (is (= {:index 1 :scan-rate 25000} (select-keys (get-in s [:routing :outputs :p2]) [:index :scan-rate])))
       (is (= :map/left-right (get-in s [:routing :map])) "the map in use: a new show's"))))
 
+(deftest snapshot-carries-engine-inputs-test
+  (testing "what the engines take from app state (state integrity 01): the tick's own maps and its wall clock"
+    (init! {[0 0] (cue :circle)})
+    (two-lasers!)
+    (state/swap-state! #(-> %
+                            (assoc-in [:projectors :p1 :safety] {:limit [-0.5 -0.5 0.5 0.5]})
+                            (assoc-in [:chains :projector-effects :p1 :items]
+                                      [{:id (random-uuid) :effect-id :corner-pin :enabled? true :params {}}])
+                            (assoc-in [:projector-ui :calibrating-projector-id] :p2)))
+    (with-redefs [events/dispatch! (fn [_])]
+      (doseq [[label play?] [["nothing playing" false] ["playing" true]]]
+        (testing label
+          (when play? (trigger! 0 0))
+          (let [state (state/get-raw-state)
+                before (System/currentTimeMillis)
+                s (show-clock/tick! (if play? 16666667 0))
+                after (System/currentTimeMillis)
+                inputs (:engine-inputs s)]
+            (is (= play? (:playing? s)))
+            (is (= (me/engine-inputs state (:wall-ms inputs)) inputs))
+            (is (identical? (:projectors state) (:projectors inputs)))
+            (is (identical? (get-in state [:chains :projector-effects]) (:projector-effects inputs)))
+            (is (= :p2 (:calibrating inputs)))
+            (is (<= before (or (:wall-ms inputs) -1) after) "the wall clock as the tick was made")))))))
+
 (deftest snapshot-names-the-effective-map-test
   (init! {[0 0] (cue :circle)})
   (two-lasers!)

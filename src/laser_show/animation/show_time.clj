@@ -354,7 +354,10 @@
                  [{:cell :run :zone-frames}] :positions {cell beats} :pulses (pulse-view)
                  :faders {slot value} (vibes.faders/fader-values) :routing (routing.rig/routing:
                  every ref's lasers and each laser's halves, scan rate and fit, which the
-                 engines compose from) :projector-ctx :preview (delay …) :render-us}."}
+                 engines compose from) :engine-inputs (multi-engine/engine-inputs: each
+                 laser's calibration and safety zone, the test pattern, Identify, BLACKOUT
+                 and the tick's wall clock, all from the tick's read of app state)
+                 :projector-ctx :preview (delay …) :render-us}."}
   !snapshot
   (atom nil))
 

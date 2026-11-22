@@ -56,6 +56,24 @@
 ;; Frame Provider Creation
 
 
+(defn engine-inputs
+  "What the engines take from app state for one tick, from state, the
+   tick's one read (show-clock/tick!), and wall-ms, the tick's wall clock:
+   {:projectors (each laser's safety zone) :projector-effects (each laser's
+   calibration chain) :calibrating :brightness :identify {id until-ms}
+   :blackout? :wall-ms}. The maps are state's own (the very
+   :projector-effects the routing's Decimate budgets come from,
+   rig/routing-inputs), so a frame's chain, zone and budget are one state's.
+   Pure."
+  [state wall-ms]
+  {:projectors (:projectors state)
+   :projector-effects (get-in state [:chains :projector-effects])
+   :calibrating (get-in state [:projector-ui :calibrating-projector-id])
+   :brightness (get-in state [:projector-ui :calibration-brightness] 0.1)
+   :identify (get-in state [:projector-ui :identify])
+   :blackout? (boolean (get-in state [:vibe-runtime :blackout?]))
+   :wall-ms wall-ms})
+
 (defn- report-skips!
   "A calibration effect that throws is skipped and the rest of the chain runs
    (effects/apply-effect-chain reports it under [:effect id]). Say so under

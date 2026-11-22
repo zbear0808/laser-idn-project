@@ -23,7 +23,10 @@
    4. publishes the result (show-time/publish!), which wakes every projector's
       engine: each composes its laser's frame from the tick's cues and
       routing and sends it on its own thread (backend/multi_engine.clj,
-      routing/compose.clj). The snapshot also carries where each cue is,
+      routing/compose.clj). The snapshot also carries what the engines take
+      from app state (multi-engine/engine-inputs: each laser's calibration
+      and safety zone, the test pattern, Identify, BLACKOUT, the tick's wall
+      clock), where each cue is,
       the presses (the Perform pads' pulse bars), where the faders are (the
       Perform tab's meters), and the preview as a delay
       that the screen forces (views/components/clock_view.clj draws it on
@@ -42,6 +45,7 @@
             [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.show-time :as show-time]
+            [laser-show.backend.multi-engine :as multi-engine]
             [laser-show.backend.output-errors :as output-errors]
             [laser-show.common.timing :as timing]
             [laser-show.events.core :as events]
@@ -291,6 +295,7 @@
                                             :faders (faders/fader-values input-values (get-in state [:config :input :macro-map]))
                                             :routing (cond-> routing cycle (assoc :cycle cycle))
                                             :zone-steps (into {} (keep (comp :zone-steps meta :zone-frames)) cues)
+                                            :engine-inputs (multi-engine/engine-inputs state (System/currentTimeMillis))
                                             :preview (delay (frame-service/preview-data cues routing))))
         ;; After publish!, so the engines never wait for them
         [runtime status] (status-step runtime state snapshot mtc-pos now-ms)
