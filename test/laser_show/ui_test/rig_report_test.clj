@@ -210,7 +210,7 @@
         stage (ui/main-window)]
     (events/set-exit-fn! #(swap! exits inc))
     (try
-      (state/swap-state! update :rig-file assoc :path (rig-path) :status :write-failed :error "No space left on device")
+      (events/write-state! update :rig-file assoc :path (rig-path) :status :write-failed :error "No space left on device")
       (ui/on-fx-thread #(javafx.event.Event/fireEvent stage (javafx.stage.WindowEvent. stage javafx.stage.WindowEvent/WINDOW_CLOSE_REQUEST)))
       (ui/assert-text! "#unsaved-message" "Your last rig changes couldn't be saved: No space left on device.")
       (ui/assert-visible! "#unsaved-retry")

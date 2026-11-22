@@ -215,7 +215,7 @@
 
 (deftest card-title-shows-the-whole-name-in-its-tooltip-test
   (let [long-name "Stage left upper truss, beam 3"]
-    (state/swap-state! assoc :projectors {:bridge (assoc bridge :name long-name)})
+    (events/write-state! assoc :projectors {:bridge (assoc bridge :name long-name)})
     (ui/click! (ui/robot) "#projectors-tab")
     (ui/wait-for! #(some? (ui/query "#rig-card-name-bridge")))
     (let [title (ui/query "#rig-card-name-bridge")]
@@ -281,10 +281,10 @@
 
 (deftest projector-settings-share-one-grid-test
   (let [robot (ui/robot)]
-    (state/swap-state! #(-> % (assoc :projectors {:bridge bridge
-                                                  :idn {:name "Laser" :host "10.0.0.5" :port 7255 :enabled? false
-                                                        :stable-id [:host "10.0.0.5" 0] :zone-groups []}})
-                            (assoc-in [:projector-ui :active-projector] :bridge)))
+    (events/write-state! #(-> % (assoc :projectors {:bridge bridge
+                                                    :idn {:name "Laser" :host "10.0.0.5" :port 7255 :enabled? false
+                                                          :stable-id [:host "10.0.0.5" 0] :zone-groups []}})
+                              (assoc-in [:projector-ui :active-projector] :bridge)))
     (ui/click! robot "#projectors-tab")
     (testing "another driver: Name, Type, its fields and the scan rate in one column"
       (ui/wait-for! #(some? (ui/query "#driver-field-max-packet-bytes")))
@@ -298,7 +298,7 @@
 (deftest edit-lsps-port-test
   (let [robot (ui/robot)
         config #(get-in (app-state) [:projectors :bridge :driver-config])]
-    (state/swap-state! #(-> % (assoc :projectors {:bridge bridge}) (assoc-in [:projector-ui :active-projector] :bridge)))
+    (events/write-state! #(-> % (assoc :projectors {:bridge bridge}) (assoc-in [:projector-ui :active-projector] :bridge)))
     (ui/click! robot "#projectors-tab")
     (ui/assert-text! "#projector-driver-label" "LSPS point stream (UDP)")
     (ui/assert-text! "#driver-field-port" "7266")
@@ -330,7 +330,7 @@
   (let [robot (ui/robot)
         config #(get-in (app-state) [:projectors :bridge :driver-config])
         chord! (fn [& keys] (.push robot (into-array javafx.scene.input.KeyCode keys)) (ui/sync-fx!))]
-    (state/swap-state! #(-> % (assoc :projectors {:bridge bridge}) (assoc-in [:projector-ui :active-projector] :bridge)))
+    (events/write-state! #(-> % (assoc :projectors {:bridge bridge}) (assoc-in [:projector-ui :active-projector] :bridge)))
     (ui/click! robot "#projectors-tab")
     (ui/assert-text! "#driver-field-port" "7266")
     (ui/fill! robot "#driver-field-port" "7300")
@@ -371,7 +371,7 @@
 (deftest show-lock-refuses-a-driver-config-edit-test
   (let [robot (ui/robot)
         config #(get-in (app-state) [:projectors :bridge :driver-config])]
-    (state/swap-state! #(-> % (assoc :projectors {:bridge bridge}) (assoc-in [:projector-ui :active-projector] :bridge)))
+    (events/write-state! #(-> % (assoc :projectors {:bridge bridge}) (assoc-in [:projector-ui :active-projector] :bridge)))
     (events/dispatch! {:event/type :vibe/set-show-lock :locked? true})
     (ui/wait-for! #(true? (get-in (app-state) [:ui :show-lock?])))
     (ui/click! robot "#projectors-tab")
@@ -402,10 +402,10 @@
     (driver/register! (update choice-descriptor :fields conj {:key :fast :label "Fast" :type :boolean}))
     (try
       (loaded!)
-      (state/swap-state! #(-> % (assoc :projectors {:choice {:name "Choice" :driver :test/choice :driver-config {:order :be}
-                                                             :stable-id [:manual :test/choice :choice] :zone-groups []
-                                                             :enabled? false :scan-rate 25000}})
-                              (assoc-in [:projector-ui :active-projector] :choice)))
+      (events/write-state! #(-> % (assoc :projectors {:choice {:name "Choice" :driver :test/choice :driver-config {:order :be}
+                                                               :stable-id [:manual :test/choice :choice] :zone-groups []
+                                                               :enabled? false :scan-rate 25000}})
+                                (assoc-in [:projector-ui :active-projector] :choice)))
       (events/dispatch! {:event/type :vibe/set-show-lock :locked? true})
       (ui/wait-for! #(true? (get-in (app-state) [:ui :show-lock?])))
       (ui/click! robot "#projectors-tab")
@@ -434,7 +434,7 @@
         nova {:name "Nova" :driver :acme/nova :driver-config {:serial "NV-00123" :output 0}
              :stable-id [:device :acme/nova "NV-00123" 0] :zone-groups [] :exclude-from-all? false
              :enabled? true :scan-rate 30000}]
-    (state/swap-state! #(-> % (assoc :projectors {:nova nova}) (assoc-in [:projector-ui :active-projector] :nova)))
+    (events/write-state! #(-> % (assoc :projectors {:nova nova}) (assoc-in [:projector-ui :active-projector] :nova)))
     (ui/click! robot "#projectors-tab")
     (ui/assert-text! "#projector-driver-missing" "Output driver :acme/nova is not installed. Its settings are kept.")
     (ui/assert-text! "#projector-driver-config-text" "Serial: NV-00123\nOutput: 0")
@@ -466,7 +466,7 @@
         rec (rd/recording-driver {:id :test/status :status (fn [_] @says)})]
     (with-driver rec
       (fn []
-        (state/swap-state! assoc :projectors {:rec (driver-projector :test/status)})
+        (events/write-state! assoc :projectors {:rec (driver-projector :test/status)})
         (ui/click! robot "#projectors-tab")
         (ui/click! robot "#stream-btn")
         (ui/wait-for! #(str/starts-with? (str (status-text)) "Streaming"))
@@ -494,7 +494,7 @@
         rec (rd/recording-driver {:id :test/busy :fail-open? (constantly {:busy? true :holder "ShowCtl on 10.0.0.3"})})]
     (with-driver rec
       (fn []
-        (state/swap-state! assoc :projectors {:rec (driver-projector :test/busy)})
+        (events/write-state! assoc :projectors {:rec (driver-projector :test/busy)})
         (ui/click! robot "#projectors-tab")
         (ui/click! robot "#stream-btn")
         (ui/assert-text! "#projector-status-rec" "In use by ShowCtl on 10.0.0.3")
@@ -510,7 +510,7 @@
         opens #(count (filter (fn [c] (= :open (first c))) @(:calls rec)))]
     (with-driver rec
       (fn []
-        (state/swap-state! assoc :projectors {:rec (driver-projector :test/reopen)})
+        (events/write-state! assoc :projectors {:rec (driver-projector :test/reopen)})
         (ui/click! robot "#projectors-tab")
         (ui/click! robot "#stream-btn")
         (ui/wait-for! #(str/starts-with? (str (status-text)) "Streaming"))
@@ -531,7 +531,7 @@
         rec (rd/recording-driver {:id :test/stuck :block-send-ms {5 3000}})]
     (with-driver rec
       (fn []
-        (state/swap-state! assoc :projectors {:rec (driver-projector :test/stuck)})
+        (events/write-state! assoc :projectors {:rec (driver-projector :test/stuck)})
         (ui/click! robot "#projectors-tab")
         (ui/click! robot "#stream-btn")
         (ui/assert-text! "#projector-status-rec" "Driver not responding")
@@ -569,7 +569,7 @@
       (ui/wait-for! #(some? (added-lsps)))
       (let [[id] (added-lsps)
             status-sel (str "#projector-status-" (id-text id))]
-        (state/swap-state! assoc-in [:chains :cue-chains [7 3]] (circle-cue 300))
+        (events/write-state! assoc-in [:chains :cue-chains [7 3]] (circle-cue 300))
         (events/dispatch! {:event/type :grid/trigger-cell :col 7 :row 3})
         (ui/wait-for! #(some? (get-in (app-state) [:playback :active-cues [7 3]])))
         (fixtures/with-clock

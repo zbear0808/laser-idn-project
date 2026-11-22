@@ -16,9 +16,9 @@
 (deftest picker-offers-the-zones-the-show-uses-test
   ;; zones plan Z4 (06 §4.5): the zones the show draws into, by name
   (let [robot (ui/robot)]
-    (state/swap-state! #(-> %
-                            (assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a)
-                            (assoc-in [:zones :labels :zone/a] "Beams")))
+    (events/write-state! #(-> %
+                              (assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a)
+                              (assoc-in [:zones :labels :zone/a] "Beams")))
     (ui/click! robot "#preview-zone-label-0")
     (ui/wait-for! #(= 0 (get-in (state/get-raw-state) [:ui :preview-zone-selector-open])))
     (ui/assert-text! "#preview-zone-option-0-zone-a .label" "A · Beams")
@@ -56,10 +56,10 @@
                        :params {:x-scale {:type :sine :min 0.2 :max 1.0 :period 1.0}}}]}]})
 
 (defn- play-square!
-  "The stretching square at [7 3], playing. Written before any event is
-   queued, so no event's write-back can lose it."
+  "The stretching square at [7 3], playing. Written on the event thread
+   (events/write-state!), so no event's write-back can lose it."
   []
-  (state/swap-state! assoc-in [:chains :cue-chains [7 3]] stretching-square)
+  (events/write-state! assoc-in [:chains :cue-chains [7 3]] stretching-square)
   (events/dispatch! {:event/type :grid/trigger-cell :col 7 :row 3})
   (ui/wait-for! #(some? (get-in (state/get-raw-state) [:playback :active-cues [7 3]]))))
 
@@ -206,10 +206,10 @@
 (defn- play-left-and-right!
   "One laser, and a cue with a circle on Left and another on Right, playing."
   []
-  (state/swap-state! #(-> %
-                          (assoc :projectors {:p1 {:name "Laser A" :host "10.0.0.1" :enabled? true :zone-groups []}})
-                          (assoc-in [:chains :cue-chains [7 3]] {:target :all
-                                                                  :items [(ring :auto/left 0.2) (ring :auto/right 0.2)]})))
+  (events/write-state! #(-> %
+                            (assoc :projectors {:p1 {:name "Laser A" :host "10.0.0.1" :enabled? true :zone-groups []}})
+                            (assoc-in [:chains :cue-chains [7 3]] {:target :all
+                                                                    :items [(ring :auto/left 0.2) (ring :auto/right 0.2)]})))
   (events/dispatch! {:event/type :grid/trigger-cell :col 7 :row 3})
   (ui/wait-for! #(some? (get-in (state/get-raw-state) [:playback :active-cues [7 3]]))))
 
@@ -236,7 +236,7 @@
 
 (deftest old-cell-still-shows-its-group-test
   (play-square!)
-  (state/assoc-in-state! [:config :preview :grid-cells 2] {:zone-group-id :all})
+  (events/write-state! assoc-in [:config :preview :grid-cells 2] {:zone-group-id :all})
   (with-clock (System/nanoTime)
     (fn [_]
       (ui/wait-for! #(pos? (lit-in 2)))

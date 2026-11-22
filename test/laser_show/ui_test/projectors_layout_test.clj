@@ -5,6 +5,7 @@
    the rig strip and the inspector stays where it is dragged, for the
    session."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.events.core :as events]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
@@ -27,12 +28,12 @@
   "Lasers :a and :b, :a selected, its safety zone a limit and one blocked
    area."
   []
-  (state/swap-state! #(-> %
-                          (assoc :projectors {:a (laser 1 :name "Laser A"
-                                                        :safety {:limit [-0.8 -0.6 0.8 0.9]
-                                                                 :blocked [[-0.3 -0.6 0.3 -0.2]]})
-                                              :b (laser 2 :name "Laser B")})
-                          (assoc-in [:projector-ui :active-projector] :a))))
+  (events/write-state! #(-> %
+                            (assoc :projectors {:a (laser 1 :name "Laser A"
+                                                          :safety {:limit [-0.8 -0.6 0.8 0.9]
+                                                                   :blocked [[-0.3 -0.6 0.3 -0.2]]})
+                                                :b (laser 2 :name "Laser B")})
+                            (assoc-in [:projector-ui :active-projector] :a))))
 
 (defn- at-window-size!
   "The main window at w × h, laid out."
@@ -129,13 +130,13 @@
    column, above the safety zone."
   []
   (let [id #uuid "00000000-0000-0000-0000-0000000000c1"]
-    (state/swap-state! #(-> %
-                            (assoc-in [:chains :projector-effects :a :items]
-                                      [{:id id :effect-id :rgb-curves :enabled? true
-                                        :params {:r-curve-points [[0.0 0.0] [1.0 1.0]]
-                                                 :g-curve-points [[0.0 0.0] [1.0 1.0]]
-                                                 :b-curve-points [[0.0 0.0] [1.0 1.0]]}}])
-                            (assoc-in [:list-ui [:projector-effects :a]] {:selected-ids #{id} :last-selected-id id})))))
+    (events/write-state! #(-> %
+                              (assoc-in [:chains :projector-effects :a :items]
+                                        [{:id id :effect-id :rgb-curves :enabled? true
+                                          :params {:r-curve-points [[0.0 0.0] [1.0 1.0]]
+                                                   :g-curve-points [[0.0 0.0] [1.0 1.0]]
+                                                   :b-curve-points [[0.0 0.0] [1.0 1.0]]}}])
+                              (assoc-in [:list-ui [:projector-effects :a]] {:selected-ids #{id} :last-selected-id id})))))
 
 (deftest each-column-scrolls-on-its-own-test
   (let [robot (ui/robot)
@@ -172,20 +173,20 @@
     (eventually #(shown? "#rig-card-a"))
     (let [before (height "#rig-strip-scroll")]
       (is (shown? "#rig-card-a"))
-      (state/swap-state! #(-> %
-                              (assoc-in [:backend :streaming :running?] true)
-                              (assoc-in [:backend :streaming :status]
-                                        {:engines 2 :wanted 2 :pending? false
-                                         :projectors {:a {:state :streaming :fps 58.7 :scan-limited? true
-                                                          :warning "Interlock open"
-                                                          :driver-info {:buffer-ms 40 :firmware "4.1.2" :scan-rate 30303}}}})))
+      (events/write-state! #(-> %
+                                (assoc-in [:backend :streaming :running?] true)
+                                (assoc-in [:backend :streaming :status]
+                                          {:engines 2 :wanted 2 :pending? false
+                                           :projectors {:a {:state :streaming :fps 58.7 :scan-limited? true
+                                                            :warning "Interlock open"
+                                                            :driver-info {:buffer-ms 40 :firmware "4.1.2" :scan-rate 30303}}}})))
       (ui/wait-for! #(some? (ui/query "#projector-driver-info-a")))
       (eventually #(and (< (+ before 30) (height "#rig-strip-scroll")) (shown? "#rig-card-a")))
       (is (< (+ before 30) (height "#rig-strip-scroll")) "the strip grew with the card")
       (is (shown? "#rig-card-a") "and the divider doesn't cut it")
-      (state/swap-state! #(-> %
-                              (assoc-in [:backend :streaming :running?] false)
-                              (assoc-in [:backend :streaming :status] nil)))
+      (events/write-state! #(-> %
+                                (assoc-in [:backend :streaming :running?] false)
+                                (assoc-in [:backend :streaming :status] nil)))
       (eventually #(near? before (height "#rig-strip-scroll")))
       (is (near? before (height "#rig-strip-scroll")) "the inspector gets its room back"))))
 

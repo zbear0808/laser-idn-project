@@ -150,10 +150,10 @@
   (let [robot (ui/robot)
         id :projector-acme-nova-NV-1-0
         status (str "#projector-status-" (name id))]
-    (state/swap-state! assoc-in [:projectors :bridge]
-                       {:name "Bridge" :driver :lsps :driver-config {:host "127.0.0.1" :port 7266 :max-packet-bytes 1400}
-                        :stable-id [:manual :lsps :bridge] :zone-groups [] :exclude-from-all? false :tags #{}
-                        :enabled? false :scan-rate 25000})
+    (events/write-state! assoc-in [:projectors :bridge]
+                         {:name "Bridge" :driver :lsps :driver-config {:host "127.0.0.1" :port 7266 :max-packet-bytes 1400}
+                          :stable-id [:manual :lsps :bridge] :zone-groups [] :exclude-from-all? false :tags #{}
+                          :enabled? false :scan-rate 25000})
     (reset! nova-devices [(device "NV-1" 0)])
     (scan! robot)
     (ui/wait-for! #(some? (ui/query (card id))))
@@ -232,7 +232,7 @@
           "the receiver's exact config from :discover; the driver fills its defaults on open")
       (ui/check! robot (str "#rig-card-enable-" (name id)))
       (ui/wait-for! #(true? (enabled? id)))
-      (state/swap-state! assoc-in [:chains :cue-chains [7 3]] (circle-cue 300))
+      (events/write-state! assoc-in [:chains :cue-chains [7 3]] (circle-cue 300))
       (events/dispatch! {:event/type :grid/trigger-cell :col 7 :row 3})
       (ui/wait-for! #(some? (get-in (app-state) [:playback :active-cues [7 3]])))
       (fixtures/with-clock

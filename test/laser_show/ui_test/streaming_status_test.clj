@@ -57,8 +57,8 @@
 
 (deftest toolbar-shows-streaming-n-of-m-test
   (let [robot (ui/robot)]
-    (state/swap-state! assoc :projectors {:a (projector 1 "127.0.0.1")
-                                          :b (assoc (projector 2 "127.0.0.1") :enabled? false)})
+    (events/write-state! assoc :projectors {:a (projector 1 "127.0.0.1")
+                                            :b (assoc (projector 2 "127.0.0.1") :enabled? false)})
     (ui/assert-text! "#streaming-status-label" "Not streaming")
     (ui/assert-text! "#stream-btn" "Stream")
     (ui/click! robot "#stream-btn")
@@ -74,8 +74,8 @@
   (with-unresolvable "unresolvable.test"
     (fn []
       (let [robot (ui/robot)]
-        (state/swap-state! assoc :projectors {:a (projector 1 "127.0.0.1")
-                                              :b (projector 2 "unresolvable.test")})
+        (events/write-state! assoc :projectors {:a (projector 1 "127.0.0.1")
+                                                :b (projector 2 "unresolvable.test")})
         (ui/click! robot "#stream-btn")
         (ui/assert-text! "#streaming-status-label" "Streaming to 1 of 2 · 1 error")
         (ui/click! robot "#stream-btn")
@@ -89,12 +89,12 @@
     (app/start-test!)
     (ui/sync-fx!)
     (ui/set-size! (ui/main-window) 1200 800)
-    (state/swap-state! assoc-in [:chains :cue-chains [0 0]]
-                       {:items [{:id (random-uuid) :type :preset :preset-id :circle :enabled? true :effects []}]})
+    (events/write-state! assoc-in [:chains :cue-chains [0 0]]
+                         {:items [{:id (random-uuid) :type :preset :preset-id :circle :enabled? true :effects []}]})
     (events/dispatch! {:event/type :grid/trigger-cell :col 0 :row 0})
     (ui/wait-for! #(some? (ui/query "#status-playing")))
     (let [p (fn [n] {:name n :host "10.0.0.9" :enabled? true :zone-groups [:all]})]
-      (state/swap-state!
+      (events/write-state!
        #(-> %
             (assoc :projectors {:a (p "Busy one") :b (p "Nova stage left") :c (p "Reopen one") :d (p "Status one") :e (p "Stuck one")})
             (assoc-in [:backend :streaming :running?] true)
@@ -127,7 +127,7 @@
 
 (deftest no-projectors-enabled-links-to-the-projectors-tab-test
   (let [robot (ui/robot)]
-    (state/swap-state! assoc :projectors {:b (assoc (projector 2 "127.0.0.1") :enabled? false)})
+    (events/write-state! assoc :projectors {:b (assoc (projector 2 "127.0.0.1") :enabled? false)})
     (ui/click! robot "#stream-btn")
     (ui/assert-text! "#streaming-status-label" "No projectors enabled")
     (ui/assert-text! "#stream-btn" "Stop")
@@ -135,7 +135,7 @@
     (ui/click! robot "#streaming-projectors-link")
     (ui/wait-for! #(= :projectors (get-in (state/get-raw-state) [:ui :active-tab])))
     (testing "enabling one streams it, and the link goes"
-      (state/swap-state! assoc-in [:projectors :b :enabled?] true)
+      (events/write-state! assoc-in [:projectors :b :enabled?] true)
       (events/dispatch! {:event/type :idn/start-multi-streaming})
       (ui/assert-text! "#streaming-status-label" "Streaming to 1 of 1")
       (ui/wait-for! #(not (ui/visible? "#streaming-projectors-link"))))
@@ -146,8 +146,8 @@
   (with-unresolvable "unresolvable.test"
     (fn []
       (let [robot (ui/robot)]
-        (state/swap-state! assoc :projectors {:a (projector 1 "127.0.0.1")
-                                              :b (projector 2 "unresolvable.test")})
+        (events/write-state! assoc :projectors {:a (projector 1 "127.0.0.1")
+                                                :b (projector 2 "unresolvable.test")})
         (ui/click! robot "#projectors-tab")
         (ui/wait-for! #(some? (ui/query "#projector-dot-a")))
         (is (= (Color/web (css/text-muted)) (fill-of "#projector-dot-a")) "not streaming")
@@ -166,9 +166,9 @@
   (let [robot (ui/robot)
         host #(get-in (state/get-raw-state) [:projectors :a :host])
         port #(get-in (state/get-raw-state) [:projectors :a :port])]
-    (state/swap-state! #(-> %
-                            (assoc :projectors {:a (projector 1 "127.0.0.1")})
-                            (assoc-in [:projector-ui :active-projector] :a)))
+    (events/write-state! #(-> %
+                              (assoc :projectors {:a (projector 1 "127.0.0.1")})
+                              (assoc-in [:projector-ui :active-projector] :a)))
     (ui/click! robot "#projectors-tab")
     (ui/wait-for! #(some? (ui/query "#projector-host-field")))
     (ui/fill! robot "#projector-host-field" "192.168.1")
@@ -192,9 +192,9 @@
 (deftest scan-rate-field-commits-on-enter-test
   (let [robot (ui/robot)
         rate #(get-in (state/get-raw-state) [:projectors :a :scan-rate])]
-    (state/swap-state! #(-> %
-                            (assoc :projectors {:a (assoc (projector 1 "127.0.0.1") :scan-rate 25000)})
-                            (assoc-in [:projector-ui :active-projector] :a)))
+    (events/write-state! #(-> %
+                              (assoc :projectors {:a (assoc (projector 1 "127.0.0.1") :scan-rate 25000)})
+                              (assoc-in [:projector-ui :active-projector] :a)))
     (ui/click! robot "#projectors-tab")
     (ui/assert-text! "#projector-scan-rate-field" "25000")
     (ui/fill! robot "#projector-scan-rate-field" "30k")
@@ -220,7 +220,7 @@
         lit (vec (for [i (range 1000)] [(- (/ (double i) 1000) 0.5) 0.0 1.0 1.0 1.0]))]
     (with-redefs-fn {#'me/projector-frame (constantly lit)}
       (fn []
-        (state/swap-state! assoc :projectors {:a (assoc (projector 1 "127.0.0.1") :scan-rate 25000)})
+        (events/write-state! assoc :projectors {:a (assoc (projector 1 "127.0.0.1") :scan-rate 25000)})
         (ui/click! robot "#projectors-tab")
         (ui/wait-for! #(some? (ui/query "#projector-dot-a")))
         (ui/click! robot "#stream-btn")
@@ -242,14 +242,14 @@
             :params {:num-points (dec n)} :target target}]})
 
 (defn- play! [cue]
-  (state/swap-state! assoc-in [:chains :cue-chains [7 3]] cue)
+  (events/write-state! assoc-in [:chains :cue-chains [7 3]] cue)
   (events/dispatch! {:event/type :grid/trigger-cell :col 7 :row 3})
   (ui/wait-for! #(some? (get-in (state/get-raw-state) [:playback :active-cues [7 3]]))))
 
 (deftest low-fps-chip-names-the-laser-and-opens-its-card-test
   (let [robot (ui/robot)]
-    (state/swap-state! assoc :projectors {:a (assoc (projector 1 "127.0.0.1") :name "Laser L" :scan-rate 25000)
-                                          :b (assoc (projector 2 "127.0.0.1") :name "Laser R" :scan-rate 25000)})
+    (events/write-state! assoc :projectors {:a (assoc (projector 1 "127.0.0.1") :name "Laser L" :scan-rate 25000)
+                                            :b (assoc (projector 2 "127.0.0.1") :name "Laser R" :scan-rate 25000)})
     (play! (circle-cue 3000 :auto.laser/b))
     (is (not (ui/visible? "#low-fps-chip")))
     (fixtures/with-clock
@@ -263,7 +263,7 @@
           (ui/wait-for! #(= :projectors (get-in (state/get-raw-state) [:ui :active-tab])))
           (ui/assert-text! "#projector-config-title" "CONFIGURE: Laser R"))
         (testing "both low: the lowest, and +1"
-          (state/assoc-in-state! [:chains :cue-chains [7 3] :items 0 :target] :all)
+          (events/write-state! assoc-in [:chains :cue-chains [7 3] :items 0 :target] :all)
           (ui/wait-for! #(= "LOW FPS · Laser L 14 fps +1" (ui/node-text "#low-fps-chip"))))
         (ui/click! robot "#stream-btn")))
     (testing "gone when nothing streams"
@@ -271,7 +271,7 @@
 
 (deftest light-laser-shows-no-chip-test
   (let [robot (ui/robot)]
-    (state/swap-state! assoc :projectors {:a (assoc (projector 1 "127.0.0.1") :scan-rate 25000)})
+    (events/write-state! assoc :projectors {:a (assoc (projector 1 "127.0.0.1") :scan-rate 25000)})
     (play! (circle-cue 400 :all))
     (fixtures/with-clock
       (fn [_]

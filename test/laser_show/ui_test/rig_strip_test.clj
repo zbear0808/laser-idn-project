@@ -28,11 +28,11 @@
 (defn- with-lasers!
   "Projectors :a :b :c at 10.0.0.1-3, on, so in that order."
   []
-  (state/swap-state! assoc :projectors
-                     (into {} (for [[id n] [[:a 1] [:b 2] [:c 3]]]
-                                [id {:name (str "Laser " (str/upper-case (name id))) :host (str "10.0.0." n) :port 7255
-                                     :service-id 1 :enabled? true :zone-groups [] :exclude-from-all? false
-                                     :output-config {:color-bit-depth 8 :xy-bit-depth 16}}]))))
+  (events/write-state! assoc :projectors
+                       (into {} (for [[id n] [[:a 1] [:b 2] [:c 3]]]
+                                  [id {:name (str "Laser " (str/upper-case (name id))) :host (str "10.0.0." n) :port 7255
+                                       :service-id 1 :enabled? true :zone-groups [] :exclude-from-all? false
+                                       :output-config {:color-bit-depth 8 :xy-bit-depth 16}}]))))
 
 (defn- shown-order
   "The ids of the cards on the strip, left to right."
@@ -211,7 +211,7 @@
   (let [robot (ui/robot)
         groups #(get-in (app-state) [:projectors % :zone-groups])]
     (with-lasers!)
-    (state/swap-state! assoc-in [:projectors :c :enabled?] false)
+    (events/write-state! assoc-in [:projectors :c :enabled?] false)
     (ui/click! robot "#projectors-tab")
     (ui/wait-for! #(= "□" (mark "graphics" :a)))
     ;; The rows are under the cards: at 1200 × 800 the strip shows the cards

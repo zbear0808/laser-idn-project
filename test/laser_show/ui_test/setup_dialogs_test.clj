@@ -23,11 +23,11 @@
 (defn- with-projector!
   "One projector, :a, selected for editing."
   []
-  (state/swap-state! #(-> %
-                          (assoc :projectors {:a {:name "Fake 1" :host "127.0.0.1" :port 7255 :service-id 1
-                                                  :enabled? true :zone-groups [] :exclude-from-all? false
-                                                  :output-config {:color-bit-depth 8 :xy-bit-depth 16}}})
-                          (assoc-in [:projector-ui :active-projector] :a))))
+  (events/write-state! #(-> %
+                            (assoc :projectors {:a {:name "Fake 1" :host "127.0.0.1" :port 7255 :service-id 1
+                                                    :enabled? true :zone-groups [] :exclude-from-all? false
+                                                    :output-config {:color-bit-depth 8 :xy-bit-depth 16}}})
+                            (assoc-in [:projector-ui :active-projector] :a))))
 
 (defn- device
   "A discovered device as the network scan reports it, with these services."
@@ -107,12 +107,9 @@
   (let [robot (ui/robot)
         groups #(set (get-in (app-state) [:projectors :a :zone-groups]))
         settle! (fn []
-                  ;; Each toggle is an event: one landing is the last of them
+                  ;; Each toggle is an event: wait until the last of them has run
                   (ui/sync-fx!)
-                  (events/dispatch! {:event/type :timing/set-bpm :bpm 121.0})
-                  (ui/wait-for! #(= 121.0 (get-in (app-state) [:timing :bpm])))
-                  (events/dispatch! {:event/type :timing/set-bpm :bpm 120.0})
-                  (ui/wait-for! #(= 120.0 (get-in (app-state) [:timing :bpm]))))]
+                  (is (events/flush!) "the queued events ran"))]
     (with-projector!)
     (ui/click! robot "#zones-tab")
     (ui/assert-text! "#zones-subtitle"
@@ -200,12 +197,12 @@
 (deftest delete-group-asks-and-retargets-test
   (let [robot (ui/robot)
         cue-zone #(get-in (app-state) [:chains :cue-chains [0 0] :items 0 :target])]
-    (state/swap-state! #(-> %
-                            (assoc-in [:zone-groups :group-balcony] {:id :group-balcony :name "Balcony"
-                                                                     :description "" :color "#FF0000"})
-                            (assoc-in [:chains :cue-chains [0 0]] {:name "Intro"
-                                                                   :items [{:id "p" :type :preset :preset-id :circle
-                                                                            :target :group-balcony}]})))
+    (events/write-state! #(-> %
+                              (assoc-in [:zone-groups :group-balcony] {:id :group-balcony :name "Balcony"
+                                                                       :description "" :color "#FF0000"})
+                              (assoc-in [:chains :cue-chains [0 0]] {:name "Intro"
+                                                                     :items [{:id "p" :type :preset :preset-id :circle
+                                                                              :target :group-balcony}]})))
     (ui/click! robot "#zones-tab")
     (events/dispatch! {:event/type :zone-groups/select :group-id :group-balcony})
     (ui/wait-for! #(= "Used by 1 cue" (ui/node-text "#zone-group-cue-usage")))
@@ -241,21 +238,21 @@
    Axis Transform selected for editing."
   []
   (with-projector!)
-  (state/swap-state! #(-> %
-                          (assoc-in [:projectors :b] {:name "Fake 2" :host "127.0.0.2" :port 7255 :service-id 1
-                                                      :enabled? true :zone-groups [:all]
-                                                      :output-config {:color-bit-depth 8 :xy-bit-depth 16}})
-                          (assoc-in [:chains :projector-effects :a :items]
-                                    [{:id #uuid "00000000-0000-0000-0000-0000000000a1" :effect-id :rgb-curves :enabled? true
-                                      :params {:r-curve-points [[0.0 0.0] [1.0 1.0]]
-                                               :g-curve-points [[0.0 0.0] [1.0 1.0]]
-                                               :b-curve-points [[0.0 0.0] [1.0 1.0]]}}
-                                     {:id #uuid "00000000-0000-0000-0000-0000000000a2" :effect-id :axis-transform :enabled? true
-                                      :params {:mirror-x? false :mirror-y? false :swap-axes? false}}])
-                          (assoc-in [:chains :projector-effects :b :items] [])
-                          (assoc-in [:list-ui [:projector-effects :a]]
-                                    {:selected-ids #{#uuid "00000000-0000-0000-0000-0000000000a2"}
-                                     :last-selected-id #uuid "00000000-0000-0000-0000-0000000000a2"}))))
+  (events/write-state! #(-> %
+                            (assoc-in [:projectors :b] {:name "Fake 2" :host "127.0.0.2" :port 7255 :service-id 1
+                                                        :enabled? true :zone-groups [:all]
+                                                        :output-config {:color-bit-depth 8 :xy-bit-depth 16}})
+                            (assoc-in [:chains :projector-effects :a :items]
+                                      [{:id #uuid "00000000-0000-0000-0000-0000000000a1" :effect-id :rgb-curves :enabled? true
+                                        :params {:r-curve-points [[0.0 0.0] [1.0 1.0]]
+                                                 :g-curve-points [[0.0 0.0] [1.0 1.0]]
+                                                 :b-curve-points [[0.0 0.0] [1.0 1.0]]}}
+                                       {:id #uuid "00000000-0000-0000-0000-0000000000a2" :effect-id :axis-transform :enabled? true
+                                        :params {:mirror-x? false :mirror-y? false :swap-axes? false}}])
+                            (assoc-in [:chains :projector-effects :b :items] [])
+                            (assoc-in [:list-ui [:projector-effects :a]]
+                                      {:selected-ids #{#uuid "00000000-0000-0000-0000-0000000000a2"}
+                                       :last-selected-id #uuid "00000000-0000-0000-0000-0000000000a2"}))))
 
 (deftest axis-transform-boxes-stick-test
   (let [robot (ui/robot)

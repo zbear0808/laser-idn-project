@@ -44,7 +44,7 @@
 (defn- play!
   "cue at [7 3], playing."
   [cue]
-  (state/swap-state! assoc-in [:chains :cue-chains [7 3]] cue)
+  (events/write-state! assoc-in [:chains :cue-chains [7 3]] cue)
   (events/dispatch! {:event/type :grid/trigger-cell :col 7 :row 3})
   (ui/wait-for! #(some? (get-in (state/get-raw-state) [:playback :active-cues [7 3]]))))
 
@@ -73,7 +73,7 @@
 
 (deftest thumbnail-draws-what-the-laser-sent-test
   (let [robot (ui/robot)]
-    (state/swap-state! assoc :projectors {:a (laser :safety {:limit [-1.0 -1.0 0.0 1.0] :blocked []})})
+    (events/write-state! assoc :projectors {:a (laser :safety {:limit [-1.0 -1.0 0.0 1.0] :blocked []})})
     (play! (circle-cue 200))
     (ui/click! robot "#projectors-tab")
     (fixtures/with-clock
@@ -87,7 +87,7 @@
 
 (deftest thumbnail-says-not-streaming-test
   (let [robot (ui/robot)]
-    (state/swap-state! assoc :projectors {:a (laser)})
+    (events/write-state! assoc :projectors {:a (laser)})
     (ui/click! robot "#projectors-tab")
     (ui/wait-for! #(= "Not streaming" (said "#rig-card-thumbnail-a")))
     (ui/assert-text! "#rig-card-not-streaming-a" "Not streaming")
@@ -106,7 +106,7 @@
 
 (deftest card-turns-amber-below-its-minimum-test
   (let [robot (ui/robot)]
-    (state/swap-state! assoc :projectors {:a (laser)})
+    (events/write-state! assoc :projectors {:a (laser)})
     (play! (circle-cue 3000))
     (ui/click! robot "#projectors-tab")
     (fixtures/with-clock
@@ -122,7 +122,7 @@
 
 (deftest thinned-laser-shows-its-cut-test
   (let [robot (ui/robot)]
-    (state/swap-state! assoc :projectors {:a (laser)})
+    (events/write-state! assoc :projectors {:a (laser)})
     (play! (circle-cue 2000))
     (ui/click! robot "#projectors-tab")
     (fixtures/with-clock
@@ -136,10 +136,10 @@
 
 (deftest decimated-laser-meters-what-it-draws-test
   (let [robot (ui/robot)]
-    (state/swap-state! #(-> %
-                            (assoc :projectors {:a (laser)})
-                            (assoc-in [:chains :projector-effects :a :items]
-                                      [{:id (random-uuid) :effect-id :decimate :enabled? true :params {:kpps 25 :fps 30}}])))
+    (events/write-state! #(-> %
+                              (assoc :projectors {:a (laser)})
+                              (assoc-in [:chains :projector-effects :a :items]
+                                        [{:id (random-uuid) :effect-id :decimate :enabled? true :params {:kpps 25 :fps 30}}])))
     (play! (circle-cue 3000))
     (ui/click! robot "#projectors-tab")
     (fixtures/with-clock
@@ -155,9 +155,9 @@
 (deftest fit-guard-settings-apply-test
   (let [robot (ui/robot)
         fit #(get-in (state/get-raw-state) [:projectors :a :fit])]
-    (state/swap-state! #(-> %
-                            (assoc :projectors {:a (laser)})
-                            (assoc-in [:projector-ui :active-projector] :a)))
+    (events/write-state! #(-> %
+                              (assoc :projectors {:a (laser)})
+                              (assoc-in [:projector-ui :active-projector] :a)))
     (play! (circle-cue 3000))
     (ui/click! robot "#projectors-tab")
     (ui/assert-text! "#projector-fit-min-fps" "20")
