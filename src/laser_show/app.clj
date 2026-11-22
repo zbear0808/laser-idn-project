@@ -12,7 +12,6 @@
    (stop!)   - Stop the application
    (-main)   - Main entry point"
   (:require [cljfx.api :as fx]
-            [cljfx.css :as css]
             [clojure.java.io :as io]
             [clojure.tools.logging :as log]
             [taoensso.timbre :as timbre]
@@ -36,7 +35,6 @@
             [laser-show.input.midi :as midi]
             [laser-show.input.osc :as osc]
             [laser-show.input.router :as router]
-            [laser-show.css.title-bar :as menus]
             [laser-show.dev-config :as dev-config]
             [clojure.pprint :as pprint])
   (:import [javafx.application Platform])
@@ -114,17 +112,6 @@
                          :fx/executor events/event-executor}))
 
 
-(defn init-styles!
-  "Initialize CSS style URLs in state.
-   
-   This sets up the cljfx-css registered styles in the application state,
-   enabling hot-reload support. The style URLs are stored in state so that
-   when a var watch detects a change, updating state triggers a re-render."
-  []
-  (state/assoc-in-state! [:styles :menu-theme] (::css/url menus/menu-theme))
-  (log/debug "CSS styles initialized"))
-
-
 ;; Application Lifecycle
 
 
@@ -197,6 +184,22 @@
   (when recovered?
     (events/dispatch! {:event/type :rig/retry-write})))
 
+(defn- connect-link!
+  "Connect to the Carabiner daemon unless [:backend :link :auto-connect?] is
+   false: on this thread (it blocks as link/connect-carabiner! does), then
+   the result goes to app state through :timing/carabiner-connected, queued
+   like every other event, so an event in flight can't undo it."
+  []
+  (let [link-state (get-in (state/get-raw-state) [:backend :link])]
+    (when (:auto-connect? link-state true)
+      (let [{:keys [carabiner-connected? listener]}
+            (link/connect-carabiner! link-state events/dispatch! #(get-in (state/get-raw-state) [:backend :link]))]
+        (events/dispatch! (cond-> {:event/type :timing/carabiner-connected
+                                   :connected? (boolean carabiner-connected?)}
+                            listener (assoc :listener listener)))
+        (when carabiner-connected?
+          (log/info "Carabiner daemon connected (Link available via UI button)"))))))
+
 (defn start!
   "Start the laser show application.
    
@@ -224,8 +227,6 @@
         loaded-addons (load-addons {})]
     (state/init-state! (:state rig))
 
-    (init-styles!)
-
     (output-runtime/open!)
     (output-runtime/install-shutdown-hook!)
     (rig-store/install-shutdown-hook!)
@@ -246,14 +247,7 @@
   ;; After dispatch! reaches the agent, so the clock's reports queue there
   (show-clock/start!)
 
-  ;; Start Carabiner service (auto-connect for Link support)
-  (let [link-state (get-in (state/get-raw-state) [:backend :link])
-        auto-connect? (:auto-connect? link-state true)
-        get-link-state-fn #(get-in (state/get-raw-state) [:backend :link])]
-    (when auto-connect?
-      (let [new-link-state (link/connect-carabiner! link-state events/dispatch! get-link-state-fn)]
-        (state/assoc-in-state! [:backend :link] new-link-state)
-        (log/info "Carabiner daemon connected (Link available via UI button)"))))
+  (connect-link!)
 
   ;; Auto-scan for IDN devices on startup
   (log/info "Starting automatic device discovery...")
@@ -383,7 +377,6 @@
                          {:addons [] :dir (.getAbsolutePath (addons/addons-dir))})]
      (state/init-state! (:state rig))
      (show-time/reset-runtime!)
-     (init-styles!)
      (output-runtime/open!)
      (let [app (create-app)]
        (reset! *app app)

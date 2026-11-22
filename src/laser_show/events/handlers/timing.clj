@@ -246,9 +246,13 @@
   {:state (assoc-in state [:backend :link :link-peers] (or peers 0))})
 
 (defn- handle-timing-carabiner-connected
-  "Update Carabiner connection status (internal event from link service)."
-  [{:keys [state connected?]}]
-  {:state (assoc-in state [:backend :link :carabiner-connected?] connected?)})
+  "Update Carabiner connection status (app/connect-link!'s result at
+   start-up), and the status listener when the event has one. The other
+   link keys are kept."
+  [{:keys [state connected? listener]}]
+  {:state (update-in state [:backend :link]
+                     #(cond-> (assoc % :carabiner-connected? connected?)
+                        listener (assoc :listener listener)))})
 
 (defn- handle-timing-link-enabled
   "Update Link enabled status (internal event from link service)."

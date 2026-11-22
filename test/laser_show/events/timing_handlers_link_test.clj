@@ -61,6 +61,20 @@
           new-state (:state result)]
       (is (false? (get-in new-state [:backend :link :carabiner-connected?]))))))
 
+(deftest carabiner-connected-keeps-the-listener-test
+  (let [before (assoc (get-in base-state [:backend :link]) :carabiner-connected? false :link-peers 2 :auto-connect? true)
+        state (assoc-in base-state [:backend :link] before)
+        link-after #(get-in (:state (timing/handle (assoc % :state state :event/type :timing/carabiner-connected)))
+                            [:backend :link])]
+    (testing "a connect: the flag and the listener, the other link keys kept"
+      (is (= (assoc before :carabiner-connected? true :listener ::listener)
+             (link-after {:connected? true :listener ::listener}))))
+    (testing "a connect that failed: no listener"
+      (is (= before (link-after {:connected? false}))))
+    (testing "no :listener in the event: the flag only, as before"
+      (is (= (assoc before :carabiner-connected? true)
+             (link-after {:connected? true}))))))
+
 
 ;; Link Enabled Status Tests
 

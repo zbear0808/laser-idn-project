@@ -7,6 +7,7 @@
             [laser-show.app :as app]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.timing :as timing]
+            [laser-show.input.link :as link]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures])
   (:import [javafx.application Platform]))
@@ -62,6 +63,25 @@
     (is (= "Written meanwhile" (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :name]))
         "the event's write-back didn't undo it")
     (is (= 128.0 (get-in (state/get-raw-state) [:timing :bpm])) "and the event's own change landed")))
+
+(deftest link-connection-survives-an-event-in-flight-test
+  (let [threads (atom {})]
+    (with-redefs [link/connect-carabiner! (fn [ls _ _] (assoc ls :carabiner-connected? true :listener ::listener))]
+      (slowed :show-clock/status 200 threads
+              (fn []
+                ;; What the show clock sends a few times a second
+                (events/dispatch! {:event/type :show-clock/status :status {:beat-index 1}})
+                (Thread/sleep 50)
+                (@#'app/connect-link!)
+                (is (events/flush!)))))
+    (let [link-state (get-in (state/get-raw-state) [:backend :link])]
+      (try
+        (is (true? (:carabiner-connected? link-state)) "the event's write-back didn't take the connection away")
+        (is (= ::listener (:listener link-state)))
+        (is (true? (:auto-connect? link-state)) "the other link keys are kept")
+        (finally
+          ;; Nothing for the fixture's stop! to disconnect
+          (events/write-state! update-in [:backend :link] #(-> % (assoc :carabiner-connected? false) (dissoc :listener))))))))
 
 (deftest flush-does-not-wait-on-the-fx-thread-or-forever-test
   (testing "on the FX thread: false at once"
