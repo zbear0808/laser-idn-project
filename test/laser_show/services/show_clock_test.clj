@@ -111,11 +111,13 @@
       (is (show-clock/running?)))))
 
 (def ^:private agent-handler
-  "The event wiring app/create-app uses: the pipeline on an agent."
-  (-> events/handle-event-pipeline
+  "The event wiring app/create-app uses: the ordered pipeline on an agent, on
+   the one event thread."
+  (-> events/ordered-pipeline
       (fx/wrap-co-effects (assoc events/co-effects :fx/context (constantly nil)))
       (fx/wrap-effects events/effects)
-      (event-handler/wrap-async {:error-handler (fn [_ e] (throw e))})))
+      (event-handler/wrap-async {:error-handler (fn [_ e] (throw e))
+                                 :fx/executor events/event-executor})))
 
 (deftest slow-event-cannot-move-a-cue-back-test
   (testing "an event handled while the clock ticks writes back its old snapshot, but

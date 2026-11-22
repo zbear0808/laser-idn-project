@@ -97,7 +97,8 @@
 (defn- create-app
   "Create the cljfx app with async event processing. cljfx wraps the
    pipeline (with :state first, events/ordered-pipeline) with our co-effects
-   and effects and runs it on its agent, so every
+   and effects and runs it on its agent, on the one event thread
+   (events/event-executor, shared by every app instance), so every
    effect's dispatch queues on that agent. The :fx/context co-effect cljfx
    would add is switched off: events carry :state instead."
   []
@@ -109,7 +110,8 @@
    :desc-fn (fn [_] {:fx/type root/root-view})
    :opts {:fx.opt/type->lifecycle (get-type->lifecycle)}
    :error-handler default-error-handler
-   :async-agent-options {:error-handler agent-error-handler}))
+   :async-agent-options {:error-handler agent-error-handler
+                         :fx/executor events/event-executor}))
 
 
 (defn init-styles!

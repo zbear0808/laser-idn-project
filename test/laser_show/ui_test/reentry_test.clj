@@ -2,8 +2,7 @@
   "Results that background effects deliver later (a future, a timer) are
    handled on the event agent, like every other event, and not on the thread
    that produced them."
-  (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is use-fixtures]]
+  (:require [clojure.test :refer [deftest is use-fixtures]]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.chain :as chain]
             [laser-show.events.handlers.connection :as connection]
@@ -16,7 +15,7 @@
 (use-fixtures :each fixtures/with-app)
 
 (defn- agent-thread? [thread-name]
-  (str/starts-with? thread-name "clojure-agent-send-pool-"))
+  (= events/event-thread-name thread-name))
 
 (defn- recording-threads
   "Wrap handle so it records [event-type thread-name] into threads."

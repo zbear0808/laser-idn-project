@@ -20,8 +20,8 @@
    
    Threading (with the app running):
    - UI callbacks (inline fns) run briefly on FX thread, then delegate to agent
-   - Co-effects, handlers and effects run on the agent thread
-     (clojure-agent-send-pool-*), one event at a time
+   - Co-effects, handlers and effects run on the agent, on the one event
+     thread (laser-show-events, event-executor), one event at a time
    - An effect that continues the event (:dispatch, :project/save's :on-saved,
      ...) runs the follow-up inline through run-inline, in the same turn
    - Effects that work later on another thread (futures: scan, learn,
@@ -80,7 +80,7 @@
            [java.net URI]
            [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
-           [java.util.concurrent TimeUnit]))
+           [java.util.concurrent Executors ThreadFactory TimeUnit]))
 
 ;; Co-effects (inject data INTO events)
 ;; Co-effect functions take NO arguments and return data to inject.
@@ -706,6 +706,36 @@
   (-> ordered-pipeline
       (fx/wrap-co-effects co-effects)
       (fx/wrap-effects effects)))
+
+;; The event thread
+
+(def event-thread-name
+  "The name of the one thread every app instance's events run on."
+  "laser-show-events")
+
+(defonce ^{:private true
+           :doc "The thread event-executor runs on (set when it starts)."}
+  !event-thread
+  (atom nil))
+
+(defonce ^{:doc "A single-thread executor with one daemon thread,
+   event-thread-name. app/create-app gives it to cljfx as :fx/executor, so
+   every app instance's agent runs its events here, one at a time: an old
+   app's late event can't run alongside the new app's. defonce, so a dev
+   code reload keeps the thread."}
+  event-executor
+  (Executors/newSingleThreadExecutor
+   (reify ThreadFactory
+     (newThread [_ r]
+       (let [t (doto (Thread. ^Runnable r ^String event-thread-name)
+                 (.setDaemon true))]
+         (reset! !event-thread t)
+         t)))))
+
+(defn on-event-thread?
+  "Is this the event thread (event-executor's)?"
+  []
+  (identical? (Thread/currentThread) @!event-thread))
 
 ;; Convenience Functions
 
