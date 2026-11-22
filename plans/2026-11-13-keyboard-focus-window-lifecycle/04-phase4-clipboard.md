@@ -1,7 +1,7 @@
 # Phase 4 — One clipboard
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)   **Updated:** 2026-11-20 at `3229c95`, re-checked at `cc9e000`: every citation re-checked, probes p5–p7 re-run and p9–p17 added, the phase split into Steps 4a–4c, D13 and D14 added. Re-checked 2026-11-21 at `a38ea43`, after the output drivers, zones Z4–Z6, vibe Phase 8, Decimate's follow-ups, the Projectors layout pass and the engine snapshot: every Step 4a citation re-checked, probes p5–p7 and p9–p17 re-run and p18 added, and Step 4a takes in the step grid's clipboard (zones Z6, §1 row 19). Re-checked 2026-11-22 at `8723420`, after Step 4a and plan 02 (direct state writes): every Step 4b and 4c citation re-checked, probes p6, p7 and p13–p15 re-run, and §7's type table extended (§0, "Re-checked at `8723420`")
-**Status:** In progress. **Step 4a done** (2026-11-21, `02ae75c`..`1113d9a`; §9a As built), D8, D13 and D14 answered (2026-11-21, the ★ options). **D9 answered A** (2026-11-22, the ★ option). Steps 4b and 4c in progress on branch `clipboard-4bc`   **Last verified against:** `8723420` (probes p6, p7, p13–p15; p5–p7 and p9–p18 at `3229c95`, `cc9e000` and `a38ea43`, `probes/keyboard_probes_test.clj`; headless JavaFX 28-ea+11, JDK 25.0.5, macOS arm64)
+**Status:** **Done** (2026-11-22). Step 4a done (2026-11-21, `02ae75c`..`1113d9a`; §9a As built); Steps 4b and 4c done (2026-11-22, `29bf152`..`71ab827`, branch `clipboard-4bc`; §9b As built). D8, D13 and D14 answered (2026-11-21), D9 answered A (2026-11-22), all the ★ options   **Last verified against:** `71ab827` (probes p6, p7, p13–p15 at `8723420` and `71ab827`; p5–p7 and p9–p18 at `3229c95`, `cc9e000` and `a38ea43`, `probes/keyboard_probes_test.clj`; headless JavaFX 28-ea+11, JDK 25.0.5, macOS arm64)
 **Supersedes / Superseded by:** replaces the clipboard parts of `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md` (§3.6, §3.7, §5.A.2). Takes over review 02 #15, the clipboard bullets of 02 #2, M1 step 2 and M4, the "clipboard effect stubs" carry-over (`02-events-state.md:363`), review 01 F7 and Q6, and "Left: the clipboard helper" in the improvement review's overview (row 11). Zones Z0 already fixed the projector chain's part of K-8 (B-8b, `f044a31`), and `95a510d` removed `:clipboard/paste-projector-effects`   **Related findings:** K-6…K-11 (`00-overview.md` §4); review 01 F7, Q6; 02 #2, #15, M1, M4
 **Size:** ~2–2.5 days (4a ~1.25, 4b ~0.75, 4c ~0.25)   **Needs:** none of Phases 2–3 (§0)
 
@@ -12,8 +12,8 @@ Copy and paste are written twice, with different type names and different read r
 | Step | What ships | Fixes | Needs | Size |
 |---|---|---|---|---|
 | **4a** One clipboard (**done**, §9a) | `[:ui :clipboard]` is written only in the `:state` handlers return. Two NEW effects write and read the OS clipboard on the FX thread, and the event agent never waits for them. Nothing reads the OS clipboard while rendering. Paste buttons and menu items follow the clipboard. The dialog-local clipboards, the step grid's own clipboard and the dead code go | the lost update (K-7, p9), the waits (p10), the OS reads in handlers and render (K-10, p11), Paste buttons that never light or light wrongly (p5, p11, p12), the data-loss half of K-6 (p16), K-11, the step grid's second clipboard (p18) | D8, D13, D14 (answered) | ~1.25 d |
-| 4b Types and ids | each list's type comes from its component id; a copied cell pastes into a list; pasted things get new ids at every depth; an empty cell copies nothing | K-8 (p7, p13), K-9 (p6, p14, p15) | D9 (answered A) | ~0.75 d |
-| 4c Cut | Cut is one event and one undo step, with a Cut button | the rest of K-6 | D9 (answered A) | ~0.25 d |
+| 4b Types and ids (**done**, §9b) | each list's type comes from its component id; a copied cell pastes into a list; pasted things get new ids at every depth; an empty cell copies nothing | K-8 (p7, p13), K-9 (p6, p14, p15) | D9 (answered A) | ~0.75 d |
+| 4c Cut (**done**, §9b) | Cut is one event and one undo step, with a Cut button | the rest of K-6 | D9 (answered A) | ~0.25 d |
 
 **4a ships first and alone.** It keeps today's rules for which target takes which clip (§7, first table), so nothing that pastes today stops pasting and nothing pastes where it couldn't before. 4b and 4c use 4a's helpers and can follow in either order.
 
@@ -471,6 +471,66 @@ The after-runs came on a slower machine: p17 measures code Step 4a didn't change
 - Noticed, as planned for 4b: the item-effects list's Paste lights for copied cue items (both lists are `:cue-chain-items` until 4b).
 
 Not done here, as planned: Steps 4b and 4c (D9).
+
+## 9b. Steps 4b and 4c as built (2026-11-22, branch `clipboard-4bc`, from `8723420`)
+
+| # | Commit | What |
+|---|---|---|
+| – | `c9b251c` | `plans:` the re-check at `8723420` (§0), D9 answered A, §7's tables extended (the step grid, empty cells, the types nothing writes), the probes moved onto `events/write-state!` |
+| 5 | `29bf152` | NEW `clipboard/list-type`; `payload` and `accepts?` strict; `clipboard-types` the five written types; `list-clip` copies only `:cue-chain-items` and `:item-effects`; list copy and paste take the type from the component id; the list view's and the projector chain's `:clipboard-type` plumbing goes |
+| 6 | `c52f2b7` | `payload`: a copied grid cell (not a timeline cue) into a cue list as its items, a copied effects cell into an effect list as its effects |
+| 7 | `4fb9ebc` | NEW `chains/fresh-ids`; `deep-copy-item(s)` on it; grid paste through `(comp chains/fresh-ids migration/cue-z4)`, effects paste through `chains/fresh-ids`; NEW `clipboard/empty-cell?`, so an empty cell copies nothing and an empty cell's clip pastes nowhere; `serialize-effect-chain` walks into groups |
+| 8 | `71ab827` | NEW `:list/cut-selected` (`handle-cut-selected`), ⌘X and the NEW Cut button `#chain-cut-selection` (scissors icon, between Copy and Paste) dispatch it |
+
+**Changes per namespace**, beyond §4 as written:
+- `laser-show.state.clipboard`: `cell-clip` returns nil for an empty cell (NEW `empty-cell?`: nil, or no `:items` and no `:tracks`), so `handle-copy-to-clipboard` only checks for a clip. `payload` and `accepts?` also refuse a cell clip whose cell is empty: another build, or edited text, can still put `{:type :cue-chain :data nil}` on the OS clipboard, and invariant 9 holds for it too. `accepts?` is false for a nil target. `serialize-effect-chain` leaves a map without `:params` (a group) as it is and walks into its `:items`: every effect list allows groups, and they all copy as `:item-effects` now (§0). It requires `animation.cue-chains` for `timeline-cue?`.
+- `laser-show.animation.chains`: `deep-copy-item` gives the item a uuid first when it has none or a keyword one, as before, then `fresh-ids`. `deep-copy-items` runs `fresh-ids` over the whole vector, so a reference from one copied item to another follows it. `fresh-ids` returns `x` itself when nothing in it has a uuid `:id`.
+- `laser-show.events.handlers.list`: a list without a type (`list-type` nil) pastes nothing and doesn't read the OS clipboard; it copies and cuts nothing, so Cut never deletes what it couldn't copy.
+- `laser-show.views.components.list`: requires `state.clipboard` for `list-type`; Paste is off for a list without a type.
+
+**Deviations**
+- **The probes** p2, p7, p11, p13 and p14 wrote state directly, which plan 02 made throw under `start-test!`; they write through `events/write-state!` now (in the re-check commit).
+- **The empty-cell rule lives in `state.clipboard`** (`cell-clip`, `payload`, `accepts?`), not only in `handle-copy-to-clipboard`, as above.
+- **A cell's own target doesn't come with its items** into a cue list: the items keep theirs, and `items-z4` converts an older build's. Noticed, not changed: D9 A says the paste adds the cell's items.
+- **Cut under the show lock** goes through, as Delete and a list paste do: the lock refuses no list edit (§6). Unchanged by 4c.
+- **The review overview** (`plans/2026-11-07-improvement-review/00-overview.md`): this plan takes over row 11, which is already done; nothing there changed.
+- **Extra tests**: `copy-takes-its-type-from-the-list-test`, `paste-between-effect-lists-test`, `a-list-without-a-type-copies-nothing-test` (replaces `timeline-track-copy-uses-own-clipboard-type-test`), `cut-with-nothing-to-cut-does-nothing-test` (list handlers); `an-empty-cell-makes-no-clip-test`, `effect-copies-keep-groups-as-they-are-test` (clipboard).
+
+**Tests added**: `clipboard-test/list-type-test`, `accepts-strict-types-and-conversions-test` (replaces `accepts-keeps-todays-rules-test`), and the two above; `list-handlers-test/paste-refuses-another-lists-kind-test`, `paste-a-copied-cell-into-a-cue-list-test`, `paste-a-copied-effects-cell-into-an-effect-list-test`, `paste-a-timeline-cell-into-a-list-does-nothing-test`, `paste-regenerates-ids-at-every-depth-test`, `cut-selected-is-one-state-update-test`, `cut-selected-is-one-undo-step-test`, and the four above; `chains-test/fresh-ids-renames-every-inner-id-test`, `fresh-ids-keeps-inner-references-test`, `fresh-ids-leaves-outside-references-test`, `deep-copy-item-regenerates-nested-effect-ids-test`; `grid-handlers-test/paste-cell-regenerates-ids-test`, `copy-an-empty-cell-copies-nothing-test`; `menu-handlers-test/edit-copy-on-an-empty-cell-keeps-the-clipboard-test`; UI `clipboard-test/lists-refuse-each-others-items-test`, `cell-copy-pastes-into-a-list-test`, `cut-then-paste-restores-the-items-test`, `cut-is-one-undo-step-test`.
+
+**Tests changed**: `clipboard-test/list-clip-shapes-test` (no tracks, no untyped list), `system-text-ignores-foreign-text-test` (the types nothing writes); `list-handlers-test/paste-effects-into-an-item-effects-list-test` (an `:effect-chain` clip pastes nowhere; no `:clipboard-type`), its `copy-event` and `paste-event` (no `:clipboard-type`); `subs-test/can-paste-test` (cells with items, the conversions, an empty cell); UI `clipboard-test/cue-editor-paste-lights-after-a-copy-test` (a copied cell lights the cue list's Paste; an item's effects stay off after a cue copy), `paste-button-and-shortcut-agree-test` (the effects grid's chain takes effects; the cue items come from the cue list), the file's `copy-event` and `paste-event`; `cue-chain-list-test/list-buttons-say-what-they-do-test` (the Cut tooltip). `deep-copy-item-test`, `deep-copy-items-test`, `timeline.model-test`'s duplicate-clips tests and `grid-test/cell-menus-name-the-platform-shortcut-test` pass unchanged.
+
+**Red first** (pure handler tests return effect maps, so nothing ran `:clipboard/write`; UI tests ran headless against the stashed old `src`):
+- Commit 5: `clipboard-test` didn't compile (`No such var: clipboard/list-type`); `list-handlers-test` 8 failures in 4 tests (an item's effects copied as cue items, cue items pasted into `[:item-effects 0 0]` and `[:effect-chain 0 0]`, an effect into the cue list, an untyped list copied tracks); UI 2 failures and 2 errors in 3 tests (an item's effects' Paste stayed on after a cue copy, the effects grid's chain's Paste was on for cue items and off for effects).
+- Commit 6: 9 failures in 3 tests (`clipboard-test` 4, `list-handlers-test` 5); UI `cell-copy-pastes-…` and `cue-editor-paste-lights-…` timed out (a list's Paste stayed off for a copied cell).
+- Commit 7: `chains-test` didn't compile (`No such var: chains/fresh-ids`); 17 failures in 7 tests in the other four namespaces. `subs-test/can-paste-test` then failed twice: it used empty cells, which take nothing now; updated.
+- Commit 8: `list-handlers-test` 7 failures and 1 error in 3 tests (`:list/cut-selected` unknown); UI 2 failures and 2 errors in 3 tests (no Cut button, its tooltip nil; ⌘X's undo label "Delete Item(s)").
+
+**Probes, before (`8723420`) and after (`71ab827`)**, headless, 2026-11-22 (load average 1.8–2.6 before, 10.5–11.5 after):
+
+| Probe | Before | After |
+|---|---|---|
+| p6 | a list's ⌘V of a copied cell: 1 → 1 | 1 → 2 (the cell's item) |
+| p7 | effect chain [0 0] holds `{:preset-id :circle :type :preset}` | `[]` |
+| p13 | a preset in item 0's effects; `{:effect-id :scale}` among cue [0 0]'s items | `[]`; only `{:type :preset :preset-id :circle}` |
+| p14 | A1 and B2 share item ids; Edit > Copy on the empty [5 2] stores `{:type :cue-chain :data nil}`; Edit > Paste on [2 0] leaves it `nil` | ids differ; the slot keeps the A1 clip copied before; Edit > Paste on [2 0] pastes A1's circle with a new id (undo label "Paste") |
+| p15 | a copied item's effect keeps its id, in a group too | gets a new one, in a group too |
+
+**Suites** (2026-11-22, headless JavaFX 28-ea+11, JDK 25.0.5, macOS arm64):
+- Unit, full: 1900 tests, 570,660 assertions, 0 failures (10:54–10:56, load 9.0 → 3.7).
+- UI, full: 296 tests, 1568 assertions, 0 failures (10:56–11:12, load 3.5 → 1.1).
+- Targeted on the way: unit `clipboard list-handlers chains grid-handlers menu-handlers effects-handlers model-test timeline-handlers subs show-lock core-test step-grid-handlers cue-chain-handlers migration projector-handlers history-handlers` (400 tests, 9331 assertions); UI `clipboard-test` (16 tests, 67 assertions), `cue-chain-list-test`, `setup-dialogs-test`, `step-grid-test`, `projectors-layout-test`, `grid-test`, `menu-bar-test`.
+- kondo (`--lint src test --parallel --fail-level error`): 0 errors, 17 warnings, none in a file 4b or 4c touched (the same count as at 4a).
+- No timing test failed, so none needed a rerun.
+
+**Live check** (headless REPL, `start-test!` with a temp rig file and add-ons folder; the headless clipboard; screenshots in `test-results/clipboard-4bc/`, gitignored):
+- Copy Cue on A2 (cell [1 0], a square) from its menu (`01-…`); in A1's Cue Chain Editor the cue list's Paste was on and the item effects' off (`02-…`); ⌘V added the square after the circle, with its own id, "Paste Item(s)" (`03-…`).
+- Copy Effects on D1 (cell [0 3], the Master's Intensity) (`04-…`): the item effects' Paste on, the cue list's off (`05-…`); Paste added Intensity to the square's effects, with its own id (`06-…`).
+- After ⌘C on the circle, the item effects' Paste was off (`07-…`): 4a's leftover is gone.
+- The Cut button on the square: 2 → 1 items, the slot and the OS text hold the square, one undo entry "Cut Item(s)" (`08-…`); ⌘Z brought it back with the clip kept (`09-…`); ⌘⇧Z, then ⌘V after the circle, put it back (`10-…`).
+- The projector panel's 316 px chain column fits Copy, Cut, Paste and Delete at their full widths (44, 38, 44 and 48 px against 43.3, 37.6, 43.2 and 47.5 px wanted) (`11-…`).
+
+**The Mac's pasteboard** was never touched: every UI run, probe and the live check ran headless, and `pbpaste | shasum` read the same before the first run and after the last.
 
 ## 10. Out of scope / alternatives considered
 

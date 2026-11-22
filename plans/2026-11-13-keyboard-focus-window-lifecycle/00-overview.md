@@ -1,7 +1,7 @@
 # Keyboard, focus and window lifecycle — overview
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)
-**Status:** In progress. Phase 1 done (`93c638a`, 2026-11-14); Phase 4 Step 4a done (2026-11-21, `02ae75c`..`1113d9a`, 04 §9a); D0–D3 answered A; D8, D13 and D14 answered (2026-11-21, A, B, A); D9 answered A (2026-11-22, the ★ option), Steps 4b–4c in progress; D4–D7 and D10–D12 open   **Last verified against:** `cb32414` (live probes on JavaFX 28-ea+11, headless; see §3). Phase 1 moved line numbers in `root.clj`, `menu.clj`, `app.clj`, `domains.clj`, `multi_engine.clj` and `events/core.clj`, so citations into those files in docs 02–05 are against `cb32414` and get re-checked before each phase starts
+**Status:** In progress. Phase 1 done (`93c638a`, 2026-11-14); Phase 4 done (2026-11-22: Step 4a `02ae75c`..`1113d9a`, 04 §9a; Steps 4b–4c `29bf152`..`71ab827`, 04 §9b); D0–D3 answered A; D8, D13 and D14 answered (2026-11-21, A, B, A); D9 answered A (2026-11-22, the ★ option); D4–D7 and D10–D12 open   **Last verified against:** `cb32414` (live probes on JavaFX 28-ea+11, headless; see §3). Phase 1 moved line numbers in `root.clj`, `menu.clj`, `app.clj`, `domains.clj`, `multi_engine.clj` and `events/core.clj`, so citations into those files in docs 02–05 are against `cb32414` and get re-checked before each phase starts
 **Supersedes / Superseded by:** supersedes `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md` (approved with D0 on 2026-11-14; that file is marked superseded and otherwise untouched)
 **Related findings:** review 01 F3, F4, F7, F18, F20, M5, L3, Q4, Q6; 02 #15, M4 (clipboard part); 05 F17, F9, L3; carry-overs "menu stubs" and "unsaved-changes guard"; undo plan §10
 
@@ -16,7 +16,7 @@ The CI fix (§1) is in `e87b272`.
 | `01-phase1-unsaved-guard.md` | Unsaved-changes guard and an exit path | ~1 day | D1, D2, D3 (answered A). Done, `93c638a` |
 | `02-phase2-dialog-shell.md` | One dialog shell | ~1.5 days | D4 |
 | `03-phase3-key-handling.md` | Keys reach the right place | ~0.5–1 day | D5, D6, D7 |
-| `04-phase4-clipboard.md` | One clipboard, in three steps; Step 4a (the one clipboard) ships on its own | ~2–2.5 days | 4a: **done** (2026-11-21, `02ae75c`..`1113d9a`, 04 §9a); 4b–4c: D9 answered A (2026-11-22), in progress. No longer waits for Phase 3 (04 §0) |
+| `04-phase4-clipboard.md` | One clipboard, in three steps; Step 4a (the one clipboard) ships on its own | ~2–2.5 days | **Done** (2026-11-22). 4a: 2026-11-21, `02ae75c`..`1113d9a`, 04 §9a; 4b–4c: D9 answered A, 2026-11-22, `29bf152`..`71ab827`, 04 §9b |
 | `05-phase5-keyboard-triggers.md` | Keyboard as a cue-trigger source | ~1–1.5 days | D10, D11, D12 (and Phases 2–3) |
 
 About 6–7 days in total, against roughly two weeks for the 2026-10-07 plan as written. Each phase ships on its own.
@@ -100,10 +100,10 @@ Run by `probes/keyboard_probes_test.clj` (headless TestFX, JavaFX 28-ea+11, mast
 | K-3 | Exit stops no engines, no preview timer, no Carabiner; no IDN close is sent | L | `app.clj:186-199`; `link/disconnect-carabiner!` has no callers | 1 (done, `93c638a`) |
 | K-4 | List shortcuts die when focus moves to a toolbar button or checkbox inside the list | M | `list.clj:733,748`; p4 | 3 |
 | K-5 | Global props atom: two writers, never cleaned, `:ordered-ids` can be missing | L | `list.clj:57,603,865` | 3 |
-| K-6 | Cut is two events; if the OS write fails, the items are deleted and nothing can be pasted | M | p16; `views/components/list.clj:775-779`, `state/clipboard.clj:71-73` | 4a (no loss: done), 4c (one event) |
+| K-6 | Cut is two events; if the OS write fails, the items are deleted and nothing can be pasted | M | p16; `views/components/list.clj:775-779`, `state/clipboard.clj:71-73` | 4a (no loss: done), 4c (one event: done, `71ab827`) |
 | K-7 | A list copy never reaches `[:ui :clipboard]`: the helper writes it behind the pipeline, and the handler's write-back undoes it. The Cue Chain Editor's Paste buttons never enable; the projector chain's enables only after a re-render | M | p5, p9, p11; `state/clipboard.clj:34` vs `events/handlers/list.clj:247` | 4a (done) |
-| K-8 | Lists paste each other's items: the effects grid's chain and an item's effects take a cue's presets and give effects to the cue list. Projector chains were fixed in `f044a31` (zones Z0, B-8b) | H (data) | p7, p13; `views/components/list.clj:875`; `effect_chain_editor.clj:143`, `cue_chain_editor.clj:559` | 4b |
-| K-9 | Cell copy and list paste don't interoperate. A paste keeps ids (a cell's all, a list item's effects). An empty cell's copy empties the cell it is pasted on | M | p6, p14, p15; `events/helpers.clj:66-72, 90-95`; `animation/chains.clj:217-229` | 4b |
+| K-8 | Lists paste each other's items: the effects grid's chain and an item's effects take a cue's presets and give effects to the cue list. Projector chains were fixed in `f044a31` (zones Z0, B-8b) | H (data) | p7, p13; `views/components/list.clj:875`; `effect_chain_editor.clj:143`, `cue_chain_editor.clj:559` | 4b (done, `29bf152`) |
+| K-9 | Cell copy and list paste don't interoperate. A paste keeps ids (a cell's all, a list item's effects). An empty cell's copy empties the cell it is pasted on | M | p6, p14, p15; `events/helpers.clj:66-72, 90-95`; `animation/chains.clj:217-229` | 4b (done, `c52f2b7`, `4fb9ebc`) |
 | K-10 | The OS clipboard is read while rendering (two views) and inside paste handlers, and every copy and list paste makes the event agent wait for the FX thread (about 500 ms behind a busy FX thread) | M | p10–p12; `projectors.clj:560`, `effect_chain_editor.clj:95`, `events/handlers/list.clj:257-260`, `state/clipboard.clj:64,82` | 4a (done) |
 | K-11 | Dead clipboard code: `:on-copy-fn` callbacks nobody calls, two unused effects and a TODO stub, dialog-local slots, never-written types. `:clipboard/paste-projector-effects` and the projector stubs are already gone (Z0, `95a510d`) | L | `views/components/list.clj:598, 876, 917`; `events/core.clj:212-229, 552-553`; `events/handlers/effects.clj:167-174`; `cue_chain.clj:158-174` | 4a (done) |
 | K-12 | Six dialogs copy their shell; add-projector never closes; `:editing-name?` never reset; two dialogs lack defaults | M | `02-…` §1 | 2 |
