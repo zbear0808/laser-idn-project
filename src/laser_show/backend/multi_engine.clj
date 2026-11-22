@@ -20,9 +20,12 @@
      3. Applies projector calibration effects (color curves + corner-pin)
      4. Clips it to the projector's safety zone
    
-   No engine reads the groups from app state: the routing comes with the
-   tick, so an engine's frame and the preview agree, and a group edit shows
-   on the next tick without a restart.
+   No engine reads app state: each tick brings the routing and everything
+   else a frame takes (engine-inputs: each laser's calibration and safety
+   zone, the test pattern, Identify, BLACKOUT, the tick's wall clock), so a
+   frame is a function of its snapshot, every laser draws a tick from the
+   same state, an engine's frame and the preview agree, and an edit shows on
+   the next tick without a restart.
    
    This namespace builds engines and their frame providers. Starting, stopping
    and keeping them is the output runtime's job (backend/output_runtime.clj)."
@@ -94,14 +97,12 @@
         (output-errors/ok! [:calibration projector-id])))))
 
 (defn- apply-projector-effects
-  "Apply projector-level calibration effects to a frame, at timing-ctx (the
-   snapshot's projector context).
-   
-   Projector effects are stored in [:chains :projector-effects projector-id :items]
-   These include RGB curves, corner-pin calibration, etc."
-  [frame projector-id timing-ctx]
-  (let [raw-state (state/get-raw-state)
-        projector-effects (get-in raw-state [:chains :projector-effects projector-id :items] [])]
+  "Apply a projector's calibration effects, items (its chain from the tick's
+   [:chains :projector-effects projector-id :items], engine-inputs), to a
+   frame at timing-ctx (the snapshot's projector context). These include RGB
+   curves, corner-pin calibration, Decimate, etc. Reads no state."
+  [frame projector-id items timing-ctx]
+  (let [projector-effects (or items [])]
     (if (seq projector-effects)
       (try
         (let [out (effects/apply-effect-chain frame {:effects projector-effects} timing-ctx)]
@@ -112,6 +113,11 @@
           (output-errors/report! [:projector-effects projector-id] e)
           frame))
       frame)))
+
+(defn- chain-of
+  "The tick's calibration chain for projector-id (engine-inputs)."
+  [inputs projector-id]
+  (get-in inputs [:projector-effects projector-id :items]))
 
 (defn- stalled
   "Why a projector sends an empty frame instead of the snapshot's."
@@ -126,14 +132,15 @@
 
 (defn- guard-safety
   "The last stage of every frame a projector sends: (f zone)'s frame inside
-   the projector's safety zone (animation.safety, zones plan Z1). Reading and
-   normalizing the zone, f and apply-safety are one step: if anything in it
-   throws, a zone that can't be read included, the projector sends an empty
-   frame and [:safety projector-id] says why (it fails closed). Either way the
-   frame carries the snapshot's {:tick :at-ns}."
-  [raw-state projector-id snapshot f]
+   the projector's safety zone from the tick (inputs, engine-inputs;
+   animation.safety, zones plan Z1). Reading and normalizing the zone, f and
+   apply-safety are one step: if anything in it throws, a zone that can't be
+   read included, the projector sends an empty frame and [:safety
+   projector-id] says why (it fails closed). Either way the frame carries the
+   snapshot's {:tick :at-ns}."
+  [inputs projector-id snapshot f]
   (try
-    (let [zone (safety/normalize (get-in raw-state [:projectors projector-id :safety]))
+    (let [zone (safety/normalize (get-in inputs [:projectors projector-id :safety]))
           out (safety/apply-safety zone (f zone))]
       (output-errors/ok! [:safety projector-id])
       (stamp snapshot out))
@@ -141,81 +148,77 @@
       (output-errors/report! [:safety projector-id] e)
       (stamp snapshot []))))
 
-(defn now-ms
-  "The wall clock Identify's flash is timed by (a var, so tests can set it)."
-  []
-  (System/currentTimeMillis))
-
 (defn- test-pattern-mode
-  "Is projector-id showing the test pattern at now-ms: :identify-on or
-   :identify-off while Identify flashes ([:projector-ui :identify id], until
-   its end time), else :calibrate while it is the calibrating projector, else
-   nil. Identify wins while it flashes."
-  [raw-state projector-id now-ms]
-  (let [until (get-in raw-state [:projector-ui :identify projector-id])]
+  "Is projector-id showing the test pattern at the tick's wall clock
+   (inputs' :wall-ms): :identify-on or :identify-off while Identify flashes
+   (:identify id, until its end time), else :calibrate while it is the
+   calibrating projector, else nil. Identify wins while it flashes."
+  [inputs projector-id]
+  (let [until (get-in inputs [:identify projector-id])
+        now-ms (:wall-ms inputs)]
     (cond
-      (and until (< (long now-ms) (long until)))
+      (and until now-ms (< (long now-ms) (long until)))
       (if (test-pattern/identify-on? now-ms until) :identify-on :identify-off)
 
-      (= projector-id (get-in raw-state [:projector-ui :calibrating-projector-id]))
+      (= projector-id (:calibrating inputs))
       :calibrate)))
 
 (defn- test-pattern-frame
   "The test pattern (animation.test-pattern): the grid through the projector
    effects, the safety outline on top in output space, at the calibration
-   brightness, then the safety stage."
-  [raw-state projector-id snapshot]
-  (let [brightness (get-in raw-state [:projector-ui :calibration-brightness] 0.1)]
-    (guard-safety raw-state projector-id snapshot
+   brightness, then the safety stage, all from the tick (inputs)."
+  [inputs projector-id snapshot]
+  (let [brightness (:brightness inputs 0.1)]
+    (guard-safety inputs projector-id snapshot
                   (fn [zone]
                     (frame-service/concatenate-frames
                      [(apply-projector-effects (test-pattern/content-layer brightness) projector-id
-                                               (:projector-ctx snapshot))
+                                               (chain-of inputs projector-id) (:projector-ctx snapshot))
                       (test-pattern/safety-layer zone brightness)])))))
 
 (declare show-frame)
 
 (defn- projector-frame
-  "The projector's frame for the show clock's tick in snapshot: what it
-   draws of the tick's cues, composed from the snapshot's routing, then its
-   projector effects at the first cue's timing (show-frame). While it shows
-   the test pattern (calibration or Identify), the pattern instead, even
-   with nothing playing; dark during BLACKOUT and in Identify's dark halves.
-   Nil before the first tick, while nothing is playing and when none of the
-   cues reach it. Its safety zone comes last (guard-safety): it clips what
-   the projector effects made, and if it fails the projector sends an empty
-   frame. A snapshot older than show-time/STALE_MS throws \"Show clock
-   stalled\". The frame carries the snapshot's {:tick :at-ns} as metadata,
+  "The projector's frame for the show clock's tick in snapshot, from the
+   snapshot alone: what it draws of the tick's cues, composed from the
+   snapshot's routing, then its projector effects at the first cue's timing
+   (show-frame). While it shows the test pattern (calibration or Identify),
+   the pattern instead, even with nothing playing; dark during BLACKOUT and
+   in Identify's dark halves. Its calibration, safety zone, test pattern,
+   Identify and BLACKOUT are the tick's (:engine-inputs, engine-inputs), so
+   the same snapshot always gives the same frame. Nil before the first tick,
+   for a laser the tick doesn't know, while nothing is playing and when none
+   of the cues reach it. Its safety zone comes last (guard-safety): it clips
+   what the projector effects made, and if it fails the projector sends an
+   empty frame. The frame carries the snapshot's {:tick :at-ns} as metadata,
    so the engine knows which tick it sends."
   [projector-id snapshot]
-  (when snapshot
-    (let [now (System/nanoTime)]
-      (when (show-time/stale? snapshot now)
-        (throw (stalled snapshot now))))
-    (let [raw-state (state/get-raw-state)
-          pattern (test-pattern-mode raw-state projector-id (now-ms))]
-      (cond
-        ;; BLACKOUT darkens the test pattern, and only the pattern
-        (and pattern (get-in raw-state [:vibe-runtime :blackout?])) (stamp snapshot [])
-        (= :identify-off pattern) (stamp snapshot [])
-        ;; Even with nothing playing; it skips the render, so the effects grid
-        ;; (the Master included) never touches it
-        pattern (test-pattern-frame raw-state projector-id snapshot)
-        (:playing? snapshot) (show-frame raw-state projector-id snapshot)))))
+  (let [inputs (:engine-inputs snapshot)]
+    (when (contains? (:projectors inputs) projector-id)
+      (let [pattern (test-pattern-mode inputs projector-id)]
+        (cond
+          ;; BLACKOUT darkens the test pattern, and only the pattern
+          (and pattern (:blackout? inputs)) (stamp snapshot [])
+          (= :identify-off pattern) (stamp snapshot [])
+          ;; Even with nothing playing; it skips the render, so the effects grid
+          ;; (the Master included) never touches it
+          pattern (test-pattern-frame inputs projector-id snapshot)
+          (:playing? snapshot) (show-frame inputs projector-id snapshot))))))
 
 (defn- show-frame
   "What the projector draws of the show: its frame composed from the tick's
    cues and routing (routing.compose/projector-frame), then the fit guard
    (animation.fit-guard, with the routing's scan rate and fit settings for
-   it), then its projector effects and its safety zone. The frame carries
-   the guard's record, with how many halves it drew, as :fit. When the
-   projector effects change the point count (Decimate), the record counts
-   what they left (fit-guard/recount): what reaches the safety stage, before
-   the crossing points it may add. A laser whose calibration chain has an
-   enabled Decimate (the routing's :decimate-budget) meters that count
-   whether Decimate changed it or not (fit-guard/drawn). Nil when none of
-   the cues reach it."
-  [raw-state projector-id snapshot]
+   it), then its projector effects and its safety zone, both the tick's
+   (inputs). The frame carries the guard's record, with how many halves it
+   drew, as :fit. When the projector effects change the point count
+   (Decimate), the record counts what they left (fit-guard/recount): what
+   reaches the safety stage, before the crossing points it may add. A laser
+   whose calibration chain has an enabled Decimate (the routing's
+   :decimate-budget, from the same tick's chains) meters that count whether
+   Decimate changed it or not (fit-guard/drawn). Nil when none of the cues
+   reach it."
+  [inputs projector-id snapshot]
   (let [routing (:routing snapshot)
         {:keys [frame regions no-room?]} (compose/projector-frame (:cues snapshot) routing projector-id)
         log-count (swap! routing-log-counter inc)]
@@ -230,8 +233,10 @@
       (let [{:keys [scan-rate fit decimate-budget]} (get-in routing [:outputs projector-id])
             {guarded :frame record :fit} (fit-guard/guard frame scan-rate fit)
             calibrated (volatile! nil)
-            out (guard-safety raw-state projector-id snapshot
-                              (fn [_] (vreset! calibrated (apply-projector-effects guarded projector-id (:projector-ctx snapshot)))))
+            items (chain-of inputs projector-id)
+            out (guard-safety inputs projector-id snapshot
+                              (fn [_] (vreset! calibrated (apply-projector-effects guarded projector-id items
+                                                                                   (:projector-ctx snapshot)))))
             record (cond-> record
                      @calibrated (fit-guard/recount (count @calibrated))
                      (and @calibrated decimate-budget) fit-guard/drawn)]
@@ -241,11 +246,15 @@
 (defn- create-projector-frame-provider
   "Create a frame provider function for a specific projector or virtual projector.
    
-   The frame provider takes the show clock's newest tick (show-time/latest):
+   The frame provider takes the show clock's newest tick (show-time/latest),
+   and sends an empty frame, reporting \"Show clock stalled\", for one older
+   than show-time/STALE_MS on the engine's clock. Otherwise its frame
+   (projector-frame) comes from the tick alone:
    1. Composes what this projector draws from the tick's cues and routing
    2. Draws fewer points, then dims, below its minimum fps (the fit guard)
-   3. Applies projector calibration effects (color curves + corner-pin)
-   4. Clips it to the projector's safety zone
+   3. Applies the tick's projector calibration effects (color curves + corner-pin)
+   4. Clips it to the tick's safety zone
+   So a keepalive resend of the same tick sends the same frame.
    
    The fit guard's record on the frame (:fit) is averaged over the frames it
    makes (fit-guard/smooth, kept here: one provider per engine, called only
@@ -260,7 +269,12 @@
   (let [smoothed (volatile! nil)]
     (fn []
       (try
-        (let [frame (projector-frame projector-id (show-time/latest))
+        (let [snapshot (show-time/latest)
+              _ (when snapshot
+                  (let [now (System/nanoTime)]
+                    (when (show-time/stale? snapshot now)
+                      (throw (stalled snapshot now)))))
+              frame (projector-frame projector-id snapshot)
               fit (vreset! smoothed (fit-guard/smooth @smoothed (:fit (meta frame))))
               frame (cond-> frame fit (vary-meta assoc :fit fit))]
           (output-errors/ok! [:provider projector-id])

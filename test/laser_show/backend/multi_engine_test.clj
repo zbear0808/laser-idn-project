@@ -4,6 +4,7 @@
             [laser-show.animation.cue-timing :as ct]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.effects.calibration]
+            [laser-show.animation.fit-guard :as fit-guard]
             [laser-show.animation.show-time :as show-time]
             [laser-show.backend.multi-engine :as me]
             [laser-show.backend.output-errors :as output-errors]
@@ -32,12 +33,16 @@
 (use-fixtures :each setup-test-state)
 
 (defn- snapshot
-  "A snapshot as the show clock publishes it, its routing made from app state
-   as it is now (zones plan Z3)."
-  [cues & {:keys [at-ns playing? projector-ctx] :or {playing? true}}]
-  {:tick 1 :at-ns (or at-ns (System/nanoTime)) :playing? playing? :cues cues
-   :projector-ctx projector-ctx :preview (delay nil)
-   :routing (rig/routing (rig/routing-inputs (state/get-raw-state) nil))})
+  "A snapshot as the show clock publishes it, its routing and what the
+   engines take from app state (multi-engine/engine-inputs, at wall-ms, now
+   by default) made from app state as it is now (zones plan Z3, state
+   integrity 01)."
+  [cues & {:keys [at-ns playing? projector-ctx wall-ms] :or {playing? true}}]
+  (let [s (state/get-raw-state)]
+    {:tick 1 :at-ns (or at-ns (System/nanoTime)) :playing? playing? :cues cues
+     :projector-ctx projector-ctx :preview (delay nil)
+     :routing (rig/routing (rig/routing-inputs s nil))
+     :engine-inputs (me/engine-inputs s (or wall-ms (System/currentTimeMillis)))}))
 
 
 ;; Validation Tests
@@ -448,10 +453,9 @@
           apply-projector-effects #'me/apply-projector-effects]
       (doseq [failing (map :id failing-calibration-effects)]
         (testing (name failing)
-          (state/assoc-in-state! [:chains :projector-effects :proj-a :items]
-                                 [{:id (random-uuid) :effect-id failing :enabled? true :params {}}
-                                  curves])
-          (let [out (apply-projector-effects frame :proj-a {:time-ms 0 :bpm 120.0})]
+          (let [out (apply-projector-effects frame :proj-a
+                                             [{:id (random-uuid) :effect-id failing :enabled? true :params {}} curves]
+                                             {:time-ms 0 :bpm 120.0})]
             (is (= [[0.9 0.9] [-0.9 -0.9]] (mapv #(subvec % 0 2) out)) "positions unchanged")
             (is (every? #(< 0.49 (% 2) 0.51) out) "rgb-curves still raises red to 0.5")))))
     (finally
@@ -469,13 +473,11 @@
                            :b-curve-points [[0.0 0.0] [1.0 1.0]]}}
           apply-projector-effects #'me/apply-projector-effects
           warning #(get-in (output-errors/snapshot) [[:calibration :proj-a] :message])]
-      (state/assoc-in-state! [:chains :projector-effects :proj-a :items] [fails curves])
-      (let [out (apply-projector-effects frame :proj-a {:time-ms 0 :bpm 120.0})]
+      (let [out (apply-projector-effects frame :proj-a [fails curves] {:time-ms 0 :bpm 120.0})]
         (is (every? #(< 0.49 (% 2) 0.51) out) "the frame is the same as before: the others still apply"))
       (is (= "Test: corner pin fails skipped" (warning)) "the skip is named under [:calibration id]")
       (testing "it clears when the effect works again"
-        (state/assoc-in-state! [:chains :projector-effects :proj-a :items] [curves])
-        (apply-projector-effects frame :proj-a {:time-ms 0 :bpm 120.0})
+        (apply-projector-effects frame :proj-a [curves] {:time-ms 0 :bpm 120.0})
         (is (nil? (warning)))))
     (finally
       (output-errors/clear!)
@@ -610,9 +612,7 @@
 (deftest identify-flashes-then-stops-test
   (state/swap-state! #(assoc-in % [:projectors :p] {:zone-groups [:all]}))
   (let [cues [{:cell [0 0] :zone-frames {:all lit-line}}]
-        frame-at (fn [now-ms]
-                   (with-redefs [me/now-ms (constantly now-ms)]
-                     (#'me/projector-frame :p (snapshot cues))))]
+        frame-at (fn [wall-ms] (#'me/projector-frame :p (snapshot cues :wall-ms wall-ms)))]
     (state/swap-state! #(assoc-in % [:projector-ui :identify :p] 10000))
     (is (< 300 (count (frame-at 7000))) "lit: the pattern instead of the show")
     (is (= [] (frame-at 7300)) "dark for the next 250 ms")
@@ -800,3 +800,211 @@
     (testing "the calibration brightness and BLACKOUT as set"
       (is (= [0.4 true] ((juxt :brightness :blackout?)
                          (me/engine-inputs {:projector-ui {:calibration-brightness 0.4} :vibe-runtime {:blackout? :yes}} 5)))))))
+
+(def ^:private line-to-08
+  "A lit line from the middle to x = 0.8."
+  [[0.0 0.0 0.0 0.0 0.0] [0.8 0.0 1.0 1.0 1.0]])
+
+(defn- pin
+  "A corner pin with its corners at ±s: it scales every point by s."
+  [s]
+  {:id #uuid "00000000-0000-0000-0000-0000000000a1" :effect-id :corner-pin :enabled? true
+   :params {:tl-x (- s) :tl-y s :tr-x s :tr-y s :bl-x (- s) :bl-y (- s) :br-x s :br-y (- s)}})
+
+(defn- box [h] {:limit [(- h) (- h) h h]})
+
+(defn- reach
+  "How far right the frame's light goes: the largest x of a lit point, 0 for none."
+  [frame]
+  (reduce max 0.0 (map #(double (first %)) (lit-points frame))))
+
+(defn- near? [a b] (< (Math/abs (- (double a) (double b))) 1e-6))
+
+(defn- laser [host] {:host host :enabled? true :zone-groups [] :exclude-from-all? false})
+
+(deftest calibration-edit-waits-for-the-next-tick-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:chains :cue-chains [0 0]] {:destination-zone {:zone-group-id :all}
+                                                                  :items [(preset :circle)]})
+                          (assoc-in [:projectors :p] (laser "10.0.0.5"))
+                          (assoc-in [:chains :projector-effects :p :items] [(pin 1.0)])))
+  (events/event-handler {:event/type :grid/trigger-cell :col 0 :row 0})
+  (with-redefs [events/dispatch! (fn [_])]
+    (show-clock/tick! 0)
+    (let [s (show-clock/tick! 16666667)
+          before (#'me/projector-frame :p s)]
+      (state/assoc-in-state! [:chains :projector-effects :p :items] [(pin 0.5)])
+      (let [after (#'me/projector-frame :p s)]
+        (is (near? 0.5 (reach before)) "the circle of radius 0.5 through a pin of 1.0")
+        (is (= before after) "the tick's frame keeps the tick's pin")
+        (is (near? 0.25 (reach (#'me/projector-frame :p (show-clock/tick! 33333334))))
+            "the next tick's has the edit")))))
+
+(deftest decimate-edit-waits-for-the-next-tick-test
+  (state/assoc-in-state! [:projectors :p] (assoc (laser "10.0.0.5") :scan-rate 25000))
+  (let [cues [{:cell [0 0] :zone-frames {:all heavy}}]
+        counts (fn [frame] [(count frame) (:points (:fit (meta frame)))])
+        snap (snapshot cues)
+        before (#'me/projector-frame :p snap)
+        provider (#'me/create-projector-frame-provider :p)]
+    (show-time/publish! snap)
+    (state/assoc-in-state! [:chains :projector-effects :p :items] [decimate])
+    (let [after (#'me/projector-frame :p snap)]
+      (is (= [1800 1800] (counts before)))
+      (is (= before after) "Decimate added after the tick: the tick's frame keeps the guard's 1,800 points")
+      (is (= [1800 1800] (counts after)) "and its record, which the card and LOW FPS read, says so")
+      (is (= [1800 1800] (counts (provider))) "so does the provider's smoothed record"))
+    (let [next-snap (snapshot cues)]
+      (is (= [833 833] (counts (#'me/projector-frame :p next-snap))) "the next tick's frame is Decimate's")
+      (show-time/publish! next-snap)
+      (is (= [833 833] (counts (provider)))))))
+
+(deftest decimate-removal-waits-for-the-next-tick-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:projectors :p] (assoc (laser "10.0.0.5") :scan-rate 25000))
+                          (assoc-in [:chains :projector-effects :p :items] [decimate])))
+  (let [cues [{:cell [0 0] :zone-frames {:all heavy}}]
+        counts (fn [frame] (let [fit (:fit (meta frame))] [(count frame) (:points fit) (:effect-points fit)]))
+        snap (snapshot cues)]
+    (is (= 833 (get-in snap [:routing :outputs :p :decimate-budget])) "the tick's routing meters by Decimate's budget")
+    (state/assoc-in-state! [:chains :projector-effects :p :items] [])
+    (is (= [833 833 833] (counts (#'me/projector-frame :p snap)))
+        "Decimate removed after the tick: the tick's frame is still its chain's, metered by its rule")
+    (is (= [1800 1800 nil] (counts (#'me/projector-frame :p (snapshot cues))))
+        "the next tick's: no Decimate, and the meter counts what the laser is asked for")))
+
+(defn- circle-points
+  "n lit points on a circle of radius r around the middle."
+  [n r]
+  (mapv (fn [i] (let [a (/ (* 2.0 Math/PI i) n)] [(* r (Math/cos a)) (* r (Math/sin a)) 0.0 1.0 0.0]))
+        (range n)))
+
+(deftest safety-edit-waits-for-the-next-tick-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:projectors :p] (laser "10.0.0.5"))
+                          (assoc-in [:projectors :p :safety] (box 0.9))))
+  (let [cues [{:cell [0 0] :zone-frames {:auto/left (circle-points 64 0.9)}}]
+        snap (snapshot cues)
+        left (fn [s] (get-in s [:routing :outputs :p :regions :L]))]
+    (is (every? true? (map near? [-0.225 0.0 0.675] (left snap))) "the tick fits Left to the ±0.9 box")
+    (state/assoc-in-state! [:projectors :p :safety] (box 0.3))
+    (let [out (#'me/projector-frame :p snap)]
+      (is (= 64 (count (lit-points out))) "narrowed after the tick: the tick's frame is clipped to the box it was fitted to")
+      (is (inside-limit? [-0.9 -0.9 0.9 0.9] out)))
+    (let [next-snap (snapshot cues)
+          out (#'me/projector-frame :p next-snap)]
+      (is (every? true? (map near? [-0.075 0.0 0.225] (left next-snap))) "the next tick fits Left to the ±0.3 box")
+      (is (= 64 (count (lit-points out))))
+      (is (inside-limit? [-0.3 -0.3 0.3 0.3] out) "and clips to it"))))
+
+(deftest blackout-and-test-pattern-wait-for-the-next-tick-test
+  (state/assoc-in-state! [:projectors :p] (laser "10.0.0.5"))
+  (testing "BLACKOUT pressed after the tick, the test pattern on"
+    (state/assoc-in-state! [:projector-ui :calibrating-projector-id] :p)
+    (let [snap (snapshot [] :playing? false)]
+      (state/assoc-in-state! [:vibe-runtime :blackout?] true)
+      (is (= 537 (count (#'me/projector-frame :p snap))) "the tick's frame is the pattern")
+      (is (= [] (#'me/projector-frame :p (snapshot [] :playing? false))) "the next tick's is dark"))
+    (state/swap-state! #(-> % (assoc-in [:vibe-runtime :blackout?] false)
+                            (assoc-in [:projector-ui :calibrating-projector-id] nil))))
+  (testing "the test pattern turned on after the tick"
+    (let [cues [{:cell [0 0] :zone-frames {:all line-to-08}}]
+          snap (snapshot cues)]
+      (state/assoc-in-state! [:projector-ui :calibrating-projector-id] :p)
+      (is (= line-to-08 (#'me/projector-frame :p snap)) "the tick's frame is the cue")
+      (is (= 537 (count (#'me/projector-frame :p (snapshot cues)))) "the next tick's the pattern"))
+    (state/assoc-in-state! [:projector-ui :calibrating-projector-id] nil))
+  (testing "Identify pressed after the tick"
+    (let [cues [{:cell [0 0] :zone-frames {:all line-to-08}}]
+          snap (snapshot cues :wall-ms 7000)]
+      (state/assoc-in-state! [:projector-ui :identify :p] 10000)
+      (is (= line-to-08 (#'me/projector-frame :p snap)) "the tick's frame is the cue")
+      (is (< 300 (count (#'me/projector-frame :p (snapshot cues :wall-ms 7000)))) "the next tick's flashes"))))
+
+(deftest edit-while-a-frame-is-made-leaves-it-alone-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:projectors :p] (assoc (laser "10.0.0.5") :safety (box 0.9)))
+                          (assoc-in [:chains :projector-effects :p :items] [(pin 1.0)])))
+  (let [cues [{:cell [0 0] :zone-frames {:all line-to-08}}]
+        snap (snapshot cues)
+        guard fit-guard/guard
+        edit! #(state/swap-state! (fn [s] (-> s (assoc-in [:projectors :p :safety] (box 0.3))
+                                              (assoc-in [:chains :projector-effects :p :items] [(pin 0.5)]))))
+        out (with-redefs [fit-guard/guard (fn [& args] (edit!) (apply guard args))]
+              (#'me/projector-frame :p snap))]
+    (is (near? 0.8 (reach out)) "the pin and the limit edited while the frame is composed: the tick's pin, the tick's limit")
+    (is (near? 0.3 (reach (#'me/projector-frame :p (snapshot cues)))) "the next tick's: both new")))
+
+(deftest lasers-of-one-tick-share-its-state-test
+  (state/swap-state! #(-> %
+                          (assoc :projectors {:a (laser "10.0.0.5") :b (laser "10.0.0.6")})
+                          (assoc-in [:chains :projector-effects :a :items] [(pin 1.0)])
+                          (assoc-in [:chains :projector-effects :b :items] [(pin 1.0)])))
+  (let [snap (snapshot [{:cell [0 0] :zone-frames {:all line-to-08}}])
+        a (#'me/projector-frame :a snap)]
+    (state/swap-state! #(-> % (assoc-in [:chains :projector-effects :a :items] [(pin 0.5)])
+                            (assoc-in [:chains :projector-effects :b :items] [(pin 0.5)])))
+    (let [b (#'me/projector-frame :b snap)]
+      (is (near? 0.8 (reach a)))
+      (is (near? 0.8 (reach b)) "both pins edited between the two lasers' frames: both draw the tick's"))))
+
+(deftest engine-reads-no-app-state-test
+  (let [cues [{:cell [0 0] :zone-frames {:all line-to-08}}]
+        frame-of (fn [snap] (try (#'me/projector-frame :p snap) (catch Throwable e (ex-message e))))
+        cases (atom [])
+        case! (fn [label snap] (swap! cases conj [label snap (frame-of snap)]))]
+    (state/swap-state! #(-> %
+                            (assoc-in [:projectors :p] (assoc (laser "10.0.0.5") :safety {:limit [-0.5 -0.5 0.5 0.5]
+                                                                                       :blocked [[-0.1 -0.1 0.1 0.1]]}))
+                            (assoc-in [:chains :projector-effects :p :items] [identity-curves (pin 0.5)])))
+    (case! "a show frame with calibration and a zone" (snapshot cues))
+    (state/assoc-in-state! [:projector-ui :calibrating-projector-id] :p)
+    (case! "the test pattern" (snapshot [] :playing? false))
+    (state/swap-state! #(-> % (assoc-in [:projector-ui :calibrating-projector-id] nil)
+                            (assoc-in [:projector-ui :identify :p] 10000)))
+    (case! "Identify, lit" (snapshot cues :wall-ms 7000))
+    (case! "Identify, dark" (snapshot cues :wall-ms 7300))
+    (state/swap-state! #(-> % (update :projector-ui dissoc :identify)
+                            (assoc-in [:projector-ui :calibrating-projector-id] :p)
+                            (assoc-in [:vibe-runtime :blackout?] true)))
+    (case! "BLACKOUT on the pattern" (snapshot [] :playing? false))
+    (state/swap-state! #(-> % (assoc-in [:projector-ui :calibrating-projector-id] nil)
+                            (assoc-in [:vibe-runtime :blackout?] false)))
+    (case! "nothing playing" (snapshot [] :playing? false))
+    (state/assoc-in-state! [:projectors :p :safety] {:limit [0.0 0.0]})
+    (case! "an unreadable zone" (snapshot cues))
+    (let [[_ _ show] (first @cases)]
+      (is (near? 0.4 (reach show)) "the show frame is pinned (0.8 to 0.4) inside its zone"))
+    (is (< 300 (count (nth (nth @cases 1) 2))) "the test pattern")
+    (is (nil? (nth (nth @cases 5) 2)) "nothing playing")
+    (output-errors/clear!)
+    (with-redefs [state/get-raw-state (fn [] (throw (ex-info "test: an engine read app state" {})))]
+      (doseq [[label snap expected] @cases]
+        (testing label
+          (is (= expected (frame-of snap))))))
+    (is (some? (get (output-errors/snapshot) [:safety :p])) "the unreadable zone is reported")))
+
+(deftest laser-the-tick-doesnt-know-draws-nothing-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:projectors :p] (laser "10.0.0.5"))
+                          (assoc-in [:projector-ui :calibrating-projector-id] :p)))
+  (let [snap (snapshot [{:cell [0 0] :zone-frames {:all line-to-08}}])]
+    (is (= 537 (count (#'me/projector-frame :p snap))) "a laser the tick knows shows its test pattern")
+    (output-errors/clear!)
+    (is (nil? (#'me/projector-frame :p (update-in snap [:engine-inputs :projectors] dissoc :p)))
+        "one missing from the tick's [:projectors] draws nothing, the test pattern included")
+    (is (nil? (#'me/projector-frame :p (dissoc snap :engine-inputs))) "and so does a snapshot without :engine-inputs")
+    (is (empty? (output-errors/snapshot)) "with no error: not a full-range fallback")))
+
+(deftest same-tick-same-frame-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:projectors :p] (laser "10.0.0.5"))
+                          (assoc-in [:chains :projector-effects :p :items] [(pin 1.0)])))
+  (let [provider (#'me/create-projector-frame-provider :p)]
+    (show-time/publish! (snapshot [{:cell [0 0] :zone-frames {:all line-to-08}}]))
+    (let [first-frame (provider)]
+      (state/swap-state! #(-> % (assoc-in [:chains :projector-effects :p :items] [(pin 0.5)])
+                              (assoc-in [:projector-ui :identify :p] (+ (System/currentTimeMillis) 3000))))
+      (let [resent (provider)]
+        (is (near? 0.8 (reach first-frame)))
+        (is (= first-frame resent) "a keepalive resend of the same tick, with the pin edited and Identify started since")))))

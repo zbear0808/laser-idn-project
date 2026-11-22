@@ -44,7 +44,7 @@
 (defn fingerprint
   "What an engine is built from. A change restarts the projector's engine;
    names, groups, the rig's order, fit and safety settings restart nothing:
-   the routing comes with each tick, and safety is read live. An IDN
+   the routing, safety and calibration come with each tick. An IDN
    projector has no :driver or :driver-config, so its fingerprint is the same
    as before there were drivers (plans/2026-11-19-output-drivers/01 §5.5)."
   [projector]

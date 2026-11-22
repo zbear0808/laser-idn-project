@@ -324,10 +324,11 @@
         apply-projector-effects @#'me/apply-projector-effects]
     (doseq [effect-id [:probe-calibration-fails-per-point :probe-calibration-fails-to-build]]
       (init-with-projectors! {})
-      (state/swap-state! assoc-in [:chains :projector-effects :probe-a :items]
-                         [{:id (random-uuid) :effect-id effect-id :enabled? true :params {}}])
+      ;; Since state integrity 01 the engine passes the tick's chain in
       (say "p8" effect-id "-> output equals the uncalibrated input?"
-           (= frame (apply-projector-effects frame :probe-a {:time-ms 0 :bpm 120.0}))))))
+           (= frame (apply-projector-effects frame :probe-a
+                                             [{:id (random-uuid) :effect-id effect-id :enabled? true :params {}}]
+                                             {:time-ms 0 :bpm 120.0}))))))
 
 
 ;; p9 — RGB curves with a raised low end (diode threshold compensation)

@@ -578,11 +578,15 @@
 
 (defn- zone-snapshot
   "A snapshot of one cue; since zones Z3 it carries the routing the engines
-   compose from, made from app state as the show clock makes it."
+   compose from, and since state integrity 01 what they take from app state
+   (multi-engine/engine-inputs), made from app state as the show clock makes
+   them."
   [zone-frames]
-  {:tick 1 :at-ns (System/nanoTime) :playing? true :projector-ctx nil :preview (delay nil)
-   :cues [{:cell [0 0] :zone-frames zone-frames}]
-   :routing (rig/routing (rig/routing-inputs (state/get-raw-state) nil))})
+  (let [s (state/get-raw-state)]
+    {:tick 1 :at-ns (System/nanoTime) :playing? true :projector-ctx nil :preview (delay nil)
+     :cues [{:cell [0 0] :zone-frames zone-frames}]
+     :routing (rig/routing (rig/routing-inputs s nil))
+     :engine-inputs (me/engine-inputs s (System/currentTimeMillis))}))
 
 (defn- render-zones
   "generate-frames-by-zone for one cue at beats, through the same render context

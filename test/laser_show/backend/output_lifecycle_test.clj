@@ -10,6 +10,7 @@
             [laser-show.backend.output-errors :as output-errors]
             [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.backend.streaming-engine :as se]
+            [laser-show.animation.show-time :as show-time]
             [laser-show.animation.types :as t]
             [laser-show.animation.fit-guard :as fit-guard]
             [laser-show.animation.effects :as effects]
@@ -47,7 +48,8 @@
 (defn- stopping-every-engine
   "Record every engine started during the test, and afterwards drain the
    output runtime and stop every recorded engine, so a failing test can't
-   leave a sender running. The runtime is opened again for the next test."
+   leave a sender running. The runtime is opened again for the next test,
+   and show time is reset."
   [f]
   (let [started (atom [])
         start! se/start!]
@@ -63,7 +65,10 @@
         (output-runtime/drain! 2000)
         (run! se/stop! @started)
         (output-runtime/open!)
-        (output-errors/clear!)))))
+        (output-errors/clear!)
+        ;; A test that ran the clock leaves its last tick behind, which the
+        ;; providers would call stale
+        (show-time/reset-runtime!)))))
 
 (use-fixtures :each with-fake-dac stopping-every-engine)
 

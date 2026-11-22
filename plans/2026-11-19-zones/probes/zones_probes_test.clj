@@ -94,9 +94,13 @@
     ((z3-fn 'laser-show.routing.rig/routing) (inputs s nil))))
 
 (defn- snapshot [cues]
-  ;; at-ns a minute ahead, so the measurement never sees a stale tick
-  {:tick 1 :at-ns (+ (System/nanoTime) 60000000000) :playing? true :cues cues :projector-ctx nil
-   :routing (routing-of (state/get-raw-state)) :preview (delay nil)})
+  ;; at-ns a minute ahead, so the measurement never sees a stale tick; since
+  ;; state integrity 01 the engines take their calibration and safety zone
+  ;; from the snapshot's :engine-inputs
+  (let [s (state/get-raw-state)]
+    {:tick 1 :at-ns (+ (System/nanoTime) 60000000000) :playing? true :cues cues :projector-ctx nil
+     :routing (routing-of s) :preview (delay nil)
+     :engine-inputs (me/engine-inputs s (System/currentTimeMillis))}))
 
 
 ;; z1: one laser's frame from a tick

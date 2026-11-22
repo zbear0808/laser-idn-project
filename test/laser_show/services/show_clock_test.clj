@@ -15,12 +15,15 @@
             [laser-show.events.core :as events]
             [laser-show.events.handlers.input :as input-handlers]
             [laser-show.events.handlers.input-mapper :as mapper]
+            [laser-show.events.handlers.projector :as projector-handlers]
             [laser-show.events.handlers.timing :as timing]
             [laser-show.idn.fake-dac :as dac]
             [laser-show.input.events :as ie]
             [laser-show.input.mtc :as mtc]
             [laser-show.input.router :as router]
             [laser-show.input.store :as input-store]
+            [laser-show.output.driver :as driver]
+            [laser-show.output.recording-driver :as rd]
             [laser-show.profiling.frame-profiler :as profiler]
             [laser-show.routing.compose :as compose]
             [laser-show.routing.rig :as rig]
@@ -196,22 +199,28 @@
 
 (defn- with-engines
   "n projectors on zone :all streaming to a fake DAC (no clock thread, so they
-   pace themselves) while (f) runs."
-  [n f]
-  (let [fake (dac/start!)
-        projectors (into {} (for [i (range 1 (inc n))]
-                              [(keyword (str "p" i))
-                               {:host "127.0.0.1" :port (:port fake) :service-id i
-                                :zone-groups [:all] :enabled? true}]))
-        _ (state/swap-state! assoc :projectors projectors)
-        engines (mapv (fn [[id p]] (me/create-engine-for-projector id p)) projectors)]
-    (try
-      (run! se/start! engines)
-      (f)
-      (finally
-        (se/stop-all! engines)
-        (is (empty? (dac/violations fake)))
-        (dac/stop! fake)))))
+   pace themselves) while (f) runs; each merged with idn, and others
+   ({id projector}) besides, on whichever driver they name. Returns the
+   engines."
+  ([n f] (with-engines n {} f))
+  ([n {:keys [idn others]} f]
+   (let [fake (dac/start!)
+         projectors (into (or others {})
+                          (for [i (range 1 (inc n))]
+                            [(keyword (str "p" i))
+                             (merge {:host "127.0.0.1" :port (:port fake) :service-id i
+                                     :zone-groups [:all] :enabled? true}
+                                    idn)]))
+         _ (state/swap-state! assoc :projectors projectors)
+         engines (mapv (fn [[id p]] (me/create-engine-for-projector id p)) projectors)]
+     (try
+       (run! se/start! engines)
+       (f)
+       engines
+       (finally
+         (se/stop-all! engines)
+         (is (empty? (dac/violations fake)))
+         (dac/stop! fake))))))
 
 (deftest renders-once-per-tick-test
   (testing "one render per cue per tick, whatever the number of projectors (c2)"
@@ -227,6 +236,39 @@
                 (show-clock/tick! (System/nanoTime))
                 (Thread/sleep 5))
               (is (= 60 @renders) (str n " projector(s)")))))))))
+
+(deftest engines-read-no-app-state-test
+  (testing "no engine thread reads app state, whatever its driver: the tick brings everything a frame takes (state integrity 01, invariant 2)"
+    (init! {[0 0] (cue :circle)})
+    (trigger! 0 0)
+    (let [rec (rd/recording-driver)
+          reads (atom {})
+          get-raw-state state/get-raw-state]
+      (driver/register! (:driver rec))
+      (try
+        (state/assoc-in-state! [:chains :projector-effects]
+                               (into {} (for [id [:p1 :p2 :p3 :p4]] [id {:items projector-handlers/DEFAULT_PROJECTOR_EFFECTS}])))
+        (let [engines (with-engines 3 {:idn {:safety {:limit [-0.8 -0.8 0.8 0.8]}}
+                                       :others {:p4 {:driver :test/recording :driver-config {}
+                                                     :zone-groups [:all] :enabled? true
+                                                     :safety {:limit [-0.8 -0.8 0.8 0.8]}}}}
+                        (fn []
+                          (with-redefs [state/get-raw-state
+                                        (fn []
+                                          (let [thread (.getName (Thread/currentThread))]
+                                            (when (re-find #"^(idn|output)-streaming-" thread)
+                                              (swap! reads update thread (fnil inc 0))))
+                                          (get-raw-state))]
+                            (dotimes [_ 60]
+                              (show-clock/tick! (System/nanoTime))
+                              (Thread/sleep 5)))))]
+          (is (= {} @reads) "no app-state read on an idn-streaming-* or output-streaming-* thread")
+          (is (= #{"output-streaming-p4"} (into #{} (comp (filter (comp #{:send} first)) (map second)) @(:threads rec)))
+              "the recording driver's engine sent on an output-streaming-* thread")
+          (is (every? (comp pos? :frames-sent se/get-stats) engines) "every engine sent frames")
+          (is (some seq @(:frames rec)) "the recording driver's engine sent the cue"))
+        (finally
+          (driver/unregister! :test/recording))))))
 
 (deftest snapshot-shape-test
   (init! {[0 0] (cue :circle)})
