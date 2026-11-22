@@ -34,6 +34,9 @@
 ;; After Step 4a (2026-11-21) p11 and p16 wrap the functions Step 4a reads and writes the
 ;; OS clipboard with (events/system-clipboard-text, events/put-system-clipboard-text!);
 ;; the a38ea43 run wrapped the old ones (git history has that version).
+;; Since plan 02 (direct state writes, 8723420) a direct write to app state throws under
+;; start-test!, so p2, p7, p11, p13 and p14 write their setup with events/write-state!.
+;; p6, p7, p13-p15 were re-run at 8723420 (2026-11-22) with the same findings.
 ;;
 ;; Run from the repo root (macOS Apple Silicon; use :win, :linux or :mac elsewhere).
 ;; The plan folder is the classpath root, so this namespace is probes.keyboard-probes-test:
@@ -122,7 +125,7 @@
     (ui/press! robot KeyCode/SPACE)
     (Thread/sleep 300) (ui/sync-fx!)
     (say "p2 Space in #bpm-input -> playing? =" (playing?))
-    (state/swap-state! assoc-in [:playback :playing?] true)
+    (events/write-state! assoc-in [:playback :playing?] true)
     (ui/sync-fx!)
     ;; A retrigger asks the show clock to restart (show clock 01 §4)
     (let [restart (fn [] (get-in (raw) [:playback :requests :restart :id]))
@@ -131,7 +134,7 @@
       (Thread/sleep 300) (ui/sync-fx!)
       (say "p2 R in #bpm-input (playing) -> restart requested:" (not= before (restart))
            "(false = no retrigger)"))
-    (state/swap-state! assoc-in [:grid :selected-cell] [0 0])
+    (events/write-state! assoc-in [:grid :selected-cell] [0 0])
     (ui/sync-fx!)
     (let [before (count (cue-items))]
       (ui/press! robot KeyCode/DELETE)
@@ -242,7 +245,7 @@
 (deftest p7-cue-items-can-be-pasted-into-an-effect-list
   ;; EXPECT today: the effect chain [0 0] ends up holding a :type :preset item
   (let [first-id (:id (first (cue-items)))]
-    (state/assoc-in-state! [:list-ui [:cue-chain 0 0] :selected-ids] #{first-id})
+    (events/write-state! assoc-in [:list-ui [:cue-chain 0 0] :selected-ids] #{first-id})
     (events/dispatch! {:event/type :list/copy-selected
                        :component-id [:cue-chain 0 0]
                        :items-path [:chains :cue-chains [0 0] :items]})
@@ -283,7 +286,7 @@
 (defn- undo-label [] (:description (peek (get-in (raw) [:history :undo-stack]))))
 
 (defn- select-first-cue-item! []
-  (state/assoc-in-state! [:list-ui [:cue-chain 0 0] :selected-ids] #{(:id (first (cue-items)))}))
+  (events/write-state! assoc-in [:list-ui [:cue-chain 0 0] :selected-ids] #{(:id (first (cue-items)))}))
 
 (deftest p9-the-lost-update-detector-names-the-clipboard
   ;; EXPECT today: both copies report [[:ui :clipboard]] as written by another writer between
@@ -362,7 +365,7 @@
   "Projectors :a and :b, :a selected; :a's chain is RGB curves and an Axis Transform,
    the Axis Transform selected (setup_dialogs_test's with-calibration-chains!)."
   []
-  (state/swap-state!
+  (events/write-state!
    #(-> %
         (assoc :projectors {:a {:name "Fake 1" :host "127.0.0.1" :port 7255 :service-id 1
                                 :enabled? true :zone-groups [] :exclude-from-all? false
@@ -467,7 +470,7 @@
                        :clipboard-type :cue-chain-items})
     (flush!)
     (say "p13 item 0's effects after pasting a copied cue item =" (shape (get-in (raw) effects-path)))
-    (state/swap-state! #(-> %
+    (events/write-state! #(-> %
                             (assoc-in effects-path [{:id fx-id :effect-id :scale :enabled? true :params {}}])
                             (assoc-in [:list-ui [:item-effects 0 0] :selected-ids] #{fx-id})
                             (assoc-in [:list-ui [:cue-chain 0 0]] {:selected-ids #{} :last-selected-id nil})))
@@ -486,11 +489,11 @@
   (flush!)
   (let [ids #(mapv :id (get-in (raw) [:chains :cue-chains % :items]))]
     (say "p14 copy A1, paste on B2: the same item ids =" (= (ids [0 0]) (ids [1 1]))))
-  (state/swap-state! #(-> % (assoc-in [:ui :active-tab] :grid) (assoc-in [:grid :selected-cell] [5 2])))
+  (events/write-state! #(-> % (assoc-in [:ui :active-tab] :grid) (assoc-in [:grid :selected-cell] [5 2])))
   (events/dispatch! {:event/type :edit/copy})
   (flush!)
   (say "p14 Edit > Copy on the empty cell [5 2] -> [:ui :clipboard] =" (get-in (raw) [:ui :clipboard]))
-  (state/assoc-in-state! [:grid :selected-cell] [2 0])
+  (events/write-state! assoc-in [:grid :selected-cell] [2 0])
   (let [before (get-in (raw) [:chains :cue-chains [2 0] :items 0 :preset-id])]
     (events/dispatch! {:event/type :edit/paste})
     (flush!)

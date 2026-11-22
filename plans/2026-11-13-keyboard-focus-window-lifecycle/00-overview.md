@@ -1,7 +1,7 @@
 # Keyboard, focus and window lifecycle — overview
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)
-**Status:** In progress. Phase 1 done (`93c638a`, 2026-11-14); Phase 4 Step 4a done (2026-11-21, `02ae75c`..`1113d9a`, 04 §9a); D0–D3 answered A; D8, D13 and D14 answered (2026-11-21, A, B, A); D4–D7 and D9–D12 open   **Last verified against:** `cb32414` (live probes on JavaFX 28-ea+11, headless; see §3). Phase 1 moved line numbers in `root.clj`, `menu.clj`, `app.clj`, `domains.clj`, `multi_engine.clj` and `events/core.clj`, so citations into those files in docs 02–05 are against `cb32414` and get re-checked before each phase starts
+**Status:** In progress. Phase 1 done (`93c638a`, 2026-11-14); Phase 4 Step 4a done (2026-11-21, `02ae75c`..`1113d9a`, 04 §9a); D0–D3 answered A; D8, D13 and D14 answered (2026-11-21, A, B, A); D9 answered A (2026-11-22, the ★ option), Steps 4b–4c in progress; D4–D7 and D10–D12 open   **Last verified against:** `cb32414` (live probes on JavaFX 28-ea+11, headless; see §3). Phase 1 moved line numbers in `root.clj`, `menu.clj`, `app.clj`, `domains.clj`, `multi_engine.clj` and `events/core.clj`, so citations into those files in docs 02–05 are against `cb32414` and get re-checked before each phase starts
 **Supersedes / Superseded by:** supersedes `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md` (approved with D0 on 2026-11-14; that file is marked superseded and otherwise untouched)
 **Related findings:** review 01 F3, F4, F7, F18, F20, M5, L3, Q4, Q6; 02 #15, M4 (clipboard part); 05 F17, F9, L3; carry-overs "menu stubs" and "unsaved-changes guard"; undo plan §10
 
@@ -16,7 +16,7 @@ The CI fix (§1) is in `e87b272`.
 | `01-phase1-unsaved-guard.md` | Unsaved-changes guard and an exit path | ~1 day | D1, D2, D3 (answered A). Done, `93c638a` |
 | `02-phase2-dialog-shell.md` | One dialog shell | ~1.5 days | D4 |
 | `03-phase3-key-handling.md` | Keys reach the right place | ~0.5–1 day | D5, D6, D7 |
-| `04-phase4-clipboard.md` | One clipboard, in three steps; Step 4a (the one clipboard) ships on its own | ~2–2.5 days | 4a: **done** (2026-11-21, `02ae75c`..`1113d9a`, 04 §9a); 4b–4c: D9. No longer waits for Phase 3 (04 §0) |
+| `04-phase4-clipboard.md` | One clipboard, in three steps; Step 4a (the one clipboard) ships on its own | ~2–2.5 days | 4a: **done** (2026-11-21, `02ae75c`..`1113d9a`, 04 §9a); 4b–4c: D9 answered A (2026-11-22), in progress. No longer waits for Phase 3 (04 §0) |
 | `05-phase5-keyboard-triggers.md` | Keyboard as a cue-trigger source | ~1–1.5 days | D10, D11, D12 (and Phases 2–3) |
 
 About 6–7 days in total, against roughly two weeks for the 2026-10-07 plan as written. Each phase ships on its own.
@@ -156,7 +156,7 @@ Each decision is written out in full, with options and a recommendation, in the 
 | D6 | Main-window buttons vs single-key shortcuts | 03 | Phase 3 | A: toolbar and tab buttons not focus-traversable |
 | D7 | Where list keyboard commands get their props | 03 | Phase 3 | A: keep the atom, make it correct |
 | D8 | Clipboard source of truth and OS reads (04 also asks D13: what enables Paste, and D14: how the OS clipboard is read) | 04 | Step 4a | **A, answered 2026-11-21**: the slot; the OS clipboard read only while the slot is empty (with D13 B and D14 A, both answered the same day) |
-| D9 | Clipboard types, conversions, Cut button | 04 | Steps 4b–4c | A: strict types from the list's id + cell→list conversion + Cut |
+| D9 | Clipboard types, conversions, Cut button | 04 | Steps 4b–4c | **A, answered 2026-11-22** (the ★ option, under the standing choice): strict types from the list's id + cell→list conversion + Cut |
 | D10 | Trigger vs built-in shortcut collisions | 05 | Phase 5 | A: user binding wins, Escape reserved |
 | D11 | Where keyboard triggers work; master switch | 05 | Phase 5 | A: main window + editor dialogs, switch in Settings |
 | D12 | Key identity | 05 | Phase 5 | A: bare `KeyCode` name, Shift ignored |
