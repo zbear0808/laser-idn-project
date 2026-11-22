@@ -1,7 +1,7 @@
 # No state writes outside the event pipeline
 
 **Written:** 2026-11-20   **Written for commit:** `3229c95` (`master`)
-**Status:** In progress (2026-11-21, branch `direct-state-writes`). W1–W6 answered A, the ★ options   **Last verified against:** `cc9e000` (re-checked after `master` moved from `3229c95`: since then only the Decimate files changed in `src/` and `test/`, and this plan cites none of them by line; the counts in §1.3 are at `cc9e000`. Probes w1–w6 in `probes/state_write_probes_test.clj` were run four times on 2026-11-20, the first two at `3229c95` and the last at `cc9e000`: macOS arm64, JDK 25.0.5, load average 2–8)
+**Status:** **Done** (2026-11-22, `03cd7fc`..`7412ac6`; §11 As built). W1–W6 answered A, the ★ options   **Last verified against:** `cc9e000` (re-checked after `master` moved from `3229c95`: since then only the Decimate files changed in `src/` and `test/`, and this plan cites none of them by line; the counts in §1.3 are at `cc9e000`. Probes w1–w6 in `probes/state_write_probes_test.clj` were run four times on 2026-11-20, the first two at `3229c95` and the last at `cc9e000`: macOS arm64, JDK 25.0.5, load average 2–8)
 **Supersedes / Superseded by:** takes over the Link item of review 02 M1 step 2 and the `[:styles :menu-theme]` item of 02 M6 step 1, and the "link setup write … stays with review 02 M1" line of `plans/2026-11-16-output-runtime/03-phase3-event-reentry.md` §9 / none   **Related findings:** review 02 #2, #21, #23, M1, M6; output runtime O-9 (03 §1, §9, §10 "Observed, not changed"); keyboard K-7 and probes p5, p9 (the clipboard write: `plans/2026-11-13-keyboard-focus-window-lifecycle/04-phase4-clipboard.md`, Step 4a, not here)
 **Size:** about 4½ days (about 3½ with W2 B and W3 B)
 
@@ -684,3 +684,41 @@ Commits 2 and 3 come before 4, and 4 before 9: the strict guard needs the UI tes
     Whichever plan lands second edits what the other left (§4).
   - **If commit 9 lands before 4a,** it carries the `[:ui :clipboard]` exemption: in the guard, in the kondo config, and in `guard-lets-the-clipboard-through-test`. 4a then removes all three. If 4a lands first, commit 9 has no exemption.
   - **4a fits this plan's rule as it is.** Its handlers write `[:ui :clipboard]` in the `:state` they return. Its `:clipboard/write` and `:clipboard/read` effects write no app state; `:clipboard/read` calls back through the effect's `dispatch`, so the follow-up runs on the event thread. W1 A's `:state` first also makes sure a copy's `:state` is written before its `:clipboard/write` runs.
+
+---
+
+## 11. As built (2026-11-22, `03cd7fc`..`7412ac6`)
+
+Built on branch `direct-state-writes` from `38a98d0` (W1–W6 answered A), with parallel agents in separate worktrees: commits 1–3 first, then 4 (in three parts), 5–7 and 8 in parallel, then 9 and 10. JDK 25.0.5, macOS arm64, headless JavaFX.
+
+| # | Commit | What |
+|---|---|---|
+| 8 | `03cd7fc` | `save-project!`, `load-project!`, `new-project!` gone; `persistent_test` uses `project-files`/`write-project!`/`mark-saved` and `read-project`/`apply-loaded-project` through two private helpers, and no longer touches app state |
+| 1 | `fd74ae4` | private `state-first`, public `events/ordered-pipeline`; `event-handler` and `create-app` use it |
+| 2 | `e120daa` | `events/event-executor` (one daemon thread, `events/event-thread-name` "laser-show-events"), `on-event-thread?`; passed as cljfx's `:fx/executor` (cljfx 1.10.6 `wrap-async` reads it and uses `send-via`) |
+| 3 | `0732720` | `events/flush!`, `events/write-state!`, NEW `laser-show.events.handlers.dev` (`:dev/flush`, `:dev/write-state`), effects `:dev/deliver` and `:dev/swap-state` |
+| 4 | `d422cd2`, `6681748`, `30c3075` | every direct write in `test/laser_show/ui_test/` (**132 lines in 26 namespaces** at HEAD, not §1.3's 69 in 20: zones Z4–Z6 and the output drivers added tests) is `events/write-state!`; the BPM-marker waits (perform, vibes, modulator editor, cue chain list) and `setup_dialogs_test`'s `settle!` use `events/flush!` |
+| 5 | `cf630c8` | `app/connect-link!` dispatches `:timing/carabiner-connected` with `:listener`; `init-styles!`, its calls and `[:styles :menu-theme]` gone, and so is `reload-app-code!`'s `init-styles!` step (moved here from commit 7 so no commit resolves a deleted var) |
+| 6 | `491afbc` | `stop!` claims `*app` with `reset-vals!`, flushes (1 s) and calls `release-devices!` from one read only when it claimed an app; `stop-input-devices!` and `disconnect-link!` gone |
+| 7 | `db372d2` | `:dev/reloaded` (`:kind` `:styles` or `:app`), dispatched by `reload-all-styles!`, `reload-app-code!` and `watch-styles!` |
+| 9 | `94218f2` | `state/guard-writes!` and the check in `swap-state!`, `reset-state!`, `reset-state-vals!`, `init-state!` (`assoc-in-state!` goes through `swap-state!`); installed after `set-dispatch-fn!` in `start!` (strict in dev mode) and `start-test!` (strict), removed in `stop!`; kondo `:discouraged-var` at `:error` with the exemptions of §4. No clipboard exemption: Step 4a landed first |
+| 10 | `7412ac6` | `docs/CLJFX_STATE_MANAGEMENT.md` ("In this app" box), the app-repl and targeted-ui-testing skills, `.github/copilot-instructions.md`, and the `state.core`, `state.domains` and `events.core` docstrings |
+
+### Deviations
+
+1. `flush!` returns false on the event thread or the FX thread even without an app (§7's table said true without an app on any thread; its own `flush-test` said false on the executor). `write-state!` therefore throws there too.
+2. `connect-link!` logs "Carabiner daemon connected" only when the connect succeeded.
+3. `stop-writes-nothing-and-closes-each-device-once-test` slows `:timing/set-bpm`, not `:show-clock/status`: the latter writes `[:backend :input :mtc]`, which would break the `identical?` check for a reason unrelated to `stop!`. `stop!` flushes only when it claimed an app (a second call has no dispatch fn to flush).
+4. Extra tests: `flush-does-not-wait-on-the-fx-thread-or-forever-test`. In `cue_chain_list_test` the drag-and-drop rotation now runs on the event thread after the drop, so it can no longer race it.
+5. Docs left as they are: `CLJFX_STATE_MANAGEMENT.md` Best Practices 3–4 and the Summary rows still show swaps from futures (generic cljfx advice); the "In this app" box overrides them.
+
+### Red first
+
+`state-runs-first-test` (BPM 120, status `nil`, as w3), `state-first-keeps-the-other-effects-in-order-test` (w3's hash order); `old-and-new-app-share-the-event-thread-test` (BPM 120 on `clojure-agent-send-pool-2` and `-3`, as w6); commit 3's unit tests ("Unknown event domain: dev"); `link-connection-survives-an-event-in-flight-test` against the old inline block (`false`, no `:listener`, as w1); `stop-writes-nothing-and-closes-each-device-once-test` (MIDI and OSC closed 3 times each, `[:backend :link]` rewritten, as w2); `stop-on-the-event-thread-does-not-wait-test`; `carabiner-connected-keeps-the-listener-test`; `dev-reloaded-test`; `state.core-test` without the checks (17 failures, 5 errors). `write-state-lands-after-the-event-in-flight-test` fails with a direct `swap-state!` in place of `write-state!`.
+
+### Verification
+
+- Unit suite at `94218f2` and again at `7412ac6`: 1880 tests, 0 failures, 0 errors (baseline at `9588cd0`: 1869).
+- UI suite at `94218f2`, with the strict guard on: 292 tests, 1550 assertions, 0 failures, 0 errors (at `30c3075`, after commit 4: 288, 0 failures). No "outside the event pipeline" in either suite's log, so no refused write was swallowed on another thread.
+- Kondo `--lint src test --parallel --fail-level error`: 0 errors, 17 warnings (as before). A `state/swap-state!` added to `services/frame_service.clj` gave 1 error, then was removed.
+- Not run: the GUI app by hand, a real Carabiner, the probes w1–w6 (they become the tests above; the probes in other plan folders still write state directly and would now throw while an app runs, §1.3).
