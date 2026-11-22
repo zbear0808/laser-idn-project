@@ -544,6 +544,51 @@
       (ui/wait-for! #(= fx-cell (mapv :effect-id (item-fx)))))))
 
 
+;; Cut is one step, with a Cut button (Step 4c; p16)
+
+(defn- undo-labels [] (mapv :description (get-in (raw) [:history :undo-stack])))
+
+(deftest cut-then-paste-restores-the-items-test
+  ;; Step 4c: the Cut button, then Paste, puts the items back
+  (let [robot (ui/robot)
+        cut "#list-editor-cue-chain-0-0 #chain-cut-selection"]
+    (set-os-text! "")
+    (open-cue-editor!)
+    (add-cue-items! [:square :triangle])
+    (events/dispatch! {:event/type :list/clear-selection :component-id [:cue-chain 0 0]})
+    (ui/wait-for! #(empty? (selected)))
+    (ui/wait-for! #(disabled? cut))
+    (is (disabled? cut) "nothing selected: nothing to cut")
+    (select-cue-item! robot 1)
+    (ui/wait-for! #(not (disabled? cut)))
+    (ui/click! robot cut)
+    (ui/wait-for! #(= [:circle :triangle] (mapv :preset-id (cue-items))))
+    (is (= [:square] (mapv :preset-id (:items (slot)))))
+    ;; and on the OS clipboard, and the selection went with the items
+    (ui/wait-for! #(= (slot) (clipboard/<-system-text (os-text))))
+    (ui/wait-for! #(disabled? cut))
+    (select-cue-item! robot 0)
+    (ui/click! robot cue-paste)
+    (ui/wait-for! #(= [:circle :square :triangle] (mapv :preset-id (cue-items))))))
+
+(deftest cut-is-one-undo-step-test
+  ;; p16: before Step 4c ⌘X was a copy and a delete, labelled "Delete Item(s)"
+  (let [robot (ui/robot)]
+    (set-os-text! "")
+    (open-cue-editor!)
+    (add-cue-items! [:square])
+    (let [before (undo-labels)]
+      (select-cue-item! robot 1)
+      (shortcut! robot KeyCode/X)
+      (ui/wait-for! #(= [:circle] (mapv :preset-id (cue-items))))
+      (flush!)
+      (is (= (conj before "Cut Item(s)") (undo-labels)) "one undo step, named for the cut")
+      (events/dispatch! {:event/type :edit/undo})
+      (ui/wait-for! #(= [:circle :square] (mapv :preset-id (cue-items))))
+      (is (= before (undo-labels)) "one undo brings the item back")
+      (is (= [:square] (mapv :preset-id (:items (slot)))) "and the clip stays"))))
+
+
 ;; The step grid copies and pastes through the one clipboard (p18)
 
 (deftest step-grid-paste-follows-the-one-clipboard-test

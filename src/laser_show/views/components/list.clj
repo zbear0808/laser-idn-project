@@ -143,6 +143,16 @@
                        :component-id component-id
                        :items-path items-path})))
 
+(defn- dispatch-cut-selected!
+  "Dispatch :list/cut-selected event: copy and delete in one step."
+  [props]
+  (let [{:keys [component-id items-path on-change-event on-change-params]} props]
+    (events/dispatch! {:event/type :list/cut-selected
+                       :component-id component-id
+                       :items-path items-path
+                       :on-change-event on-change-event
+                       :on-change-params on-change-params})))
+
 (defn- dispatch-paste-items!
   "Dispatch :list/paste-items event."
   [props]
@@ -696,6 +706,15 @@
                                :text (str "Copy the selected items (" (shortcuts/shortcut-text :c) ")")}
                      :on-action (fn [_] (dispatch-copy-selected! sidebar-props))}
                     {:fx/type :button
+                     :id "chain-cut-selection"
+                     :text "Cut"
+                     :graphic {:fx/type fa/icon :name :scissors :size 8}
+                     :disable (zero? selection-count)
+                     :style-class "chain-toolbar-btn"
+                     :tooltip {:fx/type :tooltip
+                               :text (str "Cut the selected items (" (shortcuts/shortcut-text :x) ")")}
+                     :on-action (fn [_] (dispatch-cut-selected! sidebar-props))}
+                    {:fx/type :button
                      :id "chain-paste-items"
                      :text "Paste"
                      :graphic {:fx/type fa/icon :name :clipboard :size 8}
@@ -776,8 +795,7 @@
 
                            (and ctrl? (= code javafx.scene.input.KeyCode/X))
                            (do (log/debug "Handling Ctrl+X (cut)")
-                               (dispatch-copy-selected! props)
-                               (dispatch-delete-selected! props)
+                               (dispatch-cut-selected! props)
                                true)
 
                            (and ctrl? (= code javafx.scene.input.KeyCode/A))

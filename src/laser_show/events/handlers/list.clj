@@ -253,6 +253,35 @@
       {:state state})))
 
 
+(defn- handle-cut-selected
+  "Cut the selected items in one event (keyboard plan Phase 4, Step 4c):
+   copy's clip in [:ui :clipboard] and on the OS clipboard, the selection
+   cleared, and the change event without them, \"Cut Item(s)\": one undo
+   step. The clip is in the slot before the delete runs, so a failed OS
+   write loses nothing. A list without a type (clipboard/list-type) cuts
+   nothing."
+  [{:keys [component-id items-path on-change-event on-change-params state] :as event}]
+  (let [items (get-in state items-path [])
+        selected-ids (get-in state [:list-ui component-id :selected-ids] #{})
+        normalized-ids (when (seq selected-ids) (helpers/normalize-selected-ids selected-ids items))
+        clip (when (seq normalized-ids)
+               (clipboard/list-clip (clipboard/list-type component-id)
+                                    (chains/deep-copy-items (helpers/collect-by-ids items normalized-ids))
+                                    (h/current-time-ms event)))]
+    (if clip
+      {:state (-> state
+                  (assoc-in [:ui :clipboard] clip)
+                  (assoc-in [:list-ui component-id] {:selected-ids #{}
+                                                     :last-selected-id nil
+                                                     :renaming-id nil}))
+       :clipboard/write clip
+       :dispatch (assoc on-change-params
+                        :event/type on-change-event
+                        :items (helpers/remove-by-ids items normalized-ids)
+                        :history/description "Cut Item(s)")}
+      {:state state})))
+
+
 (defn- handle-paste-items
   "Paste the clipboard's items after the selected item (or at the end),
    through h/with-clipboard: with nothing copied in this app yet, the OS
@@ -414,6 +443,7 @@
    Item operation events:
    - :list/delete-selected - Delete selected items
    - :list/copy-selected - Copy to clipboard
+   - :list/cut-selected - Copy to clipboard and delete, in one step
    - :list/paste-items - Paste from clipboard
    - :list/group-selected - Group selected items
    - :list/create-empty-group - Create new empty group
@@ -444,6 +474,7 @@
     ;; Item operations
     :list/delete-selected (handle-delete-selected event)
     :list/copy-selected (handle-copy-selected event)
+    :list/cut-selected (handle-cut-selected event)
     :list/paste-items (handle-paste-items event)
     :list/group-selected (handle-group-selected event)
     :list/create-empty-group (handle-create-empty-group event)

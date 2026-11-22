@@ -4,8 +4,11 @@
    Tests the hierarchical list UI state management including
    selection, drag-drop, and rename operations."
   (:require [clojure.test :refer [deftest is testing]]
+            [laser-show.events.core :as events]
             [laser-show.events.handlers.list :as list-handlers]
-            [laser-show.state.clipboard :as clipboard]))
+            [laser-show.state.clipboard :as clipboard]
+            [laser-show.state.domains :as domains]
+            [laser-show.state.history :as history]))
 
 
 ;; Selection Tests
@@ -669,3 +672,56 @@
     (is (= :star (get-in pasted [:items 0 :preset-id])))
     (is (not-any? #{g-id p-id e-id} [(:id pasted) (get-in pasted [:items 0 :id]) (get-in pasted [:items 0 :effects 0 :id])])
         "the group, its preset and the preset's effect all get new ids")))
+
+
+;; Cut is one step (keyboard plan Phase 4, Step 4c)
+
+
+(defn- cut-event [state]
+  {:event/type :list/cut-selected :component-id [:cue-chain 0 0]
+   :items-path [:chains :cue-chains [0 0] :items]
+   :on-change-event :chain/set-items
+   :on-change-params {:domain :cue-chains :entity-key [0 0]}
+   :state state :time 1763650000002})
+
+(deftest cut-selected-is-one-state-update-test
+  ;; p16: before Step 4c ⌘X dispatched a copy, then a delete, and the undo
+  ;; label was "Delete Item(s)"
+  (let [state (cue-state triangle-clip)
+        result (list-handlers/handle (cut-event state))
+        clip (get-in result [:state :ui :clipboard])]
+    (is (= #{:state :clipboard/write :dispatch} (set (keys result))))
+    (is (= [:circle] (mapv :preset-id (:items clip))) "the cut item is in the slot, before the delete runs")
+    (is (= 1763650000002 (:copied-at clip)))
+    (is (= clip (:clipboard/write result)) "and on its way to the OS clipboard")
+    (is (= {:selected-ids #{} :last-selected-id nil :renaming-id nil}
+           (get-in result [:state :list-ui [:cue-chain 0 0]])) "the selection cleared in the same state")
+    (is (= {:event/type :chain/set-items :domain :cue-chains :entity-key [0 0]
+            :items [{:id id-b :type :preset :preset-id :square :effects []}]
+            :history/description "Cut Item(s)"}
+           (:dispatch result)))))
+
+(deftest cut-with-nothing-to-cut-does-nothing-test
+  (let [state (assoc-in (cue-state triangle-clip) [:list-ui [:cue-chain 0 0] :selected-ids] #{})]
+    (is (= {:state state} (list-handlers/handle (cut-event state))) "nothing selected"))
+  (let [state (-> (cue-state triangle-clip)
+                  (assoc-in [:list-ui [:timeline-tracks 0 0]] {:selected-ids #{id-a}}))]
+    (is (= {:state state} (list-handlers/handle (assoc (cut-event state) :component-id [:timeline-tracks 0 0])))
+        "a list without a type: nothing copied, so nothing deleted")))
+
+(deftest cut-selected-is-one-undo-step-test
+  (let [s0 (-> (domains/build-initial-state)
+               (merge (select-keys (cue-state nil) [:list-ui]))
+               (assoc-in [:chains :cue-chains [0 0]] (get-in (cue-state nil) [:chains :cue-chains [0 0]]))
+               (assoc :history {:undo-stack [] :redo-stack [] :transaction nil}))
+        effects (events/handle-event-pipeline (cut-event s0))
+        s1 (:state effects)
+        s2 (:state (events/handle-event-pipeline (assoc (:dispatch effects) :state s1)))]
+    (is (= [:square] (mapv :preset-id (get-in s2 [:chains :cue-chains [0 0] :items]))))
+    (is (= [:circle] (mapv :preset-id (get-in s2 [:ui :clipboard :items]))))
+    (is (= 1 (count (get-in s2 [:history :undo-stack]))) "one undo entry")
+    (is (= "Cut Item(s)" (history/undo-label (:history s2))))
+    (let [s3 (:state (events/handle-event-pipeline {:event/type :edit/undo :state s2}))]
+      (is (= [:circle :square] (mapv :preset-id (get-in s3 [:chains :cue-chains [0 0] :items])))
+          "one undo brings the items back")
+      (is (= [:circle] (mapv :preset-id (get-in s3 [:ui :clipboard :items]))) "and the clip stays"))))

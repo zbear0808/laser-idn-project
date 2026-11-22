@@ -109,11 +109,12 @@
       (is (= {"#chain-new-group" "New empty group"
               "#chain-group-selection" (str "Group the selected items (" (key "G") ")")
               "#chain-copy-selection" (str "Copy the selected items (" (key "C") ")")
+              "#chain-cut-selection" (str "Cut the selected items (" (key "X") ")")
               "#chain-paste-items" (str "Paste after the selection (" (key "V") ")")
               "#chain-delete-selection" "Delete the selected items (Delete)"}
              (into {} (map (juxt identity tooltip-of))
                    ["#chain-new-group" "#chain-group-selection" "#chain-copy-selection"
-                    "#chain-paste-items" "#chain-delete-selection"]))))
+                    "#chain-cut-selection" "#chain-paste-items" "#chain-delete-selection"]))))
     (testing "the hint names this platform's keys"
       (is (= (str (key "Click") " multi-select • Drag to reorder • " (key "G") " group")
              (text-of ".chain-hint-text"))))
