@@ -625,3 +625,23 @@
                                       100 2 :mode javafx.scene.input.TransferMode/MOVE)))
       (ui/wait-for! #(= moved (:id (first (tracks)))))
       (is (= 2 (count (tracks)))))))
+
+(deftest escape-cancels-a-track-rename-test
+  ;; Keyboard plan 03: the rename field keeps its keys (Delete, letters) and
+  ;; Escape ends the rename, leaving the name as it was
+  (let [robot (ui/robot)
+        track-name #(:name (first (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :tracks])))]
+    (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
+    (ui/wait-for! #(some? (ui/query "#timeline-track-header-0")))
+    (let [before (track-name)]
+      (.doubleClickOn ^org.testfx.api.FxRobotInterface robot ^javafx.scene.Node (ui/query "#timeline-track-header-0")
+                      (into-array javafx.scene.input.MouseButton [javafx.scene.input.MouseButton/PRIMARY]))
+      (ui/wait-for! #(some? (ui/query "#timeline-track-rename")))
+      (ui/type! robot "#timeline-track-rename" "Lead")
+      (ui/press! robot javafx.scene.input.KeyCode/BACK_SPACE)
+      (ui/wait-for! #(= "Lea" (ui/node-text "#timeline-track-rename")))
+      (ui/press! robot javafx.scene.input.KeyCode/DELETE)
+      (ui/press! robot javafx.scene.input.KeyCode/ESCAPE)
+      (ui/wait-for! #(nil? (ui/query "#timeline-track-rename")))
+      (is (= before (track-name)))
+      (is (some? (ui/query "#timeline-track-header-0")) "no track deleted"))))

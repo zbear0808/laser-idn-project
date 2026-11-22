@@ -448,3 +448,28 @@
          (is (not (pseudo? "#zone-map-pad-unison" "cycling")) "Unison isn't in the cycle")
          (ui/wait-for! #(some (fn [[id text]] (and (pseudo? (str "#zone-map-pad-" id) "cycling") (= text (ui/node-text (str "#zone-map-pad-" id "-name")))))
                               [["left-right" "↻ LEFT / RIGHT"] ["odd-even" "↻ ODD / EVEN"]])))))))
+
+(deftest undo-shortcut-in-the-pattern-window-test
+  ;; Keyboard plan 03: ⌘Z (Ctrl+Z) pressed in the pattern window reaches its
+  ;; scene's undo, with the focus on one of its buttons
+  (let [robot (ui/robot)
+        push! (fn [& codes] (.push ^org.testfx.api.FxRobot robot (into-array javafx.scene.input.KeyCode codes)) (ui/sync-fx!))
+        zones #(get-in (cue-pattern) [:params :zones])]
+    (lasers! 3)
+    (events/write-state! assoc-in [:chains :cue-chains [0 0] :name] "Beams")
+    (open-editor! 0 0)
+    (ui/wait-for! #(some? (ui/query "#pattern-chip-cue")))
+    (fire-item! "#pattern-chip-cue" "Alternate   A ⇄ B")
+    (ui/wait-for! #(some? (cue-pattern)))
+    (fire-item! "#pattern-chip-cue" "Edit pattern…")
+    (ui/wait-for! window-open?)
+    (ui/wait-for! #(some? (ui/query "#zone-pattern-lane-add")))
+    (fire-item! "#zone-pattern-lane-add" "New zone (C → Left)")
+    (ui/wait-for! #(= [:zone/a :zone/b :zone/c] (zones)))
+    (ui/focus! robot "#zone-pattern-remove")
+    (push! javafx.scene.input.KeyCode/SHORTCUT javafx.scene.input.KeyCode/Z)
+    (ui/wait-for! #(= [:zone/a :zone/b] (zones)))
+    (testing "and ⇧⌘Z redoes it"
+      (push! javafx.scene.input.KeyCode/SHORTCUT javafx.scene.input.KeyCode/SHIFT javafx.scene.input.KeyCode/Z)
+      (ui/wait-for! #(= [:zone/a :zone/b :zone/c] (zones))))
+    (is (window-open?))))

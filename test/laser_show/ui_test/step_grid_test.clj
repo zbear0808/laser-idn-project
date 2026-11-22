@@ -454,3 +454,26 @@
   (ui/click! (ui/robot) "#zone-pattern-step-grid")
   (ui/wait-for! #(window-open? cue-title))
   (ui/wait-for! #(lit-cell? 2 2)))
+
+(deftest keys-reach-the-grid-through-its-window-test
+  ;; Keyboard plan 03: real key presses, through the window's scene, with the
+  ;; focus on the grid body (key! above fires them at the body)
+  (let [robot (ui/robot)
+        push! (fn [& codes] (.push ^org.testfx.api.FxRobot robot (into-array KeyCode codes)) (ui/sync-fx!))
+        playing? #(true? (get-in (app-state) [:playback :playing?]))]
+    (grid-on-a1! {:steps (vec (repeat 8 []))})
+    (open-grid! cue-target)
+    (ui/focus! robot "#step-grid-body")
+    (push! KeyCode/RIGHT)
+    (ui/wait-for! #(= [0 1] (cursor)))
+    (push! KeyCode/SPACE)
+    (ui/wait-for! #(= [A] (nth (steps) 1)))
+    (is (not (playing?)) "Space is the grid's here, not Play")
+    (testing "⌘Z (Ctrl+Z) reaches the window's undo"
+      (push! KeyCode/SHORTCUT KeyCode/Z)
+      (ui/wait-for! #(= [] (nth (steps) 1))))
+    (testing "and the grid's toolbar buttons leave the focus on the grid"
+      (ui/click! robot "#step-grid-copy")
+      (ui/wait-for! #(identical? (body) (ui/on-fx-thread (fn [] (.getFocusOwner (.getScene (body)))))))
+      (push! KeyCode/END)
+      (ui/wait-for! #(= [0 7] (cursor))))))
