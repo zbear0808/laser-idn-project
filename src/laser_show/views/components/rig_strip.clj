@@ -20,7 +20,8 @@
             [laser-show.views.components.drag-drop-cell :as dnd]
             [laser-show.views.components.group-matrix :as group-matrix]
             [laser-show.views.components.load-warning :as load-warning]
-            [laser-show.views.components.preview :as preview])
+            [laser-show.views.components.preview :as preview]
+            [laser-show.views.keys :as keys])
   (:import [javafx.application Platform]
            [javafx.beans.value ChangeListener]
            [javafx.scene Node]
@@ -469,14 +470,17 @@
       (neg? i) (if (neg? delta) (peek ids) (first ids))
       :else (get ids (+ i (if (neg? delta) -1 1))))))
 
-(defn- key-handler
-  "← → move the selection; Alt+← / Alt+→ move the selected card."
+(defn- key-filter
+  "← → move the selection; Alt+← / Alt+→ move the selected card. A filter,
+   so they work with the focus anywhere on the strip: a card's On box or a
+   ◀ ▶ button would take them to move the focus (keyboard plan 03, D5 A).
+   Not while typing (keys/typing-target?)."
   [ids selected]
-  (fn [^KeyEvent e]
-    (let [code (.getCode e)]
-      (when (#{KeyCode/LEFT KeyCode/RIGHT} code)
+  (fn [^javafx.event.Event e]
+    (let [code (when (= KeyEvent/KEY_PRESSED (.getEventType e)) (.getCode ^KeyEvent e))]
+      (when (and (#{KeyCode/LEFT KeyCode/RIGHT} code) (not (keys/typing-target? e)))
         (let [delta (if (= KeyCode/LEFT code) -1 1)]
-          (if (.isAltDown e)
+          (if (.isAltDown ^KeyEvent e)
             (when selected
               (events/dispatch! {:event/type :rig/nudge-projector :projector-id selected :delta delta}))
             (when-let [next-id (neighbour ids selected delta)]
@@ -580,7 +584,7 @@
                 :hgap 4
                 :vgap 0
                 :padding 4
-                :on-key-pressed (key-handler ids selected)
+                :event-filter (key-filter ids selected)
                 :children (-> [(move-button {:id "rig-move-left-button" :text "◀" :tooltip "Move left (Alt+←)"
                                              :disable (not (pos? i)) :selected selected :delta -1 :column 0})]
                               (into (map-indexed (fn [k card]

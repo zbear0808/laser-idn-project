@@ -305,3 +305,24 @@
       (ui/wait-for! #(some? (ui/query "#rig-card-identify-projector-10-0-0-6-1")))
       (is (nil? (ui/query "#rig-card-enable-all-projector-10-0-0-6-1")))
       (ui/press! robot KeyCode/ESCAPE))))
+
+(deftest arrows-reach-the-strip-from-its-own-controls-test
+  ;; Keyboard plan 03: real key presses through the scene. A card's On box
+  ;; or a ◀ ▶ button with the focus doesn't keep ← → from the strip
+  (let [robot (ui/robot)
+        selected #(get-in (app-state) [:projector-ui :active-projector])
+        focus-owner-id #(ui/on-fx-thread (fn [] (some-> ^Node (ui/query "#rig-strip") .getScene .getFocusOwner .getId)))]
+    (with-lasers!)
+    (ui/click! robot "#projectors-tab")
+    (ui/click! robot "#rig-card-a")
+    (ui/wait-for! #(= :a (selected)))
+    (ui/wait-for! #(= "rig-strip" (focus-owner-id)))
+    (ui/press! robot KeyCode/RIGHT)
+    (ui/wait-for! #(= :b (selected)))
+    (doseq [[sel expected] [["#rig-card-enable-b" :c] ["#rig-move-left-button" :b]]]
+      (testing (str "with the focus on " sel)
+        (ui/focus! robot sel)
+        (ui/wait-for! #(= (subs sel 1) (focus-owner-id)))
+        (ui/press! robot (if (= :c expected) KeyCode/RIGHT KeyCode/LEFT))
+        (ui/wait-for! #(= expected (selected)))))
+    (is (every? #(get-in (app-state) [:projectors % :enabled?]) [:a :b :c]) "no On box changed")))
