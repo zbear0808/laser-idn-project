@@ -37,6 +37,12 @@
 ;; Since plan 02 (direct state writes, 8723420) a direct write to app state throws under
 ;; start-test!, so p2, p7, p11, p13 and p14 write their setup with events/write-state!.
 ;; p6, p7, p13-p15 were re-run at 8723420 (2026-11-22) with the same findings.
+;; Re-checked 2026-11-22 at 2227bce for Phases 2, 3 and 5: p1-p4 and p8 re-run. p8 waited
+;; for [:timing :tap-times], which tap tempo no longer writes (the taps are
+;; [:timing :tap :taps] since triggers.tap-tempo), so it timed out; it now waits for the
+;; new path and also prints the tap count after Space. p2 also presses Escape (D10's
+;; audit note), in #bpm-input and on #main-layout. p19 (new) clicks main-window controls
+;; and presses Space (D6).
 ;;
 ;; Run from the repo root (macOS Apple Silicon; use :win, :linux or :mac elsewhere).
 ;; The plan folder is the classpath root, so this namespace is probes.keyboard-probes-test:
@@ -108,7 +114,7 @@
   (ui/wait-for! #(= (+ 1 (count ids)) (count (ui/query-all ".chain-item")))))
 
 
-;; Main-window accelerators (title_bar.clj:143-163)
+;; Main-window accelerators (title_bar.clj:143-163 at cb32414, :144-168 at 2227bce)
 
 (deftest p1-space-accelerator-fires-when-focus-is-not-a-text-field
   ;; EXPECT today: playing? true
@@ -134,6 +140,18 @@
       (Thread/sleep 300) (ui/sync-fx!)
       (say "p2 R in #bpm-input (playing) -> restart requested:" (not= before (restart))
            "(false = no retrigger)"))
+    ;; Escape (the hidden Stop accelerator, title_bar.clj:158-164), added 2026-11-22 for D10
+    (ui/press! robot KeyCode/ESCAPE)
+    (Thread/sleep 300) (ui/sync-fx!)
+    (say "p2 Escape in #bpm-input (playing) -> playing? =" (playing?) "(true = Stop did not fire)"
+         "; focus owners =" (focus-owners))
+    (events/write-state! assoc-in [:playback :playing?] true)
+    (ui/sync-fx!)
+    (ui/focus! robot "#main-layout")
+    (ui/press! robot KeyCode/ESCAPE)
+    (Thread/sleep 300) (ui/sync-fx!)
+    (say "p2 Escape with focus on #main-layout -> playing? =" (playing?) "(false = Stop fired)")
+    (ui/focus! robot "#bpm-input")
     (events/write-state! assoc-in [:grid :selected-cell] [0 0])
     (ui/sync-fx!)
     (let [before (count (cue-items))]
@@ -159,15 +177,38 @@
                            (reify EventHandler
                              (handle [_ e] (swap! log conj [:bubble (str (.getEventType e)) (str (.getCode e))])))))))
     (ui/click! robot "#tap-tempo-btn")
-    (ui/wait-for! #(= 1 (count (get-in (raw) [:timing :tap-times]))))
+    ;; [:timing :tap-times] at cb32414; the taps are [:timing :tap :taps] since tap tempo moved
+    ;; to triggers.tap-tempo
+    (ui/wait-for! #(= 1 (count (get-in (raw) [:timing :tap :taps]))))
     (reset! log [])
     (ui/press! robot KeyCode/SPACE)
     (Thread/sleep 400) (ui/sync-fx!)
     (say "p8 focus owners =" (focus-owners))
-    (say "p8 key events with TAP focused =" @log)))
+    (say "p8 key events with TAP focused =" @log)
+    (say "p8 taps after Space with TAP focused =" (count (get-in (raw) [:timing :tap :taps]))
+         "(1 = the press did not reach TAP's action)")))
+
+(deftest p19-main-window-controls-that-keep-focus-after-a-click
+  ;; Added 2026-11-22 at 2227bce for D6: which main-window controls take focus when
+  ;; clicked, and whether Space then still reaches the Play accelerator (title_bar.clj:154)
+  (let [robot (ui/robot)]
+    (doseq [sel ["#grid-tab" "#perform-tab" "#trigger-mode-selector"]]
+      (events/write-state! assoc-in [:playback :playing?] false)
+      (ui/sync-fx!)
+      (ui/click! robot sel)
+      (ui/sync-fx!)
+      (when (= sel "#trigger-mode-selector")
+        ;; close the popup the click opened (not playing, so the Stop accelerator is off),
+        ;; so only focus is left
+        (ui/press! robot KeyCode/ESCAPE)
+        (Thread/sleep 200) (ui/sync-fx!))
+      (let [owners (focus-owners)]
+        (ui/press! robot KeyCode/SPACE)
+        (Thread/sleep 300) (ui/sync-fx!)
+        (say "p19 click" sel "-> focus owners =" owners "; Space -> playing? =" (playing?))))))
 
 
-;; List keyboard handling (list.clj:716-790)
+;; List keyboard handling (list.clj:716-790 at cb32414, :752-824 at 2227bce)
 
 (deftest p3-list-focus-and-shortcuts-after-clicking-an-item
   ;; EXPECT today: focus owner is the list-editor VBox (not a ScrollPane); Delete removes one item;

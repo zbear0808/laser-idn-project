@@ -1,25 +1,27 @@
 # Keyboard, focus and window lifecycle — overview
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)
-**Status:** In progress. Phase 1 done (`93c638a`, 2026-11-14); Phase 4 done (2026-11-22: Step 4a `02ae75c`..`1113d9a`, 04 §9a; Steps 4b–4c `29bf152`..`71ab827`, 04 §9b); D0–D3 answered A; D8, D13 and D14 answered (2026-11-21, A, B, A); D9 answered A (2026-11-22, the ★ option); D4–D7 and D10–D12 open   **Last verified against:** `cb32414` (live probes on JavaFX 28-ea+11, headless; see §3). Phase 1 moved line numbers in `root.clj`, `menu.clj`, `app.clj`, `domains.clj`, `multi_engine.clj` and `events/core.clj`, so citations into those files in docs 02–05 are against `cb32414` and get re-checked before each phase starts
+**Status:** In progress. Phase 1 done (`93c638a`, 2026-11-14); Phase 4 done (2026-11-22: Step 4a `02ae75c`..`1113d9a`, 04 §9a; Steps 4b–4c `29bf152`..`71ab827`, 04 §9b); D0–D3 answered A; D8, D13 and D14 answered (2026-11-21, A, B, A); D9 answered A (2026-11-22, the ★ option); D4–D7, D10 and D12 answered A (2026-11-22, the ★ options, under the user's standing choice); **D11 re-opened** (2026-11-22, 05)   **Last verified against:** `2227bce` for docs 02, 03 and 05 (re-checked 2026-11-22, 275 commits after `cb32414`; probes p1–p4, p8 and p19, §3). §2 and §4's evidence column outside those docs are still as of `cb32414`
 **Supersedes / Superseded by:** supersedes `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md` (approved with D0 on 2026-11-14; that file is marked superseded and otherwise untouched)
 **Related findings:** review 01 F3, F4, F7, F18, F20, M5, L3, Q4, Q6; 02 #15, M4 (clipboard part); 05 F17, F9, L3; carry-overs "menu stubs" and "unsaved-changes guard"; undo plan §10
 
 ## Start here
 
-**Phase 1 (`01-phase1-unsaved-guard.md`) is done** (`93c638a`, 2026-11-14; results and differences from the plan in its §10). It was the only pending item that stopped real data loss: closing the window, File > Exit, File > New and File > Open discarded unsaved work without asking (`views/root.clj:167-169`, `events/handlers/menu.clj:28,133` at `cb32414`). **Next is Phase 2 (`02-phase2-dialog-shell.md`), which needs D4.**
+**Phase 1 (`01-phase1-unsaved-guard.md`) is done** (`93c638a`, 2026-11-14; results and differences from the plan in its §10). It was the only pending item that stopped real data loss: closing the window, File > Exit, File > New and File > Open discarded unsaved work without asking (`views/root.clj:167-169`, `events/handlers/menu.clj:28,133` at `cb32414`). **Phase 4 is done** too (2026-11-22). Docs 02, 03 and 05 were re-checked at `2227bce` on 2026-11-22.
+
+**Next is Phase 3 (`03-phase3-key-handling.md`).** It needs nothing open, depends on nothing (03 §0), and fixes the one verified key defect (p4), plus Space being eaten after a click on TAP, a tab or the trigger-mode combo (p8, p19). Phase 2 follows. Phase 5 needs D11 answered, then Phases 2 and 3.
 
 The CI fix (§1) is in `e87b272`.
 
 | Doc | Phase | Size | Needs |
 |---|---|---|---|
 | `01-phase1-unsaved-guard.md` | Unsaved-changes guard and an exit path | ~1 day | D1, D2, D3 (answered A). Done, `93c638a` |
-| `02-phase2-dialog-shell.md` | One dialog shell | ~1.5 days | D4 |
-| `03-phase3-key-handling.md` | Keys reach the right place | ~0.5–1 day | D5, D6, D7 |
+| `03-phase3-key-handling.md` | Keys reach the right place. Verified at `2227bce` | ~0.5–1 day | Nothing open (D5–D7 answered A, 2026-11-22). Depends on nothing; build it first |
+| `02-phase2-dialog-shell.md` | One dialog shell, now for eleven dialogs; `cell-label` and the add-projector close already done by other work (02 §0). Verified at `2227bce` | ~2 days | Nothing open (D4 answered A, with the menu-stub table, 2026-11-22) |
 | `04-phase4-clipboard.md` | One clipboard, in three steps; Step 4a (the one clipboard) ships on its own | ~2–2.5 days | **Done** (2026-11-22). 4a: 2026-11-21, `02ae75c`..`1113d9a`, 04 §9a; 4b–4c: D9 answered A, 2026-11-22, `29bf152`..`71ab827`, 04 §9b |
-| `05-phase5-keyboard-triggers.md` | Keyboard as a cue-trigger source | ~1–1.5 days | D10, D11, D12 (and Phases 2–3) |
+| `05-phase5-keyboard-triggers.md` | Keyboard as a cue-trigger source (cells, vibe roles, map and pattern pads, the Zone step key). K-15 already fixed by other work (05 §0). Verified at `2227bce` | ~1–1.5 days | **D11 (re-opened)**; D10, D12 answered A. Phases 3 and 2 |
 
-About 6–7 days in total, against roughly two weeks for the 2026-10-07 plan as written. Each phase ships on its own.
+About 4–4.5 days left (3 → 2 → 5), against roughly two weeks for the 2026-10-07 plan as written. Each phase ships on its own.
 
 ## 1. Step 0 — CI is red because the workflow file is invalid
 
@@ -41,6 +43,8 @@ Fix (move the shell choice to the job, remove it from the step):
 ```
 
 **Applied 2026-11-14 in `e87b272`:** `shell` moved to `jobs.ui-tests.defaults.run` and removed from the step. After pushing, expect the Linux unit-test failure from run #2 to show up again if it was real; that needs its own look.
+
+**Step 0 is done** (re-checked 2026-11-22). The workflow file is valid at `2227bce` (`build-and-test.yml:68-72`, with a comment saying why), and every run since executes its jobs. Some later runs were green (2026-11-17, 2026-11-18). The two latest runs on `master` (2026-11-22) failed in "Run unit tests" (Linux) and in the macOS and Windows headless UI tests (`gh run view 45001123968`). Those failures are not this step's; they need their own look. This section stays as history.
 
 ## 2. Why this plan first: all pending work, ranked
 
@@ -76,7 +80,12 @@ But the blast radius is smaller than it first reads. When the transport is stopp
 
 ## 3. What the running app does today (probes)
 
-Run by `probes/keyboard_probes_test.clj` (headless TestFX, JavaFX 28-ea+11, master `cb32414`). The file's header has the command.
+Run by `probes/keyboard_probes_test.clj` (headless TestFX, JavaFX 28-ea+11, master `cb32414`). The file's header has the command. Re-run 2026-11-22 at `2227bce` (JDK 25.0.5; 03 §1 has the table, with `uptime`):
+- p1–p4 and p8 print the same as at `cb32414`. p8 needed its wait moved from `[:timing :tap-times]` to `[:timing :tap :taps]`.
+- p2 now also presses Escape: from `#bpm-input` it **stops the show**.
+- p19 (new) shows a clicked tab button or the trigger-mode combo keeping focus and eating Space, as TAP does in p8.
+
+p5–p7 are Phase 4's and were re-run there (04 §9).
 
 | Probe | Action | Result |
 |---|---|---|
@@ -98,18 +107,18 @@ Run by `probes/keyboard_probes_test.clj` (headless TestFX, JavaFX 28-ea+11, mast
 | K-1 | Window close, File > Exit, New and Open discard unsaved work without asking | H | `root.clj:167-169`, `menu.clj:28,133` | 1 (done, `93c638a`) |
 | K-2 | In dev mode, closing the main window kills the REPL JVM | M | `root.clj:169` vs `app.clj:130-132` | 1 (done, `93c638a`) |
 | K-3 | Exit stops no engines, no preview timer, no Carabiner; no IDN close is sent | L | `app.clj:186-199`; `link/disconnect-carabiner!` has no callers | 1 (done, `93c638a`) |
-| K-4 | List shortcuts die when focus moves to a toolbar button or checkbox inside the list | M | `list.clj:733,748`; p4 | 3 |
-| K-5 | Global props atom: two writers, never cleaned, `:ordered-ids` can be missing | L | `list.clj:57,603,865` | 3 |
+| K-4 | List shortcuts die when focus moves to a toolbar button or checkbox inside the list; main-window buttons and combos eat Space after a click | M | `list.clj:769,784`; p4, p8, p19 (at `2227bce`) | 3 |
+| K-5 | Global props atom: two writers, never cleaned, `:ordered-ids` can be missing | L | `list.clj:60,619,887` (at `2227bce`) | 3 |
 | K-6 | Cut is two events; if the OS write fails, the items are deleted and nothing can be pasted | M | p16; `views/components/list.clj:775-779`, `state/clipboard.clj:71-73` | 4a (no loss: done), 4c (one event: done, `71ab827`) |
 | K-7 | A list copy never reaches `[:ui :clipboard]`: the helper writes it behind the pipeline, and the handler's write-back undoes it. The Cue Chain Editor's Paste buttons never enable; the projector chain's enables only after a re-render | M | p5, p9, p11; `state/clipboard.clj:34` vs `events/handlers/list.clj:247` | 4a (done) |
 | K-8 | Lists paste each other's items: the effects grid's chain and an item's effects take a cue's presets and give effects to the cue list. Projector chains were fixed in `f044a31` (zones Z0, B-8b) | H (data) | p7, p13; `views/components/list.clj:875`; `effect_chain_editor.clj:143`, `cue_chain_editor.clj:559` | 4b (done, `29bf152`) |
 | K-9 | Cell copy and list paste don't interoperate. A paste keeps ids (a cell's all, a list item's effects). An empty cell's copy empties the cell it is pasted on | M | p6, p14, p15; `events/helpers.clj:66-72, 90-95`; `animation/chains.clj:217-229` | 4b (done, `c52f2b7`, `4fb9ebc`) |
 | K-10 | The OS clipboard is read while rendering (two views) and inside paste handlers, and every copy and list paste makes the event agent wait for the FX thread (about 500 ms behind a busy FX thread) | M | p10–p12; `projectors.clj:560`, `effect_chain_editor.clj:95`, `events/handlers/list.clj:257-260`, `state/clipboard.clj:64,82` | 4a (done) |
 | K-11 | Dead clipboard code: `:on-copy-fn` callbacks nobody calls, two unused effects and a TODO stub, dialog-local slots, never-written types. `:clipboard/paste-projector-effects` and the projector stubs are already gone (Z0, `95a510d`) | L | `views/components/list.clj:598, 876, 917`; `events/core.clj:212-229, 552-553`; `events/handlers/effects.clj:167-174`; `cue_chain.clj:158-174` | 4a (done) |
-| K-12 | Six dialogs copy their shell; add-projector never closes; `:editing-name?` never reset; two dialogs lack defaults | M | `02-…` §1 | 2 |
-| K-13 | Keyboard is advertised as an input source but nothing produces keyboard events | M | `README.md:3,51`; survey | 5 |
-| K-14 | Menu items that do nothing: About, Export, Toggle Preview, Fullscreen, Check for Updates | L | `menu.clj:122,220,227,253`; `251` | 2 |
-| K-15 | Learning a key (or note) also fires its previous binding | L | `input.clj:232-238`, `input_mapper.clj:85` | 5 |
+| K-12 | Eleven dialogs copy their shell (five added since `cb32414`); `:editing-name?` never reset; five dialogs lack defaults; dialogs' stylesheets don't follow Reload Styles. Add Projector now closes after Add (output drivers) | M | `02-…` §0, §1 | 2 |
+| K-13 | Keyboard is advertised as an input source but nothing produces keyboard events | M | `README.md:3,52`; survey (at `2227bce`) | 5 |
+| K-14 | Menu items that do nothing: About, Export, Toggle Preview, Fullscreen, Check for Updates | L | `menu.clj:206-211, 351-363, 378-389` (at `2227bce`) | 2 |
+| K-15 | Learning a key (or note) also fires its previous binding | L | was `input.clj:232-238`, `input_mapper.clj:85` | **done by other work** (`38f92ad`, 2026-11-19: `input_mapper.clj:59-66, 105-106`; 05 §0) |
 
 ## 5. Target architecture (recommended defaults)
 
@@ -134,12 +143,12 @@ No focus context in app state, no `:command/*` router, no shortcut registry. Eve
 | Phase | Goal | Depends on |
 |---|---|---|
 | 1 | Never lose work; one exit path | CI fixed (§1) |
-| 2 | One dialog shell; fix the dialog bugs | none. Phase 1's confirm dialog can use it, or a plain stage first |
-| 3 | List shortcuts survive focus moves; one typing guard; main-window focus hygiene | Phase 2 for the shared scene handler |
+| 2 | One dialog shell; fix the dialog bugs | none. It takes Phase 3's `keys/typing-target?` if Phase 3 is first |
+| 3 | List shortcuts survive focus moves; one typing guard; main-window focus hygiene | none (03 §0: nothing in it uses the dialog shell) |
 | 4 | One clipboard; atomic cut; Paste button works; type safety | None since `f044a31` (04 §0): it shares `views/components/list.clj` with Phase 3, so whichever lands second rebases |
 | 5 | Keyboard cue triggers | Phases 2 and 3 |
 
-Phases 1 and 2 are independent and can run in parallel; 3 follows 2; 5 follows 3. Phase 4 needs none of them (04 §0, updated 2026-11-20), and its Step 4a can go first: today a copy or list paste blocks the event agent until the FX thread has run it (`state/clipboard.clj:64,82`; p10: 503–579 ms behind a busy FX thread), and every trigger waits behind it (audit, `plans/2026-11-17-show-clock/00-overview.md` §9).
+Phases 2 and 3 are independent (re-checked 2026-11-22); the recommended order is 3, then 2, then 5. Phase 5 needs both. Phase 4 needs none of them (04 §0, updated 2026-11-20), and its Step 4a can go first: today a copy or list paste blocks the event agent until the FX thread has run it (`state/clipboard.clj:64,82`; p10: 503–579 ms behind a busy FX thread), and every trigger waits behind it (audit, `plans/2026-11-17-show-clock/00-overview.md` §9).
 
 ## 7. Decisions
 
@@ -151,15 +160,15 @@ Each decision is written out in full, with options and a recommendation, in the 
 | D1 | How is the confirm dialog shown | 01 | Phase 1 | **A, answered 2026-11-14**: data-driven stage in app state |
 | D2 | What "Save" in the dialog does | 01 | Phase 1 | **A, answered 2026-11-14**: save, then continue once the write succeeded |
 | D3 | Dev-mode close/exit and exit cleanup | 01 | Phase 1 | **A, answered 2026-11-14**: one `app/stop!` path; dev keeps the JVM |
-| D4 | How much of the dialog shell to extract (+ menu stubs) | 02 | Phase 2 | A: helpers + stage shell + root registry |
-| D5 | Focus model | 03 | Phase 3 | A: JavaFX event flow, no new state |
-| D6 | Main-window buttons vs single-key shortcuts | 03 | Phase 3 | A: toolbar and tab buttons not focus-traversable |
-| D7 | Where list keyboard commands get their props | 03 | Phase 3 | A: keep the atom, make it correct |
+| D4 | How much of the dialog shell to extract (+ menu stubs) | 02 | Phase 2 | **A, answered 2026-11-22** (the ★ option, under the standing choice): helpers + stage shell + ordered root registry, with the menu-stub table |
+| D5 | Focus model | 03 | Phase 3 | **A, answered 2026-11-22** (★): JavaFX event flow, no new state |
+| D6 | Main-window buttons vs single-key shortcuts | 03 | Phase 3 | **A, answered 2026-11-22** (★): toolbar controls (except the BPM field) and tab buttons not focus-traversable |
+| D7 | Where list keyboard commands get their props | 03 | Phase 3 | **A, answered 2026-11-22** (★): keep the atom, make it correct (no `:clipboard-type`: Phase 4 derives it from the list's id) |
 | D8 | Clipboard source of truth and OS reads (04 also asks D13: what enables Paste, and D14: how the OS clipboard is read) | 04 | Step 4a | **A, answered 2026-11-21**: the slot; the OS clipboard read only while the slot is empty (with D13 B and D14 A, both answered the same day) |
 | D9 | Clipboard types, conversions, Cut button | 04 | Steps 4b–4c | **A, answered 2026-11-22** (the ★ option, under the standing choice): strict types from the list's id + cell→list conversion + Cut |
-| D10 | Trigger vs built-in shortcut collisions | 05 | Phase 5 | A: user binding wins, Escape reserved |
-| D11 | Where keyboard triggers work; master switch | 05 | Phase 5 | A: main window + editor dialogs, switch in Settings |
-| D12 | Key identity | 05 | Phase 5 | A: bare `KeyCode` name, Shift ignored |
+| D10 | Trigger vs built-in shortcut collisions | 05 | Phase 5 | **A, answered 2026-11-22** (★): user binding wins, Escape reserved |
+| D11 | Where keyboard triggers work; whether a focused editor keeps its keys; master switch | 05 | Phase 5 | **Open, re-opened 2026-11-22** with new options. Recommended A: main window + editor windows, a focused component that edits with the key keeps it, switch in Settings (the old A, now B, would take Space and the arrows from the step grid) |
+| D12 | Key identity | 05 | Phase 5 | **A, answered 2026-11-22** (★): bare `KeyCode` name, Shift ignored |
 
 > **DECISION D0 — Which plan goes first** *(answered A, 2026-11-14)*
 >
@@ -179,7 +188,7 @@ Each decision is written out in full, with options and a recommendation, in the 
 | Review 01 L3 (unsaved guard, window lifecycle), F20 | Phases 1 and 3 (F20's text-field claim is retired by p2) | – |
 | Review 01 F4 / Q4 (props atom) | Phase 3, D7 A | 01 M6 / 02 M5 (list memoization, atomic list ops) if D7 C |
 | Review 01 F7 / Q6, 02 #15 (clipboard) | Phase 4 | – |
-| Review 05 F17 / L3 (keyboard source), F9 (learn fires old binding) | Phase 5 | the rest of 05 F9 (learn threads), already reworked by the undo plan |
+| Review 05 F17 / L3 (keyboard source), F9 (learn fires old binding) | Phase 5 (F9's part already fixed by the vibes work, `38f92ad`) | the rest of 05 F9 (learn threads), already reworked by the undo plan |
 | Menu stubs (carry-overs in 01, 02, 06) | listed in Phase 2 with defaults | – |
 | Output lifecycle, timing, safety (02 M1/M8, 03, 04) | nothing | `plans/2026-11-16-output-runtime/` |
 

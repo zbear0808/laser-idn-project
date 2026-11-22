@@ -1,98 +1,153 @@
 # Phase 5 — Keyboard as a cue-trigger source
 
-**Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)
-**Status:** Proposed. Needs D10–D12 answered. Depends on Phases 2 and 3   **Last verified against:** `cb32414`
-**Supersedes / Superseded by:** none (replaces the "keyboard trigger source" amendment in `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md`)   **Related findings:** K-13, K-15 (`00-overview.md` §3); review 05 F17, L3, F9 (learn also fires the old binding)
+**Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)   **Re-checked:** 2026-11-22 at `2227bce`, 275 commits later: every citation re-checked; K-15 found fixed by other work; the Settings placeholder found gone; the trigger actions added by vibes and zones (Z4, Z5), the new windows and their keys taken in (§0)
+**Status:** Proposed. D10 and D12 answered A (2026-11-22, the ★ options, taken under the user's standing choice to take the recommended options). **D11 re-opened** with new options for today's code (below). Depends on Phases 2 and 3, neither built yet. Partly done by other work: K-15 (§0)   **Last verified against:** `2227bce` (probe p2's Escape step, `probes/keyboard_probes_test.clj`)
+**Size:** ~1–1.5 days   **Needs:** D11   **Depends on:** Phase 3 (`views.keys`), Phase 2 (the shell, so the filter is installed once for every editor window)
+**Supersedes / Superseded by:** none (replaces the "keyboard trigger source" amendment in `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md`)   **Related findings:** K-13, K-15 (`00-overview.md` §4); review 05 F17, L3, F9 (learn also fires the old binding: fixed)
 
-The README promises keyboard input (`README.md:3`, `:51`), the trigger editor already shows keyboard bindings (`trigger_bank.clj:62`), and every stage after the input router is source-agnostic. Only the producer is missing: nothing turns a JavaFX key press into a router event. About 1–1.5 days, mostly design.
+The README promises keyboard input (`README.md:3`, `:52`), the trigger editor already shows keyboard bindings (`trigger_bank.clj:46`), and every stage after the input router is source-agnostic. Only the producer is missing: nothing turns a JavaFX key press into a router event. About 1–1.5 days, mostly design.
+
+## 0. What changed since `cb32414`
+
+- **K-15 is fixed.** Learning a key no longer also fires its old binding. The fix is in the mapper, as this doc proposed: `learning?` (`input_mapper.clj:59-66`) reads `[:backend :input :learning-target]`, and presses aren't dispatched as `:trigger/input` while a learn waits; releases still are (`:105-106`). It landed in `38f92ad` (vibes tab, 2026-11-19), with `mapper-ignores-discrete-events-while-learning-test` (`test/laser_show/events/handlers/input_mapper_test.clj:30-53`), the test §8 used to plan. The mapper change and that test are gone from §4 and §8; invariant 5 stays, now as a regression test.
+- **A key can bind far more than a cell.** These action types exist now (`triggers.clj:89-138`), and all of them are source-agnostic:
+  - vibe roles (`:vibe`, press and release; vibe Phases 1–8);
+  - `:vibe-select`;
+  - zone map pads (`:zone-map`, Z4);
+  - pattern pads (`:pattern-pad`, Z5);
+  - the Zone step key (`:zone-step`, Z5).
+
+  Once keys reach the router, the laptop keyboard can play the Perform tab's five vibe keys, and the learn buttons all take a key without change:
+  - the vibe pads (`vibe_pads.clj:91-92`);
+  - the map pads (`zone_map_pads.clj:107`, `:215`);
+  - the pattern pads and STEP (`pattern_pads.clj:86-87`);
+  - Learn all (`events/handlers/vibes.clj:197`);
+  - the Perform tab's "Press the key for …" (`perform.clj:145`).
+- **Trigger definitions are matched before the trigger map** (`definition-action`, `triggers.clj:33-41`, used first at `:163-164`). So "is this key bound?" must ask both, through one NEW function the handler also uses (§4).
+- **The Settings placeholder is gone** (`b9b9d55`), and `settings_test.clj:50-55` (`keyboard-card-is-gone-test`) checks that it stays gone. The Keyboard card is NEW, and that test changes (§8).
+- **`binding-label` is shared** by five views: `trigger_bank.clj:117`, `vibe_pads.clj:137`, `zone_map_pads.clj:84`, `pattern_pads.clj:47` and `vibe_controls.clj:41`. So the key label changes everywhere at once.
+- **The main window's focus change is taken.** `:on-focused-changed {:event/type :vibe/window-focus}` (`root.clj:212`) ends pad holds when the window loses focus (`events/handlers/vibes.clj:81-88`: "A key's hold stays: its release still comes"). That is true for MIDI. For the keyboard it is true only if the producer sends the releases itself, which §4 does. Its listener is added beside that prop, not in place of it.
+- **More windows and more keys.** There are now eight editor windows and three question dialogs (02 §1). The new windows and components that use single keys are:
+  - the step grid window's body (arrows, Space, Enter, Delete, Home/End; `step_grid.clj:41-68`);
+  - the rig strip (←/→; `rig_strip.clj:472-484`);
+  - the canvases (arrows).
+
+  The main window adds F11 to the single-key accelerators (`title_bar.clj:182`). This is why D11 is re-opened.
+- **Escape stops the show from a text field** (p2, 2026-11-22). In the main window `#bpm-input` doesn't consume Escape, so the hidden Stop accelerator fires (`title_bar.clj:158-164`). That settles the audit note's question: Escape already is a panic key there, whatever has focus. A dialog has no menu bar, so Escape stops nothing in a dialog.
+- **Design work elsewhere uses the keyboard.** `plans/2026-11-21-live-performance-ux/` (not a plan, nothing built, `README.md:4`) proposes several keys:
+  - 1–5 and 0 to queue zone maps (`designs/E-stage-view.md:62`, `:105`, `:121`; `designs/B-now-next.md:31`, `:70`);
+  - Space and N for a blind preview (`designs/D-co-pilot.md:37`);
+  - a held Shift or ? to show the pads' backs, and Esc to leave Tune (`designs/A-instrument.md:70-72`).
+
+  All of them are bare keys that this phase's producer would carry (D12 A). QLab's unchangeable Esc panic (`research/04-hci-principles-for-live-performance.md:46`) supports D10 A.
 
 ## 1. Current behaviour (file:line)
 
 | What | Where | Behaviour |
 |---|---|---|
-| Producer of keyboard events | grep `router/dispatch!`, `events/trigger`, `:keyboard` in `src/` | **Not found.** `router/dispatch!` is called only for the gamepad (`app.clj:167`) and from the MIDI/OSC connect handlers (`handlers/input.clj:61, 120, 146`); `events/trigger` is used only by gamepad and OSC (`input/gamepad.clj:62`, `input/osc.clj:104, 115`). |
-| Event constructor | `input/events.clj:58-68` | `(trigger :keyboard :space :pressed)` → `{:type :trigger :source :keyboard :id :space :state :pressed :timestamp ms}`; `:released` gives `:type :trigger-release`. |
-| Router | `input/router.clj:103-128` | `dispatch!` runs synchronously on the caller's thread: all global handlers, then pattern handlers. There is no way for a handler to consume an event. |
-| Mapper | `events/handlers/input_mapper.clj:35-91`; started by `app.clj:163`, **not** by `start-test!` (`app.clj:201-218`) | Discrete events (`trigger`, `trigger-release`, note on/off) become `{:event/type :trigger/input :input-event e :time ts}` through `*dispatch-fn` (`:73-76`). There is no source filter. |
-| Resolution | `events/handlers/triggers.clj:13-23` (`lookup-key`), `:59-89` (`action-event`), `:116-124` (`handle-input`) | Key is `{:source :keyboard :id :space}`. Press runs the bound action; `:behavior :momentary` runs `:grid/activate-cell` on press and `:grid/release-cell` on release (`:43-57`; `grid.clj:97-109`). Unmapped input only updates `[:trigger-runtime …]`. |
-| Learn | `handlers/input.clj:223-246` (start), `:248-256` (`learn-lookup-key`), `:258-270` (captured) | A global router handler captures the next `trigger` or `note-on` of **any** source and binds it. Proven end-to-end with a synthetic keyboard event by `trigger_editor_test.clj:34-74`. |
-| Learn also fires the old binding | the learn handler and the mapper are both global handlers (`handlers/input.clj:232-238`, `input_mapper.clj:85`) | The captured press is also dispatched as `:trigger/input` and resolved against the trigger map **before** the new binding is written (the binding arrives later through the learn effect's `future`, `core.clj:206-215`). Re-binding a key therefore fires its old action once. |
-| Display | `trigger_bank.clj:57-63` | `:keyboard` renders as `"Key " + (:id key)`, e.g. `Key :space`. |
-| Placeholder state | `domains.clj:425-426` | `[:backend :input :keyboard {:enabled? true :attached-components #{}}]`. Nothing reads it. |
-| Settings | `views/tabs/settings.clj:16-34`, mounted `:89-90` | "Keyboard shortcuts and hotkey configuration coming soon…" placeholder. |
-| Key repeat | JavaFX `KeyEvent` has getters `getCharacter getCode getEventType getText` and `isAltDown isControlDown isMetaDown isShiftDown isShortcutDown`; no repeat flag (checked on this classpath) | A held key delivers repeated `KEY_PRESSED` without a release in between. The producer has to remember which keys are down. |
-| Key collisions | `title_bar.clj:143, 152, 157, 163` | Delete, Space, Escape and R are built-in accelerators. |
+| Producer of keyboard events | grep `router/dispatch!`, `events/trigger`, `:keyboard` in `src/` | **Not found.** `router/dispatch!` is called for the gamepad (`app.clj:262`) and from the MIDI and OSC handlers (`handlers/input.clj:68`, `:132`, `:160`). `events/trigger` is used only by the gamepad and OSC (`input/gamepad.clj:62`, `input/osc.clj:104`, `:115`). No `KeyEvent` in `input/` or `events/`. |
+| Event constructor | `input/events.clj:58-68` | `(trigger :keyboard :space :pressed)` → `{:type :trigger :source :keyboard :id :space :state :pressed :timestamp ms}`; `:released` gives `:type :trigger-release`. `keyboard-event?` exists (`:126-129`). |
+| Router | `input/router.clj:103-128` | `dispatch!` runs synchronously on the caller's thread: all global handlers (a map, so in no set order, `:113-118`), then pattern handlers (`:121-127`). A handler can't consume an event. The router has its own on/off (`:109`, `:140-148`). |
+| Mapper | `events/handlers/input_mapper.clj:81-112`, registered by `start-mapper!` (`:116-120`); started by `app.clj:240` (`set-dispatch-fn!`) and `:258`, stopped at `:329`; **not** started by `start-test!` (`app.clj:354-398`) | Discrete events become `{:event/type :trigger/input :input-event e :time ts}` (`:107-110`), except presses while a learn waits (`:105-106`). There is no source filter. |
+| Resolution | `events/handlers/triggers.clj:17-27` (`lookup-key`), `:29-31` (trigger map), `:33-41` (definitions), `:89-138` (`action-event`), `:161-173` (`handle-input`) | The key is `{:source :keyboard :id :space}`. A press runs the bound action. `:behavior :momentary` runs `:grid/activate-cell` on press and `:grid/release-cell` on release (`:47-61`; `grid.clj:81-93`). A vibe role always gets both (`:73-87`). Unmapped input only updates `[:trigger-runtime …]`; "quiet" types skip that (`:67-71`). |
+| Learn | `handlers/input.clj:284-313` (start; the global router handler `::generalized-input-learn` at `:295-303`), `:315-323` (`learn-lookup-key`), `:348-391` (captured), `:414-422` (cancel) | Captures the next `trigger` or `note-on` of **any** source (or a moving control for a fader learn, `fader-catcher` `:268-282`) and binds it through `:input/await-learn` (`events/core.clj:313-322`). One-key targets move their key (`:342-346`). Proven end to end with a synthetic keyboard event by `trigger_editor_test.clj:99-139` (`space-press!` `:43-48`). |
+| Learn also fires the old binding (K-15) | – | **Fixed** (§0). |
+| Display | `trigger_bank.clj:38-47` | `:keyboard` renders as `"Key " + (:id key)`, e.g. `Key :space`, in all five views that show bindings. |
+| Placeholder state | `domains.clj:533-534` | `[:backend :input :keyboard {:enabled? true :attached-components #{}}]`. Nothing reads it. |
+| Settings | `views/tabs/settings.clj:20-78` | No keyboard card (removed in `b9b9d55`). Sections: EXTERNAL SYNC (Link), INPUT DEVICES (MIDI `:61`, OSC `:64`), OUTPUT (add-ons `:74`). |
+| Key repeat | JavaFX `KeyEvent` (28-ea+11) has `getCharacter getCode getEventType getText` and `isAltDown isControlDown isMetaDown isShiftDown isShortcutDown`; no repeat flag | A held key delivers repeated `KEY_PRESSED` without a release in between. The producer has to remember which keys are down. |
+| Built-in single keys, main window | `title_bar.clj:144` (Delete, Clear Cell), `:154` (Space, Play/Stop), `:162` (Escape, hidden Stop, only while playing), `:168` (R, Retrigger, only while playing), `:182` (F11, Fullscreen) | Menu accelerators; they fire unless a focused control consumes the key (03 §1, p2, p8, p19). |
+| Components that edit with single keys | step grid body `step_grid.clj:41-77`; timeline canvas `timeline_editor.clj:417-457` (Space, Esc, Delete, arrows); list `list.clj:811`, `:816` (Delete, Escape); rig strip `rig_strip.clj:472-484` (←/→); canvases (arrows, 03 §1); timeline window Space (`timeline_cue_editor.clj:170-173`) | Each consumes its keys on its own focused node (03 §1). |
 
 ## 2. Root cause
 
-Keyboard was designed as an input source (README, the `:keyboard` placeholder, the trigger-bank label) but only the receiving half was built. The producer needs a scene-level key hook, which did not exist until Phases 2–3 give every window one.
+Keyboard was designed as an input source (the README, the `:keyboard` placeholder, the trigger-bank label), but only the receiving half was built. The producer needs a scene-level key hook in every window that should take triggers. None exists: the main scene has no key filter (`root.clj:220-222`), and each dialog builds its own scene (02 §1).
 
 ## 3. Reuse / extend
 
 | Existing thing (file:line) | How it's reused |
 |---|---|
 | `input-events/trigger` (`events.clj:58-68`) | The only event constructor needed. |
-| `router/dispatch!`, the mapper, `:trigger/input`, `triggers/handle-input`, the trigger map `[:config :input :trigger-map]` | Unchanged. This is the point of the phase. |
-| Learn (`handlers/input.clj:223-270`) and the trigger editor (`cell_trigger_editor.clj`, `trigger_bank.clj`) | Unchanged, apart from the learn-suppression fix below. |
-| Phase 2 dialog shell | Installs the filter in every dialog scene. |
-| Phase 3 `laser-show.views.keys/typing-target?` | The one definition of "the user is typing". |
-| `:input/gamepad-enable` / `-disable` (`handlers/input.clj:206-210, 351-352`) | Pattern for `:input/keyboard-enable` / `-disable`. |
-| The Settings tab placeholder (`settings.clj:16-34`) | Becomes the keyboard section. |
-| TestFX: `ui/press!`, `ui/focus!`, `ui/wait-for!`, `fixtures/with-app` | Tests; the mapper must be started explicitly (see §8). |
+| `router/dispatch!`, the mapper (with its learn suppression), `:trigger/input`, `triggers/handle-input`, the trigger map `[:config :input :trigger-map]` (`domains.clj:273-274`) | Unchanged. This is the point of the phase: cells, vibe roles, map pads, pattern pads and the Zone step key all work from keys at once. |
+| Learn (`handlers/input.clj:284-422`), the trigger editor (`cell_trigger_editor.clj`, `trigger_bank.clj`) and the pads' learn buttons (§0) | Unchanged. |
+| Phase 2 `dialog-stage` (02 §4) | Installs the filter in every editor window, once. |
+| Phase 3 `laser-show.views.keys/typing-target?` (03 §4) | The one definition of "the user is typing". |
+| `fx/ext-on-instance-lifecycle` with an `addEventFilter KEY_PRESSED`, as `commit_field.clj:76-86` does | How the filter is installed. |
+| `handle-gamepad-set-enabled` (`handlers/input.clj:224-228`, table `:500-501`) | Pattern for `:input/keyboard-enable` / `-disable`. |
+| The OSC card (`osc_settings.clj:80-96`) | Card style for the Keyboard card, placed after OSC (`settings.clj:64`). |
+| UI fixture `with-input-mapper` (`ui_test/perform_test.clj:32-45`; the same in `vibes_test.clj:28-34`, `zones_test.clj:321-327`) | Starts the mapper that `start-test!` doesn't. |
+| TestFX: `ui/press!` (`testfx.clj:611-616`), `ui/focus!` (`:248-267`), `ui/wait-for!`, `fixtures/with-app` | Tests. |
 
 ## 4. Changes per namespace
 
 - `laser-show.input.keyboard` (NEW, pure, no JavaFX): the whole policy as data in, data out.
   - `key-id [key-code-name]` → keyword: `"SPACE"` → `:space`, `"DIGIT1"` → `:digit1`, `"F5"` → `:f5`.
-  - `decide [ctx]` → `{:consume? bool :emit :pressed|:released|nil}`; `ctx` = `{:key-id :phase :text-target? :modifiers :held? :bound? :learning? :enabled? :reserved?}` (table in §7).
-  - `label [key-id]` → `"Space"`, `"1"`, `"F5"`. `builtin-shortcut [key-id]` → `{:label "Play/Pause"}` or nil, for the override note (D10).
-- `laser-show.views.key-triggers` (NEW): the JavaFX glue, a scene-level key **filter** (first pass, so it sees the key before any control does).
-  - On `KEY_PRESSED` / `KEY_RELEASED` it builds `ctx` from the event, the window's held-key set and `state/get-raw-state` (enabled flag, trigger map, learning target), calls `decide`, consumes if told to, and calls `router/dispatch!` with `(events/trigger :keyboard id state)`.
-  - A held-key set per window (view-local atom) swallows repeated presses. A window-focus-lost listener releases every held key, so a momentary cue cannot stick.
-  - Installed through `fx/ext-on-instance-lifecycle` around the scene, from the Phase 2 shell and from `root.clj:170-172`.
-- `laser-show.events.handlers.input-mapper` (`input_mapper.clj:35-78`): while `[:backend :input :learning-target]` is set, discrete events are not dispatched as `:trigger/input`. Fixes the "learn also fires the old binding" defect for MIDI, OSC and keyboard alike.
-- `laser-show.events.handlers.input` (`input.clj:206-210, 351-352`): NEW `:input/keyboard-enable` / `-disable` writing `[:backend :input :keyboard :enabled?]`.
-- `laser-show.views.components.trigger-bank` (`trigger_bank.clj:62`): label through `keyboard/label`; shows "Overrides built-in shortcut: Play/Pause" when `builtin-shortcut` is non-nil (D10 option A).
-- `laser-show.views.tabs.settings` (`settings.clj:16-34, 89-90`): replace the placeholder with an enable checkbox and the list of reserved keys.
-- `laser-show.state.domains` (`domains.clj:425-426`): drop the unused `:attached-components`.
+  - `decide [ctx]` → `{:consume? bool :emit :pressed|:released|nil :cancel-learn? bool}`. `ctx` = `{:key-id :phase :text-target? :claimed? :modifiers :held? :bound? :learning :enabled? :reserved?}` (table in §7). `:learning` is nil, `:press` or `:continuous`, from `[:backend :input :learning-target]`.
+  - `label [key-id]` → `"Space"`, `"1"`, `"F5"`.
+  - `builtin-shortcut [key-id]` → `{:label "Play/Stop"}` for Space, "Clear Cell" for Delete, "Retrigger" for R and "Fullscreen" for F11, or nil. Used for the override note (D10 A).
+- `laser-show.views.key-triggers` (NEW): the JavaFX glue. It is a scene-level key **filter** (first pass, so it sees the key before any control does).
+  - On `KEY_PRESSED` / `KEY_RELEASED` it builds `ctx` from four things: the event; the window's held-key set; `keys/claims?` on the focus owner (D11); and `state/get-raw-state` (the enabled flag, `triggers/bound?`, the learning target). It calls `decide`, consumes if told to, and calls `router/dispatch!` with `(events/trigger :keyboard id state)`. For Escape while learning it dispatches `:input/cancel-learn`.
+  - A held-key set per window (a view-local atom) swallows repeated presses. A listener on the window's `focusedProperty` releases every held key when focus goes, so a momentary cue or a vibe role can't stick. It sits beside the main stage's `:on-focused-changed` (`root.clj:212`), not in place of it.
+  - Installed through `fx/ext-on-instance-lifecycle` around the main scene's root (`root.clj:220-222`) and from Phase 2's `dialog-stage` for the eight `:modality :none` windows. It is not installed in the three question dialogs; they are application-modal, so no other window takes keys while one is open.
+- `laser-show.views.keys` (Phase 3's, extended; only if D11 = A): NEW `claim-keys! [node key-ids]` stores the key ids a component edits with on the node (`getProperties`). NEW `claims? [focus-owner key-id]` walks from the focus owner up to the root. Declared at:
+  - the step grid body (`step_grid.clj:156`: arrows, Space, Enter, Delete, Backspace, Home, End);
+  - the timeline canvas (`timeline_editor.clj:966`: Space, Escape, Delete, Backspace, ←, →);
+  - the list editor (`list.clj:889`: Delete, Escape);
+  - the rig strip (`rig_strip.clj:583`: ←, →);
+  - `canvas_interaction.clj:296-313` (arrows, for a canvas with `on-key`);
+  - the timeline window's Space (`timeline_cue_editor.clj:170-173`, through the Phase 2 shell's `:on-key-extra`).
+- `laser-show.events.handlers.triggers` (`triggers.clj:29-41`): NEW public `bound? [state input-event]` = there is a definition or trigger-map action for the event. `handle-input` (`:161-173`) uses the same two lookups, so the filter and the handler can't disagree about which keys are bound.
+- `laser-show.events.handlers.input` (`input.clj:224-228`, table `:500-501`): NEW `:input/keyboard-enable` / `-disable`, writing `[:backend :input :keyboard :enabled?]`.
+- `laser-show.views.components.trigger-bank` (`trigger_bank.clj:38-47`): the `:keyboard` label goes through `keyboard/label` (`Key Space`), in all five views that show it. The trigger editor shows "Overrides built-in shortcut: Play/Stop" when `builtin-shortcut` is non-nil (D10 A).
+- `laser-show.views.components.keyboard-settings` (NEW, about 40 lines, like `osc_settings.clj`): a "Keyboard" card with the enable checkbox and the built-in keys a binding overrides (Escape is reserved). It is mounted in `settings.clj` after the OSC card (`:64`).
+- `laser-show.state.domains` (`domains.clj:533-534`): drop the unused `:attached-components`.
+- No change to the mapper (`input_mapper.clj`): K-15 is fixed.
 
-Step 0 (a 15-minute spike before the rest): a TestFX test that a filter installed through `ext-on-instance-lifecycle` sees `KEY_PRESSED` first and that consuming it stops `Space` from reaching the `MenuItem` accelerator (`title_bar.clj:152`). Everything below assumes that.
+Step 0 (a 15-minute spike before the rest): a TestFX test that a filter installed through `ext-on-instance-lifecycle` sees `KEY_PRESSED` first, and that consuming it stops Space from reaching the `MenuItem` accelerator (`title_bar.clj:154`). Everything below assumes that.
 
 ## 5. State placement
 
 | Key / path | Lives in | Written by | Undo / dirty? |
 |---|---|---|---|
 | held keys per window | view-local atom, FX thread only | the filter | n/a. Transient input state, never read elsewhere |
-| `[:backend :input :keyboard :enabled?]` (existing placeholder) | app state, session only (like the gamepad flag; `[:backend …]` is not saved, `persistent.clj:48-61`) | `:input/keyboard-enable` / `-disable` | No / no |
+| claimed keys per node (D11 A) | the node's `getProperties`, set once when the component is created | the components (§4) | n/a |
+| `[:backend :input :keyboard :enabled?]` (existing placeholder) | app state, session only (like the gamepad flag; `[:backend …]` is not saved, `persistent.clj:68-86`) | `:input/keyboard-enable` / `-disable` | No / no |
 | `[:config :input :trigger-map {:source :keyboard :id …}]` (existing) | document (saved per project, like MIDI and OSC bindings) | learn (`:input/learn-captured`, undo label "Learn Trigger") | Yes / yes |
 | `[:backend :input :learning-target]` (existing) | app state | learn handlers | No / no |
 
-The filter reads app state with `get-raw-state`. It never writes app state and never subscribes.
+The filter reads app state with `get-raw-state`. It never writes app state and never subscribes, so plan 02's write guard (`state/core.clj:102-128`) isn't involved. The router call runs the mapper and learn handlers on the FX thread, as the gamepad's poll thread does today. They deliver a promise or `events/dispatch!`, and write nothing.
 
 ## 6. Events and effects
 
 | Event / effect | Exists? | Dispatched from | Pure? |
 |---|---|---|---|
 | router event `(trigger :keyboard id :pressed|:released)` | constructor exists | the key filter, on the FX thread | n/a (router) |
-| `:trigger/input` | yes | the mapper | yes |
-| `:input/start-learn`, `:input/cancel-learn`, `:input/learn-captured` | yes | trigger editor; Escape while learning (filter) | yes |
-| `:input/keyboard-enable`, `:input/keyboard-disable` | NEW | Settings checkbox | yes |
+| `:trigger/input` | yes (`triggers.clj:161-173`) | the mapper (`input_mapper.clj:107-110`) | yes |
+| `:input/start-learn`, `:input/cancel-learn`, `:input/learn-captured` | yes (`input.clj:284`, `:414`, `:348`; table `:504-508`) | trigger editor and pads; Escape while learning (filter) | yes |
+| `:input/keyboard-enable`, `:input/keyboard-disable` | NEW | Settings > Keyboard checkbox | yes |
 
 No new effect keys.
 
 ## 7. Data examples and invariants
 
-Key ids: `SPACE` → `:space`, `A` → `:a`, `DIGIT1` → `:digit1`, `NUMPAD3` → `:numpad3`, `F5` → `:f5`, `LEFT` → `:left`. Trigger-map entry: `{:source :keyboard :id :space} → {:type :trigger-cue :target [0 0] :behavior :momentary}`.
+Key ids: `SPACE` → `:space`, `A` → `:a`, `DIGIT1` → `:digit1`, `NUMPAD3` → `:numpad3`, `F5` → `:f5`, `LEFT` → `:left`.
 
-Decision table for one key event (with D10 = A, D11 = A, D12 = A):
+Trigger-map entries:
+- `{:source :keyboard :id :space} → {:type :trigger-cue :target [0 0] :behavior :momentary}`
+- `{:source :keyboard :id :j} → {:type :vibe :role :hit}`
+- `{:source :keyboard :id :digit1} → {:type :zone-map :target :map-1}`
+
+Decision table for one key event, with D10 = A and D12 = A. The rows marked *D11 A* hold if D11 is answered A; under D11 B the "claims the key" row goes.
 
 | Situation | Consume? | Router event |
 |---|---|---|
 | keyboard triggers disabled | no | none |
 | target is a text input | no | none |
 | Ctrl/Cmd/Alt/Meta held | no | none (reserved for commands) |
-| `:escape` | no | none, unless learning, where it cancels learn |
-| learning, any other key | yes | `:pressed` (learn captures; the mapper ignores it) |
+| `:escape` | no | none; while learning it also cancels the learn. Stop still fires through the accelerator in the main window while playing (p2) |
+| a fader learn waits (`:capture :continuous`, `{:type :macro}`) | no | none (a key can't be a fader; the mapper would swallow the press, `input_mapper.clj:46-49`, `:105-106`) |
+| a press learn waits, any other key | yes | `:pressed` (learn captures it; the mapper doesn't dispatch it) |
+| *D11 A:* the focus owner claims the key (step grid, timeline canvas, list, rig strip, a canvas) | no | none: the component edits with it |
 | key already held (auto-repeat press) | yes if the key is bound, else no | none |
 | bound key, press | yes | `:pressed` |
 | bound key, release | yes | `:released` |
@@ -102,74 +157,99 @@ Decision table for one key event (with D10 = A, D11 = A, D12 = A):
 Invariants:
 1. A key that is not bound is never consumed, so every control and menu accelerator behaves exactly as before.
 2. Typing in a text field never triggers a cue.
-3. A momentary cue always gets its release, including when the window loses focus.
-4. Escape keeps its built-in meaning and cannot be bound.
-5. Learning a key never fires that key's previous binding.
+3. A momentary cue and a vibe role always get their release, including when the window loses focus.
+4. Escape keeps its built-in meaning and can't be bound.
+5. Learning a key never fires that key's previous binding (holds today; kept by a regression test).
 6. A bound key produces exactly one `:pressed` per physical press, whatever the OS auto-repeat does.
+7. *D11 A:* a focused component that edits with a key keeps that key.
 
 ## 8. Tests (named test vars + fixtures)
 
-Pure, `laser-show.input.keyboard-test` (NEW): `key-id-test`, `label-test`, `decide-table-test` (one assertion per row of §7), `builtin-shortcut-test`.
+Pure, `laser-show.input.keyboard-test` (NEW):
+- `key-id-test`
+- `label-test`
+- `decide-table-test` (one assertion per row of §7)
+- `builtin-shortcut-test`
 
 Handlers:
-- `laser-show.events.input-mapper-test` (NEW; pattern of `input/osc_test.clj:40-60`): `mapper-ignores-discrete-events-while-learning-test`.
-- `laser-show.events.handlers.input-test` (extend): `keyboard-enable-disable-test`.
+- `laser-show.events.handlers.triggers-test` (extend): `bound-agrees-with-handle-input-test` (a definition, a trigger-map entry, an unbound key).
+- `laser-show.events.handlers.input-test` (extend; the gamepad test is at `:118-124`): `keyboard-enable-disable-test`.
+- `laser-show.events.handlers.input-mapper-test` already has `mapper-ignores-discrete-events-while-learning-test` (`:30-53`). Nothing new.
 
-UI, `laser-show.ui-test.keyboard-trigger-test` (NEW; `with-toolkit` once, `with-app` each, plus a fixture that calls `input-mapper/set-dispatch-fn!` with `events/dispatch!` and `start-mapper!`, and `stop-mapper!` afterwards, because `start-test!` does not start it):
+UI, `laser-show.ui-test.keyboard-trigger-test` (NEW). Fixtures: `with-toolkit` once, then `with-app` and a `with-input-mapper` each, as `perform_test.clj:32-45` does, because `start-test!` doesn't start the mapper. Setup goes through `events/write-state!`, waits through `events/flush!`.
 - `bound-key-triggers-its-cue-test` (bind `:digit1` → cell `[0 0]`; press it with focus on `#main-layout`; wait for `[:playback :active-cues [0 0]]`)
 - `unbound-key-passes-through-test`
 - `text-field-focus-blocks-triggers-test` (`#bpm-input` focused)
 - `momentary-binding-releases-on-key-up-test`
-- `repeated-press-emits-one-trigger-test` (fires two `KEY_PRESSED` events without a release; the headless robot cannot auto-repeat)
-- `learn-captures-a-key-without-firing-the-old-binding-test`, `escape-cancels-learn-test`
-- `bound-space-overrides-play-pause-test` (D10 A) and `escape-always-stops-test`
+- `bound-key-holds-and-releases-a-vibe-role-test`
+- `repeated-press-emits-one-trigger-test` (fires two `KEY_PRESSED` events without a release; the headless robot can't auto-repeat)
+- `focus-loss-releases-held-keys-test`
+- `learn-captures-a-key-without-firing-the-old-binding-test`
+- `escape-cancels-learn-test`
+- `fader-learn-leaves-keys-alone-test`
+- `bound-space-overrides-play-stop-test` (D10 A)
+- `escape-always-stops-test` (including from `#bpm-input`, p2)
+- `bound-key-works-in-the-timeline-window-test`
+- *D11 A:* `focused-step-grid-keeps-its-space-test`
+
+`laser-show.ui-test.settings-test`: `keyboard-card-is-gone-test` (`:50-55`) becomes `keyboard-card-has-its-switch-test`. The point it checked (no card that only says "coming soon") stays true.
 
 Manual (unverified): focus-loss release on a real OS window, and a held key on macOS.
 
-Run: `clj -M:mac-arm:test keyboard input-mapper input`, then `clj -M:test-ui:mac-arm:test-ui-headless -n laser-show.ui-test.keyboard-trigger-test`, then both full suites.
+Run `clj -M:mac-arm:test -n laser-show.input.keyboard-test -n laser-show.events.handlers.triggers-test -n laser-show.events.handlers.input-test`, then `clj -M:test-ui:mac-arm:test-ui-headless -n laser-show.ui-test.keyboard-trigger-test -n laser-show.ui-test.settings-test`, then both full suites.
 
 ## 9. Out of scope / alternatives considered
 
 - **Key combinations and chords** as bindings. Not requested; D12 B is the hook.
-- **Physical key positions** (a grid of keys that matches the grid of cells regardless of layout). JavaFX exposes the logical key code only, so bindings follow the keyboard layout. Documented, not solved.
+- **Physical key positions** (a grid of keys that matches the grid of cells whatever the layout). JavaFX exposes the logical key code only, so bindings follow the keyboard layout. Documented, not solved.
 - **Global hotkeys** while another application has focus. Needs a native hook; out of scope. Keyboard triggers work only while a Laser Show window has focus.
-- **Per-binding `Accelerator`s** (`Scene.getAccelerators`). Rejected: they never see key releases (momentary needs them) and they are skipped when a control consumes the key.
-- **User-configurable built-in shortcuts** (rebinding Play/Pause itself). The registry idea from the old plan; revisit separately.
+- **Per-binding `Accelerator`s** (`Scene.getAccelerators`). Rejected: they never see key releases (momentary and vibe roles need them), and they are skipped when a control consumes the key.
+- **User-configurable built-in shortcuts** (rebinding Play/Stop itself). The registry idea from the old plan; revisit separately.
+- **Escape as Stop in dialogs too.** Today Escape stops only in the main window (no menu bar in a dialog). The filter could dispatch `:transport/stop` for Escape in every window. Not proposed: Escape already closes the question dialogs, ends a timeline drag and clears a list's selection there. Revisit with the live-performance designs.
+- **A preset keyboard layout** (1–5 for zone maps, Space for a blind preview, as `plans/2026-11-21-live-performance-ux/` sketches). That is the user's bindings or a later plan's defaults; this phase only carries the keys.
 
 ---
 
 ## Decisions
 
-> **DECISION D10 — When a keyboard binding collides with a built-in shortcut** *(open · needed before Phase 5 · recommended: A)*
+> **DECISION D10 — When a keyboard binding collides with a built-in shortcut** *(answered A, 2026-11-22: the ★ option, taken under the user's standing choice)*
 >
-> Space (play/pause), Delete (clear cell), R (retrigger) and Escape (stop) are built in (`title_bar.clj:143-163`).
+> Space (Play/Stop), Delete (Clear Cell), R (Retrigger), F11 (Fullscreen) and Escape (Stop) are built in (`title_bar.clj:144`, `:154`, `:162`, `:168`, `:182`).
 >
 > | | What | For | Against |
 > |---|---|---|---|
-> | **A (recommended)** | The user's binding wins, except Escape, which is reserved and cannot be bound (a stop key that can't be hijacked). The learn panel notes "Overrides built-in shortcut: Play/Pause" | A learned key always does what the user taught it | A bound Space no longer plays/pauses |
+> | **A (recommended)** | The user's binding wins, except Escape, which is reserved and can't be bound (a stop key that can't be hijacked). The learn panel notes "Overrides built-in shortcut: Play/Stop" | A learned key always does what the user taught it | A bound Space no longer plays or stops |
 > | B | Built-ins win; learning a colliding key is refused with a message | Nothing built-in ever changes | The most natural keys (Space, R) can't be used |
 > | C | A "performance mode" toggle: on = bindings win and built-ins (except Escape) are off; off = built-ins win | Explicit and visible | A new mode to remember and to show in the UI |
 >
-> *Audit note (2026-11-17), for whichever option:* probe p2 shows a focused text field swallowing Space, R and Delete before the menu accelerators see them. Escape wasn't probed; if it behaves the same, Escape stops nothing while someone is typing, for example in `#bpm-input`. Add Escape to p2 before deciding. If Escape is the show's panic key, the Phase 5 filter, which sees every key first, could fire Stop for Escape whatever has focus; the cost is that Escape in a text field (cancel the edit) would then also stop the show. Stop also goes through the event agent (`:transport/stop`), so it waits behind a save until the agent's I/O moves off it (`plans/2026-11-07-improvement-review/00-overview.md`, "Next").
+> *Audit note (2026-11-17), resolved 2026-11-22:* the note asked to add Escape to p2 before deciding. p2 now shows that Escape in `#bpm-input` stops the show (`playing? false`, the focus owner still the text field): the field doesn't consume it. So in the main window Escape already is a panic key whatever has focus, and A keeps it so. Stop still goes through the event agent (`:transport/stop`).
 >
-> **Your answer:** _pending_
+> **Your answer:** A (2026-11-22; the recommended ★ option, under the user's standing choice to take the recommended options. Re-checked at `2227bce`: still fits; F11 added to the built-ins it overrides)
 
-> **DECISION D11 — Where do keyboard triggers work, and is there a switch?** *(open · needed before Phase 5 · recommended: A)*
+> **DECISION D11 — Where do keyboard triggers work, and does a focused editor keep its keys?** *(open, re-opened 2026-11-22 · needed before Phase 5 · recommended: A)*
+>
+> *Why it was re-opened.* The 2026-11-13 recommendation was "main window and every editor dialog, never inside a text input". It made a bound key win over every component's own keys, which was acceptable when only the timeline canvas and the list had single keys. Since then:
+> - the step grid window (zones Z6) edits with Space, Enter, Delete, the arrows and Home/End on its focused body (`step_grid.clj:41-68`);
+> - the rig strip uses ←/→ in the main window (`rig_strip.clj:472-484`);
+> - the projector chain list sits in the main window (`tabs/projectors.clj:522`).
+>
+> Under the old option, binding Space to a cue (the most natural key; the live-performance designs use it) would turn the step grid's Space-to-toggle off for as long as the binding exists, with no way back but the mouse. That no longer looks like the best choice, so it isn't recorded. The options below are rewritten for today's code. The old A is now B.
 >
 > | | What | For | Against |
 > |---|---|---|---|
-> | **A (recommended)** | Main window and every editor dialog, never inside a text input, never in the unsaved-changes confirm; a master switch in Settings > Keyboard (default on; with no bindings nothing is intercepted anyway) | You can fire cues while editing in a dialog; matches how MIDI works | A key bound to Delete would fire in a dialog while a list also wants Delete (the binding wins, per D10) |
-> | B | Main window only | Simplest; no overlap with dialogs' own keys | Can't trigger from the timeline editor while it is focused |
-> | C | A, but dialogs are opt-in per dialog | Fine control | More configuration surface |
+> | **A (recommended)** | Main window and the eight editor windows, never the three question dialogs. A bound key fires unless the focus owner is a text input **or a component that edits with that key**: the step grid body, the timeline canvas, a focused list (Delete, Escape), the rig strip (←/→), a canvas (arrows). That component keeps the key. Components declare their keys on their node (`keys/claim-keys!`, §4), so the filter stays generic. A master switch in Settings > Keyboard (default on; with no bindings nothing is intercepted anyway) | The same rule as D5 A and as text fields: the focused editor keeps its keys. Triggers work everywhere else, including in the editor windows. Nothing built since `cb32414` loses a key | A bound key does nothing to the cue while such a component has focus (click elsewhere first, or bind a key the editor doesn't use). Six places declare their keys, and a new keyboard-driven component must too |
+> | B | The 2026-11-13 option: main window and every editor window; a bound key wins everywhere except in a text input | A bound key always fires | A bound Space, Delete or arrow stops working in the step grid, the timeline canvas, the lists and the rig strip while the binding exists |
+> | C | Main window only, with the switch | Simplest; no overlap with the editor windows' keys | Can't fire cues while an editor window is focused; in the main window the rig strip and the projector chain list still need A's or B's rule |
+> | D | A or B, but each editor window opts in | Fine control | More configuration surface |
 >
 > **Your answer:** _pending_
 
-> **DECISION D12 — What is a key's identity?** *(open · needed before Phase 5 · recommended: A)*
+> **DECISION D12 — What is a key's identity?** *(answered A, 2026-11-22: the ★ option, taken under the user's standing choice)*
 >
 > | | What | For | Against |
 > |---|---|---|---|
-> | **A (recommended)** | The `KeyCode` name only (`:space`, `:a`, `:digit1`, `:f5`). Ctrl/Cmd/Alt/Meta held means "not a trigger" (reserved for commands). Shift is ignored. Follows the logical keyboard layout | Simple labels and learn; no collision with command shortcuts | No chords; layout-dependent |
+> | **A (recommended)** | The `KeyCode` name only (`:space`, `:a`, `:digit1`, `:f5`). Ctrl/Cmd/Alt/Meta held means "not a trigger" (reserved for commands, and for Alt+←/→ in the rig strip). Shift is ignored. Follows the logical keyboard layout | Simple labels and learn; no collision with command shortcuts; the live-performance sketches use bare keys only | No chords; layout-dependent |
 > | B | Include modifiers in the identity (`:shift+a`, `:ctrl+1`) | Many more bindings | Collides with command shortcuts; more labelling and learn work |
 > | C | Use the typed character instead of the key code | Layout-independent for printable keys | Unstable for non-printable keys; case and dead-key problems |
 >
-> **Your answer:** _pending_
+> **Your answer:** A (2026-11-22; the recommended ★ option, under the user's standing choice to take the recommended options. Re-checked at `2227bce`: still fits)
