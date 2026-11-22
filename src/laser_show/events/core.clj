@@ -2,8 +2,8 @@
   "Event handling core - wraps pure handlers with co-effects and effects.
    
    This module provides:
-   - handle-event-pipeline, the co-effects and effects maps that
-     app/create-app gives to fx/create-app
+   - handle-event-pipeline, and ordered-pipeline (it with :state first), the
+     co-effects and effects maps that app/create-app gives to fx/create-app
    - Effect implementations for side-effects (IDN streaming, timing, etc.)
    - event-handler, the same pipeline run synchronously (tests, fallback)
    - dispatch! for programmatic event dispatch
@@ -532,7 +532,8 @@
 
 (defn- effect-output-write-status
   "Effect that stores the output runtime's status at its path (an atomic
-   update of that path only)."
+   update of that path only). It runs after the event's :state
+   (state-first), so a write-back can't undo it."
   [status _dispatch]
   (state/swap-state! assoc-in output-runtime/status-path status))
 
@@ -595,8 +596,9 @@
    tags the :state effect with the event's snapshot. Outermost, with-fx-event
    puts a map event's :fx/event value where its view wrote the placeholder.
 
-   app/create-app gives this to fx/create-app together with co-effects and
-   effects, so it runs on the cljfx agent."
+   app/create-app gives it, with :state first (ordered-pipeline), to
+   fx/create-app together with co-effects and effects, so it runs on the
+   cljfx agent."
   (-> handlers/handle-event
       show-lock/wrap-show-lock
       timeline-handlers/wrap-normalize-timelines
@@ -606,6 +608,25 @@
       rig-autosave/wrap-rig-autosave
       wrap-lost-update-check
       with-fx-event))
+
+(defn- state-first
+  "Wrap handler so its :state effect runs before its other effects: the
+   result's :state entry, then the other entries in the map's own order, as
+   a seq of map entries (cljfx's wrap-effects iterates it like the map). A
+   write inside the turn (an inline follow-up, :output/write-status) then
+   can't be undone by the event's write-back. A result without :state (nil
+   and {} too) is returned unchanged."
+  [handler]
+  (fn [event]
+    (let [result (handler event)]
+      (if-let [entry (find result :state)]
+        (cons entry (dissoc result :state))
+        result))))
+
+(def ordered-pipeline
+  "handle-event-pipeline with its :state effect first (state-first). What
+   event-handler runs, and what app/create-app gives to fx/create-app."
+  (state-first handle-event-pipeline))
 
 (def co-effects
   "Co-effects injected into every event:
@@ -680,9 +701,9 @@
    :projectors/scan effect-projectors-scan})
 
 (def event-handler
-  "The pipeline wrapped with co-effects and effects, run synchronously on the
-   calling thread (tests, and dispatch! without an app)."
-  (-> handle-event-pipeline
+  "The ordered pipeline wrapped with co-effects and effects, run
+   synchronously on the calling thread (tests, and dispatch! without an app)."
+  (-> ordered-pipeline
       (fx/wrap-co-effects co-effects)
       (fx/wrap-effects effects)))
 

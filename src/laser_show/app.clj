@@ -95,14 +95,15 @@
   (.printStackTrace exception *err*))
 
 (defn- create-app
-  "Create the cljfx app with async event processing. cljfx wraps the bare
-   pipeline with our co-effects and effects and runs it on its agent, so every
+  "Create the cljfx app with async event processing. cljfx wraps the
+   pipeline (with :state first, events/ordered-pipeline) with our co-effects
+   and effects and runs it on its agent, so every
    effect's dispatch queues on that agent. The :fx/context co-effect cljfx
    would add is switched off: events carry :state instead."
   []
   (fx/create-app
    (state/get-context-atom)
-   :event-handler events/handle-event-pipeline
+   :event-handler events/ordered-pipeline
    :co-effects (assoc events/co-effects :fx/context (constantly nil))
    :effects events/effects
    :desc-fn (fn [_] {:fx/type root/root-view})

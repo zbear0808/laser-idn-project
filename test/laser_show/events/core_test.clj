@@ -11,6 +11,7 @@
    [laser-show.events.handlers :as handlers]
    [laser-show.events.handlers.timing :as timing]
    [laser-show.idn.hello :as idn-hello]
+   [laser-show.backend.output-runtime :as output-runtime]
    [laser-show.output.discovery :as discovery]
    [laser-show.output.driver :as driver]
    [laser-show.output.jar-builder :as jar]
@@ -81,6 +82,42 @@
                                    :state (assoc-in (state/get-raw-state) [:timing :bpm] 90.0)})]
         (is (= [:state] (keys result)))
         (is (= 150.0 (get-in result [:state :timing :bpm])))))))
+
+(deftest state-runs-first-test
+  (testing "an inline follow-up that the handler put before :state still lands (w3)"
+    (let [handle timing/handle]
+      (with-redefs [timing/handle (fn [{:keys [state] :as event}]
+                                    (if (= :timing/probe (:event/type event))
+                                      (array-map :dispatch {:event/type :timing/set-bpm :bpm 99.0}
+                                                 :state (assoc-in state [:ui :probe] 1))
+                                      (handle event)))]
+        (events/event-handler {:event/type :timing/probe})))
+    (is (= 99.0 (get-in (state/get-raw-state) [:timing :bpm])) "the follow-up ran after the write-back")
+    (is (= 1 (get-in (state/get-raw-state) [:ui :probe]))))
+  (testing "a path write that a middleware's assoc put before :state is kept"
+    (let [status {:engines 1 :projectors {}}]
+      (with-redefs [timing/handle (fn [{:keys [state]}]
+                                    (assoc {:output/write-status status} :state state))]
+        (events/event-handler {:event/type :timing/probe}))
+      (is (= status (get-in (state/get-raw-state) output-runtime/status-path))))))
+
+(deftest state-first-keeps-the-other-effects-in-order-test
+  (let [others [:dispatch :dispatch-later :multi-engine/refresh :rig/write :output/write-status
+                :project/save :fx/show-file-chooser :system/exit]
+        nine (assoc (reduce #(assoc %1 %2 true) (array-map) others) :state 1)
+        ordered (#'events/state-first (constantly nine))]
+    (is (instance? clojure.lang.PersistentHashMap nine) "nine keys: a hash map, in hash order")
+    (is (= (cons :state (keys (dissoc nine :state))) (map key (ordered {}))))
+    (is (= (remove #{:state} (keys nine)) (rest (map key (ordered {})))) "the others in the map's own order")
+    (is (= 1 (val (first (ordered {})))))
+    (let [small (array-map :dispatch 1 :output/write-status 2 :state 3)]
+      (is (= [[:state 3] [:dispatch 1] [:output/write-status 2]]
+             (map (juxt key val) ((#'events/state-first (constantly small)) {})))))
+    (testing "without :state, unchanged"
+      (doseq [m [nil {} {:output/write-status {:engines 0}} (array-map :dispatch 1 :system/exit true)]]
+        (is (identical? m ((#'events/state-first (constantly m)) {})) (pr-str m))))
+    (testing "the handler gets the event"
+      (is (= [[:state {:event/type ::e}]] (map (juxt key val) ((#'events/state-first (fn [e] {:state e})) {:event/type ::e})))))))
 
 (deftest dispatch-later-calls-back-through-the-dispatcher-test
   (let [got (promise)]
