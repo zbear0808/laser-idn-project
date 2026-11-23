@@ -10,7 +10,7 @@
             [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
             [laser-show.routing.targets :as targets]
-            [laser-show.views.dialogs.common :as common]))
+            [laser-show.common.util :as u]))
 
 
 (defn- handle-zone-groups-select
@@ -100,7 +100,7 @@
   (let [shown (take 6 cells)
         label (fn [[col row :as cell]]
                 (let [cue-name (get-in state [:chains :cue-chains cell :name])]
-                  (str (common/cell-label col row) (when-not (str/blank? cue-name) (str " " cue-name)))))
+                  (str (u/cell-label col row) (when-not (str/blank? cue-name) (str " " cue-name)))))
         more (- (count cells) (count shown))]
     (str/join " · " (cond-> (mapv label shown)
                       (pos? more) (conj (str "and " more " more"))))))

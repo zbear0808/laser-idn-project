@@ -8,12 +8,10 @@
    full list. Remove takes the pattern away."
   (:require [cljfx.api :as fx]
             [laser-show.animation.effects :as effects]
-            [laser-show.css.core :as css]
             [laser-show.events.core :as events]
             [laser-show.subs :as subs]
             [laser-show.views.components.effect-parameter-editor :as effect-param-editor]
-            [laser-show.views.dialogs.common :as common])
-  (:import [javafx.scene.input KeyCode KeyEvent]))
+            [laser-show.views.dialogs.common :as common]))
 
 (defn window-title
   "\"Zone Pattern — Cue A1 \\\"Beams\\\"\": the cell, and the cue's name when
@@ -72,35 +70,14 @@
                    :style-class "button-primary"
                    :on-action close}]}]}))
 
-(defn- handle-scene-key-pressed
-  "Undo and redo, as in the other editors."
-  [^KeyEvent e]
-  (let [code (.getCode e)
-        shortcut? (or (.isShortcutDown e) (.isControlDown e))
-        shift? (.isShiftDown e)]
-    (when shortcut?
-      (cond
-        (and (= code KeyCode/Z) shift?)
-        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
-        (= code KeyCode/Y)
-        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
-        (= code KeyCode/Z)
-        (do (.consume e) (events/dispatch! {:event/type :edit/undo}))))))
-
 (defn zone-pattern-editor-dialog
   "The pattern window."
   [{:keys [fx/context]}]
-  (let [open? (fx/sub-ctx context subs/dialog-open? :zone-pattern-editor)
-        {:keys [col row]} (fx/sub-ctx context subs/dialog-data :zone-pattern-editor)
+  (let [{:keys [col row]} (fx/sub-ctx context subs/dialog-data :zone-pattern-editor)
         cue-name (:name (fx/sub-ctx context subs/cue-cell-chain col row))]
-    {:fx/type :stage
-     :showing open?
+    {:fx/type common/dialog-stage
+     :dialog-id :zone-pattern-editor
      :title (window-title col row cue-name)
-     :modality :none
      :min-width 640
      :min-height 480
-     :on-close-request {:event/type :ui/close-dialog :dialog-id :zone-pattern-editor}
-     :scene {:fx/type :scene
-             :stylesheets (css/dialog-stylesheet-urls)
-             :on-key-pressed handle-scene-key-pressed
-             :root {:fx/type content}}}))
+     :content {:fx/type content}}))

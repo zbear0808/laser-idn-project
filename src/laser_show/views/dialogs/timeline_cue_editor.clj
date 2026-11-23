@@ -12,47 +12,15 @@
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [laser-show.events.core :as events]
-            [laser-show.css.core :as css]
             [laser-show.views.components.inline-edit :as inline-edit]
             [laser-show.views.components.visual-editors.timeline-editor :as timeline-editor]
             [laser-show.views.components.load-warning :as load-warning]
             [laser-show.views.components.target-control :as target-control]
             [laser-show.views.components.zone-pattern-editor :as zone-pattern-editor]
-            [laser-show.routing.targets :as targets]
-            [laser-show.common.util :as u])
+            [laser-show.views.dialogs.common :as common]
+            [laser-show.views.keys :as keys]
+            [laser-show.routing.targets :as targets])
   (:import [javafx.scene.input KeyCode KeyEvent]))
-
-
-;; Trigger Mode Picker (shared with cue-chain-editor)
-
-
-(def ^:private trigger-mode-options
-  [{:id :toggle :name "Toggle"}
-   {:id :retrigger :name "Retrigger"}])
-
-(defn- trigger-mode-dropdown
-  [{:keys [col row trigger-mode]}]
-  (let [current-mode (or trigger-mode :toggle)
-        current-option (or (u/seek #(= (:id %) current-mode) trigger-mode-options)
-                           (first trigger-mode-options))]
-    {:fx/type :h-box
-     :spacing 8
-     :alignment :center-left
-     :children [{:fx/type :label
-                 :text "Trigger:"
-                 :style-class "zone-picker-label"}
-                {:fx/type :combo-box
-                 :value current-option
-                 :pref-width 120
-                 :items trigger-mode-options
-                 :button-cell (fn [mode]
-                                {:text (or (:name mode) "Toggle")})
-                 :cell-factory {:fx/cell-type :list-cell
-                                :describe (fn [mode]
-                                            {:text (or (:name mode) "Toggle")})}
-                 :on-value-changed {:event/type :cue-chain/set-trigger-mode
-                                    :col col
-                                    :row row}}]}))
 
 
 ;; Main Content
@@ -77,7 +45,7 @@
 
         ;; Chain name
         chain-name (:name cue-chain)
-        default-name (str "Cell " (char (+ 65 (or row 0))) (inc (or col 0)))
+        default-name (common/default-name col row)
         editing-name? (:editing-name? dialog-data false)]
     {:fx/type :v-box
      :spacing 0
@@ -134,7 +102,7 @@
                    :id "pattern-chip-cue"
                    :col col
                    :row row}
-                  {:fx/type trigger-mode-dropdown
+                  {:fx/type common/trigger-mode-dropdown
                    :col col
                    :row row
                    :trigger-mode (:trigger-mode cue-chain)}
@@ -159,51 +127,23 @@
 ;; Dialog Window
 
 
-(defn- handle-scene-key-pressed
-  "Handles undo/redo shortcuts and Space (play/pause the timeline) at the
-   scene level. Space only gets here when no control used it (text fields
-   and buttons do)."
+(defn- handle-space
+  "Space plays and pauses the timeline. It only gets here when no control
+   used it (buttons do), and never while you type (keys/typing-target?)."
   [^KeyEvent e]
-  (let [code (.getCode e)
-        shortcut? (or (.isShortcutDown e) (.isControlDown e))
-        shift? (.isShiftDown e)]
-    (when (and (= code KeyCode/SPACE) (not shortcut?)
-               (not (instance? javafx.scene.control.TextInputControl (.getTarget e))))
-      (.consume e)
-      (events/dispatch! {:event/type :timeline/toggle-play}))
-    (when shortcut?
-      (cond
-        (and (= code KeyCode/Z) shift?)
-        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
-        (= code KeyCode/Y)
-        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
-        (= code KeyCode/Z)
-        (do (.consume e) (events/dispatch! {:event/type :edit/undo}))))))
-
-(defn- timeline-cue-editor-scene
-  [{:keys [stylesheets]}]
-  {:fx/type :scene
-   :stylesheets stylesheets
-   :on-key-pressed handle-scene-key-pressed
-   :root {:fx/type timeline-cue-editor-content}})
+  (when (and (= KeyCode/SPACE (.getCode e))
+             (not (or (.isShortcutDown e) (.isControlDown e)))
+             (not (keys/typing-target? e)))
+    (.consume e)
+    (events/dispatch! {:event/type :timeline/toggle-play})))
 
 (defn timeline-cue-editor-dialog
   "The timeline-based cue chain editor dialog window."
   [{:keys [fx/context]}]
-  (let [open? (fx/sub-ctx context subs/dialog-open? :timeline-cue-editor)
-        dialog-data (fx/sub-ctx context subs/dialog-data :timeline-cue-editor)
-        {:keys [col row]} dialog-data
-        chain-name (:name (fx/sub-ctx context subs/cue-cell-chain col row))
-        stylesheets (css/dialog-stylesheet-urls)
-        cell-id (str "Cell " (char (+ 65 (or row 0))) (inc (or col 0)))
-        window-title (str "Timeline Editor - "
-                          (if (seq chain-name)
-                            (str chain-name " (" cell-id ")")
-                            cell-id))]
-    {:fx/type :stage
-     :showing open?
-     :title window-title
-     :modality :none
-     :on-close-request {:event/type :ui/close-dialog :dialog-id :timeline-cue-editor}
-     :scene {:fx/type timeline-cue-editor-scene
-             :stylesheets stylesheets}}))
+  (let [{:keys [col row]} (fx/sub-ctx context subs/dialog-data :timeline-cue-editor)
+        chain-name (:name (fx/sub-ctx context subs/cue-cell-chain col row))]
+    {:fx/type common/dialog-stage
+     :dialog-id :timeline-cue-editor
+     :title (common/window-title "Timeline Editor" chain-name col row)
+     :on-key-extra handle-space
+     :content {:fx/type timeline-cue-editor-content}}))

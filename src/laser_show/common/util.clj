@@ -225,5 +225,12 @@
               (rf result v))
             result)))))))
 
+
+(defn cell-label
+  "A grid cell's name, as the grid's row letters and column numbers read:
+   \"A1\" for [0 0], \"D8\" for col 7, row 3. A nil col or row counts as 0."
+  [col row]
+  (str (char (+ 65 (long (or row 0)))) (inc (long (or col 0)))))
+
 (set! *warn-on-reflection* false)
 (set! *unchecked-math* false)

@@ -13,17 +13,14 @@
    - Drag-and-drop reordering
    - Copy/paste across cells"
   (:require [cljfx.api :as fx]
-            [clojure.tools.logging :as log]
             [laser-show.subs :as subs]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
-            [laser-show.css.core :as css]
             [laser-show.views.components.effect-bank :as effect-bank]
             [laser-show.views.components.effect-parameter-editor :as param-editor]
             [laser-show.views.components.inline-edit :as inline-edit]
             [laser-show.views.components.list :as list]
-            [laser-show.events.core :as events])
-  (:import [javafx.scene.input KeyCode KeyEvent]))
+            [laser-show.views.dialogs.common :as common]))
 
 
 ;; Right Top: Tabbed Effect Bank (using data-driven component)
@@ -99,7 +96,7 @@
                               (chains/find-path-by-id effect-chain first-selected-id))
         ;; Get chain name for header
         chain-name (:name cell-data)
-        default-name (str "Cell " (char (+ 65 (or row 0))) (inc (or col 0)))
+        default-name (common/default-name col row)
         editing-name? (:editing-name? dialog-data false)]
     {:fx/type :v-box
      :spacing 0
@@ -191,63 +188,12 @@
 ;; Dialog Window
 
 
-;; NOTE: Dialog CSS is now defined in laser-show.css.dialogs
-;; The CSS string literal has been moved to the centralized CSS system
-
-(defn- handle-scene-key-pressed
-  "Handles undo/redo keyboard shortcuts at the scene level."
-  [^KeyEvent e]
-  (let [code (.getCode e)
-        shortcut? (or (.isShortcutDown e) (.isControlDown e))
-        shift? (.isShiftDown e)]
-    (when shortcut?
-      (cond
-        (and (= code KeyCode/Z) shift?)
-        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
-        (= code KeyCode/Y)
-        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
-        (= code KeyCode/Z)
-        (do (.consume e) (events/dispatch! {:event/type :edit/undo}))))))
-
-(defn- effect-chain-editor-scene
-  "Scene component for the effect chain editor.
-   Keyboard shortcuts are handled by the list component and scene accelerators."
-  [{:keys [stylesheets]}]
-  {:fx/type :scene
-   :stylesheets stylesheets
-   :on-key-pressed handle-scene-key-pressed
-   :root {:fx/type effect-chain-editor-content}})
-
 (defn effect-chain-editor-dialog
   "The effect chain editor dialog window."
   [{:keys [fx/context]}]
-  (let [open? (fx/sub-ctx context subs/dialog-open? :effect-chain-editor)
-        dialog-data (fx/sub-ctx context subs/dialog-data :effect-chain-editor)
-        {:keys [col row]} dialog-data
-        ;; Get chain data for name in title
-        chains-state (fx/sub-val context :chains)
-        cell-data (get-in chains-state [:effect-chains [col row]])
-        chain-name (:name cell-data)
-        ;; Use centralized CSS system - dialogs includes all needed styles
-        stylesheets (css/dialog-stylesheet-urls)
-        ;; Generate window title with cell identifier and name
-        cell-id (str "Cell " (char (+ 65 (or row 0))) (inc (or col 0)))
-        window-title (str "Effects Chain - "
-                         (if (seq chain-name)
-                           (str chain-name " (" cell-id ")")
-                           cell-id))]
-    ;; Log visibility check for debugging
-    (when open?
-      (log/debug "Effect chain editor visibility check"
-                 {:open? open?
-                  :dialog-data dialog-data
-                  :col col
-                  :row row
-                  :showing? open?}))
-    {:fx/type :stage
-     :showing open?
-     :title window-title
-     :modality :none
-     :on-close-request {:event/type :ui/close-dialog :dialog-id :effect-chain-editor}
-     :scene {:fx/type effect-chain-editor-scene
-             :stylesheets stylesheets}}))
+  (let [{:keys [col row]} (fx/sub-ctx context subs/dialog-data :effect-chain-editor)
+        chain-name (:name (get-in (fx/sub-val context :chains) [:effect-chains [col row]]))]
+    {:fx/type common/dialog-stage
+     :dialog-id :effect-chain-editor
+     :title (common/window-title "Effects Chain" chain-name col row)
+     :content {:fx/type effect-chain-editor-content}}))
