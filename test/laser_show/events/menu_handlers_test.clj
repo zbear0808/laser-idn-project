@@ -141,7 +141,7 @@
       (is (false? (:window/set-fullscreen result))))))
 
 (deftest fullscreen-changed-stores-what-the-window-did-test
-  (testing "the window refused, or Escape or the OS left fullscreen: the flag follows it"
+  (testing "the window refused, or the OS left fullscreen: the flag follows it"
     (let [result (menu/handle {:event/type :view/fullscreen-changed :fullscreen? false
                                :state (assoc-in base-state [:ui :fullscreen?] true)})]
       (is (= {:state (assoc-in base-state [:ui :fullscreen?] false)} result) "only the flag, no effect")))

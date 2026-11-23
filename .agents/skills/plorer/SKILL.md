@@ -130,7 +130,7 @@ Each of these was run against the app in test mode.
 (let [shown? #(boolean (seq (p/all (main-window) "#main-split")))
       before (shown?)]
   (click! "#view-menu")
-  (choose! "Toggle Preview")
+  (choose! "Show Preview")
   (wait-for #(not= before (shown?))))
 
 ;; Pick from a combo box.

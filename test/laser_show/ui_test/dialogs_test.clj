@@ -13,7 +13,8 @@
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
-            [laser-show.ui-test.testfx :as ui])
+            [laser-show.ui-test.testfx :as ui]
+            [laser-show.views.root :as root])
   (:import [com.sun.javafx.scene.control ContextMenuContent$MenuItemContainer]
            [java.io File]
            [javafx.event Event]
@@ -187,10 +188,8 @@
         (is (not (dialog-open? id))))))
   (testing "the confirm closed by its window's close continued with nothing"
     (is (= "Intro" (cue-name 0 0))))
-  (testing "the root's registry, once there is one, mounts exactly these"
-    (when-let [registry (some-> (resolve 'laser-show.views.root/dialog-registry) deref)]
-      (is (= (mapv :id dialogs)
-             (mapv #(if (map? %) (:dialog-id %) (first %)) registry))))))
+  (testing "every registered window has been exercised"
+    (is (= (set (map :id dialogs)) (set (map first root/dialog-registry))))))
 
 
 ;; Undo in the editors
@@ -243,7 +242,7 @@
             (testing "and ⇧⌘Z redoes it"
               (push! robot KeyCode/SHORTCUT KeyCode/SHIFT KeyCode/Z)
               (is (waited? #(= "Edited" (value)))))
-            (is (.isShowing stage) "the window stays open")
+            (is (ui/on-fx-thread #(.isShowing stage)) "the window stays open")
             (request-close! stage)
             (ui/wait-for! #(nil? (stage-titled title)))))))))
 
@@ -256,7 +255,9 @@
     (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
     (ui/wait-for! #(some? (stage-titled "Timeline Editor")))
     (ui/assert-visible! "#timeline-lanes")
-    (ui/focus! robot "#timeline-canvas")
+    ;; The canvas handles Space itself. A plain label leaves it to the
+    ;; dialog's scene, which is the fallback this test protects.
+    (ui/focus! robot "#timeline-readout")
     (push! robot KeyCode/SPACE)
     (ui/wait-for! #(and (some? (timing)) (not (:paused? (timing)))))
     (push! robot KeyCode/SPACE)

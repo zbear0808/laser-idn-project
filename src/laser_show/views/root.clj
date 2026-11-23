@@ -35,6 +35,7 @@
    [laser-show.views.dialogs.unsaved-confirm :as unsaved-confirm]
    [laser-show.views.dialogs.rig-report :as rig-report]
    [laser-show.views.dialogs.confirm :as confirm]
+   [laser-show.views.dialogs.about :as about]
    [laser-show.views.status-bar :as status-bar]
    [laser-show.views.tabs.effects :as effects-tab]
    [laser-show.views.tabs.grid :as grid-tab]
@@ -44,7 +45,8 @@
    [laser-show.views.tabs.settings :as settings-tab]
    [laser-show.views.tabs.vibes :as vibes-tab]
    [laser-show.views.toolbar :as toolbar])
-  (:import [javafx.stage WindowEvent]))
+  (:import [javafx.scene.input KeyCombination]
+           [javafx.stage WindowEvent]))
 
 
 ;; Layout Constants (non-color theme values)
@@ -128,7 +130,7 @@
 (defn main-content
   "Main content area with tab content and optional preview panel.
    Preview is hidden when on the vibes, projectors, zones, or settings tabs,
-   and on every tab while View > Toggle Preview has it off."
+   and on every tab while View > Show Preview is unchecked."
   [{:keys [fx/context]}]
   (let [active-tab (fx/sub-ctx context subs/active-tab)
         show-preview? (and (fx/sub-ctx context subs/preview-visible?)
@@ -191,8 +193,7 @@
                         (javafx.application.Platform/runLater #(.requestFocus layout))))))))
 
 (defn- report-fullscreen-changes!
-  "The window's fullscreen changes, whoever made them (View > Fullscreen,
-   Escape, the OS's control), go to [:ui :fullscreen?]."
+  "Keep the menu in sync even when the OS changes fullscreen itself."
   [^javafx.scene.Node layout]
   (when-let [^javafx.stage.Stage stage (some-> layout .getScene .getWindow)]
     (.addListener (.fullScreenProperty stage)
@@ -242,7 +243,8 @@
    [:trigger-editor #'cell-trigger-editor/cell-trigger-editor-dialog]
    [:unsaved-confirm #'unsaved-confirm/unsaved-confirm-dialog]
    [:rig-report #'rig-report/rig-report-dialog]
-   [:confirm #'confirm/confirm-dialog]])
+   [:confirm #'confirm/confirm-dialog]
+   [:about #'about/about-dialog]])
 
 (defn root-view
   "Root view with theming and dialog management.
@@ -264,6 +266,10 @@
                      :width (:width window-config 1200)
                      :height (:height window-config 800)
                      :showing true
+                     ;; Escape stays with the app's controls and Stop, even
+                     ;; when fullscreen was entered using the OS controls.
+                     :full-screen-exit-key-combination KeyCombination/NO_MATCH
+                     :full-screen-exit-hint "Press F11 to leave fullscreen"
                      ;; A pad's release may never come once the window lost
                      ;; focus: the pads' holds end then (handlers/vibes.clj)
                      :on-focused-changed {:event/type :vibe/window-focus}

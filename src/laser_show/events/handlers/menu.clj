@@ -4,7 +4,7 @@
    Handles:
    - File menu: New, Open, Save, Save As, Exit
    - Edit menu: Undo, Redo, Copy, Paste, Clear
-   - View menu: Toggle Preview, Fullscreen
+   - View menu: Show Preview, Fullscreen
    - Help menu: Documentation, About, IDN Stream Logging, Zone Routing Debug"
   (:require [clojure.tools.logging :as log]
             [laser-show.dev-config :as dev-config]
@@ -345,7 +345,7 @@
   "Hide or show the preview panel ([:ui :preview-visible?], unset = shown).
    The tabs that never show it (root/main-content) still don't."
   [{:keys [state]}]
-  (log/debug "View > Toggle Preview")
+  (log/debug "View > Show Preview")
   {:state (update-in state [:ui :preview-visible?] (fnil not true))})
 
 (defn- handle-view-fullscreen
@@ -359,8 +359,8 @@
      :window/set-fullscreen on?}))
 
 (defn- handle-view-fullscreen-changed
-  "The main window went in or out of fullscreen: through View > Fullscreen,
-   Escape, or the OS's own control. [:ui :fullscreen?] follows the window."
+  "The main window went in or out of fullscreen: through View > Fullscreen
+   or the OS's own control. [:ui :fullscreen?] follows the window."
   [{:keys [state fullscreen?]}]
   {:state (assoc-in state [:ui :fullscreen?] (boolean fullscreen?))})
 

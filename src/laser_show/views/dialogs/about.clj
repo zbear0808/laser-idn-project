@@ -27,7 +27,7 @@
                            :style-class ["header-primary"]}]}
               {:fx/type :label
                :id "about-description"
-               :text "Live laser show control: cue grids, effects and zones, streamed to IDN and driver projectors."
+               :text "Create cues and effects, arrange them in zones, and play your laser show live."
                :wrap-text true
                :style-class ["label-secondary"]}
               {:fx/type :label

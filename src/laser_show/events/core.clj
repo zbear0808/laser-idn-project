@@ -82,7 +82,7 @@
             [laser-show.animation.show-time :as show-time])
   (:import [javafx.stage FileChooser FileChooser$ExtensionFilter Stage]
            [javafx.application Platform]
-           [javafx.scene.input Clipboard ClipboardContent KeyCombination]
+           [javafx.scene.input Clipboard ClipboardContent]
            [java.awt Desktop Desktop$Action]
            [java.io File]
            [java.net URI]
@@ -470,18 +470,7 @@
   [{:keys [f args]} _dispatch]
   (apply state/swap-state! f args))
 
-;; File Chooser Effect
-
-(defn- get-primary-stage
-  "Get the primary stage from the JavaFX application.
-   Returns nil if no stage is available."
-  []
-  (try
-    (let [stages (Stage/getWindows)]
-      (u/seek #(instance? Stage %) stages))
-    (catch Exception e
-      (log/warn "Could not get primary stage:" (.getMessage e))
-      nil)))
+;; Main-window effects
 
 (defn main-stage
   "The app's main window: the showing stage whose scene root is
@@ -495,8 +484,7 @@
 (defn- effect-window-set-fullscreen
   "Effect that puts the main window in or out of fullscreen, on the FX
    thread, then dispatches :view/fullscreen-changed with what the window did
-   (false with no main window, or when the platform refused). Later changes,
-   Escape or the OS's control, come from the window's listener (views/root)."
+   (false with no main window). The window also reports OS-initiated changes."
   [on? dispatch]
   (let [report! #(dispatch {:event/type :view/fullscreen-changed :fullscreen? (boolean %)})]
     (try
@@ -504,19 +492,17 @@
        (fn []
          (try
            (if-let [stage (main-stage)]
-             (do (when on?
-                   ;; Escape is the blackout here (the Transport menu), so
-                   ;; it doesn't also leave fullscreen: F11 does
-                   (.setFullScreenExitKeyCombination stage KeyCombination/NO_MATCH)
-                   (.setFullScreenExitHint stage "F11 (View > Fullscreen) leaves full screen"))
-                 (.setFullScreen stage (boolean on?))
-                 (report! (.isFullScreen stage)))
+             (do (.setFullScreen stage (boolean on?))
+                 ;; The property listener reports transitions. A platform
+                 ;; can refuse the request without changing the property.
+                 (when (not= on? (.isFullScreen stage))
+                   (report! (.isFullScreen stage))))
              (do (log/warn "Fullscreen: no main window")
                  (report! false)))
-           (catch Throwable t
+            (catch Exception t
              (log/warn "Could not change fullscreen:" (.getMessage t))
              (report! false)))))
-      (catch Throwable t
+      (catch IllegalStateException t
         (log/warn "Could not change fullscreen:" (.getMessage t))
         (report! false)))))
 
@@ -538,7 +524,7 @@
    (fn []
      (try
        (let [chooser (FileChooser.)
-             stage (get-primary-stage)]
+              stage (main-stage)]
 
          ;; Set title
          (when title
