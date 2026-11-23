@@ -1,7 +1,7 @@
 # Phase 2 — One dialog shell
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)   **Re-checked:** 2026-11-22 at `2227bce`, 275 commits later: every citation re-checked; five dialogs added since (the confirm dialog, the unsaved-changes confirm, the rig report, the zone pattern editor and the step grid window); the parts other work has done marked (§0)
-**Status:** Proposed, ready to build. D4 answered A, with the menu-stub table (§9) (2026-11-22, the ★ option, taken under the user's standing choice to take the recommended options). Partly done by other work (§0)   **Last verified against:** `2227bce`
+**Status:** In progress on `keyboard-phase2` from `c3de6b6` (2026-11-23). D4 answered A, with the menu-stub table (§9). §§0–9 describe the re-check at `2227bce`; the content sizing for Add Projector and the trigger editor from `04c0ffd` is kept.
 **Size:** ~2 days (was ~1.5: eleven dialogs instead of six, three of them modal questions, against two defects and one duplicate already gone)   **Needs:** nothing open   **Depends on:** nothing. Phase 3 can go first and give the shell `keys/typing-target?` (03 §0)
 **Supersedes / Superseded by:** none   **Related findings:** K-12, K-14 (`00-overview.md` §4); review 01 F18, M5, F19 (dialog parts), Q9; the shared scene filter the 2026-10-07 plan wanted in every dialog
 
@@ -156,7 +156,7 @@ Registry order (as `root.clj:223-266` today): effect chain, cue chain, timeline,
 
 Invariants:
 1. Every dialog id in the root registry has a default entry in `domains.clj`, and every `:dialogs` default has a dialog in the registry.
-2. Opening and closing any dialog never changes the document, so there is no undo entry and the dirty flag is untouched.
+2. Showing or closing a window is UI-only. An editor command that deliberately edits the document before showing its window keeps its own undo behavior (converting a cue to a timeline; creating or converting a step grid).
 3. Window titles and the node ids listed in §1 are unchanged.
 4. The shared handler consumes a key only when it matched an undo/redo chord (or the dialog's own extra). The question dialogs keep Enter and Escape on their default and cancel buttons.
 5. Every dialog's stylesheets come from `subs/stylesheet-urls`.
