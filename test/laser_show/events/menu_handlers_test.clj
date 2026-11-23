@@ -111,3 +111,45 @@
     (let [state (assoc-in sample-state-with-cues [:ui :clipboard] {:type :cue-chain :data nil :copied-at 1})
           result (menu/handle {:event/type :edit/paste :state state :time 9})]
       (is (= {:items [{:preset-id :circle}]} (get-in result [:state :chains :cue-chains [0 0]]))))))
+
+
+;; The View menu and the removed stubs (dialog shell plan 02 §9)
+
+(deftest toggle-preview-hides-and-restores-test
+  (let [toggle #(:state (menu/handle {:event/type :view/toggle-preview :state %}))
+        unset (update base-state :ui dissoc :preview-visible?)]
+    (testing "unset counts as shown: the first toggle hides it"
+      (is (false? (get-in (toggle unset) [:ui :preview-visible?]))))
+    (testing "and the next one brings it back"
+      (is (true? (get-in (toggle (toggle unset)) [:ui :preview-visible?]))))
+    (testing "from the shown default"
+      (is (false? (get-in (toggle (assoc-in base-state [:ui :preview-visible?] true)) [:ui :preview-visible?]))))
+    (testing "the document isn't touched"
+      (is (not (history/derive-dirty unset (toggle unset)))))))
+
+(deftest fullscreen-returns-the-window-effect-test
+  (testing "off (or unset): on, and the main window is asked to go fullscreen"
+    (doseq [state [(update base-state :ui dissoc :fullscreen?)
+                   (assoc-in base-state [:ui :fullscreen?] false)]]
+      (let [result (menu/handle {:event/type :view/fullscreen :state state})]
+        (is (true? (get-in result [:state :ui :fullscreen?])))
+        (is (true? (:window/set-fullscreen result))))))
+  (testing "on: off"
+    (let [result (menu/handle {:event/type :view/fullscreen
+                               :state (assoc-in base-state [:ui :fullscreen?] true)})]
+      (is (false? (get-in result [:state :ui :fullscreen?])))
+      (is (false? (:window/set-fullscreen result))))))
+
+(deftest fullscreen-changed-stores-what-the-window-did-test
+  (testing "the window refused, or Escape or the OS left fullscreen: the flag follows it"
+    (let [result (menu/handle {:event/type :view/fullscreen-changed :fullscreen? false
+                               :state (assoc-in base-state [:ui :fullscreen?] true)})]
+      (is (= {:state (assoc-in base-state [:ui :fullscreen?] false)} result) "only the flag, no effect")))
+  (testing "the OS put it in fullscreen"
+    (is (true? (get-in (menu/handle {:event/type :view/fullscreen-changed :fullscreen? true :state base-state})
+                       [:state :ui :fullscreen?])))))
+
+(deftest export-and-check-for-updates-are-gone-test
+  (testing "nothing handles them: their menu items went with them"
+    (is (= {} (menu/handle {:event/type :file/export :state base-state})))
+    (is (= {} (menu/handle {:event/type :help/check-updates :state base-state})))))

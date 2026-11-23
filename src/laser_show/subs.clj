@@ -158,6 +158,12 @@
   [context]
   (fx/sub-val context get-in [:config :window :grid-split] 0.65))
 
+(defn preview-visible?
+  "Is the preview panel on (View > Toggle Preview, [:ui :preview-visible?];
+   unset means on)? The tabs that never show it still don't (root)."
+  [context]
+  (not (false? (fx/sub-val context get-in [:ui :preview-visible?]))))
+
 (defn preview-config [context]
   (fx/sub-val context ex/preview-config))
 

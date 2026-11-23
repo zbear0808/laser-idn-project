@@ -53,7 +53,7 @@
                :output/write-status
                :project/save :project/load :fx/show-file-chooser :system/exit :system/open-url
                :dev/reload :dev/deliver :dev/swap-state :clipboard/write :clipboard/read
-               :projectors/scan :addons/install :system/open-folder]))
+               :projectors/scan :addons/install :system/open-folder :window/set-fullscreen]))
   (is (not-any? #(contains? events/effects %) [:clipboard/copy-effects :clipboard/paste-effects])
       "no effect copies or pastes behind the clipboard's handlers (keyboard plan Step 4a)")
   (is (not (contains? events/effects :clipboard/paste-projector-effects))
@@ -125,6 +125,12 @@
     ((get events/effects :dispatch-later) {:event {:event/type ::later} :delay-ms 0}
                                           #(deliver got %))
     (is (= {:event/type ::later} (deref got 2000 ::timeout)))))
+
+(deftest set-fullscreen-reports-back-without-a-main-window-test
+  (testing "no main window (no toolkit, or none showing): it reports not fullscreen, so the flag can't stick on"
+    (let [got (promise)]
+      ((get events/effects :window/set-fullscreen) true #(deliver got %))
+      (is (= {:event/type :view/fullscreen-changed :fullscreen? false} (deref got 5000 ::timeout))))))
 
 
 ;; No-app fallback

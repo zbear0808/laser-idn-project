@@ -82,7 +82,7 @@
             [laser-show.animation.show-time :as show-time])
   (:import [javafx.stage FileChooser FileChooser$ExtensionFilter Stage]
            [javafx.application Platform]
-           [javafx.scene.input Clipboard ClipboardContent]
+           [javafx.scene.input Clipboard ClipboardContent KeyCombination]
            [java.awt Desktop Desktop$Action]
            [java.io File]
            [java.net URI]
@@ -483,6 +483,43 @@
       (log/warn "Could not get primary stage:" (.getMessage e))
       nil)))
 
+(defn main-stage
+  "The app's main window: the showing stage whose scene root is
+   #main-layout (views/root), or nil. Not any first stage: under TestFX
+   another stage shows first. FX thread."
+  ^Stage []
+  (u/seek #(and (instance? Stage %)
+                (= "main-layout" (some-> ^Stage % .getScene .getRoot .getId)))
+          (Stage/getWindows)))
+
+(defn- effect-window-set-fullscreen
+  "Effect that puts the main window in or out of fullscreen, on the FX
+   thread, then dispatches :view/fullscreen-changed with what the window did
+   (false with no main window, or when the platform refused). Later changes,
+   Escape or the OS's control, come from the window's listener (views/root)."
+  [on? dispatch]
+  (let [report! #(dispatch {:event/type :view/fullscreen-changed :fullscreen? (boolean %)})]
+    (try
+      (Platform/runLater
+       (fn []
+         (try
+           (if-let [stage (main-stage)]
+             (do (when on?
+                   ;; Escape is the blackout here (the Transport menu), so
+                   ;; it doesn't also leave fullscreen: F11 does
+                   (.setFullScreenExitKeyCombination stage KeyCombination/NO_MATCH)
+                   (.setFullScreenExitHint stage "F11 (View > Fullscreen) leaves full screen"))
+                 (.setFullScreen stage (boolean on?))
+                 (report! (.isFullScreen stage)))
+             (do (log/warn "Fullscreen: no main window")
+                 (report! false)))
+           (catch Throwable t
+             (log/warn "Could not change fullscreen:" (.getMessage t))
+             (report! false)))))
+      (catch Throwable t
+        (log/warn "Could not change fullscreen:" (.getMessage t))
+        (report! false)))))
+
 (defn- effect-show-file-chooser
   "Effect that shows a JavaFX FileChooser dialog.
    
@@ -679,6 +716,8 @@
      folder as <name>.jar.new; :addons/installed or :addons/install-failed
      comes back (later, future)
    - :fx/show-file-chooser - show file open/save dialog (later, FX thread)
+   - :window/set-fullscreen - the main window in or out of fullscreen, then
+     :view/fullscreen-changed with what it did (later, FX thread)
    - :system/exit - end the application through the fn registered with set-exit-fn!
    - :system/open-url - open a URL in the system browser
    - :system/open-folder - make a folder and open it in the file manager
@@ -713,6 +752,8 @@
    :addons/install effect-addons-install
    ;; File chooser dialog
    :fx/show-file-chooser effect-show-file-chooser
+   ;; The main window
+   :window/set-fullscreen effect-window-set-fullscreen
    ;; System
    :system/exit effect-system-exit
    :system/open-url effect-system-open-url
