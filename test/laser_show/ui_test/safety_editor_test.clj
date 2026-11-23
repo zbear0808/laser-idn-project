@@ -6,7 +6,8 @@
             [laser-show.events.core :as events]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
-            [laser-show.ui-test.testfx :as ui])
+            [laser-show.ui-test.testfx :as ui]
+            [laser-show.views.keys :as keys])
   (:import [javafx.event Event]
            [javafx.scene Node]
            [javafx.scene.input KeyCode MouseButton MouseEvent]))
@@ -83,8 +84,10 @@
   (ui/wait-for! #(some? (ui/query "#safety-canvas")))
   (fire-press-and-drag! [(px 0.8) (py 0.0)] [(- (px 0.8) 40.0) (py 0.0)])
   (ui/wait-for! #(< (get-in (zone) [:limit 2]) 0.5))
+  (is (ui/on-fx-thread #(keys/claims? (ui/query "#safety-canvas") :escape)) "Escape cancels the drag")
   (ui/press! (ui/robot) KeyCode/ESCAPE)
   (ui/wait-for! #(= 0.8 (get-in (zone) [:limit 2])))
+  (is (not (ui/on-fx-thread #(keys/claims? (ui/query "#safety-canvas") :escape))) "no drag left to cancel")
   (fire-canvas! MouseEvent/MOUSE_RELEASED (- (px 0.8) 40.0) (py 0.0))
   (is (= [-0.8 -0.8 0.8 0.8] (:limit (zone))) "the zone from before the drag, and the release changes nothing")
   (is (not (get-in (app-state) [:ui :dialogs :confirm :open?])) "it didn't ask"))

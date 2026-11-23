@@ -35,6 +35,22 @@
     (let [props (.getProperties node)]
       (.put props ::claimed-keys (into (get props ::claimed-keys #{}) key-ids)))))
 
+(defn set-key-claim-predicate!
+  "For a reusable editor whose keys depend on its latest props or local
+   selection. pred receives a key id; nil removes this dynamic claim only.
+   Call on the FX thread."
+  [^Node node pred]
+  (if pred
+    (.put (.getProperties node) ::claims-key? pred)
+    (when (.hasProperties node)
+      (.remove (.getProperties node) ::claims-key?))))
+
+(defn- node-claims? [^Node node key-id]
+  (when (.hasProperties node)
+    (let [props (.getProperties node)]
+      (or (contains? (get props ::claimed-keys) key-id)
+          (when-let [pred (get props ::claims-key?)] (pred key-id))))))
+
 (defn claims?
   "Does the focus owner, or any of its ancestors, edit with key-id?
    Call on the FX thread. A scene with no focus owner has no node claims."
@@ -42,6 +58,5 @@
   (loop [node focus-owner]
     (cond
       (nil? node) false
-      (and (.hasProperties node)
-           (contains? (get (.getProperties node) ::claimed-keys) key-id)) true
+      (node-claims? node key-id) true
       :else (recur (.getParent node)))))

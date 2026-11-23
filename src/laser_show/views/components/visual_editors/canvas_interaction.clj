@@ -96,6 +96,22 @@
       (update-drag-state! canvas new-drag)
       (render! canvas (or (:preview-value new-drag) value) new-drag))))
 
+(def ^:private edit-key-codes
+  {:left KeyCode/LEFT :right KeyCode/RIGHT :up KeyCode/UP :down KeyCode/DOWN
+   :tab KeyCode/TAB :escape KeyCode/ESCAPE})
+
+(defn- set-key-claims! [^Canvas canvas {:keys [on-key claimed-keys value]}]
+  (keys/set-key-claim-predicate!
+   canvas
+   (when on-key
+     (or claimed-keys
+         ;; on-key describes the edit; only the actual key handler applies it.
+         ;; Ask it with the current selection/drag state: a read-only hue
+         ;; takes no arrows; the safety canvas takes Escape only in a drag.
+         (fn [id]
+           (when-let [code (get edit-key-codes id)]
+             (:consumed? (on-key code false value (get-drag-state canvas)))))))))
+
 (defn- draw-interactive-canvas!
   "Called on every render cycle via cljfx Canvas :draw prop. Triggers render! callback."
   [^Canvas canvas props]
@@ -141,7 +157,8 @@
      :on-exit          - (fn [value drag-info])
 
    Keyboard interaction opts:
-     :claimed-keys     - bare key ids handled by :on-key while this canvas has focus
+     :claimed-keys     - full set of bare keys to keep (e.g. the timeline). Without a set,
+                         :on-key's :consumed? decides for arrows, Tab and Escape; it must be pure.
      :on-key           - (fn [^KeyCode key-code shift? value drag-info])
                          Returns map with keys:
                            :dispatch    - event map
@@ -174,7 +191,7 @@
                                on release). Default true. Pass false when the
                                canvas commits one edit on release itself."
   [{:keys [width height value render!
-           on-press on-drag on-release on-hover on-key claimed-keys on-exit on-scroll
+           on-press on-drag on-release on-hover on-key on-exit on-scroll
            on-drag-over on-drag-exited on-drag-dropped
            initial-drag-state history-transaction?
            cursor focus-traversable? id style-class managed]
@@ -184,7 +201,6 @@
     :as props}]
   {:fx/type fx/ext-on-instance-lifecycle
    :on-created (fn [^Canvas canvas]
-                 (when on-key (keys/claim-keys! canvas claimed-keys))
                  (let [canvas-id (keyword (gensym "canvas-"))]
                    (.setUserData canvas {:canvas-id canvas-id
                                          :interaction (atom (merge {:dragging?     false
@@ -207,6 +223,8 @@
                                  focus-traversable?
                                  has-keyboard?))
           :draw (fn [^Canvas canvas]
+                  ;; :draw receives this render's props even when the node is reused.
+                  (set-key-claims! canvas props)
                   (draw-interactive-canvas! canvas props))
 
           :on-mouse-pressed
