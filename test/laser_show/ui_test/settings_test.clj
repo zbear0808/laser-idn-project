@@ -1,7 +1,7 @@
 (ns laser-show.ui-test.settings-test
   "The Settings tab: its cards, the MIDI card's buttons and fields, and the
-   OSC card's one switch. Nothing here opens a device or a socket: the
-   connected and listening states are put in the state by hand."
+   OSC and keyboard switches. Nothing here opens a device or a socket:
+   the connected and listening states are put in the state by hand."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
             [laser-show.state.core :as state]
@@ -47,12 +47,34 @@
 
 (defn- osc [] (get-in (state/get-raw-state) [:backend :input :osc]))
 
-(deftest keyboard-card-is-gone-test
+(deftest keyboard-card-has-its-switch-test
   (open-settings!)
-  (let [shown (texts)]
-    (is (every? shown ["Ableton Link" "MIDI Configuration" "OSC Configuration"]))
-    (is (not-any? shown ["Keyboard Configuration" "Keyboard shortcuts and hotkey configuration coming soon..."])
-        "no card that only says it's coming")))
+  (let [robot (ui/robot)
+        switch "#keyboard-enabled"
+        enabled? #(get-in (state/get-raw-state) [:backend :input :keyboard :enabled?])]
+    (is (every? (texts) ["Ableton Link" "MIDI Configuration" "OSC Configuration" "Keyboard"]))
+    (ui/assert-text! "#keyboard-reserved" "Escape is reserved for Stop.")
+    (ui/assert-selected! switch)
+    (ui/scroll-into-view! switch)
+    (ui/click! robot switch)
+    (ui/wait-for! #(false? (enabled?)))
+    (ui/click! robot switch)
+    (ui/wait-for! #(true? (enabled?)))))
+
+(deftest keyboard-card-lists-overridden-shortcuts-test
+  (open-settings!)
+  (ui/assert-text! "#keyboard-overrides" "No built-in shortcuts overridden.")
+  (let [cue {:type :trigger-cue :target [0 0]}]
+    (events/write-state!
+     #(-> %
+          (assoc-in [:config :input :trigger-map] {{:source :keyboard :id :space} cue
+                                                   {:source :keyboard :id :digit1} cue})
+          (assoc-in [:triggers :definitions] {:retrigger {:match {:source :keyboard :id :r} :action cue}
+                                              :fullscreen {:match {:source :keyboard :id :f11} :action cue :enabled? false}})))
+    (ui/assert-text! "#keyboard-overrides" "Overridden shortcuts: R (Retrigger), Space (Play/Stop)")
+    (ui/scroll-into-view! "#keyboard-enabled")
+    (ui/click! (ui/robot) "#keyboard-enabled")
+    (ui/assert-text! "#keyboard-overrides" "Shortcuts overridden when enabled: R (Retrigger), Space (Play/Stop)")))
 
 (deftest disconnect-all-is-a-button-test
   (open-settings!)

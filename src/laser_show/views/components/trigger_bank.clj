@@ -4,7 +4,8 @@
    Provides UI for assigning MIDI, OSC, or Keyboard inputs to trigger
    the current cue or effect cell."
   (:require [clojure.string :as str]
-            [laser-show.common.util :as u])
+            [laser-show.common.util :as u]
+            [laser-show.input.keyboard :as keyboard])
   (:import [javafx.util StringConverter]))
 
 (def ^:private option-name
@@ -37,14 +38,36 @@
 
 (defn binding-label
   "A trigger-map key as the user knows the control: \"MIDI Ch 1 Note 36\",
-   \"OSC /x\", \"Key :space\", or the key itself."
+   \"OSC /x\", \"Key Space\", or the key itself."
   [trigger-key]
   (case (:source trigger-key)
     :midi (str "MIDI Ch " (inc (or (:channel trigger-key) 0))
                " Note " (:note trigger-key))
     :osc (str "OSC " (:id trigger-key))
-    :keyboard (str "Key " (:id trigger-key))
+    :keyboard (str "Key " (keyboard/label (:id trigger-key)))
     (str trigger-key)))
+
+(defn- binding-row [{:keys [source id] :as trigger-key}]
+  (let [shortcut (when (= :keyboard source) (keyboard/builtin-shortcut id))]
+    {:fx/type :h-box
+     :fx/key trigger-key
+     :spacing 10
+     :alignment :center-left
+     :children [{:fx/type :v-box
+                 :h-box/hgrow :always
+                 :spacing 2
+                 :children (cond-> [{:fx/type :label
+                                     :text (binding-label trigger-key)
+                                     :style-class ["label" "trigger-item-label"]}]
+                             shortcut (conj {:fx/type :label
+                                             :text (str "Overrides built-in shortcut: " (:label shortcut))
+                                             :wrap-text true
+                                             :style-class "label-secondary"}))}
+                {:fx/type :button
+                 :id (str "trigger-remove-" (hash trigger-key))
+                 :text "Remove"
+                 :style-class "button-danger"
+                 :on-action {:event/type :input/remove-trigger :trigger-key trigger-key}}]}))
 
 (defn fader-label
   "An input store key learned for a fader as the user knows the control:
@@ -104,7 +127,7 @@
 
       {:fx/type :label
        :text (str "Map inputs to trigger this " target-label " cell")
-       :style-class "description-text"}
+       :style-class "label-secondary"}
 
       ;; Mapped Triggers List
       (if (seq cell-triggers)
@@ -113,24 +136,7 @@
          :spacing 5
          :children
          (u/concatv
-          (mapv (fn [trigger-key]
-                  (let [label (binding-label trigger-key)]
-                    {:fx/type :h-box
-                     :spacing 10
-                     :alignment :center-left
-                     :children
-                     [{:fx/type :label
-                       :text label
-                       :style-class "trigger-item-label"}
-                      {:fx/type :region
-                       :h-box/hgrow :always}
-                      {:fx/type :button
-                       :id (str "trigger-remove-" (hash trigger-key))
-                       :text "Remove"
-                       :style-class "button-danger"
-                       :on-action {:event/type :input/remove-trigger
-                                   :trigger-key trigger-key}}]}))
-                cell-triggers)
+          (mapv binding-row cell-triggers)
           [{:fx/type :button
             :id "trigger-clear-all"
             :text "Clear All Triggers"
@@ -169,7 +175,7 @@
          :children
          [{:fx/type :label
            :text "Waiting for input..."
-           :style-class "status-text"}
+           :style-class "label-primary"}
           {:fx/type :button
            :id "trigger-cancel-learn-button"
            :text "Cancel Learning"
