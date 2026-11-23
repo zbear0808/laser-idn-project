@@ -221,6 +221,10 @@ Run `clj -M:mac-arm:test -n laser-show.input.keyboard-test -n laser-show.events.
 
 **Verification on macOS arm64 (`79bd080`):** the integrated `keyboard-trigger-test`, `key-filter-test`, `keys-test`, `settings-test` and `trigger-editor-test` run passed 39 tests / 153 assertions. Coverage includes keyboard bindings in a second window, no binding in any of the four modal windows, release on blur/close, a mid-hold rebind, typed input, discrete and continuous Learn, and editor key precedence. The first acceptance run on `eb25043` had 14 failures/timeouts for missing behavior. In a headless `start-test!` session, the trigger editor learned J from keyboard input without starting the cue; J then played and stopped A1 in the main window. The platform-native held-key and external-application-focus checks in §8 were not performed. Kondo: 0 errors, 17 warnings.
 
+| Full regression suite at `79bd080` | Tests | Assertions | Failures | Errors |
+|---|---:|---:|---:|---:|
+| Unit (`clojure -M:mac-arm:test:test-ui-headless`) | 1,925 | 570,841 | 0 | 0 |
+
 ---
 
 ## Decisions
