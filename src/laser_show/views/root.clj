@@ -215,18 +215,19 @@
 
 (def dialog-registry
   "Dialogs in window stacking order. The shared confirmation must open above
-   the rig report when a change in that report needs a second answer."
-  [[:effect-chain-editor effect-chain-editor/effect-chain-editor-dialog]
-   [:cue-chain-editor cue-chain-editor/cue-chain-editor-dialog]
-   [:timeline-cue-editor timeline-cue-editor/timeline-cue-editor-dialog]
-   [:zone-pattern-editor zone-pattern-editor/zone-pattern-editor-dialog]
-   [:step-grid-editor step-grid-editor/step-grid-editor-dialog]
-   [:add-projector-manual add-projector-dialog/add-projector-manual-dialog]
-   [:zone-group-editor zone-group-editor/zone-group-editor-dialog]
-   [:trigger-editor cell-trigger-editor/cell-trigger-editor-dialog]
-   [:unsaved-confirm unsaved-confirm/unsaved-confirm-dialog]
-   [:rig-report rig-report/rig-report-dialog]
-   [:confirm confirm/confirm-dialog]])
+   the rig report when a change there needs a second answer. Keep the vars so
+   reloading an individual view still picks up its new function."
+  [[:effect-chain-editor #'effect-chain-editor/effect-chain-editor-dialog]
+   [:cue-chain-editor #'cue-chain-editor/cue-chain-editor-dialog]
+   [:timeline-cue-editor #'timeline-cue-editor/timeline-cue-editor-dialog]
+   [:zone-pattern-editor #'zone-pattern-editor/zone-pattern-editor-dialog]
+   [:step-grid-editor #'step-grid-editor/step-grid-editor-dialog]
+   [:add-projector-manual #'add-projector-dialog/add-projector-manual-dialog]
+   [:zone-group-editor #'zone-group-editor/zone-group-editor-dialog]
+   [:trigger-editor #'cell-trigger-editor/cell-trigger-editor-dialog]
+   [:unsaved-confirm #'unsaved-confirm/unsaved-confirm-dialog]
+   [:rig-report #'rig-report/rig-report-dialog]
+   [:confirm #'confirm/confirm-dialog]])
 
 (defn root-view
   "Root view with theming and dialog management.
@@ -263,5 +264,5 @@
                              :root {:fx/type main-layout}}}]
                    (keep (fn [[id component]]
                            (when (fx/sub-ctx context subs/dialog-open? id)
-                             {:fx/type component :fx/key id})))
+                             {:fx/type @component :fx/key id})))
                    dialog-registry)}}))
