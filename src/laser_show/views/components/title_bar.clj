@@ -61,8 +61,7 @@
 (defn- file-menu-items
   "Create File menu items with dynamic state."
   [context]
-  (let [has-project? (fx/sub-ctx context subs/project-file)
-        dirty? (fx/sub-ctx context subs/project-dirty?)]
+  (let [dirty? (fx/sub-ctx context subs/project-dirty?)]
     [{:fx/type :menu-item
       :text "New Project"
       :accelerator [:shortcut :n]
@@ -85,13 +84,6 @@
       :text "Save As..."
       :accelerator [:shortcut :shift :s]
       :on-action {:event/type :file/save-as}}
-     
-     {:fx/type :separator-menu-item}
-     
-     {:fx/type :menu-item
-      :text "Export..."
-      :disable (not has-project?)
-      :on-action {:event/type :file/export}}
      
      {:fx/type :separator-menu-item}
      
@@ -170,16 +162,19 @@
       :on-action {:event/type :transport/retrigger}}]))
 
 (defn- view-menu-items
-  "Create View menu items."
-  [_context]
-  [{:fx/type :menu-item
-    :text "Toggle Preview"
+  "Create View menu items. Both are checked while they're on; the tabs that
+   never show the preview still don't with Show Preview on."
+  [context]
+  [{:fx/type :check-menu-item
+    :text "Show Preview"
     :accelerator [:shortcut :p]
+    :selected (fx/sub-ctx context subs/preview-visible?)
     :on-action {:event/type :view/toggle-preview}}
    
-   {:fx/type :menu-item
+   {:fx/type :check-menu-item
     :text "Fullscreen"
     :accelerator [:f11]
+    :selected (true? (fx/sub-val context get-in [:ui :fullscreen?]))
     :on-action {:event/type :view/fullscreen}}])
 
 (defn- help-menu-items
@@ -198,10 +193,6 @@
       {:fx/type :menu-item
        :text "About"
        :on-action {:event/type :help/about}}
-      
-      {:fx/type :menu-item
-       :text "Check for Updates"
-       :on-action {:event/type :help/check-updates}}
       
       {:fx/type :separator-menu-item}
       

@@ -127,10 +127,12 @@
 
 (defn main-content
   "Main content area with tab content and optional preview panel.
-   Preview is hidden when on the vibes, projectors, zones, or settings tabs."
+   Preview is hidden when on the vibes, projectors, zones, or settings tabs,
+   and on every tab while View > Toggle Preview has it off."
   [{:keys [fx/context]}]
   (let [active-tab (fx/sub-ctx context subs/active-tab)
-        show-preview? (not (#{:vibes :projectors :zones :settings} active-tab))
+        show-preview? (and (fx/sub-ctx context subs/preview-visible?)
+                           (not (#{:vibes :projectors :zones :settings} active-tab)))
         bg-primary (css/bg-primary)
         bg-elevated (css/bg-elevated)]
     (if show-preview?
@@ -188,6 +190,18 @@
                                  (nil? (.getScene ^javafx.scene.Node old)))
                         (javafx.application.Platform/runLater #(.requestFocus layout))))))))
 
+(defn- report-fullscreen-changes!
+  "The window's fullscreen changes, whoever made them (View > Fullscreen,
+   Escape, the OS's control), go to [:ui :fullscreen?]."
+  [^javafx.scene.Node layout]
+  (when-let [^javafx.stage.Stage stage (some-> layout .getScene .getWindow)]
+    (.addListener (.fullScreenProperty stage)
+                  ^javafx.beans.value.ChangeListener
+                  (reify javafx.beans.value.ChangeListener
+                    (changed [_ _ _ on?]
+                      (events/dispatch! {:event/type :view/fullscreen-changed
+                                         :fullscreen? (boolean on?)}))))))
+
 (defn main-layout
   "Main application layout with HeaderBar in title bar area. It takes the
    focus when it is shown, so the window starts with it off the BPM field:
@@ -198,7 +212,8 @@
    :on-created (fn [^javafx.scene.Node node]
                  (javafx.application.Platform/runLater
                   #(do (.requestFocus node)
-                       (take-focus-from-removed-owners! node))))
+                       (take-focus-from-removed-owners! node)
+                       (report-fullscreen-changes! node))))
    :desc {:fx/type :border-pane
           :id "main-layout"
           :style (str "-fx-background-color: " (css/bg-primary) ";")

@@ -2,10 +2,10 @@
   "Event handlers for menu commands (File/Edit/View/Help).
    
    Handles:
-   - File menu: New, Open, Save, Save As, Export, Exit
+   - File menu: New, Open, Save, Save As, Exit
    - Edit menu: Undo, Redo, Copy, Paste, Clear
    - View menu: Toggle Preview, Fullscreen
-   - Help menu: Documentation, About, Check Updates, IDN Stream Logging, Zone Routing Debug"
+   - Help menu: Documentation, About, IDN Stream Logging, Zone Routing Debug"
   (:require [clojure.tools.logging :as log]
             [laser-show.dev-config :as dev-config]
             [laser-show.routing.zone-effects :as ze]
@@ -203,13 +203,6 @@
     (save-to event file-path)
     {:state state}))
 
-(defn- handle-file-export
-  "Export project data (TODO: Implement export dialog)."
-  [{:keys [state]}]
-  (log/debug "File > Export")
-  ;; TODO: Show export options dialog
-  {:state state})
-
 (defn- handle-file-exit
   "Exit the application. Asks first when the project has unsaved changes,
    then when the rig file couldn't take the last rig changes (zones plan
@@ -349,18 +342,27 @@
 
 
 (defn- handle-view-toggle-preview
-  "Toggle preview panel visibility (TODO: Implement preview toggle)."
+  "Hide or show the preview panel ([:ui :preview-visible?], unset = shown).
+   The tabs that never show it (root/main-content) still don't."
   [{:keys [state]}]
   (log/debug "View > Toggle Preview")
-  ;; TODO: Implement preview panel show/hide
-  {:state (update-in state [:ui :preview-visible?] not)})
+  {:state (update-in state [:ui :preview-visible?] (fnil not true))})
 
 (defn- handle-view-fullscreen
-  "Toggle fullscreen mode (TODO: Implement fullscreen)."
+  "Fullscreen on or off: the main window follows through
+   :window/set-fullscreen, and :view/fullscreen-changed then stores what the
+   window did."
   [{:keys [state]}]
   (log/debug "View > Fullscreen")
-  ;; TODO: Implement fullscreen toggle via JavaFX stage
-  {:state (update-in state [:ui :fullscreen?] not)})
+  (let [on? (not (true? (get-in state [:ui :fullscreen?])))]
+    {:state (assoc-in state [:ui :fullscreen?] on?)
+     :window/set-fullscreen on?}))
+
+(defn- handle-view-fullscreen-changed
+  "The main window went in or out of fullscreen: through View > Fullscreen,
+   Escape, or the OS's own control. [:ui :fullscreen?] follows the window."
+  [{:keys [state fullscreen?]}]
+  {:state (assoc-in state [:ui :fullscreen?] (boolean fullscreen?))})
 
 
 ;; Help Menu Events
@@ -380,13 +382,6 @@
   [{:keys [state]}]
   (log/debug "Help > About")
   {:state (assoc-in state [:ui :dialogs :about :open?] true)})
-
-(defn- handle-help-check-updates
-  "Check for application updates."
-  [{:keys [state]}]
-  (log/debug "Help > Check for Updates")
-  ;; TODO: Implement update check
-  {:state state})
 
 (defn- handle-help-toggle-idn-stream-logging
   "Toggle IDN stream debug logging on/off."
@@ -451,7 +446,6 @@
     :file/save-as (handle-file-save-as event)
     :file/save-as-result (handle-file-save-as-result event)
     :file/save-failed (handle-file-save-failed event)
-    :file/export (handle-file-export event)
     :file/exit (handle-file-exit event)
     :file/confirm-save (handle-file-confirm-save event)
     :file/confirm-retry (handle-file-confirm-retry event)
@@ -468,11 +462,11 @@
     ;; View menu
     :view/toggle-preview (handle-view-toggle-preview event)
     :view/fullscreen (handle-view-fullscreen event)
+    :view/fullscreen-changed (handle-view-fullscreen-changed event)
     
     ;; Help menu
     :help/documentation (handle-help-documentation event)
     :help/about (handle-help-about event)
-    :help/check-updates (handle-help-check-updates event)
     :help/toggle-idn-stream-logging (handle-help-toggle-idn-stream-logging event)
     :help/toggle-zone-routing-debug (handle-help-toggle-zone-routing-debug event)
     :help/reload-styles (handle-help-reload-styles event)
