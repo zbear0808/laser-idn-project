@@ -753,6 +753,7 @@
    (keys/list-key-target?). The props are read when a key comes, so they are
    the last render's."
   [^javafx.scene.Node node component-id]
+  (keys/claim-keys! node #{:delete :escape})
   (.addEventFilter
    node
    javafx.scene.input.KeyEvent/KEY_PRESSED

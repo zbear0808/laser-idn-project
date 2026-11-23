@@ -14,7 +14,8 @@
    4. Mouse handlers dispatch the callbacks' events and call render!
       immediately with the new interaction state."
   (:require [cljfx.api :as fx]
-            [laser-show.events.core :as events])
+            [laser-show.events.core :as events]
+            [laser-show.views.keys :as keys])
   (:import [javafx.scene.canvas Canvas]
            [javafx.scene.input DragEvent KeyEvent KeyCode MouseEvent ScrollEvent TransferMode]))
 
@@ -140,6 +141,7 @@
      :on-exit          - (fn [value drag-info])
 
    Keyboard interaction opts:
+     :claimed-keys     - bare key ids handled by :on-key while this canvas has focus
      :on-key           - (fn [^KeyCode key-code shift? value drag-info])
                          Returns map with keys:
                            :dispatch    - event map
@@ -172,7 +174,7 @@
                                on release). Default true. Pass false when the
                                canvas commits one edit on release itself."
   [{:keys [width height value render!
-           on-press on-drag on-release on-hover on-key on-exit on-scroll
+           on-press on-drag on-release on-hover on-key claimed-keys on-exit on-scroll
            on-drag-over on-drag-exited on-drag-dropped
            initial-drag-state history-transaction?
            cursor focus-traversable? id style-class managed]
@@ -182,6 +184,7 @@
     :as props}]
   {:fx/type fx/ext-on-instance-lifecycle
    :on-created (fn [^Canvas canvas]
+                 (when on-key (keys/claim-keys! canvas claimed-keys))
                  (let [canvas-id (keyword (gensym "canvas-"))]
                    (.setUserData canvas {:canvas-id canvas-id
                                          :interaction (atom (merge {:dragging?     false

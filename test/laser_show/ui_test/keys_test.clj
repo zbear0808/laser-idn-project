@@ -1,7 +1,6 @@
 (ns laser-show.ui-test.keys-test
-  "laser-show.views.keys: what counts as typing, and focus inside a node
-   (keyboard plan 03 §4). It builds real controls, so it needs the toolkit,
-   but no app."
+  "laser-show.views.keys: typing, focus inside a node, and the keys an editor
+   claims for its focused descendants. Needs the toolkit but no app."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]
@@ -77,3 +76,23 @@
       (is (not (ui/on-fx-thread #(keys/focus-within? nil))) "no node")
       (finally
         (ui/on-fx-thread #(.hide ^Stage stage))))))
+
+(deftest claims-follow-only-the-focus-owners-ancestors-test
+  (let [[editor child sibling]
+        (ui/on-fx-thread
+         (fn []
+           (let [child (Button.)
+                 editor (VBox. (into-array Node [(HBox. (into-array Node [child]))]))
+                 sibling (Button.)
+                 dialog (VBox. (into-array Node [editor sibling]))]
+             (keys/claim-keys! dialog #{:space})
+             (keys/claim-keys! editor #{:left :right})
+             (keys/claim-keys! editor #{:right :back_space})
+             [editor child sibling])))
+        claims (fn [node]
+                 (ui/on-fx-thread #(into #{} (filter (partial keys/claims? node))
+                                         [:space :left :right :back_space :a])))]
+    (is (= #{:space :left :right :back_space} (claims editor) (claims child))
+        "nested controls inherit both the editor's declarations and the window's")
+    (is (= #{:space} (claims sibling)) "a different part of the window has only the window's key")
+    (is (empty? (claims nil)) "no focus owner")))

@@ -12,7 +12,8 @@
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]
             [laser-show.views.components.shortcuts :as shortcuts]
-            [laser-show.views.components.step-grid :as step-grid])
+            [laser-show.views.components.step-grid :as step-grid]
+            [laser-show.views.keys :as keys])
   (:import [javafx.event Event]
            [javafx.scene Node]
            [javafx.scene.control ButtonBase Control Labeled Menu MenuButton MenuItem]
@@ -464,6 +465,9 @@
     (grid-on-a1! {:steps (vec (repeat 8 []))})
     (open-grid! cue-target)
     (ui/focus! robot "#step-grid-body")
+    (let [claims? (fn [id] (ui/on-fx-thread #(keys/claims? (.getFocusOwner (.getScene (body))) id)))]
+      (is (every? claims? [:space :right :back_space :end]) "the focused grid keeps its editing keys")
+      (is (not-any? claims? [:c :v :r]) "Copy and Paste are chords; bare letters can trigger"))
     (push! KeyCode/RIGHT)
     (ui/wait-for! #(= [0 1] (cursor)))
     (push! KeyCode/SPACE)

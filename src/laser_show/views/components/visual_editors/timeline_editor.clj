@@ -963,6 +963,7 @@
             :on-drag on-drag
             :on-release on-release
             :on-hover on-hover
+            :claimed-keys #{:space :escape :delete :back_space :left :right}
             :on-key on-key
             :on-drag-over on-drop-over
             :on-drag-exited on-drop-exit

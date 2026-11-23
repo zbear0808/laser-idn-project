@@ -145,5 +145,6 @@
     {:fx/type common/dialog-stage
      :dialog-id :timeline-cue-editor
      :title (common/window-title "Timeline Editor" chain-name col row)
+     :claimed-keys #{:space}
      :on-key-extra handle-space
      :content {:fx/type timeline-cue-editor-content}}))

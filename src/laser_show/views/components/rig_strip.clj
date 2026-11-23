@@ -569,7 +569,9 @@
         n (count ids)
         detail-line? (boolean (some (comp second :address-lines) cards))]
     {:fx/type fx/ext-on-instance-lifecycle
-     :on-created fit-to-cards!
+     :on-created (fn [^ScrollPane pane]
+                   (keys/claim-keys! (.getContent pane) #{:left :right})
+                   (fit-to-cards! pane))
      :desc
      {:fx/type :scroll-pane
       :id "rig-strip-scroll"

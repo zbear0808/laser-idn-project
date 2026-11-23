@@ -8,7 +8,8 @@
             [laser-show.events.core :as events]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
-            [laser-show.ui-test.testfx :as ui])
+            [laser-show.ui-test.testfx :as ui]
+            [laser-show.views.keys :as keys])
   (:import [javafx.scene Node Parent]
            [javafx.scene.control Labeled ScrollPane]
            [javafx.scene.input KeyCode]
@@ -43,6 +44,21 @@
   (ui/wait-for! #(ui/on-fx-thread (fn [] (let [scene (.getScene (ui/main-window))]
                                            (and (== w (.getWidth scene)) (== h (.getHeight scene)))))))
   (ui/sync-fx!))
+
+(deftest editor-key-claims-follow-focus-on-the-projectors-tab-test
+  (let [robot (ui/robot)
+        candidates [:left :right :up :down :delete :back_space :escape :space :c]]
+    (with-lasers!)
+    (ui/click! robot "#projectors-tab")
+    (doseq [[selector expected] [["#rig-card-enable-a" #{:left :right}]
+                                 ["#list-editor-projector-effects-a #chain-new-group" #{:delete :escape}]
+                                 ["#rig-strip-scroll" #{}]
+                                 ["#safety-canvas" #{}]]]
+      (ui/focus! robot selector)
+      (is (= expected
+             (ui/on-fx-thread #(let [owner (.getFocusOwner (.getScene (ui/main-window)))]
+                                 (into #{} (filter (partial keys/claims? owner)) candidates))))
+          selector))))
 
 (defn- eventually
   "Wait up to 2 s for pred, then go on either way: the assertions after it
