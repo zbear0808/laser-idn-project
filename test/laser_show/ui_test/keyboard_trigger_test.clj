@@ -83,6 +83,19 @@
   (ui/wait-for! #(nil? (cue [0 0])))
   (is (= [[:h :pressed] [:h :released]] @*key-edges*)))
 
+(deftest releasing-a-rebound-key-stops-only-its-original-cue-test
+  (let [robot (main-robot!)
+        momentary (fn [cell] {:type :trigger-cue :target cell :behavior :momentary})]
+    (bind! :h (momentary [0 0]))
+    (events/dispatch! {:event/type :grid/activate-cell :col 1 :row 0})
+    (ui/wait-for! #(some? (cue [1 0])))
+    (let [other-run (cue [1 0])]
+      (while-held! robot KeyCode/H (fn []
+                                     (ui/wait-for! #(some? (cue [0 0])))
+                                     (bind! :h (momentary [1 0]))))
+      (ui/wait-for! #(nil? (cue [0 0])))
+      (is (= other-run (cue [1 0])) "the release belongs to the original press"))))
+
 (deftest bound-key-holds-and-releases-a-vibe-role-test
   (bind! :j {:type :vibe :role :hit})
   (while-held! (main-robot!) KeyCode/J
