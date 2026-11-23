@@ -230,6 +230,7 @@ Files: `events/handlers.clj`, `test/.../triggers_test.clj`.
 - Turning on BPM sync adopts the last reported Link tempo immediately, including when Link is re-enabled with the sync preference still selected. The toolbar enables Link first, then toggles BPM following; Settings retains the two separate controls.
 - `input/link.clj` forwards changed BPM and peer reports, including a tempo already available when the listener registers. Repeated steady reports are quiet; while following, a local tempo mismatch requests a correction. The timing handler checks both switches when it processes the report, so a queued observation cannot change the app tempo after sync was disabled.
 - Verified with the 120 → steady 128 BPM regression, back-to-back reports, and the Settings and toolbar controls. Focused macOS arm64 run: 69 unit and 26 headless UI tests passed. Tests use the beat-carabiner status map without a live peer. Downbeat/phase alignment remains the independent L2 item.
+- Full macOS arm64 regression at `0bbe0cb`: 1,902 unit tests (570,682 assertions) and 315 headless UI tests (1,641 assertions); no failures or errors.
 
 **Q8. Stop trigger runtime churn (F13 part 5, F14 part 3).**
 Steps:
