@@ -26,7 +26,7 @@
 
 (defn keyboard-settings-section [{:keys [fx/context]}]
   (let [enabled? (fx/sub-val context get-in [:backend :input :keyboard :enabled?])
-        overrides (overridden-shortcuts context)]
+        overrides (fx/sub-ctx context overridden-shortcuts)]
     {:fx/type :v-box
      :id "keyboard-settings"
      :style-class "card"

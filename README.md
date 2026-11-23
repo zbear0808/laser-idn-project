@@ -52,7 +52,7 @@ Keyboard, MIDI, OSC and gamepad controls use the same input [router](src/laser_s
 
 To play a cue from your keyboard, right-click its cell, choose **Configure Triggers...**, click **Learn Next Input**, and press a key such as **1**. Choose **While held (momentary)** before learning if the cue should stop on release. Bindings are saved with the show. **Settings → Keyboard** turns keyboard triggers on or off for the session.
 
-Keys work in the main window and non-modal editors. Text fields keep what you type, and a focused editor keeps the keys it edits with: for example, Space still toggles a step in the step grid. Elsewhere a bound Space overrides Play/Stop. Escape cannot be bound; Ctrl/Cmd/Alt shortcuts keep their usual behavior. Keys follow your keyboard layout, Shift does not create a separate binding, and leaving the window releases held cues.
+Keys work in the main window and non-modal editors. Text fields keep what you type, and a focused editor keeps the keys it edits with: for example, Space still toggles a step in the step grid. Elsewhere a bound Space overrides Play/Stop. Escape cannot be bound; Ctrl/Cmd/Alt shortcuts keep their usual behavior. Keys follow your keyboard layout, Shift does not create a separate binding, and leaving the window releases held keys.
 
 ## Vibe Mode
 
