@@ -1,7 +1,7 @@
 # Keyboard, focus and window lifecycle — overview
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)
-**Status:** In progress. Phases 1–4 are implemented (`93c638a`, `90dbe87`, `c190f7c`, `71ab827`). Phase 5 is in progress on `keyboard-phase5` from `eb25043`; D11=A was confirmed on 2026-11-23. All decisions are answered (§7). §2 is the historical priority comparison at `cb32414`.
+**Status:** All five phases are implemented on `keyboard-phase5`; Phase 5 builds on `keyboard-phase2` (`eb25043`). All decisions are answered (§7). **Last verified against:** `79bd080`; the full unit and headless UI suites passed. The remaining manual desktop checks are in Phase 5 §8. §2 is the historical priority comparison at `cb32414`.
 **Supersedes / Superseded by:** supersedes `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md` (approved with D0 on 2026-11-14; that file is marked superseded and otherwise untouched)
 **Related findings:** review 01 F3, F4, F7, F18, F20, M5, L3, Q4, Q6; 02 #15, M4 (clipboard part); 05 F17, F9, L3; carry-overs "menu stubs" and "unsaved-changes guard"; undo plan §10
 
@@ -9,7 +9,7 @@
 
 **Phase 1 (`01-phase1-unsaved-guard.md`) is done** (`93c638a`, 2026-11-14; results and differences from the plan in its §10). It was the only pending item that stopped real data loss: closing the window, File > Exit, File > New and File > Open discarded unsaved work without asking (`views/root.clj:167-169`, `events/handlers/menu.clj:28,133` at `cb32414`). **Phase 4 is done** too (2026-11-22). Docs 02, 03 and 05 were re-checked at `2227bce` on 2026-11-22. **Phase 3 is done** (2026-11-22, `d2e23c1`..`c190f7c`; results, deviations and probes in 03 §10): a list's keys work with the focus on its own buttons and boxes, and Space plays after a click on TAP, a tab or the trigger-mode menu.
 
-**Phase 2 is done** on `keyboard-phase2` (`90dbe87`); [02 §10](02-phase2-dialog-shell.md#10-as-built-on-keyboard-phase2-from-c3de6b6) records the implementation and both full regression suites. **Phase 5 is in progress:** keyboard triggers in the main window and eight non-modal editors, with text inputs and focused editors keeping their keys.
+**Phase 2 is done** on `keyboard-phase2` (`90dbe87`); [02 §10](02-phase2-dialog-shell.md#10-as-built-on-keyboard-phase2-from-c3de6b6) records its regression results. **Phase 5 is implemented** on `keyboard-phase5`: keyboard triggers work in the main window and eight non-modal editors, while text inputs and focused editors keep their keys. [05 §10](05-phase5-keyboard-triggers.md#10-as-built-on-keyboard-phase5-from-eb25043) records the results and the remaining manual checks.
 
 The CI fix (§1) is in `e87b272`.
 
@@ -19,9 +19,7 @@ The CI fix (§1) is in `e87b272`.
 | `03-phase3-key-handling.md` | Keys reach the right place. Verified at `2227bce` | ~0.5–1 day | **Done** (2026-11-22, `d2e23c1`..`c190f7c`, 03 §10; D5–D7 answered A) |
 | `02-phase2-dialog-shell.md` | One shell for all twelve dialogs, including About; stale form/rename fixes and working View commands | ~2 days | **Done on `keyboard-phase2`** (`90dbe87`, 02 §10; D4=A) |
 | `04-phase4-clipboard.md` | One clipboard, in three steps; Step 4a (the one clipboard) ships on its own | ~2–2.5 days | **Done** (2026-11-22). 4a: 2026-11-21, `02ae75c`..`1113d9a`, 04 §9a; 4b–4c: D9 answered A, 2026-11-22, `29bf152`..`71ab827`, 04 §9b |
-| `05-phase5-keyboard-triggers.md` | Keyboard as a cue-trigger source (cells, vibe roles, map and pattern pads, the Zone step key) | ~1–1.5 days | **In progress**; D10–D12 answered A. Phases 3 and 2 built |
-
-About 1–1.5 days of implementation left (Phase 5).
+| `05-phase5-keyboard-triggers.md` | Keyboard as a cue-trigger source (cells, vibe roles, map and pattern pads, the Zone step key) | ~1–1.5 days | **Implemented on `keyboard-phase5`** (`79bd080`, 05 §10; D10–D12=A) |
 
 ## 1. Step 0 — CI is red because the workflow file is invalid
 
@@ -118,7 +116,7 @@ After Phase 3 (2026-11-22, `c190f7c`; 03 §10): p4 prints `3 2` (Delete reaches 
 | K-10 | The OS clipboard is read while rendering (two views) and inside paste handlers, and every copy and list paste makes the event agent wait for the FX thread (about 500 ms behind a busy FX thread) | M | p10–p12; `projectors.clj:560`, `effect_chain_editor.clj:95`, `events/handlers/list.clj:257-260`, `state/clipboard.clj:64,82` | 4a (done) |
 | K-11 | Dead clipboard code: `:on-copy-fn` callbacks nobody calls, two unused effects and a TODO stub, dialog-local slots, never-written types. `:clipboard/paste-projector-effects` and the projector stubs are already gone (Z0, `95a510d`) | L | `views/components/list.clj:598, 876, 917`; `events/core.clj:212-229, 552-553`; `events/handlers/effects.clj:167-174`; `cue_chain.clj:158-174` | 4a (done) |
 | K-12 | Dialogs duplicated their window code; stale rename/cancelled form state; five missing defaults; open dialogs missed style reloads | M | 02 §§1, 10 | 2 (fixed, `90dbe87`) |
-| K-13 | Keyboard is advertised as an input source but nothing produces keyboard events | M | `README.md:3,52`; survey (at `2227bce`) | 5 |
+| K-13 | The advertised keyboard source had no producer | M | 05 §§1, 10 | 5 (fixed, `79bd080`) |
 | K-14 | Menu items that did nothing: About, Export, Toggle Preview, Fullscreen, Check for Updates | L | 02 §§9–10 | 2 (fixed, `90dbe87`) |
 | K-15 | Learning a key (or note) also fires its previous binding | L | was `input.clj:232-238`, `input_mapper.clj:85` | **done by other work** (`38f92ad`, 2026-11-19: `input_mapper.clj:59-66, 105-106`; 05 §0) |
 

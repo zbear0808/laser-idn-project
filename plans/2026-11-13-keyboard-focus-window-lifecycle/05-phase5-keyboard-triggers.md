@@ -1,7 +1,7 @@
 # Phase 5 — Keyboard as a cue-trigger source
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)   **Re-checked:** 2026-11-22 at `2227bce`, 275 commits later: every citation re-checked; K-15 found fixed by other work; the Settings placeholder found gone; the trigger actions added by vibes and zones (Z4, Z5), the new windows and their keys taken in (§0)
-**Status:** In progress on `keyboard-phase5` from `eb25043`. **D11 answered A (2026-11-23)**; D10 and D12 answered A (2026-11-22). Both dependencies are built: Phase 3 (`c190f7c`) and Phase 2 (`90dbe87`). K-15 is already fixed (§0). **Last verified against:** `eb25043` for the shared shell and editor hooks; `2227bce` for the original survey.
+**Status:** Implemented on `keyboard-phase5` from `eb25043`; D10–D12 answered A. **Last verified against:** `79bd080`, with both full regression suites passing (§10). The manual macOS window-focus and held-key checks in §8 remain open.
 **Size:** ~1–1.5 days   **Needs:** nothing open   **Depends on:** Phase 3 (`views.keys`), Phase 2 (the shell)
 **Supersedes / Superseded by:** none (replaces the "keyboard trigger source" amendment in `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md`)   **Related findings:** K-13, K-15 (`00-overview.md` §4); review 05 F17, L3, F9 (learn also fires the old binding: fixed)
 
@@ -224,6 +224,7 @@ Run `clj -M:mac-arm:test -n laser-show.input.keyboard-test -n laser-show.events.
 | Full regression suite at `79bd080` | Tests | Assertions | Failures | Errors |
 |---|---:|---:|---:|---:|
 | Unit (`clojure -M:mac-arm:test:test-ui-headless`) | 1,925 | 570,841 | 0 | 0 |
+| Headless UI (`clojure -M:test-ui:mac-arm:test-ui-headless`) | 354 | 1,875 | 0 | 0 |
 
 ---
 
