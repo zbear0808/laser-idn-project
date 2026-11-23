@@ -103,7 +103,7 @@ Keyboard was designed as an input source (the README, the `:keyboard` placeholde
 - `laser-show.views.components.trigger-bank` (`trigger_bank.clj:38-47`): the `:keyboard` label goes through `keyboard/label` (`Key Space`), in all five views that show it. The trigger editor shows "Overrides built-in shortcut: Play/Stop" when `builtin-shortcut` is non-nil (D10 A).
 - `laser-show.views.components.keyboard-settings` (NEW, about 40 lines, like `osc_settings.clj`): a "Keyboard" card with the enable checkbox and the built-in keys a binding overrides (Escape is reserved). It is mounted in `settings.clj` after the OSC card (`:64`).
 - `laser-show.state.domains` (`domains.clj:533-534`): drop the unused `:attached-components`.
-- No change to the mapper (`input_mapper.clj`): K-15 is fixed.
+- K-15's generic mapper suppression was already present. See §10 for the keyboard learn/dispatch ordering case.
 
 Step 0 (a 15-minute spike before the rest): a TestFX test that a filter installed through `ext-on-instance-lifecycle` sees `KEY_PRESSED` first, and that consuming it stops Space from reaching the `MenuItem` accelerator (`title_bar.clj:154`). Everything below assumes that.
 
@@ -209,6 +209,13 @@ Run `clj -M:mac-arm:test -n laser-show.input.keyboard-test -n laser-show.events.
 - **User-configurable built-in shortcuts** (rebinding Play/Stop itself). The registry idea from the old plan; revisit separately.
 - **Escape as Stop in dialogs too.** Today Escape stops only in the main window (no menu bar in a dialog). The filter could dispatch `:transport/stop` for Escape in every window. Not proposed: Escape already closes the question dialogs, ends a timeline drag and clears a list's selection there. Revisit with the live-performance designs.
 - **A preset keyboard layout** (1–5 for zone maps, Space for a blind preview, as `plans/2026-11-21-live-performance-ux/` sketches). That is the user's bindings or a later plan's defaults; this phase only carries the keys.
+
+## 10. As built on `keyboard-phase5` (from `eb25043`)
+
+- **Ownership:** the main scene and eight non-modal editor scenes use the capture filter in `views/key_triggers.clj`; the four modal dialogs do not. The original `:on-focused-changed` for pointer pads stays. Each scene installs its own filters and window-focus listener, and removes them on disposal or replacement. The step-0 headless check (`07cf026`) demonstrated that a consuming scene filter stops Space reaching the Play menu accelerator; removing it restores Play.
+- **Press and release:** the FX thread keeps only the keys the scene claimed, distinguishing a learn from a performing press. Key-up, window blur and scene disposal release performing keys once. `:trigger-runtime :keyboard-activations` records the action on the event thread, so a momentary cue, effect or vibe releases its original target even if its binding was removed/reassigned or its definition matches only a press. New/Open clears the old show's keyboard activations; they are never saved or undone (`83f747c`, `2395551`).
+- **Learning:** `:learning-capture` records discrete vs. continuous independently of the learn target. A fader learn leaves the keyboard alone. A key used to learn is consumed through key-up without playing a cue. Its router press is tagged `:learn-only?`, so even if the learn finishes before the mapper sees that same press, it cannot fire the new or old binding (`cb8fbbd`, `5436a6f`).
+- **Settings and display:** the session switch leaves saved bindings intact. The card lists overridden menu shortcuts from the trigger map and enabled definitions; the trigger editor names a collision alongside its binding. Key names are shared by all binding displays (`46ed151`).
 
 ---
 
