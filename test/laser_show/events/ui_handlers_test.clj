@@ -119,6 +119,36 @@
       (is (= 2 (get-in result [:state :ui :dialogs :effect-chain-editor :row]))))))
 
 
+(defn- run-turn
+  "Run an event and its inline :dispatch continuations through the pipeline."
+  [state event]
+  (let [{new-state :state next-event :dispatch} (events/handle-event-pipeline (assoc event :state state))
+        state (or new-state state)]
+    (if next-event (recur state next-event) state)))
+
+(deftest open-dialog-clears-editing-name-test
+  ;; A2 is already a timeline, so opening any of these editors is UI-only.
+  (let [clean (-> base-state
+                  (assoc-in [:chains :cue-chains [1 0]] {:editor-type :timeline :tracks [] :items []})
+                  history/mark-clean)
+        modes {[0] :numeric}]
+    (doseq [[id event modes-at] [[:cue-chain-editor :cue-chain/open-editor [:ui-modes]]
+                                 [:effect-chain-editor :effect-chain/open-editor [:ui-modes]]
+                                 [:timeline-cue-editor :timeline-cue-editor/open [:effect-ui :items :ui-modes]]]
+            [open? col row] [[false 1 0] [true 5 3]]]
+      (testing (str id (if open? " switching cells mid-rename" " reopening after a mid-rename close"))
+        (let [path [:ui :dialogs id]
+              prior (assoc-in {:open? open? :col col :row row :editing-name? true} modes-at modes)
+              after (run-turn (assoc-in clean path prior) {:event/type event :col 1 :row 0})
+              dialog (get-in after path)]
+          (is (= {:open? true :col 1 :row 0 :editing-name? false}
+                 (select-keys dialog [:open? :col :row :editing-name?])))
+          (is (= modes (get-in dialog modes-at)) "per-effect UI modes survive")
+          (is (= (:chains clean) (:chains after)))
+          (is (empty? (get-in after [:history :undo-stack])))
+          (is (false? (get-in after [:project :dirty?]))))))))
+
+
 ;; handle-ui-close-dialog Tests
 
 
@@ -131,6 +161,15 @@
       (is (false? (get-in result [:state :ui :dialogs :effect-chain-editor :open?])))
       ;; Other dialog data should be preserved
       (is (= 0 (get-in result [:state :ui :dialogs :effect-chain-editor :col]))))))
+
+(deftest close-dialog-forgets-a-form-test
+  (let [path [:ui :dialogs :add-projector-manual]
+        typed {:open? true :driver :lsps :name "Stage left" :host "10.0.0.9" :port "7300"
+               :driver-config {:host "127.0.0.1"}}
+        typing (assoc-in base-state path typed)
+        handle #(run-turn typing {:event/type % :dialog-id :add-projector-manual})]
+    (is (= typed (get-in (handle :ui/open-dialog) path)) "Add Manual while already open keeps the draft")
+    (is (= {:open? false} (get-in (handle :ui/close-dialog) path)) "closing discards the draft")))
 
 
 ;; handle-ui-set-active-tab Tests

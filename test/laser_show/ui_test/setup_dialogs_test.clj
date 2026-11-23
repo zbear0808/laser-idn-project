@@ -3,13 +3,14 @@
    Projector dialog, the zone group editor, a projector's name, a discovered
    output's checkbox and the calibration brightness slider. A discovered
    device with one output, or none, shows in the device list. The Add
-   Projector dialog closes after Add, and the projector panel's Port: label
-   shows whole."
+   Projector dialog reopens blank after Add, Cancel or window close, and the
+   projector panel's Port: label shows whole."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
-            [laser-show.ui-test.testfx :as ui]))
+            [laser-show.ui-test.testfx :as ui])
+  (:import [javafx.stage WindowEvent]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -72,6 +73,38 @@
       (ui/wait-for! #(window-showing? "Add Projector"))
       (ui/assert-text! "#add-projector-host-field" "")
       (ui/assert-disabled! "#add-projector-confirm-button"))))
+
+(deftest add-projector-cancel-clears-the-form-test
+  (let [robot (ui/robot)
+        form #(get-in (app-state) [:ui :dialogs :add-projector-manual])
+        open-blank! (fn []
+                      (ui/click! robot "#projectors-add-manual-button")
+                      (ui/wait-for! #(window-showing? "Add Projector"))
+                      (ui/assert-text! "#add-projector-name-field" "")
+                      (ui/assert-text! "#add-projector-host-field" "")
+                      (ui/assert-text! "#add-projector-port-field" "7255")
+                      (ui/assert-disabled! "#add-projector-confirm-button"))]
+    (ui/click! robot "#projectors-tab")
+    (open-blank!)
+    (testing "Cancel discards the name and connection details"
+      (ui/fill! robot "#add-projector-name-field" "Stage left")
+      (ui/fill! robot "#add-projector-host-field" "10.0.0.9")
+      (ui/fill! robot "#add-projector-port-field" "7300")
+      (ui/wait-for! #(= {:name "Stage left" :host "10.0.0.9" :port "7300"}
+                        (select-keys (form) [:name :host :port])))
+      (ui/click! robot "#add-projector-cancel-button")
+      (ui/wait-for! #(not (window-showing? "Add Projector")))
+      (open-blank!))
+    (testing "the window's close button also discards the driver and its fields"
+      (ui/select! robot "#add-projector-driver-combo" ":lsps")
+      (ui/fill! robot "#driver-field-host" "127.0.0.5")
+      (ui/wait-for! #(= "127.0.0.5" (get-in (form) [:driver-config :host])))
+      (let [button (ui/query "#add-projector-cancel-button")]
+        (ui/on-fx-thread #(let [window (.getWindow (.getScene button))]
+                            (.fireEvent window (WindowEvent. window WindowEvent/WINDOW_CLOSE_REQUEST)))))
+      (ui/wait-for! #(not (window-showing? "Add Projector")))
+      (open-blank!)
+      (ui/wait-for! #(nil? (:driver-config (form)))))))
 
 (deftest create-zone-group-test
   (let [robot (ui/robot)
@@ -359,4 +392,3 @@
       (ui/wait-for! #(some? (window-titled "Cue Chain Editor")))
       (ui/wait-for! #(some? (labeled-in (window-titled "Cue Chain Editor") "Decimate")))
       (is (ui/has-style-class? "#shape-tab" "tab-btn-active") "the tab it shows"))))
-

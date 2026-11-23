@@ -112,7 +112,7 @@
 
 
 (defn- handle-effect-chain-open-editor
-  "Open the effect chain editor for a specific cell.
+  "Open the effect chain editor for a specific cell with rename mode off.
    Optionally accepts :initial-tab.
    Uses :list/auto-select-single-item to auto-select if only 1 effect exists."
   [{:keys [col row state initial-tab]}]
@@ -121,7 +121,8 @@
                          {:open? true
                           :col col
                           :row row
-                          :active-bank-tab (or initial-tab :shape)}))
+                          :active-bank-tab (or initial-tab :shape)
+                          :editing-name? false}))
    :dispatch {:event/type :list/auto-select-single-item
               :component-id [:effect-chain col row]
               :items-path [:chains :effect-chains [col row] :items]}})

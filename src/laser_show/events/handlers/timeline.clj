@@ -460,7 +460,7 @@
                           (empty? (:items final-chain)) (prefs-assoc [:add-panel :open?] true))
                  :dispatch {:event/type :ui/open-dialog
                             :dialog-id :timeline-cue-editor
-                            :data {:col col :row row}}}]
+                            :data {:col col :row row :editing-name? false}}}]
     (cond
       (not changed?) effects
       (not timeline?) (assoc effects :history/description "Convert to Timeline Cue")

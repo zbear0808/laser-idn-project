@@ -38,9 +38,9 @@
 
 
 (defn- handle-cue-chain-open-editor
-  "Open the cue chain editor for a specific cell.
+  "Open the cue chain editor for a specific cell with rename mode off.
    FLATTENED: No :data nesting - fields directly in dialog map.
-   
+
    Selection state is now stored in list-ui domain at [:list-ui [:cue-chain col row]].
    Uses :list/auto-select-single-item to auto-select if only 1 item exists."
   [{:keys [col row state initial-tab]}]
@@ -52,7 +52,8 @@
                           :row row
                           :active-preset-tab (or initial-tab :geometric)
                           :selected-effect-id nil
-                          :item-effects-ui {}}))
+                          :item-effects-ui {}
+                          :editing-name? false}))
    :dispatch {:event/type :list/auto-select-single-item
               :component-id [:cue-chain col row]
               :items-path [:chains :cue-chains [col row] :items]}})

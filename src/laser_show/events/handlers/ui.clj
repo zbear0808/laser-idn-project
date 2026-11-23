@@ -42,9 +42,12 @@
               (assoc-in [:ui :dialogs dialog-id :open?] true))})
 
 (defn- handle-ui-close-dialog
-  "Close a dialog."
+  "Close the dialog. Cancel and window close discard the Add Projector form,
+   just like a successful Add; editors keep their per-dialog UI state."
   [{:keys [dialog-id state]}]
-  {:state (assoc-in state [:ui :dialogs dialog-id :open?] false)})
+  {:state (if (= :add-projector-manual dialog-id)
+            (assoc-in state [:ui :dialogs dialog-id] {:open? false})
+            (assoc-in state [:ui :dialogs dialog-id :open?] false))})
 
 (defn- handle-ui-update-dialog-data
   "Update data associated with a dialog (e.g., selected item within dialog).
