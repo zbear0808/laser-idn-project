@@ -4,7 +4,7 @@
    This is the top-level component that:
    - Creates the main window (Stage)
    - Sets up the layout structure
-   - Manages dialogs via fx/ext-let-refs
+   - Mounts open dialogs in registry order
    - Applies theming via fx/ext-set-env
    
    Component Hierarchy:
@@ -15,7 +15,7 @@
    │   ├── tab-content (grid/vibes/perform/effects/projectors/zone-groups/settings)
    │   └── preview-panel
    ├── status-bar
-   └── dialogs (via refs)"
+   └── dialogs (via fx/ext-many)"
   (:require
    [cljfx.api :as fx]
    [laser-show.events.core :as events]
@@ -28,7 +28,7 @@
    [laser-show.views.dialogs.cue-chain-editor :as cue-chain-editor]
    [laser-show.views.dialogs.timeline-cue-editor :as timeline-cue-editor]
    [laser-show.views.dialogs.zone-pattern-editor :as zone-pattern-editor]
-  [laser-show.views.dialogs.step-grid-editor :as step-grid-editor]
+   [laser-show.views.dialogs.step-grid-editor :as step-grid-editor]
    [laser-show.views.dialogs.add-projector-manual :as add-projector-dialog]
    [laser-show.views.dialogs.zone-group-editor :as zone-group-editor]
    [laser-show.views.dialogs.cell-trigger-editor :as cell-trigger-editor]
@@ -213,6 +213,20 @@
 
 ;; Root View
 
+(def dialog-registry
+  "Dialogs in window stacking order. The shared confirmation must open above
+   the rig report when a change in that report needs a second answer."
+  [[:effect-chain-editor effect-chain-editor/effect-chain-editor-dialog]
+   [:cue-chain-editor cue-chain-editor/cue-chain-editor-dialog]
+   [:timeline-cue-editor timeline-cue-editor/timeline-cue-editor-dialog]
+   [:zone-pattern-editor zone-pattern-editor/zone-pattern-editor-dialog]
+   [:step-grid-editor step-grid-editor/step-grid-editor-dialog]
+   [:add-projector-manual add-projector-dialog/add-projector-manual-dialog]
+   [:zone-group-editor zone-group-editor/zone-group-editor-dialog]
+   [:trigger-editor cell-trigger-editor/cell-trigger-editor-dialog]
+   [:unsaved-confirm unsaved-confirm/unsaved-confirm-dialog]
+   [:rig-report rig-report/rig-report-dialog]
+   [:confirm confirm/confirm-dialog]])
 
 (defn root-view
   "Root view with theming and dialog management.
@@ -222,27 +236,12 @@
   [{:keys [fx/context]}]
   (let [{:keys [title]} (fx/sub-ctx context subs/project-status)
         window-config (fx/sub-ctx context subs/window-config)
-        stylesheets (fx/sub-ctx context subs/stylesheet-urls)
-        effect-editor-open? (fx/sub-ctx context subs/dialog-open? :effect-chain-editor)
-        cue-editor-open? (fx/sub-ctx context subs/dialog-open? :cue-chain-editor)
-        timeline-editor-open? (fx/sub-ctx context subs/dialog-open? :timeline-cue-editor)
-        zone-pattern-editor-open? (fx/sub-ctx context subs/dialog-open? :zone-pattern-editor)
-        step-grid-editor-open? (fx/sub-ctx context subs/dialog-open? :step-grid-editor)
-        add-projector-open? (fx/sub-ctx context subs/dialog-open? :add-projector-manual)
-        zone-group-editor-open? (fx/sub-ctx context subs/dialog-open? :zone-group-editor)
-        trigger-editor-open? (fx/sub-ctx context subs/dialog-open? :trigger-editor)
-        unsaved-confirm-open? (fx/sub-ctx context subs/dialog-open? :unsaved-confirm)
-        rig-report-open? (fx/sub-ctx context subs/dialog-open? :rig-report)
-        confirm-open? (fx/sub-ctx context subs/dialog-open? :confirm)]
+        stylesheets (fx/sub-ctx context subs/stylesheet-urls)]
     {:fx/type fx/ext-set-env
      :env {::layout-config layout-config}  ; For any components that need spacing/fonts
      :desc {:fx/type fx/ext-many
-            :desc (filterv
-                   some?
-                   [;; Main application window with extended style for title bar integration
-                    ;; IMPORTANT: Each component in fx/ext-many needs :fx/key to prevent
-                    ;; position-based matching when dialogs open/close
-                    {:fx/type :stage
+            :desc (into
+                   [{:fx/type :stage
                      :fx/key :main-window
                      :title title
                      :style :extended
@@ -261,48 +260,8 @@
                                          (events/dispatch! {:event/type :file/exit}))
                      :scene {:fx/type :scene
                              :stylesheets stylesheets
-                             :root {:fx/type main-layout}}}
-                    ;; Effect chain editor dialog
-                    (when effect-editor-open?
-                      {:fx/type effect-chain-editor/effect-chain-editor-dialog
-                       :fx/key :effect-chain-editor-dialog})
-                    ;; Cue chain editor dialog
-                    (when cue-editor-open?
-                      {:fx/type cue-chain-editor/cue-chain-editor-dialog
-                       :fx/key :cue-chain-editor-dialog})
-                    ;; Timeline cue editor dialog (alternate timeline-based view)
-                    (when timeline-editor-open?
-                      {:fx/type timeline-cue-editor/timeline-cue-editor-dialog
-                       :fx/key :timeline-cue-editor-dialog})
-                    ;; A cue's zone pattern (zones plan Z5)
-                    (when zone-pattern-editor-open?
-                      {:fx/type zone-pattern-editor/zone-pattern-editor-dialog
-                       :fx/key :zone-pattern-editor-dialog})
-                    ;; A zone pattern's step grid (zones plan Z6)
-                    (when step-grid-editor-open?
-                      {:fx/type step-grid-editor/step-grid-editor-dialog
-                       :fx/key :step-grid-editor-dialog})
-                    ;; Add projector manually dialog
-                    (when add-projector-open?
-                      {:fx/type add-projector-dialog/add-projector-manual-dialog
-                       :fx/key :add-projector-manual-dialog})
-                    ;; Zone group editor dialog
-                    (when zone-group-editor-open?
-                      {:fx/type zone-group-editor/zone-group-editor-dialog
-                       :fx/key :zone-group-editor-dialog})
-                    ;; Cell trigger editor dialog
-                    (when trigger-editor-open?
-                      {:fx/type cell-trigger-editor/cell-trigger-editor-dialog
-                       :fx/key :cell-trigger-editor-dialog})
-                    ;; Unsaved-changes question (New / Open / Exit)
-                    (when unsaved-confirm-open?
-                      {:fx/type unsaved-confirm/unsaved-confirm-dialog
-                       :fx/key :unsaved-confirm-dialog})
-                    ;; A show's rig onto this one: the set-up question or the report
-                    (when rig-report-open?
-                      {:fx/type rig-report/rig-report-dialog
-                       :fx/key :rig-report-dialog})
-                    ;; The setup screens' shared confirm dialog, on top of the report
-                    (when confirm-open?
-                      {:fx/type confirm/confirm-dialog
-                       :fx/key :confirm-dialog})])}}))
+                             :root {:fx/type main-layout}}}]
+                   (keep (fn [[id component]]
+                           (when (fx/sub-ctx context subs/dialog-open? id)
+                             {:fx/type component :fx/key id})))
+                   dialog-registry)}}))
