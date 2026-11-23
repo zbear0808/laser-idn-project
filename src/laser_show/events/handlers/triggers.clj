@@ -41,12 +41,20 @@
                    :behavior (:behavior definition))))
         (get-in state [:triggers :definitions] {})))
 
-(defn- resolve-action [state input-event]
+(defn- configured-action [state input-event]
   (or (definition-action state input-event)
       (legacy-action state input-event)))
 
+(defn- resolve-action [state input-event]
+  (if (and (input-events/keyboard-event? input-event) (input-events/trigger-release? input-event))
+    ;; A learn can send a release without ever having fired a press. In that
+    ;; case there is nothing to let go, even if the key now has a binding.
+    (get-in state [:trigger-runtime :keyboard-activations (:id input-event)])
+    (configured-action state input-event)))
+
 (defn bound?
-  "Does this router event have a matching enabled definition or trigger-map action?"
+  "Does this router event resolve to an action? A keyboard release belongs to
+   the action of the matching press, even if its binding has since changed."
   [state input-event]
   (boolean (resolve-action state input-event)))
 
@@ -75,9 +83,8 @@
   #{:vibe :vibe-select})
 
 (def ^:private quiet-action?
-  "The bindings that leave the trigger runtime alone: vibe mode's, which
-   keep their own holds, a zone map pad's (zones plan Z4), and a pattern
-   pad's and the Zone step key's (Z5)."
+  "These bindings skip generic held-input and active-trigger bookkeeping.
+   A keyboard press still keeps its action for the matching release."
   #{:vibe :vibe-select :zone-map :pattern-pad :zone-step})
 
 (defn- vibe-event
@@ -168,12 +175,8 @@
           (update-in state'' [:trigger-runtime :active-triggers] dissoc trigger-id))
         state''))))
 
-(defn handle-input
-  [{:keys [state input-event time]}]
-  (let [action (resolve-action state input-event)
-        ;; A vibe binding leaves the bookkeeping alone: nothing reads it
-        ;; (probe v8), and the engine keeps its own holds; so does a map pad's
-        next-state (if (quiet-action? (:type action))
+(defn- run-action [state input-event action time]
+  (let [next-state (if (quiet-action? (:type action))
                      state
                      (update-runtime state input-event (or action {}) time))]
     (if-let [event (and action (action-event action input-event))]
@@ -181,12 +184,24 @@
        :dispatch (assoc event :source-trigger action :source-input input-event)}
       {:state next-state})))
 
+(defn handle-input
+  [{:keys [state input-event time]}]
+  (let [action (resolve-action state input-event)
+        id (:id input-event)
+        state (if (and id action (input-events/keyboard-event? input-event))
+                (case (:type input-event)
+                  :trigger (assoc-in state [:trigger-runtime :keyboard-activations id] action)
+                  :trigger-release (update-in state [:trigger-runtime :keyboard-activations] dissoc id)
+                  state)
+                state)]
+    (run-action state input-event action time)))
+
 (defn handle-fire
   [{:keys [state trigger-id input-event time]}]
   (if-let [definition (get-in state [:triggers :definitions trigger-id])]
-    (handle-input {:state state
-                   :input-event (or input-event (:match definition))
-                   :time time})
+    ;; Firing a definition directly does not put a physical key down.
+    (let [event (or input-event (:match definition))]
+      (run-action state event (configured-action state event) time))
     {:state state}))
 
 (defn handle
