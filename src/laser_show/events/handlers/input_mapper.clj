@@ -103,7 +103,7 @@
         (update-input-value! [:osc (:path event)]
                              (max 0.0 (min 1.0 (double (:value event))))))
       (when-not (and (or (input-events/note-on? event) (input-events/trigger? event))
-                     (learning?))
+                     (or (:learn-only? event) (learning?)))
         (if-let [dispatch @*dispatch-fn]
           (dispatch {:event/type :trigger/input
                      :input-event event

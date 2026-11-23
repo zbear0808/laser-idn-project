@@ -239,7 +239,7 @@
     (is (events/flush!))
     (is (nil? (cue [0 0])) "this was the Play shortcut")
     (is (= fader (learning-target)) "a fader movement is still needed")
-     (is (empty? @*key-edges*))))
+    (is (empty? @*key-edges*))))
 
 (deftest continuous-capture-is-not-a-key-learn-even-for-a-non-macro-target-test
   (let [robot (main-robot!)

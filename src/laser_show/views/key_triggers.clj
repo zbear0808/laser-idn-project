@@ -54,7 +54,9 @@
     (when cancel-learn? (events/dispatch! {:event/type :input/cancel-learn}))
     (case emit
       :pressed (do (vswap! held assoc id (if (= :press learning) :learn :binding))
-                   (router/dispatch! event))
+                   ;; A learn handler may finish on the event thread before
+                   ;; the mapper (another router listener) sees this event.
+                   (router/dispatch! (cond-> event (= :press learning) (assoc :learn-only? true))))
       :released (do (vswap! held dissoc id)
                     (when (= :binding owner) (router/dispatch! event)))
       nil)))

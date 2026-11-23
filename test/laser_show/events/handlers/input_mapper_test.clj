@@ -47,6 +47,12 @@
       (learning! nil)
       (router/dispatch! (first discrete))
       (is (= 7 (count @sent)) "learned: inputs reach the trigger map again")
+      (testing "a keyboard press already claimed by learn still cannot perform if the learn finished first"
+        (let [press (input :trigger :source :keyboard :id :j :state :pressed)]
+          (router/dispatch! (assoc press :learn-only? true))
+          (is (= 7 (count @sent)))
+          (router/dispatch! press)
+          (is (= press (:input-event (last @sent))))))
       (finally
         (input-mapper/stop-mapper!)
         (input-mapper/set-dispatch-fn! nil)
