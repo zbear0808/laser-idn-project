@@ -163,8 +163,7 @@
                     :source-key nil
                     :data nil}
           :doc "current drag operation state"}
-   :dialogs {:default {:projector-config {:open? false}
-                       :cue-chain-editor {:open? false
+   :dialogs {:default {:cue-chain-editor {:open? false
                                           :col nil
                                           :row nil
                                           :active-preset-tab :geometric
@@ -174,20 +173,32 @@
                                              :col nil
                                              :row nil
                                              :active-bank-tab :shape}
-                       :add-projector-manual {:open? false}
-                       :add-virtual-projector {:open? false}
+                       :timeline-cue-editor {:open? false}
+                       :zone-pattern-editor {:open? false}
+                       :step-grid-editor {:open? false}
+                       :add-projector-manual {:open? false
+                                              :driver nil
+                                              :name nil
+                                              :host nil
+                                              :port nil
+                                              :driver-config nil}
                        :zone-group-editor {:open? false
                                            :editing? false
                                            :group-id nil
                                            :name ""
                                            :description ""
                                            :color "#808080"}
+                       :trigger-editor {:open? false}
                        :unsaved-confirm {:open? false
                                          :pending nil}
+                       :rig-report {:open? false}
                        :confirm {:open? false}
-                       :about {:open? false}
-                       :settings {:open? false}}
+                       :about {:open? false}}
              :doc "dialog visibility and data states (fields alongside :open?, no nested :data key)"}
+   :preview-visible? {:default true
+                      :doc "whether the View menu shows the preview on tabs that support it"}
+   :fullscreen? {:default false
+                 :doc "whether the main window is in full screen"}
    :preview {:default {:frame nil
                        :last-render-time 0}
              :doc "preview panel state"}

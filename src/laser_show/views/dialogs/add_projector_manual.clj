@@ -138,6 +138,7 @@
                  :spacing 8
                  :alignment :center-right
                  :children [{:fx/type :button
+                             :id "add-projector-cancel-button"
                              :text "Cancel"
                              :style-class ["button-secondary"]
                              :on-action {:event/type :ui/close-dialog

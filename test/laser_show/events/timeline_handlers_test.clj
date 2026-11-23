@@ -32,8 +32,9 @@
       (is (= "Convert to Timeline Cue" (:history/description result)))
       (is (= {:event/type :ui/open-dialog
               :dialog-id :timeline-cue-editor
-              :data {:col 1 :row 1}}
-             (:dispatch result)))))
+              :data {:col 1 :row 1 :editing-name? false}}
+             (:dispatch result))
+          "it opens on the cell, with its name shown, not being edited")))
 
   (testing "converts a plain cue to 16-beat clips under an enabled 16-beat loop"
     (let [state (assoc-in base-state [:chains :cue-chains [0 0]]
