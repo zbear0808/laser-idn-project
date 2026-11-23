@@ -5,10 +5,12 @@
    - Ableton Link configuration
    - MIDI input configuration
    - OSC input configuration
+   - Keyboard triggers
    - Add-ons (output drivers from add-on jars)"
   (:require
    [laser-show.css.core :as css]
    [laser-show.views.components.addon-settings :as addon-settings]
+   [laser-show.views.components.keyboard-settings :as keyboard-settings]
    [laser-show.views.components.link-settings :as link-settings]
    [laser-show.views.components.midi-settings :as midi-settings]
    [laser-show.views.components.osc-settings :as osc-settings]))
@@ -62,6 +64,8 @@
                         
                         ;; OSC Configuration Section
                         {:fx/type osc-settings/osc-settings-section}
+
+                        {:fx/type keyboard-settings/keyboard-settings-section}
 
                         ;; Output Section Header
                         {:fx/type :label

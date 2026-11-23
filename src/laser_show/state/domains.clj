@@ -541,8 +541,7 @@
                            :learn-mode nil}            ; Promise when learning, nil otherwise
                      :mtc {:state :stopped :fps nil :text nil} ; the show clock's status of laser-show.input.mtc, see mirror-status
                      :gamepad {:enabled? true}
-                     :keyboard {:enabled? true
-                                :attached-components #{}}
+                     :keyboard {:enabled? true}
                      :router {:handlers {}
                               :event-log []
                               :enabled? true}

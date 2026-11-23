@@ -95,10 +95,12 @@
   (try (ui/wait-for! fits-window?) (catch Exception _ false)))
 
 (deftest trigger-editor-sections-are-spaced-test
-  (events/write-state! assoc-in [:config :input :trigger-map {:source :keyboard :id :q}]
+  (events/write-state! assoc-in [:config :input :trigger-map {:source :keyboard :id :space}]
                        {:type :trigger-cue :target [0 0] :behavior :follow})
   (open-trigger-editor! 0 0 :cue)
   (ui/assert-visible! "#trigger-editor-done")
+  (ui/assert-text! "#trigger-mapped-list .trigger-item-label" "Key Space")
+  (ui/assert-text! "#trigger-mapped-list .label-secondary" "Overrides built-in shortcut: Play/Stop")
   (let [^VBox dialog (first (ui/query-all "#trigger-editor-dialog"))
         sections (ui/on-fx-thread #(vec (.getChildren dialog)))
         gaps (fn [] (map (fn [above below] (- (second (ui/scene-bounds below)) (nth (ui/scene-bounds above) 3)))
@@ -117,9 +119,10 @@
       ;; wide, more than a title bar leaves.
       (is (fits-window?) (str "with a binding: " (height-wanted-and-had)))
       (events/write-state! update-in [:config :input :trigger-map] assoc
-                           {:source :keyboard :id :w} {:type :trigger-cue :target [0 0] :behavior :follow}
+                           {:source :osc :id :r} {:type :trigger-cue :target [0 0] :behavior :follow}
                            {:source :keyboard :id :e} {:type :trigger-cue :target [0 0] :behavior :follow})
       (ui/wait-for! #(= 3 (count (ui/query-all "#trigger-mapped-list .button-danger"))))
+      (ui/assert-count! "#trigger-mapped-list .label-secondary" 1)
       (is (wait-fits?) (str "with three bindings: " (height-wanted-and-had)))
       (ui/on-fx-thread #(.setStyle dialog "-fx-font-size: 16px"))
       (is (wait-fits?) (str "in a taller font: " (height-wanted-and-had))))))

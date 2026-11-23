@@ -6,7 +6,8 @@
   (is (= "MIDI Ch 1 Note 36" (trigger-bank/binding-label {:source :midi :channel 0 :note 36})))
   (is (= "MIDI Ch 1 Note 36" (trigger-bank/binding-label {:source :midi :note 36})) "no channel: the first")
   (is (= "OSC /pad/1" (trigger-bank/binding-label {:source :osc :id "/pad/1"})))
-  (is (= "Key :space" (trigger-bank/binding-label {:source :keyboard :id :space})))
+  (is (= "Key Space" (trigger-bank/binding-label {:source :keyboard :id :space})))
+  (is (= "Key 1" (trigger-bank/binding-label {:source :keyboard :id :digit1})))
   (is (= "{:source :gamepad, :id :a}" (trigger-bank/binding-label {:source :gamepad :id :a}))
       "any other source: the key itself"))
 
