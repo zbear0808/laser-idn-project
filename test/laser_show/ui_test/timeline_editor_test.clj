@@ -13,7 +13,8 @@
             [laser-show.timeline.model :as model]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]
-            [laser-show.views.components.drag-drop-cell :as dd]))
+            [laser-show.views.components.drag-drop-cell :as dd]
+            [laser-show.views.keys :as keys]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -68,6 +69,10 @@
                           (seq (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection]))))
       (let [added-id (first (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection]))]
         (ui/focus! robot "#timeline-canvas")
+        (let [canvas (ui/query "#timeline-canvas")
+              claims? (fn [id] (ui/on-fx-thread #(keys/claims? (.getFocusOwner (.getScene canvas)) id)))]
+          (is (every? claims? [:left :right :delete :back_space :space :escape]))
+          (is (not-any? claims? [:up :down :a :d]) "only horizontal nudges; Select All and Duplicate are chords"))
         (ui/press! robot javafx.scene.input.KeyCode/DELETE)
         (ui/wait-for! #(= count-before (count (get-in (state/get-raw-state) items-path))))
         (is (not-any? #(= added-id (:id %)) (get-in (state/get-raw-state) items-path)))

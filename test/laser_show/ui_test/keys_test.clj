@@ -1,10 +1,12 @@
 (ns laser-show.ui-test.keys-test
-  "laser-show.views.keys: what counts as typing, and focus inside a node
-   (keyboard plan 03 §4). It builds real controls, so it needs the toolkit,
-   but no app."
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  "laser-show.views.keys: typing, focus inside a node, and the keys an editor
+   claims for its focused descendants. Needs the toolkit but no app."
+  (:require [cljfx.api :as fx]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]
+            [laser-show.views.components.visual-editors.hue-canvas :as hue]
+            [laser-show.views.components.visual-editors.spatial-canvas :as spatial]
             [laser-show.views.keys :as keys])
   (:import [javafx.scene Node Scene]
            [javafx.scene.control Button CheckBox ComboBox Spinner TextArea TextField]
@@ -77,3 +79,58 @@
       (is (not (ui/on-fx-thread #(keys/focus-within? nil))) "no node")
       (finally
         (ui/on-fx-thread #(.hide ^Stage stage))))))
+
+(deftest claims-follow-only-the-focus-owners-ancestors-test
+  (let [[editor child sibling]
+        (ui/on-fx-thread
+         (fn []
+           (let [child (Button.)
+                 editor (VBox. (into-array Node [(HBox. (into-array Node [child]))]))
+                 sibling (Button.)
+                 dialog (VBox. (into-array Node [editor sibling]))]
+             (keys/claim-keys! dialog #{:space})
+             (keys/claim-keys! editor #{:left :right})
+             (keys/claim-keys! editor #{:right :back_space})
+             [editor child sibling])))
+        claims (fn [node]
+                 (ui/on-fx-thread #(into #{} (filter (partial keys/claims? node))
+                                         [:space :left :right :back_space :a])))]
+    (is (= #{:space :left :right :back_space} (claims editor) (claims child))
+        "nested controls inherit both the editor's declarations and the window's")
+    (is (= #{:space} (claims sibling)) "a different part of the window has only the window's key")
+    (is (empty? (claims nil)) "no focus owner")))
+
+(defn- canvas-claims [component]
+  (let [node (fx/instance component)]
+    (into #{} (filter (partial keys/claims? node)) [:left :right :up :down :tab :space])))
+
+(deftest hue-arrows-follow-editability-without-replacing-the-canvas-test
+  (let [desc {:fx/type hue/hue-canvas :on-hue-change {:event/type :chain/update-param}}
+        [before during after same-node?]
+        (ui/on-fx-thread
+         #(let [editable (fx/create-component desc)
+                before (canvas-claims editable)
+                read-only (fx/advance-component editable (dissoc desc :on-hue-change))
+                during (canvas-claims read-only)
+                restored (fx/advance-component read-only desc)]
+            (try
+              [before during (canvas-claims restored) (identical? (fx/instance editable) (fx/instance restored))]
+              (finally (fx/delete-component restored)))))]
+    (is (= #{:left :right} before after))
+    (is (empty? during) "a modulated hue hands the arrows back to keyboard triggers")
+    (is same-node? "keeps the same canvas")))
+
+(deftest spatial-point-editing-keeps-tab-and-the-four-arrows-test
+  (let [desc {:fx/type spatial/spatial-canvas
+              :bounds {:x-min -1.0 :x-max 1.0 :y-min -1.0 :y-max 1.0}
+              :points [{:id :center :x 0.0 :y 0.0 :color "white"}]
+              :on-point-drag {:event/type :chain/update-spatial-params}}
+        [before after] (ui/on-fx-thread
+                        #(let [editable (fx/create-component desc)
+                               before (canvas-claims editable)
+                               view-only (fx/advance-component editable (dissoc desc :on-point-drag))]
+                           (try
+                             [before (canvas-claims view-only)]
+                             (finally (fx/delete-component view-only)))))]
+    (is (= #{:left :right :up :down :tab} before))
+    (is (= #{:tab} after) "points can still be selected, but can't be nudged")))

@@ -22,7 +22,8 @@
             [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.views.components.shortcuts :as shortcuts]
             [laser-show.views.components.target-control :as target-control]
-            [laser-show.views.components.zone-pattern-editor :as zone-pattern-editor])
+            [laser-show.views.components.zone-pattern-editor :as zone-pattern-editor]
+            [laser-show.views.keys :as keys])
   (:import [javafx.application Platform]
            [javafx.scene Node]
            [javafx.scene.canvas Canvas GraphicsContext]
@@ -137,7 +138,9 @@
         [cr cs] cursor]
     {:fx/type fx/ext-on-instance-lifecycle
      ;; The grid has the keys when the window opens
-     :on-created (fn [^Node node] (Platform/runLater #(.requestFocus node)))
+     :on-created (fn [^Node node]
+                   (keys/claim-keys! node #{:left :right :up :down :space :enter :delete :back_space :home :end})
+                   (Platform/runLater #(.requestFocus node)))
      :desc
      {:fx/type :pane
      :id "step-grid-body"

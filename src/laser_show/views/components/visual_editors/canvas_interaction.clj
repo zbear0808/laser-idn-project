@@ -14,7 +14,8 @@
    4. Mouse handlers dispatch the callbacks' events and call render!
       immediately with the new interaction state."
   (:require [cljfx.api :as fx]
-            [laser-show.events.core :as events])
+            [laser-show.events.core :as events]
+            [laser-show.views.keys :as keys])
   (:import [javafx.scene.canvas Canvas]
            [javafx.scene.input DragEvent KeyEvent KeyCode MouseEvent ScrollEvent TransferMode]))
 
@@ -95,6 +96,22 @@
       (update-drag-state! canvas new-drag)
       (render! canvas (or (:preview-value new-drag) value) new-drag))))
 
+(def ^:private edit-key-codes
+  {:left KeyCode/LEFT :right KeyCode/RIGHT :up KeyCode/UP :down KeyCode/DOWN
+   :tab KeyCode/TAB :escape KeyCode/ESCAPE})
+
+(defn- set-key-claims! [^Canvas canvas {:keys [on-key claimed-keys value]}]
+  (keys/set-key-claim-predicate!
+   canvas
+   (when on-key
+     (or claimed-keys
+         ;; on-key describes the edit; only the actual key handler applies it.
+         ;; Ask it with the current selection/drag state: a read-only hue
+         ;; takes no arrows; the safety canvas takes Escape only in a drag.
+         (fn [id]
+           (when-let [code (get edit-key-codes id)]
+             (:consumed? (on-key code false value (get-drag-state canvas)))))))))
+
 (defn- draw-interactive-canvas!
   "Called on every render cycle via cljfx Canvas :draw prop. Triggers render! callback."
   [^Canvas canvas props]
@@ -140,6 +157,8 @@
      :on-exit          - (fn [value drag-info])
 
    Keyboard interaction opts:
+     :claimed-keys     - full set of bare keys to keep (e.g. the timeline). Without a set,
+                         :on-key's :consumed? decides for arrows, Tab and Escape; it must be pure.
      :on-key           - (fn [^KeyCode key-code shift? value drag-info])
                          Returns map with keys:
                            :dispatch    - event map
@@ -204,6 +223,8 @@
                                  focus-traversable?
                                  has-keyboard?))
           :draw (fn [^Canvas canvas]
+                  ;; :draw receives this render's props even when the node is reused.
+                  (set-key-claims! canvas props)
                   (draw-interactive-canvas! canvas props))
 
           :on-mouse-pressed
