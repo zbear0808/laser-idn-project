@@ -15,8 +15,7 @@
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]
             [laser-show.views.root :as root])
-  (:import [com.sun.javafx.scene.control ContextMenuContent$MenuItemContainer]
-           [java.io File]
+  (:import [java.io File]
            [javafx.event Event]
            [javafx.scene Node Parent Scene]
            [javafx.scene.control Button Labeled TextField]
@@ -328,20 +327,10 @@
 
 ;; Help > About
 
-(defn- menu-item-node
-  "The open menu's row for its item whose text is text."
-  ^Node [text]
-  (some (fn [n]
-          (when (and (instance? ContextMenuContent$MenuItemContainer n)
-                     (= text (ui/on-fx-thread #(.getText (.getItem ^ContextMenuContent$MenuItemContainer n)))))
-            n))
-        (ui/query-all ".menu-item")))
-
 (deftest help-about-opens-the-about-dialog-test
   (let [robot (ui/robot)]
     (ui/click! robot "#help-menu")
-    (ui/wait-for! #(some? (menu-item-node "About")))
-    (ui/click-node! robot (menu-item-node "About"))
+    (ui/click! robot "#help-about")
     (when (is (waited? #(title-showing? "About Laser Show")) "Help > About opens the About window")
       (is (dialog-open? :about))
       (ui/assert-visible! "#about-close")

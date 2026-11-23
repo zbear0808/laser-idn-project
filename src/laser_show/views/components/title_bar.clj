@@ -191,6 +191,7 @@
       {:fx/type :separator-menu-item}
       
       {:fx/type :menu-item
+       :id "help-about"
        :text "About"
        :on-action {:event/type :help/about}}
       
