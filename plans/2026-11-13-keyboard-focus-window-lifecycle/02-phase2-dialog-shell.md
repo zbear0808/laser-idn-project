@@ -209,6 +209,10 @@ Run `clj -M:mac-arm:test -n laser-show.views.dialogs.common-test -n laser-show.e
 
 **Verification on macOS arm64:** the focused dialog suite opened and closed all twelve windows, checked real undo/redo in all eight non-modal editors, and verified timeline Space, modal keys, About and hot reload (6 tests, 112 assertions). The focused state/registry run passed 212 tests (1,090 assertions); the setup-dialog run passed 17 tests (62 assertions). The headless live app also opened About from Help, hid and restored the preview, and reopened Add Projector with the host blank and the show still clean after Cancel. Kondo: 0 errors, 17 existing warnings.
 
+| Full regression suite at `90dbe87` | Tests | Assertions | Failures | Errors |
+|---|---:|---:|---:|---:|
+| Unit (`clojure -M:mac-arm:test:test-ui-headless`) | 1,914 | 570,734 | 0 | 0 |
+
 ---
 
 ## Decisions

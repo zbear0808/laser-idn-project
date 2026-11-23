@@ -1,7 +1,7 @@
 # Keyboard, focus and window lifecycle — overview
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)
-**Status:** In progress. Phase 1 done (`93c638a`, 2026-11-14); Phase 3 done (2026-11-22, `d2e23c1`..`c190f7c`, 03 §10); Phase 4 done (2026-11-22: Step 4a `02ae75c`..`1113d9a`, 04 §9a; Steps 4b–4c `29bf152`..`71ab827`, 04 §9b); D0–D3 answered A; D8, D13 and D14 answered (2026-11-21, A, B, A); D9 answered A (2026-11-22, the ★ option); D4–D7, D10 and D12 answered A (2026-11-22, the ★ options, under the user's standing choice); **D11 re-opened** (2026-11-22, 05)   **Last verified against:** `2227bce` for docs 02, 03 and 05 (re-checked 2026-11-22, 275 commits after `cb32414`; probes p1–p4, p8 and p19, §3). §2 and §4's evidence column outside those docs are still as of `cb32414`
+**Status:** In progress. Phase 1 is done (`93c638a`), Phase 3 is done (`c190f7c`), Phase 4 is done (`71ab827`), and Phase 2 is built on `keyboard-phase2` (`90dbe87`). Phase 5 awaits **D11**. The other decisions are answered (§7). **Last verified against:** `90dbe87` for Phase 2 (02 §10); `c190f7c` for Phase 3 (03 §10); `2227bce` for Phase 5's original code survey (05 §0 updates its shared window hook). §2 is the historical priority comparison at `cb32414`.
 **Supersedes / Superseded by:** supersedes `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md` (approved with D0 on 2026-11-14; that file is marked superseded and otherwise untouched)
 **Related findings:** review 01 F3, F4, F7, F18, F20, M5, L3, Q4, Q6; 02 #15, M4 (clipboard part); 05 F17, F9, L3; carry-overs "menu stubs" and "unsaved-changes guard"; undo plan §10
 
