@@ -1,8 +1,8 @@
 # Phase 5 — Keyboard as a cue-trigger source
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)   **Re-checked:** 2026-11-22 at `2227bce`, 275 commits later: every citation re-checked; K-15 found fixed by other work; the Settings placeholder found gone; the trigger actions added by vibes and zones (Z4, Z5), the new windows and their keys taken in (§0)
-**Status:** Proposed; **D11 is the only open decision**. D10 and D12 answered A (2026-11-22). Both dependencies are built: Phase 3 (`c190f7c`) and Phase 2 (`keyboard-phase2`, `90dbe87`). K-15 is already fixed (§0). **Last verified against:** `2227bce` (probe p2's Escape step); Phase 2's integration note below updates the window count and hook.
-**Size:** ~1–1.5 days   **Needs:** D11   **Depends on:** Phase 3 (`views.keys`), Phase 2 (the shell, so the filter is installed once for every editor window)
+**Status:** In progress on `keyboard-phase5` from `eb25043`. **D11 answered A (2026-11-23)**; D10 and D12 answered A (2026-11-22). Both dependencies are built: Phase 3 (`c190f7c`) and Phase 2 (`90dbe87`). K-15 is already fixed (§0). **Last verified against:** `eb25043` for the shared shell and editor hooks; `2227bce` for the original survey.
+**Size:** ~1–1.5 days   **Needs:** nothing open   **Depends on:** Phase 3 (`views.keys`), Phase 2 (the shell)
 **Supersedes / Superseded by:** none (replaces the "keyboard trigger source" amendment in `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md`)   **Related findings:** K-13, K-15 (`00-overview.md` §4); review 05 F17, L3, F9 (learn also fires the old binding: fixed)
 
 The README promises keyboard input (`README.md:3`, `:52`), the trigger editor already shows keyboard bindings (`trigger_bank.clj:46`), and every stage after the input router is source-agnostic. Only the producer is missing: nothing turns a JavaFX key press into a router event. About 1–1.5 days, mostly design.
@@ -228,7 +228,7 @@ Run `clj -M:mac-arm:test -n laser-show.input.keyboard-test -n laser-show.events.
 >
 > **Your answer:** A (2026-11-22; the recommended ★ option, under the user's standing choice to take the recommended options. Re-checked at `2227bce`: still fits; F11 added to the built-ins it overrides)
 
-> **DECISION D11 — Where do keyboard triggers work, and does a focused editor keep its keys?** *(open, re-opened 2026-11-22 · needed before Phase 5 · recommended: A)*
+> **DECISION D11 — Where do keyboard triggers work, and does a focused editor keep its keys?** *(answered A, 2026-11-23)*
 >
 > *Why it was re-opened.* The 2026-11-13 recommendation was "main window and every editor dialog, never inside a text input". It made a bound key win over every component's own keys, which was acceptable when only the timeline canvas and the list had single keys. Since then:
 > - the step grid window (zones Z6) edits with Space, Enter, Delete, the arrows and Home/End on its focused body (`step_grid.clj:41-68`);
@@ -244,7 +244,7 @@ Run `clj -M:mac-arm:test -n laser-show.input.keyboard-test -n laser-show.events.
 > | C | Main window only, with the switch | Simplest; no overlap with the editor windows' keys | Can't fire cues while an editor window is focused; in the main window the rig strip and the projector chain list still need A's or B's rule |
 > | D | A or B, but each editor window opts in | Fine control | More configuration surface |
 >
-> **Your answer:** _pending_
+> **Your answer:** A. The main window and eight non-modal editors accept keyboard triggers. Text inputs and focused editors retain their editing keys; the three modal questions and About do not trigger cues. The Settings switch defaults on.
 
 > **DECISION D12 — What is a key's identity?** *(answered A, 2026-11-22: the ★ option, taken under the user's standing choice)*
 >
