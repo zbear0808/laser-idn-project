@@ -482,9 +482,8 @@
           (Stage/getWindows)))
 
 (defn- effect-window-set-fullscreen
-  "Effect that puts the main window in or out of fullscreen, on the FX
-   thread, then dispatches :view/fullscreen-changed with what the window did
-   (false with no main window). The window also reports OS-initiated changes."
+  "Request fullscreen on the FX thread. The stage listener reports changes;
+   if the request is refused or no stage exists, report that here instead."
   [on? dispatch]
   (let [report! #(dispatch {:event/type :view/fullscreen-changed :fullscreen? (boolean %)})]
     (try
@@ -702,8 +701,7 @@
      folder as <name>.jar.new; :addons/installed or :addons/install-failed
      comes back (later, future)
    - :fx/show-file-chooser - show file open/save dialog (later, FX thread)
-   - :window/set-fullscreen - the main window in or out of fullscreen, then
-     :view/fullscreen-changed with what it did (later, FX thread)
+   - :window/set-fullscreen - set fullscreen on the main window (FX thread)
    - :system/exit - end the application through the fn registered with set-exit-fn!
    - :system/open-url - open a URL in the system browser
    - :system/open-folder - make a folder and open it in the file manager

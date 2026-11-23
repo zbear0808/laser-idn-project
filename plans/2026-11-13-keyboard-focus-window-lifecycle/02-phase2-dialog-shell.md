@@ -202,6 +202,7 @@ Run `clj -M:mac-arm:test -n laser-show.views.dialogs.common-test -n laser-show.e
 - `views.root/dialog-registry` mounts open windows in order, keyed by dialog id. The confirm window stays above the rig report. Components are looked up through vars so an individually reloaded view is used on its next render (`772c6da`, `9b6e935`).
 - Add Projector and the trigger editor keep the content-driven sizing from `04c0ffd`. The three modal questions keep their default/cancel buttons, and closing the unsaved-changes window still cancels the pending operation.
 - The new closed default for the rig report exposed two assumptions. The report view calculated mismatches on a fresh document, and `:rig/open-report` could open it without a loaded file. The view and handler now check the filename recorded by `:file/project-loaded`; a loaded show can still reopen its report after closing it. Before the fix, a fresh cue pinned to a missing projector produced a warning count of 1; the bare open event changed `:open?` to true (`19078cb`).
+- Help > About opens a small modal window. View > Show Preview is a check item (Shortcut+P); the tabs that never have a preview still don't. View > Fullscreen (F11) changes the main stage, and its check follows the stage even if the OS changes it. JavaFX's fullscreen exit key is disabled on that stage: Escape keeps its existing application meaning; F11 exits fullscreen. File > Export and Help > Check for Updates and their no-op handlers were removed (`8154313`, `c1defc8`, `446f2a6`).
 
 ---
 
