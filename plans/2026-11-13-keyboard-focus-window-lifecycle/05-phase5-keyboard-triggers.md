@@ -1,13 +1,15 @@
 # Phase 5 — Keyboard as a cue-trigger source
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)   **Re-checked:** 2026-11-22 at `2227bce`, 275 commits later: every citation re-checked; K-15 found fixed by other work; the Settings placeholder found gone; the trigger actions added by vibes and zones (Z4, Z5), the new windows and their keys taken in (§0)
-**Status:** Proposed. D10 and D12 answered A (2026-11-22, the ★ options, taken under the user's standing choice to take the recommended options). **D11 re-opened** with new options (below). Phase 3 is built (`c190f7c`); Phase 2 is in progress. K-15 is already fixed (§0). **Last verified against:** `2227bce` (probe p2's Escape step, `probes/keyboard_probes_test.clj`)
+**Status:** Proposed; **D11 is the only open decision**. D10 and D12 answered A (2026-11-22). Both dependencies are built: Phase 3 (`c190f7c`) and Phase 2 (`keyboard-phase2`, `90dbe87`). K-15 is already fixed (§0). **Last verified against:** `2227bce` (probe p2's Escape step); Phase 2's integration note below updates the window count and hook.
 **Size:** ~1–1.5 days   **Needs:** D11   **Depends on:** Phase 3 (`views.keys`), Phase 2 (the shell, so the filter is installed once for every editor window)
 **Supersedes / Superseded by:** none (replaces the "keyboard trigger source" amendment in `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md`)   **Related findings:** K-13, K-15 (`00-overview.md` §4); review 05 F17, L3, F9 (learn also fires the old binding: fixed)
 
 The README promises keyboard input (`README.md:3`, `:52`), the trigger editor already shows keyboard bindings (`trigger_bank.clj:46`), and every stage after the input router is source-agnostic. Only the producer is missing: nothing turns a JavaFX key press into a router event. About 1–1.5 days, mostly design.
 
 ## 0. What changed since `cb32414`
+
+- **After Phase 2 (`90dbe87`):** the main window and the eight non-modal editors are still D11 A's proposed scope. All eight editors now use `views.dialogs.common/dialog-stage`. The three modal questions **and the new modal About** use the same shell; Phase 5 should not install a trigger filter in any of the four. The timeline's additional shortcut is `handle-space` in `views/dialogs/timeline_cue_editor.clj`.
 
 - **K-15 is fixed.** Learning a key no longer also fires its old binding. The fix is in the mapper, as this doc proposed: `learning?` (`input_mapper.clj:59-66`) reads `[:backend :input :learning-target]`, and presses aren't dispatched as `:trigger/input` while a learn waits; releases still are (`:105-106`). It landed in `38f92ad` (vibes tab, 2026-11-19), with `mapper-ignores-discrete-events-while-learning-test` (`test/laser_show/events/handlers/input_mapper_test.clj:30-53`), the test §8 used to plan. The mapper change and that test are gone from §4 and §8; invariant 5 stays, now as a regression test.
 - **A key can bind far more than a cell.** These action types exist now (`triggers.clj:89-138`), and all of them are source-agnostic:
