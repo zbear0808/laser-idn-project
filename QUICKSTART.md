@@ -54,7 +54,7 @@ Vibe mode plays your cues with five keys and two faders (see [Vibe Mode](README.
 1. **Make cues on the Grid tab.**
 2. **Add a vibe** on the Vibes tab (**New vibe**), or click **One per grid row** for a vibe from each row of the grid that has cues. Name it after a feel, and pick its colour and energy.
 3. **Put HIT cues in every vibe:** pick a slot above the grid picker (HIT, ACCENT, FLASH cue, BED, FX set, FLASH effects) and click cells to put them in or take them out. 3–6 cues for HIT, one to three bigger ones for ACCENT.
-4. **Learn the five controls:** click **Learn all**, then press the keys for HIT, ACCENT, FLASH, VIBE and BLACKOUT on your controller, in that order. Under FADERS, click **Learn** for Intensity (and Morph) and move the fader.
+4. **Learn the five controls:** click **Learn all**, then press a keyboard key or controller button for HIT, ACCENT, FLASH, VIBE and BLACKOUT, in that order. Under FADERS, click **Learn** for Intensity (and Morph) and move the fader. Keyboard keys bind to pads and cues, not faders.
 5. Optionally, add **Tap reactions** to a role (a Punch on HIT, a Swell on FLASH…), and **Add Morph to** the vibe to give fader 2 something to do in it.
 6. On the **Perform** tab, click **Stream** in the toolbar and play:
    - **HIT** and **ACCENT**: a tap plays a cue that decays after a beat or two; hold to keep it until you let go.

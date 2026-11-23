@@ -48,13 +48,15 @@ Frame streaming with X/Y coordinates (16-bit) and RGB color (16-bit each). See [
 
 ## Input System
 
-All input sources produce unified events that route to handlers:
-we have keyboard, midi, and osc
-See [`src/laser_show/input/`](src/laser_show/input/) for implementation details.
+Keyboard, MIDI, OSC and gamepad controls use the same input [router](src/laser_show/input/).
+
+To play a cue from your keyboard, open its trigger editor, click **Learn Next Input**, and press a key such as **1**. Choose **While held (momentary)** before learning to play only while held. Bindings are saved with the show. **Settings → Keyboard** turns keyboard triggers on or off for the session.
+
+Keys work in the main window and non-modal editors. Text fields keep what you type, and a focused editor keeps the keys it edits with: for example, Space still toggles a step in the step grid. Elsewhere a bound Space overrides Play/Stop. Escape cannot be bound; Ctrl/Cmd/Alt shortcuts keep their usual behavior. Keys follow your keyboard layout, Shift does not create a separate binding, and leaving the window releases held cues.
 
 ## Vibe Mode
 
-Busk a show with five keys and two faders. Cues are grouped into **vibes**, each a feel ("Calm", "Groove", "Peak"): a pool of cues for each key, an optional bed underneath, and an FX set of effect cells that switch on with the vibe. A key means the same in every vibe, only what is behind it changes, and a pool never plays the same cue twice in a row. Set up on the **Vibes** tab, play on the **Perform** tab (with the mouse, a touchscreen, or learned MIDI, OSC or gamepad controls). See [`src/laser_show/vibes/`](src/laser_show/vibes/).
+Busk a show with five keys and two faders. Cues are grouped into **vibes**, each a feel ("Calm", "Groove", "Peak"): a pool of cues for each key, an optional bed underneath, and an FX set of effect cells that switch on with the vibe. A key means the same in every vibe, only what is behind it changes, and a pool never plays the same cue twice in a row. Set up on the **Vibes** tab, play on the **Perform** tab (with the mouse, a touchscreen, or learned keyboard, MIDI, OSC or gamepad controls). See [`src/laser_show/vibes/`](src/laser_show/vibes/).
 
 | Key | Press | Release |
 |---|---|---|
