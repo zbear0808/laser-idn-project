@@ -24,6 +24,7 @@
             [laser-show.routing.rig :as rig]
             [laser-show.views.components.visual-editors.custom-param-renderers :as custom-renderers]
             [laser-show.views.components.parameter-controls :as param-controls]
+            [laser-show.views.components.transform-advanced :as transform-advanced]
             [laser-show.views.components.safety-editor :as safety-editor]
             [laser-show.views.components.list :as list]
             [laser-show.views.components.commit-field :as commit-field]
@@ -457,11 +458,12 @@
      :spacing 8
      :padding 8
      :style-class ["panel-elevated"]
-     :children [{:fx/type :label
-                 :text (str "Edit: " effect-name)
-                 :style-class ["label-bold"]
-                 :style "-fx-font-size: 11;"}
-                (cond
+     :children (filterv some?
+                 [{:fx/type :label
+                   :text (str "Edit: " effect-name)
+                   :style-class ["label-bold"]
+                   :style "-fx-font-size: 11;"}
+                  (cond
                    ;; Check for custom renderer in ui-hints: rgb-curves
                    (= :rgb-curves renderer-type)
                    {:fx/type custom-renderers/rgb-curves-visual-editor
@@ -506,7 +508,10 @@
                   :else
                   {:fx/type :label
                    :text "Unknown effect - no parameters available"
-                   :style "-fx-text-fill: #808080; -fx-font-style: italic;"})]}))
+                   :style "-fx-text-fill: #808080; -fx-font-style: italic;"})
+                 (transform-advanced/control effect-def effect {:domain :projector-effects
+                                                                :entity-key projector-id
+                                                                :effect-path effect-path})])}))
 
 (defn- projector-effects-sidebar
   "Effect chain sidebar using list-editor with built-in keyboard handling.

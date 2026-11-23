@@ -33,7 +33,8 @@
   (:require
 
    [laser-show.views.components.visual-editors.keyframe-modulator-panel :as keyframe-panel]
-   [laser-show.views.components.effect-param-ui :as effect-param-ui]))
+   [laser-show.views.components.effect-param-ui :as effect-param-ui]
+   [laser-show.views.components.transform-advanced :as transform-advanced]))
 
 
 ;; Helper Functions
@@ -288,4 +289,5 @@
                            ;; No effect selected
                            {:fx/type :label
                             :text "Select an effect from the chain"
-                            :style-class "dialog-placeholder-text"})])}))
+                            :style-class "dialog-placeholder-text"})
+                         (transform-advanced/control effect-def effect base-event-params)])}))

@@ -6,7 +6,8 @@
    ====================
    
    LaserPoint is a 5-element vector [x y r g b] using NORMALIZED VALUES:
-   - Coordinates (x, y): -1.0 to 1.0 (normalized)
+   - Coordinates (x, y): -1.0 to 1.0 (normalized); a geometric transform
+     may temporarily exceed that range inside an effect chain
    - Colors (r, g, b): 0.0 to 1.0 (normalized)
    
    LaserFrame is simply a vector of points - no wrapper needed!
@@ -106,12 +107,22 @@
 
 
 (defn update-point-xy
- "Update x and y of a point, preserving color values.
-  Clamps coordinates to [-1.0, 1.0]."
- [pt new-x new-y]
- [(u/clamp (double new-x) -1.0 1.0)
-  (u/clamp (double new-y) -1.0 1.0)
-  (pt R) (pt G) (pt B)])
+  "Replace XY without losing the point's colour. Finite coordinates are
+   clamped by default. An unchecked transform leaves them for later stages;
+   non-finite coordinates must stay invalid so the output sanitiser drops them."
+  ([pt new-x new-y] (update-point-xy pt new-x new-y true))
+  ([pt new-x new-y clamp?]
+   (let [x (double new-x) y (double new-y)]
+     [(if (and clamp? (Double/isFinite x)) (Math/clamp x -1.0 1.0) x)
+      (if (and clamp? (Double/isFinite y)) (Math/clamp y -1.0 1.0) y)
+      (pt R) (pt G) (pt B)])))
+
+(defn clamp-point-xy
+  "Final XY bounds for an effect chain with deferred transforms. Keep
+   in-range points as-is, including blank travel, and leave NaN/Inf invalid."
+  [pt]
+  (let [x (double (pt X)) y (double (pt Y))]
+    (if (and (<= -1.0 x 1.0) (<= -1.0 y 1.0)) pt (update-point-xy pt x y))))
 
 (defn update-point-rgb
  "Update r, g, b of a point, preserving position.

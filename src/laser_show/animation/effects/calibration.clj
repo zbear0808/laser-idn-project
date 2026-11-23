@@ -70,7 +70,8 @@
 
 
 (defn- axis-transform-xf [time-ms bpm params ctx]
- (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
+ (let [clamp? (:clamp-after? ctx true)
+       resolved (effects/resolve-params-global params time-ms bpm ctx)
        mirror-x? (:mirror-x? resolved)
        mirror-y? (:mirror-y? resolved)
        swap-axes? (:swap-axes? resolved)]
@@ -82,10 +83,11 @@
                 ;; Then swap if needed
                 final-x (if swap-axes? y' x')
                 final-y (if swap-axes? x' y')]
-            (t/update-point-xy pt final-x final-y))))))
+            (t/update-point-xy pt final-x final-y clamp?))))))
 
 (effects/register-effect!
  {:id :axis-transform
+  :transforms-xy? true
   :name "Axis Transform"
   :category :calibration
   :timing :static

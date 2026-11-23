@@ -8,6 +8,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.animation.cue-timing :as ct]
             [laser-show.animation.effects :as effects]
+            [laser-show.animation.presets :as presets]
             [laser-show.animation.fit-guard :as fit-guard]
             [laser-show.backend.output-errors :as oe]
             [laser-show.routing.compose :as compose]
@@ -332,6 +333,19 @@
         apply-chain effects/apply-effect-chain]
     (with-redefs [effects/apply-effect-chain (fn [& args] (swap! calls inc) (apply apply-chain args))]
       [(f) @calls])))
+
+(deftest unchecked-xy-reaches-later-group-and-global-transforms-test
+  (let [point [[0.75 0.0 1.0 0.0 0.0]]
+        up {:effect-id :scale :clamp-after? false :params {:x-scale 2.0}}
+        item {:id :p :type :preset :preset-id :circle :effects [up]}
+        plain {:items [item]}
+        group {:items [{:id :g :type :group :items [item] :effects (:effects grid-scale)}]}
+        render #(get (frame-service/generate-frames-by-zone %1 test-timing-ctx
+                                                            {:global-effects %2 :global-ctx grid-ctx}) :all)]
+    (with-redefs [presets/generate-frame (constantly point)]
+      (is (= point (render plain grid-scale)) "the global transform sees x=1.5 from the item")
+      (is (= point (render group nil)) "the parent group's transform sees x=1.5 from its child")
+      (is (= 1.0 (ffirst (render plain nil))) "without another transform the finished picture is still bounded"))))
 
 (deftest global-effects-run-once-per-distinct-frame-test
   (let [shared (square 0.0)

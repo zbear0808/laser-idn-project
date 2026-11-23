@@ -30,6 +30,7 @@
   (:require
    [laser-show.animation.chains :as chains]
    [laser-show.animation.modulation :as mod]
+   [laser-show.animation.types :as t]
    [laser-show.common.util :as u]
    [laser-show.animation.keyframes :as kf]
    [laser-show.backend.output-errors :as oe]))
@@ -94,6 +95,8 @@
     :apply-transducer (fn [time-ms bpm params frame-ctx] transducer)}
    
    Optional keys, kept and read elsewhere:
+   - :transforms-xy? true: the effect supports the instance option :clamp-after?
+     (absent or true: bound XY immediately; false: defer until the chain ends)
    - :hidden? true: registered (an old show's effect still reads) but offered
      nowhere (zones plan Z4's Zone Selector)
    - :scope: where the effect banks offer it, a set of :item and :global
@@ -296,7 +299,10 @@
           ;; When in keyframe mode (non-spatial), params are already resolved (no modulators)
           ;; When in spatial keyframe mode, params contain synthetic modulator configs
           (try
-            (xf-fn time-ms bpm merged-params frame-ctx)
+            (xf-fn time-ms bpm merged-params
+                   (cond-> frame-ctx
+                     (and (:transforms-xy? effect-def) (false? (:clamp-after? effect-instance)))
+                     (assoc :clamp-after? false)))
             (catch Throwable e
               (oe/report! (effect-error-key effect-instance) e)
               failed-to-build)))))))
@@ -311,10 +317,15 @@
                   [effect xf])))
         (chains/flatten-chain (:effects chain))))
 
-(defn- compose-pairs [pairs]
-  (if (empty? pairs)
-    (map identity)
-    (apply comp (map second pairs))))
+(defn- deferred-xy? [pairs]
+  ;; Unchanged shows need no final per-point pass: each XY stage clamped.
+  (some (fn [[effect _]]
+          (and (false? (:clamp-after? effect)) (:transforms-xy? (get-effect (:effect-id effect)))))
+        pairs))
+
+(defn- compose-pairs [pairs clamp-final?]
+  (let [xf (apply comp (map second pairs))]
+    (if clamp-final? (comp xf (map t/clamp-point-xy)) xf)))
 
 (defn compose-effect-transducers
   "Compose transducers from a chain of effects.
@@ -326,34 +337,38 @@
    - chain: Effect chain {:effects [...]} - may contain groups
    - frame-ctx: {:point-count n :timing-ctx {...}} (see make-effect-transducer)
    
-   Returns: A single composed transducer, or (map identity) for empty chains."
+   Returns: A single transducer, including the final XY clamp for any
+   transform with deferred clamping. Empty chains pass through unchanged."
   [chain frame-ctx]
-  (compose-pairs (effect-transducers chain frame-ctx)))
+  (let [pairs (effect-transducers chain frame-ctx)]
+    (compose-pairs pairs (deferred-xy? pairs))))
 
 (defn- apply-pairs-one-by-one
   "Apply each [effect transducer] on its own, skipping (and reporting) each
    effect that throws."
-  [frame pairs]
-  (reduce (fn [frame [effect xf]]
-            (if (identical? xf failed-to-build)
-              frame
-              (let [k (effect-error-key effect)]
-                (try
-                  (let [out (into [] xf frame)]
-                    (oe/ok! k)
-                    out)
-                  (catch Throwable e
-                    (oe/report! k e)
-                    frame)))))
-          (into [] frame)
-          pairs))
+  [frame pairs clamp-final?]
+  (let [out (reduce (fn [frame [effect xf]]
+                      (if (identical? xf failed-to-build)
+                        frame
+                        (let [k (effect-error-key effect)]
+                          (try
+                            (let [out (into [] xf frame)]
+                              (oe/ok! k)
+                              out)
+                            (catch Throwable e
+                              (oe/report! k e)
+                              frame)))))
+                    (into [] frame)
+                    pairs)]
+    (if clamp-final? (mapv t/clamp-point-xy out) out)))
 
 (defn- apply-effects-one-by-one
   "The fallback of apply-effect-chain: the chain's effects applied one at a
    time, each one that throws skipped. Without errors, equal to the composed
    single pass."
   [frame chain frame-ctx]
-  (apply-pairs-one-by-one frame (effect-transducers chain frame-ctx)))
+  (let [pairs (effect-transducers chain frame-ctx)]
+    (apply-pairs-one-by-one frame pairs (deferred-xy? pairs))))
 
 
 ;; Effect Chain Application
@@ -375,6 +390,10 @@
      :time-ms and :bpm are the effects' time and tempo. Without it, modulators
      read beat 0.
    
+   A standalone chain finishes any deferred XY clamping. When one cue is
+   rendered in stages, pass its :defer-final-xy! callback to tell the cue
+   to finish clamping after the item, group, track and global effects.
+
    The chain's effects share one modulation context and one per-point base
    context, each made only if a parameter needs it.
    
@@ -386,16 +405,20 @@
      frame
      (let [frame-ctx (frame-context (count frame) timing-ctx)
            ;; Points stay as 5-element vectors throughout - no conversion needed!
-           pairs (effect-transducers chain frame-ctx)]
+           pairs (effect-transducers chain frame-ctx)
+           deferred? (deferred-xy? pairs)
+           defer-final! (:defer-final-xy! timing-ctx)
+           clamp-final? (and deferred? (not defer-final!))]
+       (when (and deferred? defer-final!) (defer-final!))
        (try
-         (let [out (into [] (compose-pairs pairs) frame)]
+         (let [out (into [] (compose-pairs pairs clamp-final?) frame)]
            (when (oe/failing?)
              (doseq [[effect xf] pairs
                      :when (not (identical? xf failed-to-build))]
                (oe/ok! (effect-error-key effect))))
            out)
          (catch Throwable _
-           (apply-pairs-one-by-one frame pairs)))))))
+           (apply-pairs-one-by-one frame pairs clamp-final?)))))))
 
 
 
@@ -529,4 +552,3 @@
 
 (set! *warn-on-reflection* false)
 (set! *unchecked-math* false)
-

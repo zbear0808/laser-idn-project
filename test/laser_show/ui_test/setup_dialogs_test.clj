@@ -287,6 +287,24 @@
                                       {:selected-ids #{#uuid "00000000-0000-0000-0000-0000000000a2"}
                                        :last-selected-id #uuid "00000000-0000-0000-0000-0000000000a2"}))))
 
+(deftest calibration-clamping-is-an-advanced-per-transform-setting-test
+  (let [robot (ui/robot)
+        pane "#transform-advanced-00000000-0000-0000-0000-0000000000a2"
+        box "#clamp-after-transform-00000000-0000-0000-0000-0000000000a2"
+        path [:chains :projector-effects :a :items 1]]
+    (with-calibration-chains!)
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(some? (ui/query pane)))
+    (is (false? (ui/on-fx-thread #(.isExpanded ^javafx.scene.control.TitledPane (ui/query pane)))))
+    (ui/scroll-into-view! pane)
+    (ui/click! robot (str pane " > .title"))
+    (ui/assert-selected! box)
+    (ui/scroll-into-view! box)
+    (ui/click! robot box)
+    (ui/wait-for! #(false? (get-in (app-state) (conj path :clamp-after?))))
+    (is (false? (get-in (app-state) (conj path :params :mirror-x?))) "other Axis Transform settings stay put")
+    (is (not (get-in (app-state) [:project :dirty?])) "calibration belongs to the rig, not the show")))
+
 (deftest axis-transform-boxes-stick-test
   (let [robot (ui/robot)
         param #(get-in (app-state) [:chains :projector-effects :a :items 1 :params %])]

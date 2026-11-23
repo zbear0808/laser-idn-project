@@ -7,6 +7,7 @@
    - UI mode operations (set-ui-mode)"
   (:require
    [clojure.tools.logging :as log]
+   [laser-show.animation.effects :as effects]
    [laser-show.events.helpers :as h]
    [laser-show.events.handlers.effect-params :as effect-params]))
 
@@ -68,6 +69,14 @@
     (effect-params/reset-params state params-path defaults-map)))
 
 ;; Parameter Update Handlers
+
+(defn set-clamp-after [state {:keys [items-path]} {:keys [effect-path effect-instance-id value]}]
+  (let [path (into items-path effect-path)
+        effect (get-in state path)]
+    (if (and (boolean? value) (= effect-instance-id (:id effect))
+             (:transforms-xy? (effects/get-effect (:effect-id effect))))
+      (assoc-in state (conj path :clamp-after?) value)
+      state)))
 
 (defn handle-update-param
   "Update an effect parameter value.

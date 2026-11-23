@@ -62,6 +62,10 @@
       
       :chain/update-param
       {:state (params/handle-update-param state config event)}
+
+      :chain/set-clamp-after
+      {:state (params/set-clamp-after state config event)
+       :history/description "Change Transform Clamping"}
       
       :chain/update-param-from-text
       {:state (params/handle-update-param-from-text state config event)}

@@ -7,7 +7,8 @@
 
 
 (defn- scale-xf [time-ms bpm params ctx]
-  (let [get-x-scale (effects/make-param-resolver :x-scale params time-ms bpm ctx)
+  (let [clamp? (:clamp-after? ctx true)
+        get-x-scale (effects/make-param-resolver :x-scale params time-ms bpm ctx)
         get-y-scale (effects/make-param-resolver :y-scale params time-ms bpm ctx)]
     (map-indexed
      (fn [idx pt]
@@ -17,10 +18,11 @@
              y-scale (double (get-y-scale px py idx))]
          (t/update-point-xy pt
                             (* px x-scale)
-                            (* py y-scale)))))))
+                             (* py y-scale) clamp?))))))
 
 (effects/register-effect!
  {:id :scale
+  :transforms-xy? true
   :name "Scale"
   :category :shape
   :timing :static
@@ -46,7 +48,8 @@
   :apply-transducer scale-xf})
 
 (defn- translate-xf [time-ms bpm params ctx]
-  (let [get-x (effects/make-param-resolver :x params time-ms bpm ctx)
+  (let [clamp? (:clamp-after? ctx true)
+        get-x (effects/make-param-resolver :x params time-ms bpm ctx)
         get-y (effects/make-param-resolver :y params time-ms bpm ctx)]
     (map-indexed
      (fn [idx pt]
@@ -56,10 +59,11 @@
              dy (double (get-y px py idx))]
          (t/update-point-xy pt
                             (+ px dx)
-                            (+ py dy)))))))
+                             (+ py dy) clamp?))))))
 
 (effects/register-effect!
  {:id :translate
+  :transforms-xy? true
   :name "Translate"
   :category :shape
   :timing :static
@@ -81,7 +85,8 @@
   :apply-transducer translate-xf})
 
 (defn- rotation-xf [time-ms bpm params ctx]
-  (let [get-angle (effects/make-param-resolver :angle params time-ms bpm ctx)]
+  (let [clamp? (:clamp-after? ctx true)
+        get-angle (effects/make-param-resolver :angle params time-ms bpm ctx)]
     (map-indexed
      (fn [idx pt]
        (let [x (double (pt t/X))
@@ -92,10 +97,11 @@
              sin-a (Math/sin radians)]
          (t/update-point-xy pt
                             (- (* x cos-a) (* y sin-a))
-                            (+ (* x sin-a) (* y cos-a))))))))
+                             (+ (* x sin-a) (* y cos-a)) clamp?))))))
 
 (effects/register-effect!
  {:id :rotation
+  :transforms-xy? true
   :name "Rotation"
   :category :shape
   :timing :static
@@ -121,7 +127,8 @@
    - bl (bottom-left): maps from (-1, -1)
    - br (bottom-right): maps from (1, -1)"
   [time-ms bpm params ctx]
-  (let [get-tl-x (effects/make-param-resolver :tl-x params time-ms bpm ctx)
+  (let [clamp? (:clamp-after? ctx true)
+        get-tl-x (effects/make-param-resolver :tl-x params time-ms bpm ctx)
         get-tl-y (effects/make-param-resolver :tl-y params time-ms bpm ctx)
         get-tr-x (effects/make-param-resolver :tr-x params time-ms bpm ctx)
         get-tr-y (effects/make-param-resolver :tr-y params time-ms bpm ctx)
@@ -152,10 +159,11 @@
                       (* u one-minus-v br-y)
                       (* one-minus-u v tl-y)
                       (* u v tr-y))]
-         (t/update-point-xy pt new-x new-y))))))
+          (t/update-point-xy pt new-x new-y clamp?))))))
 
 (effects/register-effect!
  {:id :corner-pin
+  :transforms-xy? true
   :name "Corner Pin"
   :category #{:shape :calibration}  ;; Available in both shape effects and projector calibration
   :timing :static
@@ -217,7 +225,8 @@
 
 
 (defn- lens-distortion-xf [time-ms bpm params ctx]
-  (let [get-k1 (effects/make-param-resolver :k1 params time-ms bpm ctx)
+  (let [clamp? (:clamp-after? ctx true)
+        get-k1 (effects/make-param-resolver :k1 params time-ms bpm ctx)
         get-k2 (effects/make-param-resolver :k2 params time-ms bpm ctx)]
     (map-indexed
      (fn [idx pt]
@@ -227,10 +236,11 @@
              k2 (double (get-k2 x y idx))
              r-sq (+ (* x x) (* y y))
              factor (+ 1.0 (* k1 r-sq) (* k2 r-sq r-sq))]
-         (t/update-point-xy pt (* x factor) (* y factor)))))))
+          (t/update-point-xy pt (* x factor) (* y factor) clamp?))))))
 
 (effects/register-effect!
  {:id :lens-distortion
+  :transforms-xy? true
   :name "Lens Distortion"
   :category :shape
   :timing :static

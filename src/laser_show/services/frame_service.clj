@@ -37,6 +37,7 @@
             [laser-show.animation.chains :as chains]
             [laser-show.animation.fit-guard :as fit-guard]
             [laser-show.animation.frames :as frames]
+            [laser-show.animation.types :as t]
             [laser-show.animation.show-time :as show-time]
             [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.backend.output-errors :as output-errors]
@@ -340,26 +341,27 @@
         frame))
     frame))
 
-(defn apply-global-effects-once
-  "The effects grid's chain (global-effects, or nil) on each frame of
-   frames-by-key ({key frame}, one cue's), at global-ctx, once per distinct
-   frame object (spec 01 §6.1): keys that hold one object get one result
-   object, so a picture placed under two keys stays one picture and a laser
-   draws it once (routing.compose). There is no value hashing: equal frames
-   that aren't identical? are two pictures. Empty frames are left out."
-  [frames-by-key global-effects global-ctx]
+(defn- map-frames-once
+  "Apply f once per distinct frame object, so a picture placed under two
+   keys stays one picture and a laser draws it once. Omit empty frames."
+  [frames-by-key f]
   (let [done (java.util.IdentityHashMap.)]
     (reduce-kv
      (fn [acc zone-id zone-frame]
        (if (seq zone-frame)
          (assoc acc zone-id (if (.containsKey done zone-frame)
                               (.get done zone-frame)
-                              (let [out (apply-global-effects-to-frame zone-frame global-effects global-ctx)]
+                              (let [out (f zone-frame)]
                                 (.put done zone-frame out)
                                 out)))
          acc))
      {}
      frames-by-key)))
+
+(defn apply-global-effects-once
+  "Apply the effects grid's chain once per distinct picture in this cue."
+  [frames-by-key global-effects global-ctx]
+  (map-frames-once frames-by-key #(apply-global-effects-to-frame % global-effects global-ctx)))
 
 (defn- merge-zone-maps
   "Merge {zone-id frame} maps, concatenating frames that share a zone."
@@ -477,7 +479,10 @@
                         (pr-str (:target cue-chain))
                         (double (:effective-beats timing-ctx 0.0))
                         (count (:items cue-chain []))))
-   (let [bpm (:bpm timing-ctx)
+   (let [needs-xy-clamp? (volatile! false)
+         defer-final! #(vreset! needs-xy-clamp? true)
+         timing-ctx (assoc timing-ctx :defer-final-xy! defer-final!)
+         bpm (:bpm timing-ctx)
          tracks (:tracks cue-chain)
          muted (model/muted-track-ids tracks)
          items (cond->> (:items cue-chain [])
@@ -508,7 +513,8 @@
                                      (mapcat val (remove #(contains? leaf-ids (key %)) clips-by-track)))))
                             (merge-zone-maps item-zone-maps))
          ;; The effects grid's effects run at the cue's tempo
-         grid-ctx (when (or global-effects (seq zone-effects)) (assoc global-ctx :bpm bpm))
+         grid-ctx (when (or global-effects (seq zone-effects))
+                    (assoc global-ctx :bpm bpm :defer-final-xy! defer-final!))
          patterns (stage-patterns cue-chain timing-ctx zone-effects grid-ctx)
          stage (when (seq patterns)
                  (run-zone-stage combined-by-zone patterns
@@ -516,8 +522,10 @@
                                         :beats {:cue (window-beats timing-ctx)
                                                 :global (double (or (:effective-beats global-ctx) 0.0))}
                                         :pulses (or (:pulses timing-ctx) (:pulses global-ctx)))))
-         steps (:steps stage)]
-     (cond-> (apply-global-effects-once (if stage (:frames stage) combined-by-zone) global-effects grid-ctx)
+         steps (:steps stage)
+         pictures (apply-global-effects-once (if stage (:frames stage) combined-by-zone) global-effects grid-ctx)]
+     (cond-> pictures
+       @needs-xy-clamp? (map-frames-once #(mapv t/clamp-point-xy %))
        (or item-points? (seq steps))
        (with-meta (cond-> {}
                     item-points? (assoc :item-points (reduce zone-remap/rekey-item-points

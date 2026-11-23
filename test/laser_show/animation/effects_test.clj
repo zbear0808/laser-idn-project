@@ -3,6 +3,7 @@
   (:require [clojure.test :refer [deftest testing is]]
             [clojure.tools.logging.test :as log-test]
             [laser-show.animation.effects :as effects]
+            [laser-show.animation.effects.calibration]
             [laser-show.animation.effects.color]      ;; Load color effects
             [laser-show.animation.effects.intensity]  ;; Load intensity effects
             [laser-show.animation.effects.shape]
@@ -10,6 +11,7 @@
             [laser-show.animation.modulation :as mod]
             [laser-show.animation.types :as t]
             [laser-show.backend.output-errors :as oe]
+            [laser-show.idn.frame-rules :as frame-rules]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.routing.zone-remap :as zone-remap]))
 
@@ -385,6 +387,57 @@
 
 (defn- error-log-entries []
   (filterv #(#{:warn :error} (:level %)) (log-test/the-log)))
+
+(deftest coordinate-clamp-is-per-transform-test
+  (let [frame [[0.75 0.25 1.0 0.25 0.0] [-0.75 -0.25 0.0 0.0 0.0]]
+        scale {:effect-id :scale :params {:x-scale 2.0}}
+        half {:effect-id :scale :params {:x-scale 0.5}}
+        run (fn [& stages] (effects/apply-effect-chain frame {:effects (vec stages)}))
+        delayed (assoc scale :clamp-after? false)]
+    (is (= [0.5 -0.5] (mapv point-x (run scale half))) "existing shows clamp at each transform")
+    (is (= frame (run delayed {:effect-id :intensity :params {:amount 1.0}} half))
+        "an unchecked transform preserves overshoot through a non-XY stage, including dark points")
+    (is (= [0.5 -0.5] (mapv point-x (run delayed {:effect-id :translate} half)))
+        "the next checked transform clamps even when its offset is zero")
+    (is (= [1.0 -1.0] (mapv point-x (run delayed))) "the finished chain always bounds XY")
+    (is (= frame (run {:type :group :enabled? true :items [delayed]} half)))
+    (let [animated (assoc delayed :keyframe-modulator {:enabled? true :driver :time
+                                                       :keyframes [{:position 0.0 :params {:x-scale 2.0}}]})]
+      (is (= frame (run animated half)) "the option belongs to the transform, not to one keyframe"))
+    (with-test-effects
+      (log-test/with-log
+        (let [bad (instance :test-fails-per-point)]
+          (is (= frame (run delayed bad half)) "the error fallback preserves intermediate coordinates")
+          (is (= [1.0 -1.0] (mapv point-x (run delayed bad))) "and still bounds the result"))))))
+
+(deftest nonfinite-xy-is-never-turned-into-a-lit-edge-test
+  (let [frame [[0.75 0.25 1.0 0.0 0.0]]]
+    (doseq [value [##Inf ##-Inf ##NaN] clamp? [true false]]
+      (let [stage {:effect-id :scale :clamp-after? clamp? :params {:x-scale value}}]
+        (is (empty? (frame-rules/sanitize-frame (effects/apply-effect-chain frame {:effects [stage]})))
+            (str "invalid coordinate " value ", clamp after transform: " clamp?))))))
+
+(deftest intermediate-clamp-on-other-xy-transforms-test
+  (let [scale (fn [x] {:effect-id :scale :params {:x-scale x}})
+        offset (fn [x] {:effect-id :translate :params {:x x}})
+        run (fn [x y stages]
+              (let [pt (first (effects/apply-effect-chain [[x y 1.0 0.0 0.0]] {:effects stages}))]
+                (subvec pt 0 2)))]
+    (doseq [[stage next-stage] [[(offset 0.75) (offset -0.75)]
+                                [{:effect-id :corner-pin :params {:tl-x -2.0 :tr-x 2.0 :bl-x -2.0 :br-x 2.0}}
+                                 (scale 0.5)]
+                                [{:effect-id :lens-distortion :params {:k1 1.0}} (scale 0.5)]]]
+      (let [[x] (run 0.75 0.0 [(assoc stage :clamp-after? false) next-stage])]
+        (is (> x (first (run 0.75 0.0 [stage next-stage]))) (str (:effect-id stage)))))
+    (let [rotate {:effect-id :rotation :params {:angle 45.0}}
+          back (assoc-in rotate [:params :angle] -45.0)
+          xy (run 0.9 0.9 [(assoc rotate :clamp-after? false) back])]
+      (is (every? #(< (Math/abs (- (double %) 0.9)) 1e-9) xy))
+      (is (< (first (run 0.9 0.9 [rotate back])) 0.8)))
+    (let [scale-up (assoc (scale 2.0) :clamp-after? false)
+          mirror {:effect-id :axis-transform :params {:mirror-x? true}}]
+      (is (= [-0.5 0.0] (run 0.75 0.0 [scale-up mirror (scale 0.5)])))
+      (is (= [-0.75 0.0] (run 0.75 0.0 [scale-up (assoc mirror :clamp-after? false) (scale 0.5)]))))))
 
 (deftest failing-effect-skips-only-itself-test
   (with-test-effects

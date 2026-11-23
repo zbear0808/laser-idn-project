@@ -24,6 +24,12 @@
           {:keys [interactive]} theme/base-colors]
       
       {
+       ".transform-advanced"
+       {" > .title" {:-fx-background-color bg-interactive}
+        " > .title > .text" {:-fx-fill text-secondary}
+        " > .content" {:-fx-background-color bg-surface :-fx-border-color border-default}
+        " .check-box" {:-fx-text-fill text-primary}}
+
        ;; Badge - Small colored labels
        
        
