@@ -3,6 +3,7 @@
             [laser-show.events.core :as events]
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.triggers :as triggers]
+            [laser-show.input.events :as input-events]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.state.templates :as templates]))
@@ -22,6 +23,24 @@
     (is (= 1 (:row (:dispatch result))))
     (is (= #{{:source :keyboard :id :space}}
            (get-in result [:state :trigger-runtime :held-inputs])))))
+
+(deftest bound-agrees-with-handle-input-test
+  (let [state {:triggers {:definitions {:stop {:match {:source :keyboard :state :pressed :id #{:a :b}}
+                                                :action {:type :stop-all}}
+                                       :off {:match {:source :keyboard :id #{:c :d}}
+                                             :enabled? false :action {:type :stop-all}}}}
+               :config {:input {:trigger-map {{:source :keyboard :id :b} {:type :tap-tempo}
+                                              {:source :keyboard :id :c} {:type :tap-tempo}}}}}]
+    (doseq [[id expected] [[:a :transport/stop]   ; definition alone
+                           [:b :transport/stop]   ; definition wins over the map
+                           [:c :timing/tap-tempo] ; map wins over a disabled definition
+                           [:d nil]               ; disabled definition alone
+                           [:e nil]]]             ; unbound
+      (testing (str id)
+        (let [event (input-events/trigger :keyboard id :pressed)]
+          (is (= (some? expected) (triggers/bound? state event)))
+          (is (= expected (get-in (triggers/handle-input {:state state :input-event event :time 1})
+                                  [:dispatch :event/type]))))))))
 
 (deftest trigger-release-removes-held-input
   (let [input {:type :trigger-release :source :keyboard :id :space :timestamp 1100}
