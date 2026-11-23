@@ -1,7 +1,7 @@
 # Phase 2 — One dialog shell
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)   **Re-checked:** 2026-11-22 at `2227bce`, 275 commits later: every citation re-checked; five dialogs added since (the confirm dialog, the unsaved-changes confirm, the rig report, the zone pattern editor and the step grid window); the parts other work has done marked (§0)
-**Status:** Built on `keyboard-phase2` from `c3de6b6` (2026-11-23), D4=A with the menu table (§9). **Last verified against:** `90dbe87`; §10 records what was built. §§0–9 describe the re-check at `2227bce`.
+**Status:** Done on `keyboard-phase2` (2026-11-23), from `c3de6b6`; D4=A with the menu table (§9). **Last verified against:** `90dbe87`; both full suites passed (§10). §§0–9 describe the re-check at `2227bce`.
 **Size:** ~2 days (was ~1.5: eleven dialogs instead of six, three of them modal questions, against two defects and one duplicate already gone)   **Needs:** nothing open   **Depends on:** nothing. Phase 3 can go first and give the shell `keys/typing-target?` (03 §0)
 **Supersedes / Superseded by:** none   **Related findings:** K-12, K-14 (`00-overview.md` §4); review 01 F18, M5, F19 (dialog parts), Q9; the shared scene filter the 2026-10-07 plan wanted in every dialog
 
@@ -212,6 +212,7 @@ Run `clj -M:mac-arm:test -n laser-show.views.dialogs.common-test -n laser-show.e
 | Full regression suite at `90dbe87` | Tests | Assertions | Failures | Errors |
 |---|---:|---:|---:|---:|
 | Unit (`clojure -M:mac-arm:test:test-ui-headless`) | 1,914 | 570,734 | 0 | 0 |
+| Headless UI (`clojure -M:test-ui:mac-arm:test-ui-headless`) | 325 | 1,779 | 0 | 0 |
 
 ---
 

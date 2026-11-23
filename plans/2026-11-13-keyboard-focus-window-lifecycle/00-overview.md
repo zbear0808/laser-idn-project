@@ -1,7 +1,7 @@
 # Keyboard, focus and window lifecycle — overview
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)
-**Status:** In progress. Phase 1 is done (`93c638a`), Phase 3 is done (`c190f7c`), Phase 4 is done (`71ab827`), and Phase 2 is built on `keyboard-phase2` (`90dbe87`). Phase 5 awaits **D11**. The other decisions are answered (§7). **Last verified against:** `90dbe87` for Phase 2 (02 §10); `c190f7c` for Phase 3 (03 §10); `2227bce` for Phase 5's original code survey (05 §0 updates its shared window hook). §2 is the historical priority comparison at `cb32414`.
+**Status:** In progress. Phase 1 is done (`93c638a`), Phase 3 is done (`c190f7c`), Phase 4 is done (`71ab827`), and Phase 2 is done on `keyboard-phase2` (`90dbe87`). Phase 5 awaits **D11**. The other decisions are answered (§7). **Last verified against:** `90dbe87` for Phase 2 (02 §10); `c190f7c` for Phase 3 (03 §10); `2227bce` for Phase 5's original code survey (05 §0 updates its shared window hook). §2 is the historical priority comparison at `cb32414`.
 **Supersedes / Superseded by:** supersedes `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md` (approved with D0 on 2026-11-14; that file is marked superseded and otherwise untouched)
 **Related findings:** review 01 F3, F4, F7, F18, F20, M5, L3, Q4, Q6; 02 #15, M4 (clipboard part); 05 F17, F9, L3; carry-overs "menu stubs" and "unsaved-changes guard"; undo plan §10
 
@@ -9,7 +9,7 @@
 
 **Phase 1 (`01-phase1-unsaved-guard.md`) is done** (`93c638a`, 2026-11-14; results and differences from the plan in its §10). It was the only pending item that stopped real data loss: closing the window, File > Exit, File > New and File > Open discarded unsaved work without asking (`views/root.clj:167-169`, `events/handlers/menu.clj:28,133` at `cb32414`). **Phase 4 is done** too (2026-11-22). Docs 02, 03 and 05 were re-checked at `2227bce` on 2026-11-22. **Phase 3 is done** (2026-11-22, `d2e23c1`..`c190f7c`; results, deviations and probes in 03 §10): a list's keys work with the focus on its own buttons and boxes, and Space plays after a click on TAP, a tab or the trigger-mode menu.
 
-**Phase 2 is built** on `keyboard-phase2` (`90dbe87`); [02 §10](02-phase2-dialog-shell.md#10-as-built-on-keyboard-phase2-from-c3de6b6) records the implementation and verification. **Next is Phase 5:** answer D11 (where keyboard triggers work and which keys a focused editor keeps). Both its code dependencies are in place.
+**Phase 2 is done** on `keyboard-phase2` (`90dbe87`); [02 §10](02-phase2-dialog-shell.md#10-as-built-on-keyboard-phase2-from-c3de6b6) records the implementation and both full regression suites. **Next is Phase 5:** answer D11 (where keyboard triggers work and which keys a focused editor keeps). Both its code dependencies are in place.
 
 The CI fix (§1) is in `e87b272`.
 
@@ -17,7 +17,7 @@ The CI fix (§1) is in `e87b272`.
 |---|---|---|---|
 | `01-phase1-unsaved-guard.md` | Unsaved-changes guard and an exit path | ~1 day | D1, D2, D3 (answered A). Done, `93c638a` |
 | `03-phase3-key-handling.md` | Keys reach the right place. Verified at `2227bce` | ~0.5–1 day | **Done** (2026-11-22, `d2e23c1`..`c190f7c`, 03 §10; D5–D7 answered A) |
-| `02-phase2-dialog-shell.md` | One shell for all twelve dialogs, including About; stale form/rename fixes and working View commands | ~2 days | **Built** (`90dbe87`, 02 §10; D4=A) |
+| `02-phase2-dialog-shell.md` | One shell for all twelve dialogs, including About; stale form/rename fixes and working View commands | ~2 days | **Done on `keyboard-phase2`** (`90dbe87`, 02 §10; D4=A) |
 | `04-phase4-clipboard.md` | One clipboard, in three steps; Step 4a (the one clipboard) ships on its own | ~2–2.5 days | **Done** (2026-11-22). 4a: 2026-11-21, `02ae75c`..`1113d9a`, 04 §9a; 4b–4c: D9 answered A, 2026-11-22, `29bf152`..`71ab827`, 04 §9b |
 | `05-phase5-keyboard-triggers.md` | Keyboard as a cue-trigger source (cells, vibe roles, map and pattern pads, the Zone step key). K-15 already fixed by other work (05 §0). Verified at `2227bce` | ~1–1.5 days | **D11 (re-opened)**; D10, D12 answered A. Phases 3 and 2 built |
 
