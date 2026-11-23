@@ -192,7 +192,7 @@
   "The effect chain editor dialog window."
   [{:keys [fx/context]}]
   (let [{:keys [col row]} (fx/sub-ctx context subs/dialog-data :effect-chain-editor)
-        chain-name (:name (get-in (fx/sub-val context :chains) [:effect-chains [col row]]))]
+        chain-name (:name (fx/sub-ctx context subs/effect-cell-chain col row))]
     {:fx/type common/dialog-stage
      :dialog-id :effect-chain-editor
      :title (common/window-title "Effects Chain" chain-name col row)

@@ -454,7 +454,7 @@
   "The cue chain editor dialog window."
   [{:keys [fx/context]}]
   (let [{:keys [col row]} (fx/sub-ctx context subs/dialog-data :cue-chain-editor)
-        chain-name (:name (get-in (fx/sub-val context :chains) [:cue-chains [col row]]))]
+        chain-name (:name (fx/sub-ctx context subs/cue-cell-chain col row))]
     {:fx/type common/dialog-stage
      :dialog-id :cue-chain-editor
      :title (common/window-title "Cue Chain Editor" chain-name col row)
