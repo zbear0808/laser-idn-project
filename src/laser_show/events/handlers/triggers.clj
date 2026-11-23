@@ -7,6 +7,7 @@
    zone map pad's a :zone-map/press (handlers/zone_maps.clj), a pattern
    pad's a :pattern-pads/press and the Zone step key's a :pattern-pads/step
    (handlers/zone_patterns.clj)."
+  (:refer-clojure :exclude [bound?])
   (:require [clojure.tools.logging :as log]
             [laser-show.input.events :as input-events]
             [laser-show.triggers.matcher :as matcher]))
@@ -39,6 +40,15 @@
                    :trigger-id id
                    :behavior (:behavior definition))))
         (get-in state [:triggers :definitions] {})))
+
+(defn- resolve-action [state input-event]
+  (or (definition-action state input-event)
+      (legacy-action state input-event)))
+
+(defn bound?
+  "Does this router event have a matching enabled definition or trigger-map action?"
+  [state input-event]
+  (boolean (resolve-action state input-event)))
 
 (defn- pressed? [input-event]
   (or (input-events/note-on? input-event)
@@ -160,8 +170,7 @@
 
 (defn handle-input
   [{:keys [state input-event time]}]
-  (let [action (or (definition-action state input-event)
-                   (legacy-action state input-event))
+  (let [action (resolve-action state input-event)
         ;; A vibe binding leaves the bookkeeping alone: nothing reads it
         ;; (probe v8), and the engine keeps its own holds; so does a map pad's
         next-state (if (quiet-action? (:type action))
