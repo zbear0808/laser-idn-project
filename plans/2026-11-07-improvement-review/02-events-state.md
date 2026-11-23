@@ -263,7 +263,7 @@ The architecture is sound in principle. There is one cljfx context atom, handler
 1. **Load replaces the document.** Take the document part of `domains/build-initial-state`, apply the loaded data, keep the runtime and backend domains, and reset `:playback`, `:list-ui`, `[:ui :dialogs]` and history. Emit `:multi-engine/refresh`.
 2. **Version the format.** Add `:format-version` to `project-metadata.edn`, plus a `migrate` multimethod keyed by version.
 3. **New project resets only document and UI domains**, then applies the starter templates.
-4. **Do the I/O in effects.** Add `:project/write-zip` and `:project/read-zip` effects that run in a `future` and dispatch `:project/saved`, `:project/save-failed`, `:project/loaded` and `:project/load-failed`. The pure handler applies the result. Surface failures as `[:project :error]` in state for a status-bar or toast view.
+4. **Move project ZIP I/O off the event thread. Very low priority; deferred (2026-11-23, [overview row 14](00-overview.md#status-re-checked-2026-11-17)).** If revisited, keep Save/Open/Exit continuations tied to the result of the specific read or write. See keyboard Phase 1's unsaved-changes guard.
 5. **Remove the dead `effect-save-project`/`effect-load-project` stubs** (`events/core.clj:101-121`) and `:project/set-folder` (`files.clj:21-24`).
 
 - Files: `state/persistent.clj`, `state/serialization.clj`, `handlers/menu.clj`, `handlers/files.clj`, `events/core.clj`, `state/domains.clj`, `test/.../persistent_test.clj`.

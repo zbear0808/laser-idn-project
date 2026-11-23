@@ -63,7 +63,7 @@
     (testing "no tap without the setting, nor while Link sync is on (V3)"
       (is (nil? (:dispatch (engine/press (assoc-in (starter) [:config :vibes :settings :hit-taps-tempo?] false)
                                          {:role :hit :time 1000}))))
-      (is (nil? (:dispatch (engine/press (assoc-in (starter) [:backend :link :sync-enabled?] true)
+      (is (nil? (:dispatch (engine/press (update-in (starter) [:backend :link] assoc :link-enabled? true :sync-enabled? true)
                                          {:role :hit :time 1000})))))
     (testing "the input's own time, and a pad's press says so"
       (let [s (:state (engine/press (starter) {:role :hit :time 5000 :input-time 1000 :src :pad}))]
@@ -680,10 +680,14 @@
 ;; One tap tempo (plans/2026-11-18-vibe-mode/06, V3 A)
 
 (deftest hit-skips-the-tap-while-link-sync-is-on-test
-  (let [linked (assoc-in (starter) [:backend :link :sync-enabled?] true)
+  (let [linked (update-in (starter) [:backend :link] assoc :link-enabled? true :sync-enabled? true)
         {:keys [state dispatch]} (engine/press linked {:role :hit :time 1000})
         button (fn [s t] (:state (handlers/handle-event {:event/type :timing/tap-tempo :time t :state s})))]
     (is (nil? dispatch) "invariant 8: with Link sync on the tempo is Link's, not the hits'")
+    (is (= :timing/tap-tempo
+           (get-in (engine/press (assoc-in linked [:backend :link :link-enabled?] false)
+                                 {:role :hit :time 1000}) [:dispatch :event/type]))
+        "turning Link off restores HIT tap tempo even with the sync preference still checked")
     (is (some? (rt state :voices :hit)) "the press plays as ever")
     (is (= {:id 1 :held? true :src :input} (pulse state :hit)))
     (is (= [1000 1500] (get-in (-> linked (button 1000) (button 1500)) [:timing :tap :taps]))

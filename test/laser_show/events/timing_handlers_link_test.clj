@@ -14,6 +14,7 @@
                     :sync-enabled? false
                     :link-bpm 120.0
                     :link-peers 1}}
+   :timing {:bpm 120.0}
    :playback {:accumulated-beats 4.5
               :phase-offset-target 0.0}})
 
@@ -161,28 +162,24 @@
 ;; Integration Tests
 
 
-(deftest test-link-bpm-sync-workflow
-  (testing "Complete BPM sync workflow"
-    (let [;; 1. Enable BPM sync
-          enable-event {:state base-state
-                        :event/type :timing/toggle-link-sync}
-          state-1 (:state (timing/handle enable-event))
-          
-          ;; 2. Receive BPM update from Link
-          bpm-event {:state state-1
-                     :event/type :timing/link-bpm-changed
-                     :bpm 130.0}
-          state-2 (:state (timing/handle bpm-event))
-          
-          ;; 3. Apply BPM change to app
-          set-bpm-event {:state state-2
-                         :event/type :timing/set-bpm
-                         :bpm 130.0}
-          state-3 (:state (timing/handle set-bpm-event))]
-      
-      (is (true? (get-in state-3 [:backend :link :sync-enabled?])))
-      (is (= 130.0 (get-in state-3 [:backend :link :link-bpm])))
-      (is (= 130.0 (get-in state-3 [:timing :bpm]))))))
+(defn- handle [state event] (:state (timing/handle (assoc event :state state))))
+
+(deftest steady-link-bpm-applies-on-sync-enable-test
+  (let [ready (assoc-in base-state [:backend :link :link-bpm] 128.0)]
+    (doseq [enable [{:event/type :timing/link-set-sync-enabled :fx/event true}
+                    {:event/type :timing/toggle-link-sync}]]
+      (let [following (handle ready enable)]
+        (is (= 128.0 (get-in following [:timing :bpm])) "no new peer report required")
+        (is (= 131.0 (get-in (handle following {:event/type :timing/link-bpm-changed :bpm 131.0})
+                             [:timing :bpm])))))
+    (let [off (assoc-in ready [:backend :link :link-enabled?] false)
+          armed (handle off {:event/type :timing/link-set-sync-enabled :fx/event true})]
+      (is (= 120.0 (get-in armed [:timing :bpm])) "the preference alone cannot change tempo")
+      (is (= 128.0 (get-in (handle armed {:event/type :timing/link-toggle}) [:timing :bpm]))
+          "re-enabling Link resumes the saved sync preference"))
+    (is (= 120.0 (get-in (handle (assoc-in ready [:backend :link :link-bpm] nil)
+                                 {:event/type :timing/toggle-link-sync}) [:timing :bpm]))
+        "no reported tempo yet")))
 
 (deftest test-link-settings-workflow
   (testing "Link settings configuration"

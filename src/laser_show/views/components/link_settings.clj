@@ -3,7 +3,7 @@
    
    Architecture:
    - Carabiner daemon auto-connects on app startup
-   - Button toggles Link sync mode (:passive/:off)
+    - The Link button and BPM-sync checkbox are separate local switches
    - Shows both Carabiner and Link connection status
    
    Provides:
@@ -98,16 +98,17 @@
 
 (defn- setting-row
   "A row with a checkbox setting and optional description."
-  [{:keys [label description checked? disabled? on-change]}]
+  [{:keys [id label description checked? disabled? on-change]}]
   {:fx/type :v-box
    :spacing 2
    :children (filterv some?
-               [{:fx/type :check-box
-                 :text label
-                 :selected (boolean checked?)
-                 :disable (boolean disabled?)
-                 :style (str "-fx-text-fill: " (css/text-primary) ";")
-                 :on-selected-changed on-change}
+               [(cond-> {:fx/type :check-box
+                         :text label
+                         :selected (boolean checked?)
+                         :disable (boolean disabled?)
+                         :style (str "-fx-text-fill: " (css/text-primary) ";")
+                         :on-selected-changed on-change}
+                  id (assoc :id id))
                 (when description
                   {:fx/type :label
                    :text description
@@ -191,6 +192,7 @@
                    :style (str "-fx-text-fill: " (css/text-secondary) ";")}
                   
                   {:fx/type setting-row
+                   :id "link-sync-bpm"
                    :label "Sync BPM from Link"
                    :description "Use Link session tempo as the app BPM"
                    :checked? sync-enabled?

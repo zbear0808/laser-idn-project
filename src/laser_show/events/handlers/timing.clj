@@ -13,7 +13,7 @@
    
    Link Architecture:
    - Carabiner daemon auto-connects on app startup
-   - Button toggles Link sync mode (:passive/:off)
+    - Link and following its tempo are separate local controls
    - UI shows both Carabiner and Link status"
   (:require [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.animation.show-time :as show-time]
@@ -112,21 +112,32 @@
 
 ;; Link Events
 
+(defn- follow-link-tempo [state bpm]
+  ;; Check both switches on the event thread: a report queued while sync
+  ;; was on must not change the app's tempo after the user turns it off.
+  (if (link/should-follow-bpm? state bpm)
+    (assoc-in state [:timing :bpm] (double bpm))
+    state))
+
+(defn- with-link-settings [state link-state]
+  (follow-link-tempo (assoc-in state [:backend :link] link-state) (:link-bpm link-state)))
+
+(defn- set-link-bpm-sync [state enabled?]
+  (let [settings (get-in state [:backend :link])]
+    (with-link-settings state (if enabled? (link/enable-sync settings) (link/disable-sync settings)))))
 
 (defn- handle-timing-toggle-link-sync
   "Toggle Ableton Link BPM sync on/off."
   [{:keys [state]}]
-  (let [current-sync (get-in state [:backend :link :sync-enabled?] false)
-        link-state (get-in state [:backend :link])
-        new-link-state (if current-sync
-                         (link/disable-sync link-state)
-                         (link/enable-sync link-state))]
-    {:state (assoc-in state [:backend :link] new-link-state)}))
+  {:state (set-link-bpm-sync state (not (get-in state [:backend :link :sync-enabled?])))})
 
 (defn- handle-timing-link-bpm-changed
-  "Receive BPM update from Link network."
+  "Cache a reported tempo for display; follow it only while sync is active."
   [{:keys [state bpm]}]
-  {:state (assoc-in state [:backend :link :link-bpm] bpm)})
+  {:state (-> (cond-> state
+                (link/bpm-changed? (get-in state [:backend :link :link-bpm]) bpm)
+                (assoc-in [:backend :link :link-bpm] bpm))
+              (follow-link-tempo bpm))})
 
 (defn- handle-timing-sync-to-downbeat
   "Synchronize playback to Link's next downbeat.
@@ -202,28 +213,19 @@
 
 
 (defn- handle-timing-link-toggle
-  "Toggle Link sync mode on/off.
-   Carabiner must be connected first (auto on startup).
-   This enables/disables Link by setting sync mode to :passive or :off."
+  "Enable or disable read-only Link. Re-enabling resumes BPM sync if selected."
   [{:keys [state]}]
   (let [link-enabled? (get-in state [:backend :link :link-enabled?] false)
         link-state (get-in state [:backend :link])
         new-link-state (if link-enabled?
                          (link/disable-link! link-state)
                          (link/enable-link! link-state))]
-    {:state (assoc-in state [:backend :link] new-link-state)}))
+    {:state (with-link-settings state new-link-state)}))
 
 (defn- handle-timing-link-set-sync-enabled
-  "Enable or disable BPM sync from Link to app.
-   This controls whether received Link BPM updates the app BPM.
-   Link must be enabled first."
+  "Set the BPM-sync preference from the Settings checkbox."
   [{:keys [state fx/event]}]
-  (let [enabled? (boolean event)
-        link-state (get-in state [:backend :link])
-        new-link-state (if enabled?
-                         (link/enable-sync link-state)
-                         (link/disable-sync link-state))]
-    {:state (assoc-in state [:backend :link] new-link-state)}))
+  {:state (set-link-bpm-sync state event)})
 
 (defn- handle-timing-link-set-beat-sync
   "Enable or disable downbeat alignment sync."
@@ -257,7 +259,7 @@
 (defn- handle-timing-link-enabled
   "Update Link enabled status (internal event from link service)."
   [{:keys [state enabled?]}]
-  {:state (assoc-in state [:backend :link :link-enabled?] enabled?)})
+  {:state (with-link-settings state (assoc (get-in state [:backend :link]) :link-enabled? enabled?))})
 
 
 ;; Global Trigger Mode

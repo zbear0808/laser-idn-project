@@ -1,6 +1,8 @@
 (ns laser-show.input.link-test
   "Tests for Ableton Link synchronization service."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [beat-carabiner.core :as bc]
+            [clojure.test :refer [deftest is testing]]
+            [laser-show.events.handlers.timing :as timing]
             [laser-show.input.link :as link]))
 
 
@@ -61,6 +63,8 @@
     (let [bpm-changed? @#'link/bpm-changed?]
       ;; Nil old BPM should trigger change
       (is (true? (bpm-changed? nil 120.0)))
+      (doseq [invalid [nil 0 -1 "128" ##NaN ##Inf]]
+        (is (false? (bpm-changed? 120.0 invalid))))
       
       ;; Small change below threshold should not trigger
       (is (false? (bpm-changed? 120.0 120.005)))
@@ -77,73 +81,60 @@
 ;; Note: The status listener expects :link-bpm key in the status map (from beat-carabiner)
 
 
-(deftest test-status-listener-creation
-  (testing "Status listener dispatches events correctly"
-    (let [dispatched-events (atom [])
-          dispatch-fn (fn [event] (swap! dispatched-events conj event))
-          get-state-fn (fn [] {:sync-enabled? true :link-bpm nil :link-peers 0})
-          listener (link/create-status-listener dispatch-fn get-state-fn)
-          ;; Status map uses :link-bpm key (as returned by beat-carabiner)
-          status {:link-bpm 125.0 :link-peers 1}]
-      
-      ;; Call listener with status
-      (listener status)
-      
-      ;; Should dispatch link-bpm-changed
-      (is (= 1 (count (filter #(= :timing/link-bpm-changed (:event/type %)) @dispatched-events))))
-      
-      ;; Should dispatch set-bpm when sync is enabled
-      (is (= 1 (count (filter #(= :timing/set-bpm (:event/type %)) @dispatched-events)))))))
+(def ^:private following
+  {:timing {:bpm 128.0}
+   :backend {:link (assoc link/initial-state :carabiner-connected? true :link-enabled? true
+                          :sync-enabled? true :link-bpm 128.0 :link-peers 1)}})
 
-(deftest test-status-listener-no-sync
-  (testing "Status listener does not dispatch set-bpm when sync disabled"
-    (let [dispatched-events (atom [])
-          dispatch-fn (fn [event] (swap! dispatched-events conj event))
-          get-state-fn (fn [] {:sync-enabled? false :link-bpm nil :link-peers 0})
-          listener (link/create-status-listener dispatch-fn get-state-fn)
-          ;; Status map uses :link-bpm key (as returned by beat-carabiner)
-          status {:link-bpm 125.0 :link-peers 0}]
-      
-      ;; Call listener with status
-      (listener status)
-      
-      ;; Should dispatch link-bpm-changed
-      (is (= 1 (count (filter #(= :timing/link-bpm-changed (:event/type %)) @dispatched-events))))
-      
-      ;; Should NOT dispatch set-bpm when sync is disabled
-      (is (= 0 (count (filter #(= :timing/set-bpm (:event/type %)) @dispatched-events)))))))
+(defn- apply-event [s e] (:state (timing/handle (assoc e :state s))))
 
-(deftest test-status-listener-threshold
-  (testing "Status listener respects BPM change threshold"
-    (let [dispatched-events (atom [])
-          dispatch-fn (fn [event] (swap! dispatched-events conj event))
-          get-state-fn (fn [] {:sync-enabled? true :link-bpm 120.0 :link-peers 0})
-          listener (link/create-status-listener dispatch-fn get-state-fn)
-          ;; Small change below threshold - use :link-bpm key
-          status {:link-bpm 120.005 :link-peers 0}]
-      
-      ;; Call listener with status
-      (listener status)
-      
-      ;; Should dispatch link-bpm-changed (always updates UI display)
-      (is (= 1 (count (filter #(= :timing/link-bpm-changed (:event/type %)) @dispatched-events))))
-      
-      ;; Should NOT dispatch set-bpm due to threshold
-      (is (= 0 (count (filter #(= :timing/set-bpm (:event/type %)) @dispatched-events)))))))
+(deftest stable-status-is-quiet-but-corrects-app-tempo-drift-test
+  (let [s (atom following)
+        sent (atom [])
+        listener (link/create-status-listener #(do (swap! sent conj %) (swap! s apply-event %)) #(deref s))
+        status {:link-bpm 128.0 :link-peers 1 :sync-mode :off}]
+    (listener status)
+    (listener (assoc status :link-bpm 128.005))
+    (is (empty? @sent) "steady tempo and sub-threshold jitter generate no events")
+    (listener (assoc status :link-peers 2))
+    (is (= [{:event/type :timing/link-peers-changed :peers 2}] @sent))
+    (reset! sent [])
+    (swap! s assoc-in [:timing :bpm] 120.0)
+    (dotimes [_ 3] (listener (assoc status :link-peers 2)))
+    (is (= 128.0 (get-in @s [:timing :bpm])) "compare the report with the app, not just the display cache")
+    (is (= 1 (count @sent)) "one correction, then silence")))
 
-(deftest test-status-listener-peers-changed
-  (testing "Status listener dispatches peer count changes"
-    (let [dispatched-events (atom [])
-          dispatch-fn (fn [event] (swap! dispatched-events conj event))
-          get-state-fn (fn [] {:sync-enabled? false :link-bpm 120.0 :link-peers 0})
-          listener (link/create-status-listener dispatch-fn get-state-fn)
-          status {:link-bpm 120.0 :link-peers 2}]
-      
-      ;; Call listener with status
-      (listener status)
-      
-      ;; Should dispatch peers-changed event
-      (is (= 1 (count (filter #(= :timing/link-peers-changed (:event/type %)) @dispatched-events)))))))
+(deftest queued-status-respects-the-current-sync-controls-test
+  (doseq [flag [:link-enabled? :sync-enabled?]]
+    (let [queued (atom [])
+          listener (link/create-status-listener #(swap! queued conj %) (constantly following))]
+      (listener {:link-bpm 132.0 :link-peers 1})
+      (let [off (assoc-in following [:backend :link flag] false)
+            result (reduce apply-event off @queued)]
+        (is (= 132.0 (get-in result [:backend :link :link-bpm])) "still display the peer tempo")
+        (is (= 128.0 (get-in result [:timing :bpm])) (str flag " off before processing"))))))
+
+(deftest consecutive-reports-can-return-to-the-last-applied-values-test
+  (let [queued (atom [])
+        listener (link/create-status-listener #(swap! queued conj %) (constantly following))]
+    ;; The event thread has not applied either report yet.
+    (dotimes [_ 3] (listener {:link-bpm 135.0 :link-peers 2}))
+    (is (= 2 (count @queued)) "only one BPM and one peer event, even with the event thread behind")
+    (listener {:link-bpm 128.0 :link-peers 1})
+    (is (= following (reduce apply-event following @queued)))))
+
+(deftest connection-picks-up-a-status-that-already-arrived-test
+  (let [sent (atom [])]
+    (with-redefs [bc/connect (constantly true)
+                  bc/add-status-listener (constantly nil)
+                  bc/state (constantly {:link-bpm 140.0 :link-peers 0})]
+      (link/connect-carabiner! link/initial-state #(swap! sent conj %) (constantly {:backend {:link link/initial-state}}))
+      (is (= [{:event/type :timing/link-bpm-changed :bpm 140.0}] @sent)))))
+
+(deftest failed-connection-registers-no-listener-test
+  (with-redefs [bc/connect (constantly false)
+                bc/add-status-listener (fn [_] (throw (AssertionError. "no connection")))]
+    (is (= link/initial-state (link/connect-carabiner! link/initial-state identity (constantly {}))))))
 
 
 ;; Initialization Tests

@@ -84,6 +84,35 @@
     (ui/wait-for! #(= 140.0 (get-in (state/get-raw-state) [:timing :bpm])))
     (ui/assert-text! "#bpm-input" "140.0")))
 
+(deftest toolbar-and-settings-follow-a-steady-link-tempo-test
+  (let [robot (ui/robot)]
+    ;; start-test! never connects to a peer. Supply the service's status only.
+    (ui/assert-disabled! "#link-sync-btn")
+    (events/dispatch! {:event/type :timing/carabiner-connected :connected? true})
+    (try
+      (events/dispatch! {:event/type :timing/link-bpm-changed :bpm 128.0})
+      (ui/assert-enabled! "#link-sync-btn")
+      (ui/click! robot "#link-sync-btn")
+      (ui/wait-for! #(true? (get-in (state/get-raw-state) [:backend :link :link-enabled?])))
+      (ui/assert-text! "#bpm-input" "120.0")
+      (ui/click! robot "#link-sync-btn")
+      (ui/assert-text! "#bpm-input" "128.0")
+      (ui/click! robot "#settings-tab")
+      (ui/assert-selected! "#link-sync-bpm")
+      (ui/uncheck! robot "#link-sync-bpm")
+      (events/dispatch! {:event/type :timing/link-bpm-changed :bpm 135.0})
+      (is (events/flush!))
+      (ui/assert-text! "#bpm-input" "128.0")
+      (ui/check! robot "#link-sync-bpm")
+      (ui/assert-text! "#bpm-input" "135.0")
+      (ui/click! robot "#link-sync-btn")
+      (ui/wait-for! #(not (ui/selected? "#link-sync-bpm")))
+      (is (true? (get-in (state/get-raw-state) [:backend :link :link-enabled?]))
+          "stop following tempo without turning off Link")
+      (finally
+        (events/dispatch! {:event/type :timing/carabiner-connected :connected? false})
+        (events/flush!)))))
+
 (deftest bpm-commits-on-focus-loss-test
   (let [robot (ui/robot)
         bpm #(get-in (state/get-raw-state) [:timing :bpm])
