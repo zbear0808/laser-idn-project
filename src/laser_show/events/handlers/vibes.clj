@@ -79,9 +79,8 @@
     {}))
 
 (defn- handle-window-focus
-  "The main window lost focus (:fx/event false): a pad's release may never
-   come, so every pad's hold ends. A key's hold stays: its release still
-   comes."
+  "The main window lost focus: release its pointer pads. Device keys keep
+   their holds; the keyboard filter sends releases for this window's keys."
   [{focused? :fx/event}]
   (if (= false focused?)
     {:dispatch {:event/type :vibe/release-all :only :pad}}

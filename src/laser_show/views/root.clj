@@ -24,6 +24,7 @@
    [laser-show.views.components.title-bar :as title-bar]
    [laser-show.views.components.preview :as preview]
    [laser-show.views.components.tabs :as tabs]
+   [laser-show.views.key-triggers :as key-triggers]
    [laser-show.views.dialogs.effect-chain-editor :as effect-chain-editor]
    [laser-show.views.dialogs.cue-chain-editor :as cue-chain-editor]
    [laser-show.views.dialogs.timeline-cue-editor :as timeline-cue-editor]
@@ -280,9 +281,9 @@
                                          ;; asynchronously, too late to cancel the close.
                                          (.consume e)
                                          (events/dispatch! {:event/type :file/exit}))
-                     :scene {:fx/type :scene
-                             :stylesheets stylesheets
-                             :root {:fx/type main-layout}}}]
+                     :scene (key-triggers/wrap-scene {:fx/type :scene
+                                                      :stylesheets stylesheets
+                                                      :root {:fx/type main-layout}} #{})}]
                    (keep (fn [[id component]]
                            (when (fx/sub-ctx context subs/dialog-open? id)
                              {:fx/type @component :fx/key id})))

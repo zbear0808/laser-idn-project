@@ -5,7 +5,8 @@
   (:require [cljfx.api :as fx]
             [laser-show.common.util :as u]
             [laser-show.events.core :as events]
-            [laser-show.subs :as subs])
+            [laser-show.subs :as subs]
+            [laser-show.views.key-triggers :as key-triggers])
   (:import [javafx.application Platform]
            [javafx.beans.value ChangeListener]
            [javafx.scene Parent]
@@ -126,21 +127,23 @@
    - :undo-keys? - Shortcut+Z, Shift+Shortcut+Z and Shortcut+Y undo and
      redo (default true for :none, false for a modal question)
    - :on-key-extra - (fn [KeyEvent]) for the dialog's own keys, after undo
-     and redo; it consumes what it uses"
+     and redo; it consumes what it uses
+   - :claimed-keys - keys this editor uses anywhere in its window"
   [{:keys [fx/context dialog-id title content modality resizable
-           width height min-width min-height on-close-request undo-keys? on-key-extra]}]
+           width height min-width min-height on-close-request undo-keys? on-key-extra claimed-keys]}]
   (let [modality (or modality :none)
         undo? (if (some? undo-keys?) undo-keys? (= :none modality))
-        on-key (if undo? (scene-key-handler on-key-extra) on-key-extra)]
+        on-key (if undo? (scene-key-handler on-key-extra) on-key-extra)
+        scene (cond-> {:fx/type :scene
+                       :stylesheets (fx/sub-ctx context subs/stylesheet-urls)
+                       :root content}
+                on-key (assoc :on-key-pressed on-key))]
     (cond-> {:fx/type :stage
              :showing (fx/sub-ctx context subs/dialog-open? dialog-id)
              :title title
              :modality modality
              :on-close-request (or on-close-request {:event/type :ui/close-dialog :dialog-id dialog-id})
-             :scene (cond-> {:fx/type :scene
-                             :stylesheets (fx/sub-ctx context subs/stylesheet-urls)
-                             :root content}
-                      on-key (assoc :on-key-pressed on-key))}
+             :scene (if (= :none modality) (key-triggers/wrap-scene scene claimed-keys) scene)}
       (some? resizable) (assoc :resizable resizable)
       width (assoc :width width)
       height (assoc :height height)
