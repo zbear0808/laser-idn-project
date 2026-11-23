@@ -9,7 +9,7 @@
 
 **Phase 1 (`01-phase1-unsaved-guard.md`) is done** (`93c638a`, 2026-11-14; results and differences from the plan in its §10). It was the only pending item that stopped real data loss: closing the window, File > Exit, File > New and File > Open discarded unsaved work without asking (`views/root.clj:167-169`, `events/handlers/menu.clj:28,133` at `cb32414`). **Phase 4 is done** too (2026-11-22). Docs 02, 03 and 05 were re-checked at `2227bce` on 2026-11-22. **Phase 3 is done** (2026-11-22, `d2e23c1`..`c190f7c`; results, deviations and probes in 03 §10): a list's keys work with the focus on its own buttons and boxes, and Space plays after a click on TAP, a tab or the trigger-mode menu.
 
-**Next is Phase 2 (`02-phase2-dialog-shell.md`).** It takes `keys/typing-target?` (now in `src/laser_show/views/keys.clj`) for the timeline's Space guard. Phase 5 needs D11 answered, then Phase 2.
+**Phase 2 (`02-phase2-dialog-shell.md`) is in progress** on `keyboard-phase2` from `c3de6b6`. It takes Phase 3's `keys/typing-target?` for the timeline's Space guard. Phase 5 needs D11 answered and Phase 2's shell.
 
 The CI fix (§1) is in `e87b272`.
 

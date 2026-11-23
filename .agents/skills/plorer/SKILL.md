@@ -124,12 +124,14 @@ Each of these was run against the app in test mode.
 (click! "#effects-tab")
 (click! "#grid-tab")
 
-;; Use the menu bar. This item only flips a state flag, so wait for the state
-;; to change: events run asynchronously.
-(let [before (state [:ui :preview-visible?])]
+;; Use the menu bar; on Grid, the preview's split pane disappears or returns.
+(click! "#grid-tab")
+(wait-for #(= :grid (state [:ui :active-tab])))
+(let [shown? #(boolean (seq (p/all (main-window) "#main-split")))
+      before (shown?)]
   (click! "#view-menu")
   (choose! "Toggle Preview")
-  (wait-for #(not= before (state [:ui :preview-visible?]))))
+  (wait-for #(not= before (shown?))))
 
 ;; Pick from a combo box.
 (click! "#trigger-mode-selector")

@@ -197,6 +197,12 @@ Run `clj -M:mac-arm:test -n laser-show.views.dialogs.common-test -n laser-show.e
 | View > Fullscreen (F11) | flips `[:ui :fullscreen?]` (`:358-363`), nothing reads it | a small effect that calls `Stage.setFullScreen` on the main stage |
 | Help > Check for Updates | no-op (`:384-389`) | remove the item until releases carry binaries |
 
+## 10. As built on `keyboard-phase2` (from `c3de6b6`)
+
+- `views.root/dialog-registry` mounts open windows in order, keyed by dialog id. The confirm window stays above the rig report. Components are looked up through vars so an individually reloaded view is used on its next render (`772c6da`, `9b6e935`).
+- Add Projector and the trigger editor keep the content-driven sizing from `04c0ffd`. The three modal questions keep their default/cancel buttons, and closing the unsaved-changes window still cancels the pending operation.
+- The new closed default for the rig report exposed two assumptions. The report view calculated mismatches on a fresh document, and `:rig/open-report` could open it without a loaded file. The view and handler now check the filename recorded by `:file/project-loaded`; a loaded show can still reopen its report after closing it. Before the fix, a fresh cue pinned to a missing projector produced a warning count of 1; the bare open event changed `:open?` to true (`19078cb`).
+
 ---
 
 ## Decisions

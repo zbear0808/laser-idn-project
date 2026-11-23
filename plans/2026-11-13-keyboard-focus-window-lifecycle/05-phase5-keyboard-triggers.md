@@ -1,7 +1,7 @@
 # Phase 5 — Keyboard as a cue-trigger source
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)   **Re-checked:** 2026-11-22 at `2227bce`, 275 commits later: every citation re-checked; K-15 found fixed by other work; the Settings placeholder found gone; the trigger actions added by vibes and zones (Z4, Z5), the new windows and their keys taken in (§0)
-**Status:** Proposed. D10 and D12 answered A (2026-11-22, the ★ options, taken under the user's standing choice to take the recommended options). **D11 re-opened** with new options for today's code (below). Depends on Phases 2 and 3, neither built yet. Partly done by other work: K-15 (§0)   **Last verified against:** `2227bce` (probe p2's Escape step, `probes/keyboard_probes_test.clj`)
+**Status:** Proposed. D10 and D12 answered A (2026-11-22, the ★ options, taken under the user's standing choice to take the recommended options). **D11 re-opened** with new options (below). Phase 3 is built (`c190f7c`); Phase 2 is in progress. K-15 is already fixed (§0). **Last verified against:** `2227bce` (probe p2's Escape step, `probes/keyboard_probes_test.clj`)
 **Size:** ~1–1.5 days   **Needs:** D11   **Depends on:** Phase 3 (`views.keys`), Phase 2 (the shell, so the filter is installed once for every editor window)
 **Supersedes / Superseded by:** none (replaces the "keyboard trigger source" amendment in `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md`)   **Related findings:** K-13, K-15 (`00-overview.md` §4); review 05 F17, L3, F9 (learn also fires the old binding: fixed)
 

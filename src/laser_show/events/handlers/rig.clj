@@ -152,7 +152,8 @@
 
 (defn- opened-show
   "What the last Open kept of the show's rig ([:ui :dialogs :rig-report]):
-   {:file :hardware :chains :pins (pin-map then) :mode :open?}."
+   {:file :hardware :chains :pins (pin-map then) :mode :open?}. A fresh
+   dialog default has no file and therefore no report to reopen."
   [state]
   (let [report (get-in state [:ui :dialogs :rig-report])]
     (when (:file report) report)))
