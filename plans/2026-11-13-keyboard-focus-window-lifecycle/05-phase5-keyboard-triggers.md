@@ -115,7 +115,8 @@ Step 0 (a 15-minute spike before the rest): a TestFX test that a filter installe
 | claimed keys per node (D11 A) | the node's `getProperties`, set once when the component is created | the components (§4) | n/a |
 | `[:backend :input :keyboard :enabled?]` (existing placeholder) | app state, session only (like the gamepad flag; `[:backend …]` is not saved, `persistent.clj:68-86`) | `:input/keyboard-enable` / `-disable` | No / no |
 | `[:config :input :trigger-map {:source :keyboard :id …}]` (existing) | document (saved per project, like MIDI and OSC bindings) | learn (`:input/learn-captured`, undo label "Learn Trigger") | Yes / yes |
-| `[:backend :input :learning-target]` (existing) | app state | learn handlers | No / no |
+| `[:backend :input :learning-target]` (existing), `:learning-capture` (added) | app state, session only | learn handlers | No / no |
+| `[:trigger-runtime :keyboard-activations]` (added; id → action) | app state, session only | `:trigger/input`, also cleared by New/Open | No / no |
 
 The filter reads app state with `get-raw-state`. It never writes app state and never subscribes, so plan 02's write guard (`state/core.clj:102-128`) isn't involved. The router call runs the mapper and learn handlers on the FX thread, as the gamepad's poll thread does today. They deliver a promise or `events/dispatch!`, and write nothing.
 
@@ -157,7 +158,7 @@ Decision table for one key event, with D10 = A and D12 = A. The rows marked *D11
 | window loses focus with keys held | n/a | `:released` for each held key |
 
 Invariants:
-1. A key that is not bound is never consumed, so every control and menu accelerator behaves exactly as before.
+1. Outside discrete Learn, a new unbound press is not consumed; controls and menu accelerators keep it. A key the app already claimed keeps its matching release even if the binding has changed.
 2. Typing in a text field never triggers a cue.
 3. A momentary cue and a vibe role always get their release, including when the window loses focus.
 4. Escape keeps its built-in meaning and can't be bound.
