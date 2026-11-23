@@ -23,10 +23,6 @@
     (.isAltDown e) (conj :alt)
     (.isShiftDown e) (conj :shift)))
 
-(defn- learn-mode [state]
-  (when-let [target (get-in state [:backend :input :learning-target])]
-    (if (= :macro (:type target)) :continuous :press)))
-
 (defn- release-all!
   "Forget the keys before emitting their releases. A key used only to learn
    never played anything, so its release must not act on the new binding."
@@ -46,7 +42,7 @@
         typing? (keys/typing-target? e)
         mods (modifiers e)
         claimed? (or (contains? window-keys id) (keys/claims? (.getFocusOwner scene) id))
-        learning (learn-mode s)
+        learning (get-in s [:backend :input :learning-capture])
         {:keys [consume? emit cancel-learn?]}
         (keyboard/decide {:key-id id :phase phase :enabled? enabled? :modifiers mods
                           :text-target? typing? :claimed? claimed? :held? (some? owner) :learning learning

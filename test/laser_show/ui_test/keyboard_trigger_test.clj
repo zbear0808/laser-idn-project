@@ -239,7 +239,18 @@
     (is (events/flush!))
     (is (nil? (cue [0 0])) "this was the Play shortcut")
     (is (= fader (learning-target)) "a fader movement is still needed")
-    (is (empty? @*key-edges*))))
+     (is (empty? @*key-edges*))))
+
+(deftest continuous-capture-is-not-a-key-learn-even-for-a-non-macro-target-test
+  (let [robot (main-robot!)
+        target {:type :trigger-cue :target [0 0]}]
+    (bind! :space target)
+    (events/dispatch! {:event/type :input/start-learn :target-action target :capture :continuous})
+    (ui/wait-for! #(= target (learning-target)))
+    (ui/press! robot KeyCode/SPACE)
+    (ui/wait-for! playing?)
+    (is (= target (learning-target)))
+    (is (empty? @*key-edges*) "Space remained a menu shortcut")))
 
 (deftest bound-key-works-in-the-timeline-window-test
   ;; A definition is a binding even without an entry in the trigger map.
