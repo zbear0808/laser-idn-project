@@ -112,12 +112,10 @@ Files: `effects.clj`, `modulation.clj`, `modulator_registry.clj`.
 - Replace the per-frame `log/error` with a rate-limited logger keyed by effect instance id, and record failures in a lock-free `!effect-errors` atom so the UI can show a badge (coordinate with views/events; don't push this into the cljfx root atom every frame, see `CLJFX_STATE_MANAGEMENT.md`).
 - For effects whose category includes `:calibration`, return a "blank all points" transducer on error instead of identity. Coordinate the same fail-closed behaviour in `multi_engine.clj:110-115` (output area).
 
-**MR5 — Clamp/blank once, at the end of the chain** (M, risk Med; visual behaviour change). Fixes findings 6 and 7.
-- Add unclamped `t/with-xy` and `t/with-rgb`, and use them in all effects.
-- Add one final stage in `apply-effect-chain`: replace NaN/Inf with a blanked point, clamp RGB to [0,1], and **blank** (rather than clamp) points whose x/y are out of range, keeping their clamped position so the beam stays on the edge.
-- Keep `update-point-xy`/`-rgb` as deprecated aliases for one release.
-- Add a property-style test that scale(2)→scale(0.5) and translate(+1.5)→translate(−1.5) return the input frame.
-- Review calibration ordering, since corner-pin may legitimately need input outside [-1,1].
+**MR5 — Intermediate clamping** (findings 6 and 7). The XY portion was implemented at `278f094` with the user's per-transform choice:
+- Scale, Translate, Rotation, Corner Pin, Lens Distortion and Axis Transform have **Advanced → Clamp after this transform**, checked by default. The option belongs to the instance, not an individual keyframe. Unchecking preserves finite overshoot until another checked transform or the final clamp. A finished cue (including group, track and global effects) is bounded before routing; projector calibration has its own final clamp before safety.
+- Non-finite transform coordinates remain invalid in both modes, so the existing output sanitizer removes those points. The O2/O3 policies in output runtime Phase 2 still apply: skip a failing effect, drop non-finite points, and do not blank a finite point merely because it was out of range.
+- The separate question of RGB headroom through intensity and color effects remains open. This checkbox governs coordinates only.
 
 **MR6 — Unify spatial and keyframe helpers** (M, risk Low). Fixes finding 17.
 - Create `laser-show.animation.spatial` with `^double position-for-driver` and a primitive `find-segment` over `double[]` positions.

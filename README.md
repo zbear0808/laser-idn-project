@@ -38,6 +38,8 @@ The laser show uses a frame-based animation system with the following core types
 - **LaserPoint**: Individual point with X/Y coordinates [-1, 1] and RGB color [0, 1.0]
 - **LaserFrame**: Vector of points representing a single frame
 
+In a geometric effect’s **Advanced** section, **Clamp after this transform** is on by default. Turn it off to let later transforms recover coordinates outside `[-1, 1]`. For example, an X coordinate of `0.75` scaled by 2 and then by ½ ends at `0.5` with the first clamp on, or `0.75` with it off. The finished cue is bounded after its group, track and global effects; the projector’s calibration chain also finishes bounded, before its safety zone is applied.
+
 ## IDN Protocol Support
 
 Implements ILDA Digital Network Hello Protocol and IDN Stream Protocol:
