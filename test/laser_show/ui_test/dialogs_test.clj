@@ -194,32 +194,47 @@
 ;; Undo in the editors
 
 (def ^:private editors
-  "The five editors with ⌘Z today: how each opens, its title's start, the
-   button the focus is left on, and an undoable edit with what it changes."
+  "How each non-modal editor opens, where to leave focus, and an undoable
+   rename. A setup form and the trigger editor get undo through the shell too."
   [{:open {:event/type :cue-chain/open-editor :col 0 :row 0}
     :title "Cue Chain Editor"
     :focus "Close"
-    :edit {:event/type :cue-chain/set-name :col 0 :row 0 :name "Edited"}
+    :edit {:event/type :cue-chain/set-name :col 0 :row 0}
     :value #(cue-name 0 0)}
    {:open {:event/type :effect-chain/open-editor :col 0 :row 3}
     :title "Effects Chain"
     :focus "Close"
-    :edit {:event/type :effect-chain/set-name :col 0 :row 3 :name "Edited"}
+    :edit {:event/type :effect-chain/set-name :col 0 :row 3}
     :value #(get-in (app-state) [:chains :effect-chains [0 3] :name])}
    {:open {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}}
     :title "Zone Pattern"
     :focus "#zone-pattern-close"
-    :edit {:event/type :cue-chain/set-name :col 0 :row 0 :name "Edited"}
+    :edit {:event/type :cue-chain/set-name :col 0 :row 0}
     :value #(cue-name 0 0)}
    {:open {:event/type :step-grid/open :target a1-grid-target}
     :title "Step Grid"
     :focus "#step-grid-close"
-    :edit {:event/type :cue-chain/set-name :col 0 :row 0 :name "Edited"}
+    :edit {:event/type :cue-chain/set-name :col 0 :row 0}
     :value #(cue-name 0 0)}
    {:open {:event/type :timeline-cue-editor/open :col 0 :row 0}
     :title "Timeline Editor"
     :focus "Close"
-    :edit {:event/type :cue-chain/set-name :dialog-id :timeline-cue-editor :col 0 :row 0 :name "Edited"}
+    :edit {:event/type :cue-chain/set-name :dialog-id :timeline-cue-editor :col 0 :row 0}
+    :value #(cue-name 0 0)}
+   {:open {:event/type :ui/open-dialog :dialog-id :trigger-editor :data {:col 0 :row 0 :cell-mode :cue}}
+    :title "Triggers — Cue Cell A1"
+    :focus "#trigger-editor-done"
+    :edit {:event/type :cue-chain/set-name :col 0 :row 0}
+    :value #(cue-name 0 0)}
+   {:open {:event/type :zone-groups/add}
+    :title "New Zone Group"
+    :focus "Cancel"
+    :edit {:event/type :cue-chain/set-name :col 0 :row 0}
+    :value #(cue-name 0 0)}
+   {:open {:event/type :ui/open-dialog :dialog-id :add-projector-manual}
+    :title "Add Projector"
+    :focus "Cancel"
+    :edit {:event/type :cue-chain/set-name :col 0 :row 0}
     :value #(cue-name 0 0)}])
 
 (deftest undo-shortcut-works-in-every-editor-dialog-test
@@ -229,9 +244,10 @@
       (testing title
         (events/dispatch! open)
         (ui/wait-for! #(some? (stage-titled title)))
-        (let [before (value)]
-          (events/dispatch! edit)
-          (ui/wait-for! #(= "Edited" (value)))
+        (let [before (value)
+              after (str "Edited in " title)]
+          (events/dispatch! (assoc edit :name after))
+          (ui/wait-for! #(= after (value)))
           (let [stage (stage-titled title)
                 node (if (str/starts-with? focus "#") (in-stage stage focus) (button-in stage focus))]
             (is (some? node) (str "a " focus " button to leave the focus on"))
@@ -240,7 +256,7 @@
             (is (waited? #(= before (value))) "⌘Z (Ctrl+Z) undid the edit")
             (testing "and ⇧⌘Z redoes it"
               (push! robot KeyCode/SHORTCUT KeyCode/SHIFT KeyCode/Z)
-              (is (waited? #(= "Edited" (value)))))
+              (is (waited? #(= after (value)))))
             (is (ui/on-fx-thread #(.isShowing stage)) "the window stays open")
             (request-close! stage)
             (ui/wait-for! #(nil? (stage-titled title)))))))))
