@@ -18,7 +18,6 @@
             [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
             [laser-show.events.core :as events]
-            [laser-show.css.core :as css]
             [laser-show.views.components.list :as list]
             [laser-show.views.components.inline-edit :as inline-edit]
             [laser-show.views.components.preset-bank :as preset-bank]
@@ -28,10 +27,9 @@
             [laser-show.views.components.load-warning :as load-warning]
             [laser-show.views.components.target-control :as target-control]
             [laser-show.views.components.zone-pattern-editor :as zone-pattern-editor]
+            [laser-show.views.dialogs.common :as common]
             [laser-show.routing.targets :as targets]
-            [clojure.string :as str]
-            [laser-show.common.util :as u])
-  (:import [javafx.scene.input KeyCode KeyEvent]))
+            [clojure.string :as str]))
 
 
 ;; Effect Bank (using data-driven component)
@@ -142,58 +140,6 @@
                                                           :col col
                                                           :row row
                                                           :item-path item-path})}]}))))
-
-
-;; Trigger Mode Picker
-
-
-(def ^:private trigger-mode-options
-  "Options for per-cue trigger mode dropdown."
-  [{:id :toggle :name "Toggle"}
-   {:id :retrigger :name "Retrigger"}])
-
-(defn- trigger-mode-dropdown
-  "Dropdown for selecting trigger mode for this cue chain.
-   Renders as a horizontal row: 'Trigger:' label (the timeline editor's) +
-   dropdown, neither ever narrower than its text.
-   
-   Trigger modes:
-   - :toggle (default) - Click to turn ON, click again to turn OFF
-   - :retrigger - Always start/restart the cue on click
-   
-   Note: Global trigger mode setting can override this per-cue setting.
-   
-   Props:
-   - :col, :row - Grid coordinates
-   - :trigger-mode - Current trigger mode (default :toggle)"
-  [{:keys [col row trigger-mode]}]
-  (let [current-mode (or trigger-mode :toggle)
-        current-option (or (u/seek #(= (:id %) current-mode) trigger-mode-options)
-                           (first trigger-mode-options))]
-    {:fx/type :h-box
-     :spacing 8
-     :alignment :center-left
-     :children [{:fx/type :label
-                 :text "Trigger:"
-                 :min-width :use-pref-size
-                 :style-class "zone-picker-label"}
-                {:fx/type :combo-box
-                 :value current-option
-                 :pref-width 120
-                 :min-width :use-pref-size
-                 :items trigger-mode-options
-                 :tooltip {:fx/type :tooltip
-                           :text (str "Toggle: a click starts the cue, the next one stops it\n"
-                                      "Retrigger: every click starts it again\n"
-                                      "The toolbar's Trigger can set it for every cue")}
-                 :button-cell (fn [mode]
-                                {:text (or (:name mode) "Toggle")})
-                 :cell-factory {:fx/cell-type :list-cell
-                                :describe (fn [mode]
-                                            {:text (or (:name mode) "Toggle")})}
-                 :on-value-changed {:event/type :cue-chain/set-trigger-mode
-                                    :col col
-                                    :row row}}]}))
 
 
 ;; Middle Section (Preset Config)
@@ -324,7 +270,7 @@
 
         ;; Get chain name for header
         chain-name (:name cue-chain)
-        default-name (str "Cell " (char (+ 65 (or row 0))) (inc (or col 0)))
+        default-name (common/default-name col row)
         editing-name? (:editing-name? dialog-data false)]
     {:fx/type :v-box
      :spacing 0
@@ -464,7 +410,7 @@
                              :id "pattern-chip-cue"
                              :col col
                              :row row}
-                            {:fx/type trigger-mode-dropdown
+                            {:fx/type common/trigger-mode-dropdown
                              :col col
                              :row row
                              :trigger-mode (:trigger-mode cue-chain)}
@@ -504,52 +450,14 @@
 ;; Dialog Window
 
 
-(defn- handle-scene-key-pressed
-  "Handles undo/redo keyboard shortcuts at the scene level."
-  [^KeyEvent e]
-  (let [code (.getCode e)
-        shortcut? (or (.isShortcutDown e) (.isControlDown e))
-        shift? (.isShiftDown e)]
-    (when shortcut?
-      (cond
-        (and (= code KeyCode/Z) shift?)
-        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
-        (= code KeyCode/Y)
-        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
-        (= code KeyCode/Z)
-        (do (.consume e) (events/dispatch! {:event/type :edit/undo}))))))
-
-(defn- cue-chain-editor-scene
-  "Scene component for the cue chain editor.
-   Keyboard shortcuts are handled by the list components and scene accelerators."
-  [{:keys [stylesheets]}]
-  {:fx/type :scene
-   :stylesheets stylesheets
-   :on-key-pressed handle-scene-key-pressed
-   :root {:fx/type cue-chain-editor-content}})
-
 (defn cue-chain-editor-dialog
   "The cue chain editor dialog window."
   [{:keys [fx/context]}]
-  (let [open? (fx/sub-ctx context subs/dialog-open? :cue-chain-editor)
-        dialog-data (fx/sub-ctx context subs/dialog-data :cue-chain-editor)
-        {:keys [col row]} dialog-data
-        ;; Get chain data for name in title
-        chains-state (fx/sub-val context :chains)
-        cue-chain (get-in chains-state [:cue-chains [col row]])
-        chain-name (:name cue-chain)
-        stylesheets (css/dialog-stylesheet-urls)
-        cell-id (str "Cell " (char (+ 65 (or row 0))) (inc (or col 0)))
-        window-title (str "Cue Chain Editor - "
-                          (if (seq chain-name)
-                            (str chain-name " (" cell-id ")")
-                            cell-id))]
-    {:fx/type :stage
-     :showing open?
-     :title window-title
-     :modality :none
+  (let [{:keys [col row]} (fx/sub-ctx context subs/dialog-data :cue-chain-editor)
+        chain-name (:name (get-in (fx/sub-val context :chains) [:cue-chains [col row]]))]
+    {:fx/type common/dialog-stage
+     :dialog-id :cue-chain-editor
+     :title (common/window-title "Cue Chain Editor" chain-name col row)
      :min-width 960
      :min-height 640
-     :on-close-request {:event/type :ui/close-dialog :dialog-id :cue-chain-editor}
-     :scene {:fx/type cue-chain-editor-scene
-             :stylesheets stylesheets}}))
+     :content {:fx/type cue-chain-editor-content}}))

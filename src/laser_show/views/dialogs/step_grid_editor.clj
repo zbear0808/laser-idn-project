@@ -11,12 +11,9 @@
    (\"Step 5 of 8\", \"Not playing\") come from the show clock's newest
    tick, never from app state."
   (:require [cljfx.api :as fx]
-            [laser-show.css.core :as css]
-            [laser-show.events.core :as events]
             [laser-show.subs :as subs]
             [laser-show.views.components.step-grid :as step-grid]
-            [laser-show.views.dialogs.common :as common])
-  (:import [javafx.scene.input KeyCode KeyEvent]))
+            [laser-show.views.dialogs.common :as common]))
 
 (def ^:private dialog-id :step-grid-editor)
 
@@ -105,39 +102,17 @@
                                    :style-class "button-primary"
                                    :on-action close}]))}]}))
 
-(defn- handle-scene-key-pressed
-  "Undo and redo, as in the other editors: ⌘Z (Ctrl+Z, and Ctrl on macOS
-   too), ⇧⌘Z or ⌘Y."
-  [^KeyEvent e]
-  (let [code (.getCode e)
-        shortcut? (or (.isShortcutDown e) (.isControlDown e))
-        shift? (.isShiftDown e)]
-    (when shortcut?
-      (cond
-        (and (= code KeyCode/Z) shift?)
-        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
-        (= code KeyCode/Y)
-        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
-        (= code KeyCode/Z)
-        (do (.consume e) (events/dispatch! {:event/type :edit/undo}))))))
-
 (defn step-grid-editor-dialog
   "The step grid window."
   [{:keys [fx/context]}]
-  (let [open? (fx/sub-ctx context subs/dialog-open? dialog-id)
-        {:keys [target]} (fx/sub-ctx context subs/dialog-data dialog-id)
+  (let [{:keys [target]} (fx/sub-ctx context subs/dialog-data dialog-id)
         [col row] (:entity-key target)
         chain-name (if (= :effect-chains (:domain target))
                      (:name (fx/sub-ctx context subs/effect-cell-chain col row))
                      (:name (fx/sub-ctx context subs/cue-cell-chain col row)))]
-    {:fx/type :stage
-     :showing open?
+    {:fx/type common/dialog-stage
+     :dialog-id dialog-id
      :title (window-title target chain-name)
-     :modality :none
      :min-width 720
      :min-height 460
-     :on-close-request {:event/type :ui/close-dialog :dialog-id dialog-id}
-     :scene {:fx/type :scene
-             :stylesheets (css/dialog-stylesheet-urls)
-             :on-key-pressed handle-scene-key-pressed
-             :root {:fx/type content}}}))
+     :content {:fx/type content}}))
