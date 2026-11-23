@@ -179,8 +179,12 @@
     (and (:carabiner-connected? data)
          (:link-enabled? data))))
 
-(defn link-sync-enabled? [state]
-  (:sync-enabled? (link-data state)))
+(defn link-sync-enabled?
+  "Is Link currently allowed to set the app tempo? The BPM-sync preference
+   is kept when Link itself is turned off."
+  [state]
+  (let [{:keys [link-enabled? sync-enabled?]} (link-data state)]
+    (and link-enabled? sync-enabled?)))
 
 (defn link-bpm [state]
   (:link-bpm (link-data state)))

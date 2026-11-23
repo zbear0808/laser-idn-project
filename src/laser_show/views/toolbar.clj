@@ -192,36 +192,26 @@
 
 
 (defn link-sync-button
- "Ableton Link sync button with status indicator."
- [{:keys [fx/context]}]
- (let [{:keys [carabiner-connected? link-enabled? sync-enabled? link-bpm link-peers]}
-       (fx/sub-ctx context subs/link-status)
-       tooltip-text (cond
-                      (and link-enabled? sync-enabled?)
-                      (format "Syncing BPM from Ableton Link (%.1f BPM, %d peers)"
-                              (or link-bpm 0.0) (or link-peers 0))
-                      
-                      link-enabled?
-                      (format "Link enabled (%.1f BPM, %d peers)\nClick to enable BPM sync"
-                              (or link-bpm 0.0) (or link-peers 0))
-                      
-                      carabiner-connected?
-                      "Carabiner ready - Click to enable Link"
-                      
-                      :else
-                      "Carabiner not connected")]
-   {:fx/type :button
-    :pref-width 50
-    :graphic {:fx/type svg/icon
-              :src "ableton.svg"
-              :color :white
-              :size 36}
-    :style-class (if (and link-enabled? sync-enabled?)
-                   "transport-btn-active"
-                   "transport-btn")
-    :focus-traversable false
-    :tooltip {:fx/type :tooltip :text tooltip-text}
-    :on-action {:event/type :timing/link-toggle}}))
+  "Enable Link; once enabled, toggle whether the app follows its tempo."
+  [{:keys [fx/context]}]
+  (let [{:keys [carabiner-connected? link-enabled? sync-enabled? link-bpm link-peers]}
+        (fx/sub-ctx context subs/link-status)
+        tempo (if link-bpm (format "%.1f BPM" (double link-bpm)) "waiting for tempo")
+        tooltip-text (cond
+                       (not carabiner-connected?) "Carabiner not connected"
+                       (not link-enabled?) "Carabiner ready - Click to enable Link"
+                       :else (format "%s (%s, %d peers)\nClick to %s BPM sync"
+                                     (if sync-enabled? "Syncing BPM from Ableton Link" "Link enabled")
+                                     tempo (or link-peers 0) (if sync-enabled? "stop" "enable")))]
+    {:fx/type :button
+     :id "link-sync-btn"
+     :disable (not carabiner-connected?)
+     :pref-width 50
+     :graphic {:fx/type svg/icon :src "ableton.svg" :color :white :size 36}
+     :style-class (if (and link-enabled? sync-enabled?) "transport-btn-active" "transport-btn")
+     :focus-traversable false
+     :tooltip {:fx/type :tooltip :text tooltip-text}
+     :on-action {:event/type (if link-enabled? :timing/toggle-link-sync :timing/link-toggle)}}))
 
 
 (defn connection-indicator

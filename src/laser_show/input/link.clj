@@ -6,7 +6,7 @@
    
    Architecture:
    - Carabiner: Auto-connects on app startup (embedded lib-carabiner)
-   - Link: User toggles via UI button (set-sync-mode :passive/:off)
+   - Link: local switches enable Link and following its tempo
    
    The service:
    1. Manages connection to Carabiner (embedded lib-carabiner)
@@ -18,7 +18,8 @@
    State is managed by the application state in domains.clj.
    This module provides pure functions for Link state management."
   (:require [clojure.tools.logging :as log]
-            [beat-carabiner.core :as bc]))
+            [beat-carabiner.core :as bc]
+            [laser-show.state.extractors :as ex]))
 
 
 ;; BPM Change Threshold
@@ -31,50 +32,40 @@
 ;; Link Status Listener
 
 
-(defn- bpm-changed?
-  "Check if BPM has changed significantly.
-   Returns true if abs(new-bpm - old-bpm) > threshold."
+(defn bpm-changed?
+  "Is this a usable Link tempo that differs from the previous one?"
   [old-bpm new-bpm]
-  (or (nil? old-bpm)
-      (> (Math/abs (- new-bpm old-bpm)) bpm-change-threshold)))
+  (and (number? new-bpm) (pos? new-bpm) (Double/isFinite (double new-bpm))
+       (or (nil? old-bpm)
+           (> (Math/abs (- (double new-bpm) (double old-bpm))) bpm-change-threshold))))
+
+(defn should-follow-bpm?
+  "Would following this Link tempo change the app's BPM right now?"
+  [state bpm]
+  (and (ex/link-sync-enabled? state) (bpm-changed? (ex/bpm state) bpm)))
 
 (defn create-status-listener
-  "Creates a status listener for Link updates.
-   
-   Args:
-   - dispatch-fn: Function to dispatch events (receives event map)
-   - get-state-fn: Function that returns current Link state
-   
-   Returns: listener function that processes Link status updates
-   
-   The status map from beat-carabiner includes:
-   - :link-bpm - Current Link session BPM
-   - :link-peers - Number of peers in the Link session
-   - :sync-mode - Current sync mode (:off, :manual, :passive, :full)"
-  [dispatch-fn get-state-fn]
-  (fn [status]
-    (let [link-state (get-state-fn)
-          new-bpm (:link-bpm status)
-          new-peers (:link-peers status 0)
-          old-bpm (:link-bpm link-state)
-          old-peers (:link-peers link-state 0)
-          sync-enabled? (:sync-enabled? link-state)]
-      ;; Always update Link BPM state (for UI display) when Link is enabled
-      (when new-bpm
-        (dispatch-fn {:event/type :timing/link-bpm-changed
-                      :bpm new-bpm}))
-      
-      ;; Update peer count if changed
-      (when (not= new-peers old-peers)
-        (dispatch-fn {:event/type :timing/link-peers-changed
-                      :peers new-peers}))
-      
-      ;; Only dispatch BPM change to app if sync is enabled and BPM changed significantly
-      (when (and sync-enabled? 
-                 new-bpm
-                 (bpm-changed? old-bpm new-bpm))
-        (dispatch-fn {:event/type :timing/set-bpm
-                      :bpm new-bpm})))))
+  "Forward changed observations, not unconditional tempo commands. Compare
+   with the last enqueued report because dispatch need not have run yet.
+   A steady peer may also need to correct a locally changed app tempo."
+  [dispatch! get-app-state]
+  (let [sent (volatile! (select-keys (ex/link-data (get-app-state)) [:link-bpm :link-peers]))]
+    (fn listen [{:keys [link-bpm link-peers]}]
+      (locking listen
+        (let [state (get-app-state)
+              previous @sent
+              timing (:timing state)
+              correct? (should-follow-bpm? state link-bpm)]
+          (when (or (bpm-changed? (:link-bpm previous) link-bpm)
+                    (and correct?
+                         ;; An unchanged timing snapshot means a correction
+                         ;; for this local tempo is already in the queue.
+                         (not (identical? timing (:correcting-timing previous)))))
+            (vswap! sent assoc :link-bpm link-bpm :correcting-timing (when correct? timing))
+            (dispatch! {:event/type :timing/link-bpm-changed :bpm link-bpm}))
+          (when (and (some? link-peers) (not= link-peers (:link-peers previous 0)))
+            (vswap! sent assoc :link-peers link-peers)
+            (dispatch! {:event/type :timing/link-peers-changed :peers link-peers})))))))
 
 
 ;; Carabiner Connection Lifecycle
@@ -87,19 +78,18 @@
    Does NOT enable Link - that's a separate step.
    
    Returns updated state map."
-  [link-state dispatch-fn get-state-fn]
+  [link-state dispatch-fn get-app-state]
   (try
-    ;; Connect to Carabiner daemon
-    (bc/connect)
-    
-    ;; Register status listener to receive updates
-    (let [listener (create-status-listener dispatch-fn get-state-fn)]
-      (bc/add-status-listener listener)
-      
-      (log/info "Carabiner daemon connected (Link not yet enabled)")
-      (-> link-state
-          (assoc :carabiner-connected? true)
-          (assoc :listener listener)))
+    (if (bc/connect)
+      (let [listener (create-status-listener dispatch-fn get-app-state)]
+        ;; connect can receive the first tempo before registration. Seed it
+        ;; without letting an older snapshot overtake a later callback.
+        (locking listener
+          (bc/add-status-listener listener)
+          (listener (bc/state)))
+        (log/info "Carabiner daemon connected (Link not yet enabled)")
+        (assoc link-state :carabiner-connected? true :listener listener))
+      (assoc link-state :carabiner-connected? false))
     (catch Exception e
       (log/error e "Error connecting to Carabiner:" (.getMessage e))
       (assoc link-state :carabiner-connected? false))))
@@ -266,7 +256,7 @@
    Returns initialized state."
   ([link-state]
    (init link-state false nil nil))
-  ([link-state auto-connect? dispatch-fn get-state-fn]
+  ([link-state auto-connect? dispatch-fn get-app-state]
    (if auto-connect?
-     (connect-carabiner! link-state dispatch-fn get-state-fn)
+     (connect-carabiner! link-state dispatch-fn get-app-state)
      link-state)))

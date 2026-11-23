@@ -193,7 +193,7 @@
   (let [link-state (get-in (state/get-raw-state) [:backend :link])]
     (when (:auto-connect? link-state true)
       (let [{:keys [carabiner-connected? listener]}
-            (link/connect-carabiner! link-state events/dispatch! #(get-in (state/get-raw-state) [:backend :link]))]
+            (link/connect-carabiner! link-state events/dispatch! state/get-raw-state)]
         (events/dispatch! (cond-> {:event/type :timing/carabiner-connected
                                    :connected? (boolean carabiner-connected?)}
                             listener (assoc :listener listener)))
