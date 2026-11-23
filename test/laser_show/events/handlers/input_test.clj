@@ -9,6 +9,7 @@
             [laser-show.input.router :as router]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
+            [laser-show.state.persistent :as persistent]
             [laser-show.state.templates :as templates]))
 
 (defn- initial-state []
@@ -122,6 +123,22 @@
     (is (true? (get-in state [:backend :input :gamepad :enabled?])))
     (is (false? (get-in disabled [:backend :input :gamepad :enabled?])))
     (is (true? (get-in enabled [:backend :input :gamepad :enabled?])))))
+
+(deftest keyboard-enable-disable-test
+  (let [clean (-> (initial-state)
+                  (assoc-in [:config :input :trigger-map {:source :keyboard :id :space}] {:type :stop-all})
+                  (history/mark-clean))
+        switch (fn [s event-type]
+                 (:state (events/handle-event-pipeline {:state s :event/type event-type})))
+        disabled (switch clean :input/keyboard-disable)
+        enabled (switch disabled :input/keyboard-enable)]
+    (is (= {:enabled? true} (get-in clean [:backend :input :keyboard])))
+    (is (false? (get-in disabled [:backend :input :keyboard :enabled?])))
+    (is (true? (get-in enabled [:backend :input :keyboard :enabled?])))
+    (doseq [s [disabled enabled]]
+      (is (= (persistent/project-files clean) (persistent/project-files s)) "the switch is session-only; bindings stay in the show")
+      (is (false? (get-in s [:project :dirty?])))
+      (is (empty? (get-in s [:history :undo-stack]))))))
 
 
 ;; Learning a vibe role (Phase 2)
@@ -306,6 +323,21 @@
 (defn- caught [p] (deref p 0 nil))
 
 (defn- macro-map [state] (get-in state [:config :input :macro-map]))
+
+(deftest learning-capture-mode-test
+  (try
+    (let [mode #(get-in % [:backend :input :learning-capture])
+          [continuous _] (start-fader-learn (initial-state) hit-role)
+          press (learning continuous hit-role)
+          fader (learning press slider-1)]
+      (is (= :continuous (mode continuous)) "an explicit continuous request, even for a non-macro target")
+      (is (= hit-role (learning-target continuous)) "the views and Learn all still recognize the target")
+      (is (= :press (mode press)) "restarting the same target as an ordinary learn replaces its mode")
+      (is (= :continuous (mode fader)) "a macro always waits for movement")
+      (is (nil? (mode (captured press hit-role (note 36)))) "a completed learn clears the mode")
+      (is (nil? (mode (run fader :input/cancel-learn))) "so does cancel"))
+    (finally
+      (stop-learning!))))
 
 (defn- fader-learned
   "state after the learn for target caught a move of MIDI CC control on

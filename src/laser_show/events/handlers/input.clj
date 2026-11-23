@@ -4,9 +4,8 @@
    Handles:
    - MIDI device discovery, connection, and configuration
    - OSC server management and address mappings
-   - Learn modes for MIDI and OSC
-   
-   State is stored at [:backend :input :midi] and [:backend :input :osc]"
+   - Gamepad and keyboard input switches
+   - Input learning and bindings"
   (:require [clojure.string :as str]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.events.helpers :as h]
@@ -218,14 +217,13 @@
     {:state (assoc-in state (osc-path) updated-osc)}))
 
 
-;; Gamepad Event Handlers
+;; Session input switches
 
 
-(defn- handle-gamepad-set-enabled
-  "Enable or disable gamepad input. The poll thread checks this flag every
-   poll, so no device work happens here."
-  [{:keys [state]} enabled?]
-  {:state (assoc-in state [:backend :input :gamepad :enabled?] enabled?)})
+(defn- set-device-enabled
+  "The gamepad poller and keyboard filter read their device's session switch."
+  [{:keys [state]} device enabled?]
+  {:state (assoc-in state [:backend :input device :enabled?] enabled?)})
 
 
 ;; Generalized Trigger Handlers
@@ -244,6 +242,9 @@
    whole action, its :behavior included."
   [target-action]
   (select-keys target-action [:type :target :role :slot]))
+
+(defn- clear-learning [state]
+  (update-in state [:backend :input] dissoc :learning-target :learning-capture))
 
 (defn- wizard-target
   "The learn Learn all waits on ([:ui :vibes :wizard], handlers/vibes.clj):
@@ -289,11 +290,13 @@
    is, a control that moves (fader-catcher)."
   [{:keys [state target-action capture]}]
   (release-pending-learn!)
-  (let [learn-promise (promise)]
+  (let [learn-promise (promise)
+        target (learn-target target-action)
+        mode (if (or (= :continuous capture) (= :macro (:type target))) :continuous :press)]
     (reset! !pending-learn learn-promise)
     ;; Register a global handler to catch the next trigger event
     (router/register-global-handler! ::generalized-input-learn
-                                     (if (or (= :continuous capture) (= :macro (:type target-action)))
+                                     (if (= :continuous mode)
                                        (fader-catcher learn-promise)
                                        (fn [event]
                                          ;; Only capture discrete triggers (NoteOn or Trigger type)
@@ -306,8 +309,8 @@
     ;; thread, then dispatches :input/learn-captured, which writes the binding
     ;; through the normal pipeline (undoable, marks the project unsaved).
     {:state (-> state
-                (assoc-in [:backend :input :learning-target] (learn-target target-action))
-                (end-other-wizard (learn-target target-action)))
+                (update-in [:backend :input] assoc :learning-target target :learning-capture mode)
+                (end-other-wizard target))
      :input/await-learn {:promise learn-promise
                          :on-captured {:event/type :input/learn-captured
                                        :target-action target-action}}}))
@@ -368,7 +371,7 @@
     (cond
       (not (and lookup-key learning?))
       {:state (cond-> state
-                learning? (update-in [:backend :input] dissoc :learning-target))}
+                learning? (clear-learning))}
 
       taken
       {:state (assoc-in state [:ui :vibes :wizard :refused] taken)
@@ -380,7 +383,7 @@
                             (update-in [:config :input :trigger-map]
                                        #(cond->> % one-key? (into {} (remove (fn [[_ action]] (= target (learn-target action)))))))
                             (assoc-in [:config :input :trigger-map lookup-key] target-action)
-                            (update-in [:backend :input] dissoc :learning-target)
+                            (clear-learning)
                             (cond-> wizard (assoc-in [:ui :vibes :wizard]
                                                      (when (seq queue) {:queue queue :done (conj (vec done) role)})))
                             (engine/release-unbound (get-in state [:config :input :trigger-map]) (h/current-time-ms event)))
@@ -406,10 +409,10 @@
       {:state (-> state
                   (update-in [:config :input :macro-map] #(into {} (remove (fn [[_ s]] (= slot s))) %))
                   (assoc-in [:config :input :macro-map k] slot)
-                  (update-in [:backend :input] dissoc :learning-target))
+                  (clear-learning))
        :history/description "Learn Fader"}
       {:state (cond-> state
-                learning? (update-in [:backend :input] dissoc :learning-target))})))
+                learning? (clear-learning))})))
 
 (defn- handle-input-cancel-learn
   "Cancel generic input learn mode, and Learn all with it."
@@ -418,7 +421,7 @@
   (release-pending-learn!)
   ;; Remove learning indicator
   {:state (-> state
-              (update-in [:backend :input] dissoc :learning-target)
+              (clear-learning)
               (end-other-wizard nil))})
 
 (defn- handle-input-remove-trigger
@@ -496,9 +499,11 @@
     :input/osc-start-learn (handle-osc-start-learn event)
     :input/osc-cancel-learn (handle-osc-cancel-learn event)
 
-    ;; Gamepad events
-    :input/gamepad-enable (handle-gamepad-set-enabled event true)
-    :input/gamepad-disable (handle-gamepad-set-enabled event false)
+    ;; Session input switches
+    :input/gamepad-enable (set-device-enabled event :gamepad true)
+    :input/gamepad-disable (set-device-enabled event :gamepad false)
+    :input/keyboard-enable (set-device-enabled event :keyboard true)
+    :input/keyboard-disable (set-device-enabled event :keyboard false)
 
     ;; Generalized triggers
     :input/start-learn (handle-input-start-learn event)
