@@ -58,34 +58,6 @@
    (::css/url vibes/vibes)
    (::css/url zones/zones)])
 
-(defn dialog-stylesheet-urls
-  "Returns stylesheet URLs appropriate for dialogs.
-   Includes theme, typography, components, buttons, forms, grid-cells,
-   layout, menus, cue-chain-editor, list, visual-editors, timeline, vibes
-   and zones.
-   
-   Example:
-   {:fx/type :scene
-    :stylesheets (css/dialog-stylesheet-urls)
-    :root {...}}"
-  []
-  [(::css/url theme/theme)
-   (::css/url typography/typography)
-   (::css/url components/components)
-   (::css/url buttons/buttons)
-   (::css/url forms/forms)
-   (::css/url grid-cells/grid-cells)
-   (::css/url layout/layout)
-   (::css/url title-bar/menu-theme)
-   (::css/url cue-chain-editor/cue-chain-editor)
-   (::css/url list/list)
-   (::css/url visual-editors/visual-editors)
-   (::css/url timeline/timeline)
-   (::css/url vibes/vibes)
-   (::css/url zones/zones)])
-
-
-
 (defn bg-primary
   "Root/window background color. Darkest."
   [] (:bg-primary theme/semantic-colors))

@@ -9,8 +9,8 @@
    :file/confirm-retry), :file/confirm-discard and :file/confirm-cancel (see
    laser-show.events.handlers.menu)."
   (:require [cljfx.api :as fx]
-            [laser-show.css.core :as css]
-            [laser-show.subs :as subs]))
+            [laser-show.subs :as subs]
+            [laser-show.views.dialogs.common :as common]))
 
 (defn- action-label
   "What the parked action does, for the question text."
@@ -115,14 +115,11 @@
   "The unsaved-changes confirmation window. Application-modal, so nothing else
    can be clicked while the question is open."
   [{:keys [fx/context]}]
-  (let [open? (fx/sub-ctx context subs/dialog-open? :unsaved-confirm)
-        {:keys [reason]} (fx/sub-ctx context subs/dialog-data :unsaved-confirm)]
-    {:fx/type :stage
-     :showing open?
+  (let [{:keys [reason]} (fx/sub-ctx context subs/dialog-data :unsaved-confirm)]
+    {:fx/type common/dialog-stage
+     :dialog-id :unsaved-confirm
      :title (if (= :rig reason) "Rig not saved" "Unsaved changes")
      :modality :application-modal
      :resizable false
      :on-close-request {:event/type :file/confirm-cancel}
-     :scene {:fx/type :scene
-             :stylesheets (css/dialog-stylesheet-urls)
-             :root {:fx/type unsaved-confirm-content}}}))
+     :content {:fx/type unsaved-confirm-content}}))

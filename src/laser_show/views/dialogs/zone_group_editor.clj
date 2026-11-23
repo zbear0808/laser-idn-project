@@ -8,7 +8,7 @@
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.subs :as subs]
-            [laser-show.css.core :as css]))
+            [laser-show.views.dialogs.common :as common]))
 
 
 ;; Color Presets
@@ -175,15 +175,8 @@
 (defn zone-group-editor-dialog
   "The zone group editor dialog window."
   [{:keys [fx/context]}]
-  (let [open? (fx/sub-ctx context subs/dialog-open? :zone-group-editor)
-        dialog-data (fx/sub-ctx context subs/dialog-data :zone-group-editor)
-        editing? (:editing? dialog-data)
-        stylesheets (css/dialog-stylesheet-urls)]
-    {:fx/type :stage
-     :showing open?
+  (let [{:keys [editing?]} (fx/sub-ctx context subs/dialog-data :zone-group-editor)]
+    {:fx/type common/dialog-stage
+     :dialog-id :zone-group-editor
      :title (if editing? "Edit Zone Group" "New Zone Group")
-     :modality :none
-     :on-close-request {:event/type :ui/close-dialog :dialog-id :zone-group-editor}
-     :scene {:fx/type :scene
-             :stylesheets stylesheets
-             :root {:fx/type zone-group-editor-content}}}))
+     :content {:fx/type zone-group-editor-content}}))

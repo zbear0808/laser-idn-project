@@ -1,0 +1,30 @@
+(ns laser-show.views.dialogs.registry-test
+  (:require [cljfx.api :as fx]
+            [clojure.set :as set]
+            [clojure.test :refer [deftest is]]
+            [laser-show.state.core :as state]
+            [laser-show.state.domains :as domains]
+            [laser-show.views.dialogs.rig-report :as rig-report]
+            [laser-show.views.root :as root]))
+
+(defn- dialog-defaults [] (get-in (domains/build-initial-state) [:ui :dialogs]))
+
+(deftest every-mounted-dialog-has-a-default-test
+  (let [ids (map first root/dialog-registry)
+        defaults (dialog-defaults)]
+    (is (apply distinct? ids) "each mounted window has its own key")
+    (is (= #{} (set/difference (set ids) (set (keys defaults)))))
+    (is (every? (comp false? :open?) (vals defaults)) "all windows start closed")))
+
+(deftest every-dialog-default-is-mounted-test
+  (is (= #{} (set/difference (set (keys (dialog-defaults)))
+                             (set (map first root/dialog-registry))))))
+
+(deftest no-rig-report-before-opening-a-show-test
+  (let [fresh (assoc-in (domains/build-initial-state) [:chains :cue-chains [0 0]]
+                        {:target :auto.laser/missing})
+        ctx (fx/create-context fresh state/cache-factory)]
+    (is (nil? (fx/sub-ctx ctx rig-report/report))
+        "a closed dialog default is not a show loaded from a file")
+    (is (zero? (fx/sub-ctx ctx rig-report/warning-count))
+        "a fresh show must not offer a report to reopen")))

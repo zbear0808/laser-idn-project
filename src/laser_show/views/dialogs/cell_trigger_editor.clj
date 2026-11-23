@@ -5,7 +5,6 @@
    apply to the cell as a whole."
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
-            [laser-show.css.core :as css]
             [laser-show.views.components.trigger-bank :as trigger-bank]
             [laser-show.views.dialogs.common :as common]))
 
@@ -79,16 +78,10 @@
 (defn cell-trigger-editor-dialog
   "The cell trigger editor dialog window."
   [{:keys [fx/context]}]
-  (let [open? (fx/sub-ctx context subs/dialog-open? :trigger-editor)
-        dialog-data (fx/sub-ctx context subs/dialog-data :trigger-editor)
+  (let [dialog-data (fx/sub-ctx context subs/dialog-data :trigger-editor)
         {:keys [col row cell-mode] :or {cell-mode :cue}} dialog-data
-        mode-title (if (= cell-mode :effects) "Effect Cell" "Cue Cell")
-        stylesheets (css/dialog-stylesheet-urls)]
-    {:fx/type :stage
-     :showing open?
+        mode-title (if (= cell-mode :effects) "Effect Cell" "Cue Cell")]
+    {:fx/type common/dialog-stage
+     :dialog-id :trigger-editor
      :title (str "Triggers — " mode-title " " (common/cell-label col row))
-     :modality :none
-     :on-close-request {:event/type :ui/close-dialog :dialog-id :trigger-editor}
-     :scene {:fx/type :scene
-             :stylesheets stylesheets
-             :root {:fx/type cell-trigger-editor-sized}}}))
+     :content {:fx/type cell-trigger-editor-sized}}))

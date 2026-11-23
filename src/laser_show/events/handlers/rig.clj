@@ -154,7 +154,8 @@
   "What the last Open kept of the show's rig ([:ui :dialogs :rig-report]):
    {:file :hardware :chains :pins (pin-map then) :mode :open?}."
   [state]
-  (get-in state [:ui :dialogs :rig-report]))
+  (let [report (get-in state [:ui :dialogs :rig-report])]
+    (when (:file report) report)))
 
 (defn- ask-if-it-grows
   "{:state after}, unless after gives a laser that is outputting a larger

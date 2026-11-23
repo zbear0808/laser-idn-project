@@ -12,7 +12,8 @@
             [laser-show.css.core :as css]
             [laser-show.routing.rig :as rig]
             [laser-show.state.rig-file :as rig-file]
-            [laser-show.subs :as subs]))
+            [laser-show.subs :as subs]
+            [laser-show.views.dialogs.common :as common]))
 
 
 ;; The set-up question
@@ -94,8 +95,9 @@
 (defn report
   "rig-file/match-report for the show that is open, or nil before one was."
   [context]
-  (when-let [{:keys [hardware chains]} (fx/sub-ctx context subs/dialog-data :rig-report)]
-    (rig-file/match-report (fx/sub-val context report-inputs) hardware chains)))
+  (let [{:keys [file hardware chains]} (fx/sub-ctx context subs/dialog-data :rig-report)]
+    (when file
+      (rig-file/match-report (fx/sub-val context report-inputs) hardware chains))))
 
 (defn warning-count
   "How many ⚠ rows the open show's report has."
@@ -243,15 +245,11 @@
   "The set-up question or the report, in its own window. Application-modal,
    so nothing else can be clicked while it is open."
   [{:keys [fx/context]}]
-  (let [open? (fx/sub-ctx context subs/dialog-open? :rig-report)
-        {:keys [mode file]} (fx/sub-ctx context subs/dialog-data :rig-report)
+  (let [{:keys [mode file]} (fx/sub-ctx context subs/dialog-data :rig-report)
         set-up? (= :set-up mode)]
-    {:fx/type :stage
-     :showing open?
+    {:fx/type common/dialog-stage
+     :dialog-id :rig-report
      :title (if set-up? "Set up rig" (str file " on this rig"))
      :modality :application-modal
      :resizable false
-     :on-close-request {:event/type :ui/close-dialog :dialog-id :rig-report}
-     :scene {:fx/type :scene
-             :stylesheets (css/dialog-stylesheet-urls)
-             :root (if set-up? {:fx/type set-up-content} {:fx/type report-content})}}))
+     :content {:fx/type (if set-up? set-up-content report-content)}}))

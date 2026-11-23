@@ -6,7 +6,6 @@
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.subs :as subs]
-            [laser-show.css.core :as css]
             [laser-show.views.components.driver-fields :as driver-fields]
             [laser-show.views.dialogs.common :as common]))
 
@@ -172,14 +171,8 @@
 
 (defn add-projector-manual-dialog
   "The add projector dialog window."
-  [{:keys [fx/context]}]
-  (let [open? (fx/sub-ctx context subs/dialog-open? :add-projector-manual)
-        stylesheets (css/dialog-stylesheet-urls)]
-    {:fx/type :stage
-     :showing open?
-     :title "Add Projector"
-     :modality :none
-     :on-close-request {:event/type :ui/close-dialog :dialog-id :add-projector-manual}
-     :scene {:fx/type :scene
-             :stylesheets stylesheets
-             :root {:fx/type add-projector-content}}}))
+  [_]
+  {:fx/type common/dialog-stage
+   :dialog-id :add-projector-manual
+   :title "Add Projector"
+   :content {:fx/type add-projector-content}})

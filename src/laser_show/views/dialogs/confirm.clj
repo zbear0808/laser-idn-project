@@ -11,8 +11,8 @@
    :confirm-event, plus {(:key choice) choice-value} when there's a choice.
    :confirm-event is plain data: whoever opens the dialog builds it fresh."
   (:require [cljfx.api :as fx]
-            [laser-show.css.core :as css]
-            [laser-show.subs :as subs]))
+            [laser-show.subs :as subs]
+            [laser-show.views.dialogs.common :as common]))
 
 (defn- choice-row
   [{:keys [choice choice-value]}]
@@ -89,14 +89,10 @@
   "The shared confirm window. Application-modal, so nothing else can be
    clicked while the question is open."
   [{:keys [fx/context]}]
-  (let [open? (fx/sub-ctx context subs/dialog-open? :confirm)
-        {:keys [title]} (fx/sub-ctx context subs/dialog-data :confirm)]
-    {:fx/type :stage
-     :showing open?
+  (let [{:keys [title]} (fx/sub-ctx context subs/dialog-data :confirm)]
+    {:fx/type common/dialog-stage
+     :dialog-id :confirm
      :title (or title "Confirm")
      :modality :application-modal
      :resizable false
-     :on-close-request {:event/type :ui/close-dialog :dialog-id :confirm}
-     :scene {:fx/type :scene
-             :stylesheets (css/dialog-stylesheet-urls)
-             :root {:fx/type confirm-content}}}))
+     :content {:fx/type confirm-content}}))
