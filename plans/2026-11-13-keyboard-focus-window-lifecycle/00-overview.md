@@ -1,7 +1,7 @@
 # Keyboard, focus and window lifecycle — overview
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)
-**Status:** In progress. Phase 1 is done (`93c638a`), Phase 3 is done (`c190f7c`), Phase 4 is done (`71ab827`), and Phase 2 is done on `keyboard-phase2` (`90dbe87`). Phase 5 awaits **D11**. The other decisions are answered (§7). **Last verified against:** `90dbe87` for Phase 2 (02 §10); `c190f7c` for Phase 3 (03 §10); `2227bce` for Phase 5's original code survey (05 §0 updates its shared window hook). §2 is the historical priority comparison at `cb32414`.
+**Status:** In progress. Phases 1–4 are implemented (`93c638a`, `90dbe87`, `c190f7c`, `71ab827`). Phase 5 is in progress on `keyboard-phase5` from `eb25043`; D11=A was confirmed on 2026-11-23. All decisions are answered (§7). §2 is the historical priority comparison at `cb32414`.
 **Supersedes / Superseded by:** supersedes `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md` (approved with D0 on 2026-11-14; that file is marked superseded and otherwise untouched)
 **Related findings:** review 01 F3, F4, F7, F18, F20, M5, L3, Q4, Q6; 02 #15, M4 (clipboard part); 05 F17, F9, L3; carry-overs "menu stubs" and "unsaved-changes guard"; undo plan §10
 
@@ -9,7 +9,7 @@
 
 **Phase 1 (`01-phase1-unsaved-guard.md`) is done** (`93c638a`, 2026-11-14; results and differences from the plan in its §10). It was the only pending item that stopped real data loss: closing the window, File > Exit, File > New and File > Open discarded unsaved work without asking (`views/root.clj:167-169`, `events/handlers/menu.clj:28,133` at `cb32414`). **Phase 4 is done** too (2026-11-22). Docs 02, 03 and 05 were re-checked at `2227bce` on 2026-11-22. **Phase 3 is done** (2026-11-22, `d2e23c1`..`c190f7c`; results, deviations and probes in 03 §10): a list's keys work with the focus on its own buttons and boxes, and Space plays after a click on TAP, a tab or the trigger-mode menu.
 
-**Phase 2 is done** on `keyboard-phase2` (`90dbe87`); [02 §10](02-phase2-dialog-shell.md#10-as-built-on-keyboard-phase2-from-c3de6b6) records the implementation and both full regression suites. **Next is Phase 5:** answer D11 (where keyboard triggers work and which keys a focused editor keeps). Both its code dependencies are in place.
+**Phase 2 is done** on `keyboard-phase2` (`90dbe87`); [02 §10](02-phase2-dialog-shell.md#10-as-built-on-keyboard-phase2-from-c3de6b6) records the implementation and both full regression suites. **Phase 5 is in progress:** keyboard triggers in the main window and eight non-modal editors, with text inputs and focused editors keeping their keys.
 
 The CI fix (§1) is in `e87b272`.
 
@@ -19,7 +19,7 @@ The CI fix (§1) is in `e87b272`.
 | `03-phase3-key-handling.md` | Keys reach the right place. Verified at `2227bce` | ~0.5–1 day | **Done** (2026-11-22, `d2e23c1`..`c190f7c`, 03 §10; D5–D7 answered A) |
 | `02-phase2-dialog-shell.md` | One shell for all twelve dialogs, including About; stale form/rename fixes and working View commands | ~2 days | **Done on `keyboard-phase2`** (`90dbe87`, 02 §10; D4=A) |
 | `04-phase4-clipboard.md` | One clipboard, in three steps; Step 4a (the one clipboard) ships on its own | ~2–2.5 days | **Done** (2026-11-22). 4a: 2026-11-21, `02ae75c`..`1113d9a`, 04 §9a; 4b–4c: D9 answered A, 2026-11-22, `29bf152`..`71ab827`, 04 §9b |
-| `05-phase5-keyboard-triggers.md` | Keyboard as a cue-trigger source (cells, vibe roles, map and pattern pads, the Zone step key). K-15 already fixed by other work (05 §0). Verified at `2227bce` | ~1–1.5 days | **D11 (re-opened)**; D10, D12 answered A. Phases 3 and 2 built |
+| `05-phase5-keyboard-triggers.md` | Keyboard as a cue-trigger source (cells, vibe roles, map and pattern pads, the Zone step key) | ~1–1.5 days | **In progress**; D10–D12 answered A. Phases 3 and 2 built |
 
 About 1–1.5 days of implementation left (Phase 5).
 
@@ -169,7 +169,7 @@ Each decision is written out in full, with options and a recommendation, in the 
 | D8 | Clipboard source of truth and OS reads (04 also asks D13: what enables Paste, and D14: how the OS clipboard is read) | 04 | Step 4a | **A, answered 2026-11-21**: the slot; the OS clipboard read only while the slot is empty (with D13 B and D14 A, both answered the same day) |
 | D9 | Clipboard types, conversions, Cut button | 04 | Steps 4b–4c | **A, answered 2026-11-22** (the ★ option, under the standing choice): strict types from the list's id + cell→list conversion + Cut |
 | D10 | Trigger vs built-in shortcut collisions | 05 | Phase 5 | **A, answered 2026-11-22** (★): user binding wins, Escape reserved |
-| D11 | Where keyboard triggers work; whether a focused editor keeps its keys; master switch | 05 | Phase 5 | **Open, re-opened 2026-11-22** with new options. Recommended A: main window + editor windows, a focused component that edits with the key keeps it, switch in Settings (the old A, now B, would take Space and the arrows from the step grid) |
+| D11 | Where keyboard triggers work; whether a focused editor keeps its keys; master switch | 05 | Phase 5 | **A, answered 2026-11-23**: main window and non-modal editors, focused components keep their editing keys, Settings switch on by default |
 | D12 | Key identity | 05 | Phase 5 | **A, answered 2026-11-22** (★): bare `KeyCode` name, Shift ignored |
 
 > **DECISION D0 — Which plan goes first** *(answered A, 2026-11-14)*
