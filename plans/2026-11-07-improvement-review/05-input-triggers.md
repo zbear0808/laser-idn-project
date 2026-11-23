@@ -73,7 +73,7 @@ There is no per-mapping range, so a mapping can't say "this address sends 0–1 
 - `stop!` in `app.clj` doesn't stop the OSC server, so a dev restart gets "address in use".
 - `register-handler` (`:238-246`) returns `nil`-safe state, but its `osc-handle` side effect runs inside a supposedly pure function.
 
-**F8. Link: downbeat sync can never work; BPM sync misses the first update. (High/Med)**
+**F8. Link: downbeat sync remains open (L2); BPM following is fixed (Q7, `0bbe0cb`).** Findings below describe the original behavior.
 - `link.clj:207-219`: `bc/beat-at-time` expects Link-timeline microseconds based on `System/nanoTime` (see `beat_carabiner/core.clj:603,613`), but gets `currentTimeMillis*1000`. It is also *asynchronous*: it writes a socket message and returns the stream-flush result, not a beat. `(mod beat 1.0)` therefore throws, gets caught and logged, and returns `nil`, so `sync-to-downbeat!` (`:221-243`) does nothing on every call (wired at `timing.clj:106-112`). The result arrives later through the status listener (`:beat` in client state), which this code ignores.
 - `link.clj:73-77` compares the incoming BPM against `(:link-bpm link-state)`, which `:timing/link-bpm-changed` (`:63-65`) already updates on every status. If the user turns sync on while Link is steady, `:timing/set-bpm` never fires. It should compare against the app's `[:timing :bpm]`.
 - `:63-65` sends `link-bpm-changed` on every Carabiner status, even when the value is unchanged, causing state churn and re-renders.
@@ -226,13 +226,10 @@ Steps:
 
 Files: `events/handlers.clj`, `test/.../triggers_test.clj`.
 
-**Q7. Link listener fixes (F8, parts 2–4).**
-Steps:
-- Send `link-bpm-changed` only when `bpm-changed?` against the stored `:link-bpm`.
-- Gate the `set-bpm` decision on `(and link-enabled? sync-enabled?)`, and compare against the *app* BPM. Pass in a `get-app-bpm-fn` or have `get-state-fn` return both.
-- Add a test: sync turned on while Link is steady at 128 and the app at 120 → `set-bpm 128`.
-
-Files: `input/link.clj`, `app.clj:145-151`, `test/laser_show/input/link_test.clj`.
+**Q7. Link BPM listener and sync controls (F8, parts 2–4) — implemented on `fix/link-bpm-sync` at `0bbe0cb`.**
+- Turning on BPM sync adopts the last reported Link tempo immediately, including when Link is re-enabled with the sync preference still selected. The toolbar enables Link first, then toggles BPM following; Settings retains the two separate controls.
+- `input/link.clj` forwards changed BPM and peer reports, including a tempo already available when the listener registers. Repeated steady reports are quiet; while following, a local tempo mismatch requests a correction. The timing handler checks both switches when it processes the report, so a queued observation cannot change the app tempo after sync was disabled.
+- Verified with the 120 → steady 128 BPM regression, back-to-back reports, and the Settings and toolbar controls. Focused macOS arm64 run: 69 unit and 26 headless UI tests passed. Tests use the beat-carabiner status map without a live peer. Downbeat/phase alignment remains the independent L2 item.
 
 **Q8. Stop trigger runtime churn (F13 part 5, F14 part 3).**
 Steps:
