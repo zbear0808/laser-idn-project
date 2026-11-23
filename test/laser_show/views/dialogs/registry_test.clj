@@ -23,8 +23,13 @@
 (deftest no-rig-report-before-opening-a-show-test
   (let [fresh (assoc-in (domains/build-initial-state) [:chains :cue-chains [0 0]]
                         {:target :auto.laser/missing})
-        ctx (fx/create-context fresh state/cache-factory)]
+        ctx (fx/create-context fresh state/cache-factory)
+        loaded (fx/create-context (assoc-in fresh [:ui :dialogs :rig-report]
+                                           {:open? false :file "friday.zip" :hardware nil})
+                                  state/cache-factory)]
     (is (nil? (fx/sub-ctx ctx rig-report/report))
         "a closed dialog default is not a show loaded from a file")
     (is (zero? (fx/sub-ctx ctx rig-report/warning-count))
-        "a fresh show must not offer a report to reopen")))
+        "a fresh show must not offer a report to reopen")
+    (is (= 1 (fx/sub-ctx loaded rig-report/warning-count))
+        "a loaded show without hardware data can still have a missing pin to report")))
