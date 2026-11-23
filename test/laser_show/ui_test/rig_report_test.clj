@@ -168,6 +168,23 @@
   (rig-store/write! (rig-path) rig-doc)
   (start-with-rig!))
 
+(deftest cancel-on-top-of-rig-report-keeps-the-report-open-test
+  (let [robot (ui/robot)
+        id :projector-10-0-0-5-1
+        show (show-zip! "graphics.zip"
+                        {id (assoc (laser "Laser L" "10.0.0.5") :safety {:limit [-0.5 -0.5 0.5 0.5] :blocked []})}
+                        {[0 0] {:items [] :target :graphics}})]
+    (start-on-laser-l!)
+    (open! show)
+    (ui/click! robot "#rig-report-use-show-projector-10-0-0-5-1")
+    (ui/assert-text! "#confirm-title" "Replace Laser L's safety zone with the show's?")
+    (is (ui/visible? "#rig-report-title") "the report stays mounted underneath its question")
+    (ui/press! robot javafx.scene.input.KeyCode/ESCAPE)
+    (ui/wait-for! #(not (ui/visible? "#confirm-title")))
+    (ui/assert-text! "#rig-report-title" "graphics.zip on this rig")
+    (ui/click! robot "#rig-report-close")
+    (ui/wait-for! #(not (ui/visible? "#rig-report-title")))))
+
 (deftest report-choose-lasers-opens-the-group-test
   (let [robot (ui/robot)
         show (show-zip! "graphics.zip" {:projector-10-0-0-5-1 (laser "Laser L" "10.0.0.5")}
