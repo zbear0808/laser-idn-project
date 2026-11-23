@@ -6,6 +6,7 @@
             [laser-show.input.events :as input-events]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
+            [laser-show.state.persistent :as persistent]
             [laser-show.state.templates :as templates]))
 
 (deftest legacy-cue-trigger-dispatches-grid-event
@@ -66,6 +67,77 @@
                     :state state
                     :input-event {:type type :source :midi :channel 0 :note 60 :timestamp 1}
                     :time 1}))
+
+(defn- keyboard-edge [state id edge]
+  (let [at (if (= :pressed edge) 1000 1400)]
+    (triggers/handle-input {:state state :time at
+                            :input-event (assoc (input-events/trigger :keyboard id edge) :timestamp at)})))
+
+(defn- no-trigger-holds? [{:keys [trigger-runtime]}]
+  (every? empty? ((juxt :keyboard-activations :held-inputs :active-triggers) trigger-runtime)))
+
+(deftest keyboard-release-balances-press-only-definition-test
+  (let [state {:chains {:cue-chains {[0 0] {:items []}}}
+               :triggers {:definitions {:cue {:match {:source :keyboard :id :j :type :trigger :state :pressed}
+                                              :action {:type :trigger-cue :target [0 0]}
+                                              :behavior :momentary}}}
+               :config {:input {:trigger-map {{:source :keyboard :id :j} {:type :vibe :role :hit}}}}}
+        press (keyboard-edge state :j :pressed)
+        playing (:state (handlers/handle-event (assoc (:dispatch press) :state (:state press))))
+        release (keyboard-edge playing :j :released)
+        stopped (:state (handlers/handle-event (assoc (:dispatch release) :state (:state release))))]
+    (is (contains? (get-in playing [:playback :active-cues]) [0 0]))
+    (is (triggers/bound? playing (input-events/trigger :keyboard :j :released)))
+    (is (= [:grid/release-cell :cue] [(get-in release [:dispatch :event/type])
+                                      (get-in release [:dispatch :source-trigger :trigger-id])]))
+    (is (not (contains? (get-in stopped [:playback :active-cues]) [0 0])))
+    (is (no-trigger-holds? stopped))))
+
+(deftest keyboard-release-survives-remap-or-removal-test
+  (let [effect {:type :trigger-effect :behavior :momentary :target [2 1]}
+        vibe {:type :vibe :role :hit}
+        state {:config {:input {:trigger-map {{:source :keyboard :id :a} effect
+                                              {:source :keyboard :id :b} vibe}}}}
+        a-down (:state (keyboard-edge state :a :pressed))
+        b-down (:state (keyboard-edge a-down :b :pressed))
+        changed (assoc-in b-down [:config :input :trigger-map] {{:source :keyboard :id :a} vibe})
+        a-up (keyboard-edge changed :a :released)
+        b-up (keyboard-edge (:state a-up) :b :released)]
+    (is (= {:event/type :effects/toggle-cell :col 2 :row 1 :fx/event false :source-trigger effect}
+           (dissoc (:dispatch a-up) :source-input)) "release the effect, not the new role")
+    (is (= {:event/type :vibe/release :role :hit :input-time 1400 :source-trigger vibe}
+           (dissoc (:dispatch b-up) :source-input)) "release the role even though it is no longer mapped")
+    (is (no-trigger-holds? (:state b-up)))
+    (is (= :vibe/press (get-in (keyboard-edge (:state b-up) :a :pressed) [:dispatch :event/type]))
+        "the next press uses the new binding")))
+
+(deftest keyboard-release-without-activation-test
+  (let [key {:source :keyboard :id :a}
+        bound {:config {:input {:trigger-map {key {:type :vibe :role :accent}}}}}
+        unbound-down (:state (keyboard-edge {} :a :pressed))]
+    (doseq [[label state] [["learn captured the press" bound]
+                           ["no action matched the press" (merge unbound-down bound)]]]
+      (testing label
+        (let [release (keyboard-edge state :a :released)]
+          (is (false? (triggers/bound? state (input-events/trigger :keyboard :a :released))))
+          (is (nil? (:dispatch release)))
+          (is (no-trigger-holds? (:state release))))))))
+
+(deftest new-or-open-forgets-previous-shows-keyboard-activations-test
+  (let [key {:source :keyboard :id :a}
+        show (assoc-in (domains/build-initial-state) [:config :input :trigger-map]
+                       {key {:type :trigger-cue :behavior :momentary :target [0 0]}
+                        note-key {:type :tap-tempo}})
+        midi-held (:state (input show :note-on))
+        both-held (:state (keyboard-edge midi-held :a :pressed))
+        files (persistent/project-files both-held)]
+    (is (= (persistent/project-files show) files) "holds don't change the saved show")
+    (doseq [next-show [(persistent/new-project-state both-held)
+                       (persistent/apply-loaded-project both-held files "held.zip")]]
+      (is (= (select-keys (:trigger-runtime midi-held) [:held-inputs :active-triggers :keyboard-activations])
+             (select-keys (:trigger-runtime next-show) [:held-inputs :active-triggers :keyboard-activations]))
+          "only the keyboard holds were dropped")
+      (is (nil? (:dispatch (keyboard-edge next-show :a :released)))))))
 
 (deftest momentary-cue-press-and-release
   (let [state (momentary-state :trigger-cue)

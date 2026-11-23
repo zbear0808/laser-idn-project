@@ -100,6 +100,8 @@
                      :doc "Map of trigger ID to runtime timing state"}
    :held-inputs {:default #{}
                  :doc "Input identities currently held"}
+   :keyboard-activations {:default {}
+                          :doc "Key id -> action resolved on key-down, until key-up or a new show"}
    :last-input-time {:default nil
                      :doc "Timestamp of the most recent discrete input"}})
 

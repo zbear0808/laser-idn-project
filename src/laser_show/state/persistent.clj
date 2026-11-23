@@ -181,6 +181,15 @@
           state
           (filter #(contains? owners (:owner %)) all-path-specs)))
 
+(defn- clear-keyboard-holds [runtime]
+  ;; The old show's actions must not receive key-up in the new show. Other
+  ;; input devices keep their session, as before.
+  (let [keyboard? #(= :keyboard (:source %))]
+    (-> runtime
+        (assoc :keyboard-activations {})
+        (update :held-inputs #(into #{} (remove keyboard?) %))
+        (update :active-triggers #(into {} (remove (comp keyboard? :input val)) %)))))
+
 (defn- reset-session
   "Reset state that refers to the previous document (playback, what vibe
    mode is doing, selection, list UI, dialogs, the status bar's notice, the
@@ -190,6 +199,7 @@
   [state initial]
   (-> state
       (assoc :playback (:playback initial))
+      (update :trigger-runtime clear-keyboard-holds)
       (assoc :vibe-runtime (:vibe-runtime initial))
       (assoc :list-ui (:list-ui initial))
       (assoc :history (:history initial))
