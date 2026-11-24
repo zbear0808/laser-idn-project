@@ -74,6 +74,7 @@
             [laser-show.events.handlers.history :as history-handlers]
             [laser-show.events.handlers.rig-autosave :as rig-autosave]
             [laser-show.events.handlers.timeline :as timeline-handlers]
+            [laser-show.events.safety-guard :as safety-guard]
             [laser-show.events.show-lock :as show-lock]
             [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.events.handlers.output-sync :as output-sync]
@@ -631,10 +632,12 @@
    invariants enforced on changed cue chains (so history sees normalized
    state), undo history for undoable document edits, then the
    unsaved-changes flag derived for every event
-   (see handlers/history.clj), then the output sync: a change to what the
-   engines are built from (undo included) requests a refresh while streaming
-   (handlers/output_sync.clj), and the rig autosave: a change to the rig
-   (undo included) requests a write of the rig file
+   (see handlers/history.clj), then the safety versions: a change to a
+   projector's safety zone (undo included) moves its versions on
+   (safety-guard/wrap-safety-versions), then the output sync: a change to
+   what the engines are built from (undo included) requests a refresh while
+   streaming (handlers/output_sync.clj), and the rig autosave: a change to
+   the rig (undo included) requests a write of the rig file
    (handlers/rig_autosave.clj). Then, in dev mode only, the lost-update check
    tags the :state effect with the event's snapshot. Outermost, with-fx-event
    puts a map event's :fx/event value where its view wrote the placeholder.
@@ -647,6 +650,7 @@
       timeline-handlers/wrap-normalize-timelines
       history-handlers/wrap-history
       history-handlers/wrap-dirty
+      safety-guard/wrap-safety-versions
       output-sync/wrap-output-sync
       rig-autosave/wrap-rig-autosave
       wrap-lost-update-check

@@ -510,8 +510,68 @@
 
 (deftest safety-events-have-undo-labels-test
   (doseq [[event-type label] [[:projectors/set-safety "Change Safety Zone"]
+                              [:projectors/set-safety-coordinate "Change Safety Zone"]
+                              [:projectors/reset-safety "Reset Safety Zone"]
                               [:projectors/add-blocked-area "Add Blocked Area"]
                               [:projectors/remove-blocked-area "Remove Blocked Area"]
                               [:projectors/copy-safety "Copy Safety Zone"]]]
     (is (= label (get history-handlers/event-descriptions event-type)) (str event-type))))
+
+(deftest coordinate-edits-are-separate-rig-undo-steps-test
+  ;; plans/2026-11-23-cljfx-reactivity/08 §5: each field commit that changes
+  ;; the zone, and Reset, is one undo step of the rig. The show stays saved,
+  ;; the rig file follows, the engines aren't rebuilt. Effects are only
+  ;; looked at, never run
+  (let [rig-path (.getPath (java.io.File. (System/getProperty "java.io.tmpdir") "coordinate-edits-test/rig.edn"))
+        s0 (-> (clean-state)
+               (assoc-in [:projectors :p1] {:name "Laser L" :host "10.0.0.5" :port 7255 :enabled? true
+                                            :zone-groups [:all] :safety {:limit [-0.5 -0.5 0.5 0.5] :blocked []}})
+               (assoc-in [:rig-file :path] rig-path)
+               history/mark-clean)
+        coord (fn [path value] {:event/type :projectors/set-safety-coordinate :projector-id :p1 :path path :value value})
+        live #(assoc-in % [:backend :streaming :running?] true)
+        zone #(get-in % [:projectors :p1 :safety])
+        labels #(mapv :description (get-in % [:history :undo-stack]))
+        redo #(get-in % [:history :redo-stack])
+        x0 (coord [:limit 0] -0.4)
+        y1 (coord [:limit 3] 0.3)
+        s1 (run s0 x0)
+        s2 (run s1 y1)]
+    (testing "two edits, two steps"
+      (is (= {:limit [-0.4 -0.5 0.5 0.3] :blocked []} (zone s2)))
+      (is (= ["Change Safety Zone" "Change Safety Zone"] (labels s2)))
+      (is (false? (get-in s2 [:project :dirty?])) "the rig is no unsaved change of the show"))
+    (testing "the rig file gets both edits; streaming, the engines aren't rebuilt"
+      (let [effects (pipeline (assoc y1 :state (live s1)))]
+        (is (= rig-path (get-in effects [:rig/write :path])))
+        (is (= {:limit [-0.4 -0.5 0.5 0.3] :blocked []} (get-in effects [:rig/write :doc :projectors :p1 :safety])))
+        (is (not (contains? effects :multi-engine/refresh)))))
+    (testing "the value it has again: no step"
+      (is (= (labels s2) (labels (run s2 y1)))))
+    (let [undone (run s2 {:event/type :edit/undo})]
+      (testing "Undo takes back the second only, and Redo puts it back"
+        (is (= {:limit [-0.4 -0.5 0.5 0.5] :blocked []} (zone undone)))
+        (is (= ["Change Safety Zone"] (labels undone)))
+        (is (= (zone s2) (zone (run undone {:event/type :edit/redo})))))
+      (testing "asking, Cancel, a refused edit, an invalid one and one that changes nothing keep Redo"
+        (let [asked (run (live undone) (coord [:limit 2] 0.75))
+              cancelled (run asked {:event/type :ui/close-dialog :dialog-id :confirm
+                                    :review-id (get-in asked [:ui :dialogs :confirm :safety-review :id])})
+              refused (run (assoc-in cancelled [:ui :show-lock?] true) (coord [:limit 2] 0.75))
+              same (run cancelled x0)
+              invalid (run cancelled (coord [:limit 0] 3.0))]
+          (is (true? (get-in asked [:ui :dialogs :confirm :open?])))
+          (is (= "Larger safety zone refused" (get-in refused [:ui :show-lock-notice :text])))
+          (doseq [[label s] [["asked" asked] ["cancelled" cancelled] ["refused" refused] ["the same" same] ["invalid" invalid]]]
+            (is (= (redo undone) (redo s)) label)
+            (is (= (labels undone) (labels s)) label)
+            (is (= (zone undone) (zone s)) label)
+            (is (false? (get-in s [:project :dirty?])) label))
+          (is (= (zone s2) (zone (run same {:event/type :edit/redo}))) "Redo still puts the second edit back"))))
+    (testing "Reset is one step"
+      (let [reset (run s2 {:event/type :projectors/reset-safety :projector-id :p1})]
+        (is (= {:limit [-1.0 -1.0 1.0 1.0] :blocked []} (zone reset)))
+        (is (= ["Change Safety Zone" "Change Safety Zone" "Reset Safety Zone"] (labels reset)))
+        (is (false? (get-in reset [:project :dirty?])))
+        (is (= (zone s2) (zone (run reset {:event/type :edit/undo}))))))))
 

@@ -43,11 +43,20 @@
 
 (defn- handle-ui-close-dialog
   "Close the dialog. Cancel and window close discard the Add Projector form,
-   just like a successful Add; editors keep their per-dialog UI state."
-  [{:keys [dialog-id state]}]
-  {:state (if (= :add-projector-manual dialog-id)
-            (assoc-in state [:ui :dialogs dialog-id] {:open? false})
-            (assoc-in state [:ui :dialogs dialog-id :open?] false))})
+   just like a successful Add; editors keep their per-dialog UI state. A
+   safety zone's question ([:ui :dialogs :confirm :safety-review],
+   safety-guard/ask-review) closes, its review with it, only with its own
+   :review-id (its Cancel's and its window's); a :review-id closes no other
+   question."
+  [{:keys [dialog-id review-id state]}]
+  (let [review (when (= :confirm dialog-id) (get-in state [:ui :dialogs :confirm :safety-review :id]))]
+    {:state (cond
+              (= :add-projector-manual dialog-id) (assoc-in state [:ui :dialogs dialog-id] {:open? false})
+              (and (= :confirm dialog-id) (or (some? review-id) (some? review)))
+              (if (and (some? review-id) (= review-id review))
+                (assoc-in state [:ui :dialogs :confirm] {:open? false})
+                state)
+              :else (assoc-in state [:ui :dialogs dialog-id :open?] false))}))
 
 (defn- handle-ui-update-dialog-data
   "Update data associated with a dialog (e.g., selected item within dialog).
@@ -85,15 +94,25 @@
   "The shared confirm dialog's confirm button (views/dialogs/confirm.clj):
    close it, and continue with its :confirm-event, plus the picked option
    under its choice's :key when it has a choice. A closed dialog continues
-   with nothing."
-  [{:keys [state]}]
-  (let [{:keys [open? confirm-event choice choice-value]} (get-in state [:ui :dialogs :confirm])
+   with nothing. A safety zone's question (:safety-review,
+   safety-guard/ask-review) answers only to its own :review-id, and stays
+   open for the answer it continues with, which closes it in this turn; a
+   :review-id answers no other question."
+  [{:keys [review-id state]}]
+  (let [{:keys [open? confirm-event choice choice-value safety-review]} (get-in state [:ui :dialogs :confirm])
         closed (assoc-in state [:ui :dialogs :confirm] {:open? false})]
-    (if (and open? confirm-event)
+    (cond
+      (or (some? review-id) (some? safety-review))
+      (if (and open? confirm-event (some? review-id) (= review-id (:id safety-review)))
+        {:dispatch confirm-event}
+        {:state state})
+
+      (and open? confirm-event)
       {:state closed
        :dispatch (cond-> confirm-event
                    (:key choice) (assoc (:key choice) choice-value))}
-      {:state closed})))
+
+      :else {:state closed})))
 
 (defn- handle-ui-set-grid-split
   "Remember where the user left the divider between a tab and the preview

@@ -27,6 +27,7 @@
   (:require [laser-show.animation.safety :as safety]
             [laser-show.events.handlers.history :as history]
             [laser-show.events.helpers :as h]
+            [laser-show.events.safety-guard :as guard]
             [laser-show.routing.zone-patterns :as zone-patterns]))
 
 (def blocked-events
@@ -119,9 +120,16 @@
 
 (def safety-edits
   "The safety zone edits (zones plan Z1). The lock refuses one only when it
-   would make a zone larger (widens-a-zone?)."
-  #{:projectors/set-safety :projectors/add-blocked-area :projectors/remove-blocked-area
-    :projectors/copy-safety})
+   would make a zone larger: a coordinate edit or Reset by the change it
+   proposes (reviewed-widening), the others by a dry run (widens-a-zone?)."
+  #{:projectors/set-safety :projectors/set-safety-coordinate :projectors/reset-safety
+    :projectors/add-blocked-area :projectors/remove-blocked-area :projectors/copy-safety})
+
+(def ^:private reviewed-edits
+  "The safety edits whose handler trusts no :confirmed? on the event, only an
+   answer to their own question (safety-guard/review-answer): a dry run
+   with :confirmed? true would only ask."
+  #{:projectors/set-safety-coordinate :projectors/reset-safety})
 
 (def ^:private larger-zone-refused "Larger safety zone refused")
 
@@ -152,6 +160,22 @@
                                             (get-in after [:projectors id :safety])))
                    (keys (:projectors after))))))
 
+(defn- reviewed-widening
+  "The state to refuse a coordinate edit or Reset from when the change it
+   proposes now (guard/zone-edit-proposal) makes its zone larger, outputting
+   or not; else nil. An answer to its own open question is judged by the
+   intent the question asked about, and refused from the state with that
+   question closed, so the dialog doesn't stay open. A stale answer goes on
+   to its handler, which writes nothing."
+  [{:keys [state review-id] :as event}]
+  (let [widens? (fn [intent]
+                  (let [{:keys [before after same?] :as proposal} (guard/zone-edit-proposal state intent)]
+                    (and proposal (not same?) (safety/widens? before after))))]
+    (if (some? review-id)
+      (when-let [{:keys [intent closed stale?]} (guard/review-answer state event)]
+        (when (and (not stale?) (widens? intent)) closed))
+      (when (widens? event) state))))
+
 (defn- refuse
   "state with the notice that the lock refused an event of type: under the
    switch ([:ui :show-lock-notice] {:text :event}) and on the status bar."
@@ -169,5 +193,8 @@
       (not (locked? state)) (handler event)
       (contains? blocked-events type) (refuse state type (refused-text type))
       (pattern-edit? event) (refuse state type pattern-edit-refused)
+      (contains? reviewed-edits type) (if-let [from (reviewed-widening event)]
+                                        (refuse from type larger-zone-refused)
+                                        (handler event))
       (and (contains? safety-edits type) (widens-a-zone? handler event)) (refuse state type larger-zone-refused)
       :else (handler event))))

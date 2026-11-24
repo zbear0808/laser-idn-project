@@ -379,6 +379,8 @@
                             :doc "Brightness for calibration test pattern (0.0-1.0)"}
    :identify {:default {}
               :doc "{projector-id until-ms}: projectors whose test pattern flashes until then (Identify)"}
+   :safety-versions {:default {:serial 0 :by-id {}}
+                     :doc "The safety zones' versions (events/safety_guard.clj wrap-safety-versions): {:serial n :by-id {projector-id {:geometry g :rows r}}}, each stamp the next serial. :geometry moves on with any change to a projector's zone (undo included), :rows when its blocked areas may be other rows (added, removed, replaced, restored), not with a coordinate field's edit. A blocked area's field sends :rows, so its edit can't land on another row; a safety question keeps :geometry, so its Allow applies only to the zone it asked about, and takes its id from :serial. A projector with no entry is at 0. For the session: not saved, not undone, never unsaved"}
    :discovered-devices {:default []
                         :doc "Devices from the last scan: IDN addresses and services, or a driver's :device-key and :outputs. Each device carries :driver."}
    :scanning? {:default false

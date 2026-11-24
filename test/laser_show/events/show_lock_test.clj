@@ -361,6 +361,174 @@
       (is (= [-1.0 -1.0 1.0 1.0] (:limit (zone (run s0 {:event/type :projectors/set-safety :projector-id :p1
                                                          :safety {:limit [-1 -1 1 1]}}))))))))
 
+(deftest coordinate-and-reset-respect-current-review-test
+  ;; plans/2026-11-23-cljfx-reactivity/08 §6, §7 examples 3-5: a coordinate
+  ;; field's edit or Reset is judged by what it does to the zone stored when
+  ;; it is handled; its question is its own, and its Allow applies only to
+  ;; the zone it asked about
+  (let [z {:limit [-0.5 -0.5 0.5 0.5] :blocked []}
+        s0 (-> (starter) (assoc-in [:projectors :p1 :safety] z) (history/mark-clean))
+        live (assoc-in s0 [:backend :streaming :running?] true)
+        coord (fn [path value & {:as more}]
+                (merge {:event/type :projectors/set-safety-coordinate :projector-id :p1 :path path :value value} more))
+        reset {:event/type :projectors/reset-safety :projector-id :p1}
+        zone #(get-in % [:projectors :p1 :safety])
+        question #(get-in % [:ui :dialogs :confirm])
+        review-id #(get-in % [:ui :dialogs :confirm :safety-review :id])
+        allow (fn [id] {:event/type :ui/confirm :review-id id})
+        stacks #(select-keys (:history %) [:undo-stack :redo-stack])
+        changed "Safety zone changed; review the edit again"]
+    (testing "smaller applies at once, live or not; larger at once on a laser that isn't on"
+      (let [s (run live (coord [:limit 0] -0.4))]
+        (is (= [-0.4 -0.5 0.5 0.5] (:limit (zone s))))
+        (is (false? (:open? (question s)))))
+      (is (= [-0.5 -0.5 0.75 0.5] (:limit (zone (run s0 (coord [:limit 2] 0.75)))))))
+    (testing "example 3: a tighter zone while it asks, then the old question's Allow"
+      (let [asked (run live (coord [:limit 2] 0.75))
+            id (review-id asked)]
+        (is (= z (zone asked)) "asking leaves the zone in force")
+        (is (= {:open? true
+                :title "Allow light in a larger area?"
+                :message "P1 is on. Light can reach places it couldn't before."
+                :confirm-label "Allow"
+                :confirm-event {:event/type :projectors/set-safety-coordinate :review-id id :confirmed? true}
+                :safety-review {:id id :geometry 0
+                                :intent {:event/type :projectors/set-safety-coordinate :projector-id :p1
+                                         :path [:limit 2] :value 0.75}}}
+               (question asked)))
+        (is (= (stacks s0) (stacks asked)))
+        (is (= asked (run asked (coord [:limit 3] 0.8))) "a second widening while it asks is dropped")
+        (let [tightened (run asked (coord [:limit 0] -0.4))
+              stale (run tightened (allow id))]
+          (is (= [-0.4 -0.5 0.5 0.5] (:limit (zone tightened))) "the tighter zone applies while it asks")
+          (is (= (question asked) (question tightened)) "and the question stays as it was")
+          (is (= [-0.4 -0.5 0.5 0.5] (:limit (zone stale))) "the old Allow writes nothing")
+          (is (= {:open? false} (question stale)))
+          (is (= changed (get-in stale [:ui :notice :text])))
+          (is (= (stacks tightened) (stacks stale)) "and adds no undo step")
+          (let [asked-again (run stale (coord [:limit 2] 0.75))
+                id2 (review-id asked-again)]
+            (is (not= id id2) "the edit again asks again, with a question of its own")
+            (testing "the old question's buttons, and none, answer nothing"
+              (doseq [event [(allow id)
+                             {:event/type :ui/close-dialog :dialog-id :confirm :review-id id}
+                             {:event/type :ui/confirm}
+                             {:event/type :ui/close-dialog :dialog-id :confirm}
+                             {:event/type :projectors/set-safety-coordinate :review-id id :confirmed? true}]]
+                (is (= asked-again (run asked-again event)) (pr-str event))))
+            (let [allowed (run asked-again (allow id2))]
+              (is (= [-0.4 -0.5 0.75 0.5] (:limit (zone allowed))))
+              (is (= {:open? false} (question allowed)))
+              (is (= (inc (count (:undo-stack (stacks stale)))) (count (:undo-stack (stacks allowed)))))
+              (testing "a second click on it, or its answer again, is no permission"
+                (doseq [event [(allow id2) {:event/type :projectors/set-safety-coordinate :review-id id2 :confirmed? true}]]
+                  (is (= allowed (run allowed event)) (pr-str event)))))))))
+    (testing "Allow applies while the zone is the one it asked about, whatever else changed"
+      (let [asked (run live (coord [:limit 2] 0.75))
+            meanwhile (-> asked
+                          (run {:event/type :ui/set-active-tab :tab-id :projectors})
+                          (run {:event/type :projectors/set-safety-coordinate :projector-id :p2 :path [:limit 0] :value -0.5}))
+            allowed (run meanwhile (allow (review-id asked)))]
+        (is (= -0.5 (get-in meanwhile [:projectors :p2 :safety :limit 0])) "another laser's zone changed")
+        (is (= [-0.5 -0.5 0.75 0.5] (:limit (zone allowed))))
+        (is (= {:open? false} (question allowed)))
+        (is (= "Change Safety Zone" (history/undo-label (:history allowed))))))
+    (testing "Cancel discards its question: its answer is no permission after"
+      (let [asked (run live (coord [:limit 2] 0.75))
+            id (review-id asked)
+            cancelled (run asked {:event/type :ui/close-dialog :dialog-id :confirm :review-id id})]
+        (is (= {:open? false} (question cancelled)))
+        (is (= z (zone cancelled)))
+        (is (= (stacks s0) (stacks cancelled)))
+        (doseq [event [(allow id) {:event/type :projectors/set-safety-coordinate :review-id id :confirmed? true}]]
+          (is (= cancelled (run cancelled event)) (pr-str event)))
+        (testing "another id, or none, closes nothing"
+          (doseq [event [{:event/type :ui/close-dialog :dialog-id :confirm :review-id (inc id)}
+                         {:event/type :ui/close-dialog :dialog-id :confirm}]]
+            (is (= asked (run asked event)) (pr-str event))))))
+    (testing "a safety question's id answers no other question"
+      (let [asked (run s0 {:event/type :projectors/request-remove :projector-id :p2})]
+        (is (true? (:open? (question asked))))
+        (doseq [event [(allow 1) {:event/type :ui/close-dialog :dialog-id :confirm :review-id 1}]]
+          (is (= asked (run asked event)) (pr-str event)))
+        (is (not (contains? (:projectors (run asked {:event/type :ui/confirm})) :p2)) "its own button still does")))
+    (testing ":confirmed? true on an edit is no permission: it asks"
+      (let [asked (run live (coord [:limit 2] 0.75 :confirmed? true))]
+        (is (= z (zone asked)))
+        (is (true? (:open? (question asked)))))
+      (is (= z (zone (run live (assoc reset :confirmed? true)))))
+      (is (= live (run live {:event/type :projectors/set-safety-coordinate :review-id 1 :confirmed? true}))
+          "and an answer to no question does nothing"))
+    (testing "example 4: locked, larger is refused, outputting or not; smaller applies at once"
+      (doseq [[label s] [["off" s0] ["outputting" live]]]
+        (testing label
+          (doseq [event [(coord [:limit 2] 0.75) (coord [:limit 2] 0.75 :confirmed? true) reset]]
+            (let [effects (handle (lock s) event)
+                  refused (:state effects)]
+              (is (= (lock s) (without-notices refused)) (str (pr-str event) ": no question, no edit"))
+              (is (= {:text "Larger safety zone refused" :event (:event/type event)} (get-in refused [:ui :show-lock-notice])))
+              (is (= "Show lock is on: Larger safety zone refused. Unlock it on the Perform tab"
+                     (get-in refused [:ui :notice :text])))
+              (is (= #{:state :dispatch-later} (set (keys effects))) "the notice's timer only")))
+          (let [smaller (run (lock s) (coord [:limit 2] 0.4))]
+            (is (= [-0.5 -0.5 0.4 0.5] (:limit (zone smaller))))
+            (is (nil? (get-in smaller [:ui :show-lock-notice])))
+            (is (false? (:open? (question smaller))))))))
+    (testing "the lock on between the question and Allow: refused, and the question closed"
+      (let [asked (run live (coord [:limit 2] 0.75))
+            allowed (run (lock asked) (allow (review-id asked)))]
+        (is (= z (zone allowed)))
+        (is (= {:open? false} (question allowed)))
+        (is (= {:text "Larger safety zone refused" :event :projectors/set-safety-coordinate}
+               (get-in allowed [:ui :show-lock-notice])))
+        (is (= (stacks s0) (stacks allowed)))))
+    (testing "example 5: a zone that can't be read"
+      (let [bad {:limit [0 0]}
+            s (assoc-in s0 [:projectors :p1 :safety] bad)
+            asked (run (assoc-in s [:backend :streaming :running?] true) reset)]
+        (is (= bad (zone (run s (coord [:limit 3] 0.3)))) "an edit leaves it as it is")
+        (is (= {:limit [-1.0 -1.0 1.0 1.0] :blocked []} (zone (run s reset))) "unlocked and off, Reset puts the whole range")
+        (is (= bad (zone asked)) "outputting, Reset asks first")
+        (is (= {:event/type :projectors/reset-safety :review-id (review-id asked) :confirmed? true}
+               (:confirm-event (question asked))))
+        (is (= {:limit [-1.0 -1.0 1.0 1.0] :blocked []} (zone (run asked (allow (review-id asked))))))
+        (let [refused (run (lock s) reset)]
+          (is (= bad (zone refused)) "locked, Reset is refused")
+          (is (= "Larger safety zone refused" (get-in refused [:ui :show-lock-notice :text]))))
+        (is (= (:projectors s) (:projectors (run s {:event/type :projectors/reset-safety :projector-id :p9})))
+            "a projector that isn't there stays so")))
+    (testing "an Allow when the zone can't be read any more writes nothing"
+      (let [asked (run live (coord [:limit 2] 0.75))
+            ;; as a rig file written by hand might have it
+            broken (assoc-in asked [:projectors :p1 :safety] {:limit [0 0]})
+            allowed (run broken (allow (review-id asked)))]
+        (is (= {:limit [0 0]} (zone allowed)))
+        (is (= {:open? false} (question allowed)))))
+    (testing "a blocked area's edit asked about, then Blocked 1 removed: Allow writes nothing"
+      (let [two {:limit [-0.5 -0.5 0.5 0.5] :blocked [[-0.2 -0.2 0.2 0.2] [0.3 0.3 0.4 0.4]]}
+            asked (run (assoc-in live [:projectors :p1 :safety] two) (coord [:blocked 1 0] 0.35 :row-version 0))
+            _ (is (true? (:open? (question asked))) "a smaller blocked area lets light in: it asks")
+            removed (run (assoc-in asked [:backend :streaming :running?] false)
+                         {:event/type :projectors/remove-blocked-area :projector-id :p1 :index 0})
+            allowed (run removed (allow (review-id asked)))]
+        (is (= [[0.3 0.3 0.4 0.4]] (:blocked (zone removed))) "with the stream off the removal applies")
+        (is (= [[0.3 0.3 0.4 0.4]] (:blocked (zone allowed))) "the row in its place is left alone")
+        (is (= {:open? false} (question allowed)))
+        (is (= changed (get-in allowed [:ui :notice :text])))))
+    (testing "the projector removed, or removed and put back, while it asks: Allow writes nothing"
+      (let [asked (run live (coord [:limit 2] 0.75))
+            id (review-id asked)
+            gone (run asked {:event/type :projectors/remove :projector-id :p1})
+            back (run gone {:event/type :edit/undo})
+            allowed-gone (run gone (allow id))
+            allowed-back (run back (allow id))]
+        (is (not (contains? (:projectors allowed-gone) :p1)) "nothing makes it again")
+        (is (= {:open? false} (question allowed-gone)))
+        (is (= z (zone back)) "Undo puts it back")
+        (is (= z (zone allowed-back)))
+        (is (= {:open? false} (question allowed-back)))
+        (is (= changed (get-in allowed-back [:ui :notice :text])))))))
+
 
 (deftest driver-config-edit-is-refused-while-locked-test
   (let [s0 (-> (starter)
