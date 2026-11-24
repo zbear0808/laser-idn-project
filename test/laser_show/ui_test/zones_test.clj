@@ -177,6 +177,39 @@
   (testing "an undo step: Change Cue Target"
     (is (= "Change Cue Target" (history/undo-label (:history (app-state)))))))
 
+(defn- row-target-items
+  "The items of the Target submenu of the context menu of the cue list's
+   row whose name starts with name."
+  [name]
+  (let [^Node card (some #(when (str/starts-with? (str (ui/on-fx-thread (fn [] (some-> ^Labeled (.lookup ^Node % ".chain-item-name") .getText))))
+                                                  name)
+                            %)
+                         (ui/query-all "#list-editor-cue-chain-0-0 .chain-item"))]
+    (ui/on-fx-thread
+     #(some (fn [i] (when (and (instance? Menu i) (= "Target" (.getText ^Menu i))) (vec (.getItems ^Menu i))))
+            (some-> ^Control (.getParent card) .getContextMenu .getItems)))))
+
+(deftest a-rows-own-target-menu-sets-its-item-test
+  ;; Each row's Target menu is a component of its own (reactivity plan 34):
+  ;; it follows its item when the rows move
+  (open-editor! 0 0)
+  (events/dispatch! {:event/type :cue-chain/add-preset :col 0 :row 0 :item-id :square})
+  (ui/wait-for! #(= 2 (count (:items (cue 0 0)))))
+  (let [[circle square] (:items (cue 0 0))]
+    (events/dispatch! {:event/type :list/perform-drop :component-id [:cue-chain 0 0]
+                       :dragging-ids #{(:id square)} :target-id (:id circle) :drop-position :before
+                       :items-path [:chains :cue-chains [0 0] :items]
+                       :on-change-event :chain/set-items :on-change-params {:domain :cue-chains :entity-key [0 0]}})
+    (ui/wait-for! #(= (mapv :id [square circle]) (mapv :id (:items (cue 0 0)))))
+    (ui/wait-for! #(some (fn [i] (= "   B → Right" (ui/on-fx-thread (fn [] (.getText ^MenuItem i)))))
+                         (row-target-items "Circle")))
+    (let [item (some (fn [i] (when (= "   B → Right" (ui/on-fx-thread (fn [] (.getText ^MenuItem i)))) i))
+                     (row-target-items "Circle"))]
+      (ui/on-fx-thread #(.fire ^MenuItem item)))
+    (ui/wait-for! #(= :zone/b (:target (second (:items (cue 0 0))))))
+    (is (nil? (:target (first (:items (cue 0 0))))) "the square, moved before it, as it was")
+    (ui/wait-for! #(some #{"Circle [B → Right]"} (texts ".chain-item-name")))))
+
 
 ;; The timeline (06 §7.2)
 
