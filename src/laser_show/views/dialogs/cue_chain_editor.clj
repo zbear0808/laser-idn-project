@@ -123,36 +123,54 @@
   [menu-ctx group]
   (routing-label menu-ctx (or (:name group) "Group") group))
 
-(defn- cue-chain-context-menu
-  "An item's or group's menu: Target ▸, the Target menu."
-  [col row items {:keys [explain] :as menu-ctx} item-or-group]
-  (let [item-id (:id item-or-group)
-        item-path (chains/find-path-by-id items item-id)]
-    (when item-path
-      (let [rows (target-control/menu-model (assoc menu-ctx
-                                                   :scope (if (chains/group? item-or-group) :group :item)
-                                                   :own (:target item-or-group)
-                                                   :inherited (get-in explain [:item-inherits item-id])))]
-        {:fx/type :context-menu
-         :items [{:fx/type :menu
+(defn- item-menu-target
+  "What the Target menu of item-id in the cue at [col row] reads of the
+   item: {:item-path :own (its own target) :group?}, nil once it is gone.
+   The menu renders again when this does, not for each change to the cue."
+  [context col row item-id]
+  (let [items (:items (fx/sub-ctx context subs/cue-cell-chain col row))]
+    (when-let [item-path (chains/find-path-by-id items item-id)]
+      (let [item (get-in items item-path)]
+        {:item-path item-path :own (:target item) :group? (chains/group? item)}))))
+
+(defn- item-target-menu
+  "The menu of the item or group item-id of the cue at [col row]: Target ▸,
+   the Target menu (none once the item is gone). A component of its own:
+   what only the menu reads (the zones the show uses, the groups) renders
+   it again, not the list's rows."
+  [{:keys [fx/context col row item-id]}]
+  (let [{:keys [item-path own group?] :as target} (fx/sub-ctx context item-menu-target col row item-id)
+        explain (fx/sub-ctx context subs/cue-target-explain col row)]
+    {:fx/type :context-menu
+     :items (if target
+              (let [rows (target-control/menu-model (assoc (target-control/menu-context context)
+                                                           :scope (if group? :group :item)
+                                                           :own own
+                                                           :inherited (get-in explain [:item-inherits item-id])))]
+                [{:fx/type :menu
                   :text "Target"
                   :items (target-control/menu-items rows {:event/type :cue-chain/set-item-target
                                                           :col col
                                                           :row row
-                                                          :item-path item-path})}]}))))
+                                                          :item-path item-path})}])
+              [])}))
+
+(defn- cue-chain-context-menu
+  "An item's or group's menu, as the cue list asks for it ([this col row]):
+   item-target-menu."
+  [col row item-or-group]
+  {:fx/type item-target-menu :col col :row row :item-id (:id item-or-group)})
 
 
 ;; Middle Section (Preset Config)
 
 
 (defn- middle-section
-  "Middle section with preset bank and parameter editor."
-  [{:keys [fx/context col row active-preset-tab selected-item-path cue-chain]}]
-  (let [;; Get selected item instance if single selection
-        items (:items cue-chain [])
-        selected-item (when selected-item-path
-                        (chains/get-item-at-path items selected-item-path))
-        is-preset? (and selected-item (= :preset (:type selected-item)))
+  "Middle section with preset bank and parameter editor, for the selected
+   item (:selected-item, at :selected-item-path; nil when none or several
+   are selected)."
+  [{:keys [fx/context col row active-preset-tab selected-item-path selected-item]}]
+  (let [is-preset? (and selected-item (= :preset (:type selected-item)))
         is-group? (and selected-item (chains/group? selected-item))
         explain (fx/sub-ctx context subs/cue-target-explain col row)
         item-target (fn [scope]
@@ -244,9 +262,8 @@
         item-effects-list-state (fx/sub-ctx context subs/list-ui-state [:item-effects col row])
         selected-effect-ids (:selected-ids item-effects-list-state #{})
 
-        ;; Get cue chain data from new unified :chains domain
-        chains-state (fx/sub-val context :chains)
-        cue-chain (or (get-in chains-state [:cue-chains [col row]]) {:items []})
+        ;; This cell's cue only: another cell's edit leaves the editor as it is
+        cue-chain (fx/sub-ctx context subs/cue-cell-chain col row)
 
         ;; For parameter editor - resolve first selected ID to path
         first-selected-id (when (= 1 (count selected-ids))
@@ -264,9 +281,13 @@
         ;; Merge ui-modes and item-effects-ui together so effects can access both
         effect-dialog-data (merge dialog-data item-effects-ui {:item-effects-ui item-effects-ui})
 
-        ;; Where each item goes, for the labels and the Target menus
-        menu-ctx (assoc (target-control/menu-context context)
-                        :explain (fx/sub-ctx context subs/cue-target-explain col row))
+        ;; What the items' labels read: where each item goes. The list gets
+        ;; it as data with top-level label functions, so its description
+        ;; stays the same while this does (each row's Target menu is a
+        ;; component reading its own)
+        label-ctx {:names (fx/sub-ctx context subs/names-ctx)
+                   :zone-map (fx/sub-ctx context subs/active-zone-map)
+                   :explain (fx/sub-ctx context subs/cue-target-explain col row)}
 
         ;; Get chain name for header
         chain-name (:name cue-chain)
@@ -311,10 +332,9 @@
                                                      :item-id-key :preset-id
                                                      :item-registry-fn presets/presets-by-id
                                                      :fallback-label "Unknown Preset"
-                                                     :get-item-label (partial cue-chain-item-label menu-ctx)
-                                                     :get-group-label (partial cue-chain-group-label menu-ctx)
-                                                     :get-context-menu (partial cue-chain-context-menu col row (:items cue-chain) menu-ctx)
-                                                     :get-group-context-menu (partial cue-chain-context-menu col row (:items cue-chain) menu-ctx)
+                                                     :get-item-label [cue-chain-item-label label-ctx]
+                                                     :get-group-label [cue-chain-group-label label-ctx]
+                                                     :get-context-menu [cue-chain-context-menu col row]
                                                      :on-change-event :chain/set-items
                                                      :on-change-params {:domain :cue-chains :entity-key [col row]}
                                                      :items-path [:chains :cue-chains [col row] :items]
@@ -362,7 +382,7 @@
                                                   :col col :row row
                                                   :active-preset-tab active-preset-tab
                                                   :selected-item-path first-selected-path
-                                                  :cue-chain cue-chain}
+                                                  :selected-item selected-item}
 
                                                  ;; Effect bank (when item selected)
                                                  (when has-item?

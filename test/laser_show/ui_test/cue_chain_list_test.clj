@@ -4,8 +4,11 @@
    cell [0 0]. And a list's keys, clicks and drops go to the list it shows
    now: after the Effects editor shows another cell in its window, after it
    reopens, and after the item effects list shows another preset's
-   (reactivity plan 04)."
-  (:require [clojure.core.cache :as cache]
+   (reactivity plan 04). Its rows follow their items through reorders and
+   inserts, and an open editor renders nothing for another cell's edit
+   (reactivity plan 34)."
+  (:require [cljfx.lifecycle :as lifecycle]
+            [clojure.core.cache :as cache]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.animation.cue-chains :as cue-chains]
@@ -454,3 +457,114 @@
         (is (:completed? (ui/fire-drop! target (drag-content f1) 20 (- h 2) :mode TransferMode/MOVE))))
       (ui/wait-for! #(= (mapv :id [f2 f3 f1]) (preset-effects 1)))
       (is (= 1 (count (preset-effects 0))) "the other preset's are as they were"))))
+
+;; Rows are keyed by their item's id and get only what they show
+;; (reactivity plan 34): a reorder or an insert moves rows instead of making
+;; them again, each row's click, drag, rename and box act on its own item,
+;; and an edit to another cell renders nothing in an open editor
+
+(defn- effect-rows
+  "{name node}: the rows of the Effects editor's list on [0 0], by the name
+   they show."
+  []
+  (into {} (map (fn [^Node n]
+                  [(ui/on-fx-thread #(some-> ^Labeled (.lookup n ".chain-item-name") .getText)) n]))
+        (ui/query-all (str (effects-list 0 0) " .chain-item"))))
+
+(defn- shown-names
+  "The names the Effects editor's list on [0 0] shows, in order."
+  []
+  (mapv #(ui/on-fx-thread (fn [] (some-> ^Labeled (.lookup ^Node % ".chain-item-name") .getText)))
+        (ui/query-all (str (effects-list 0 0) " .chain-item"))))
+
+(defn- cell-ids [] (mapv :id (cell-effects 0 0)))
+
+(deftest rows-keep-their-items-through-a-reorder-and-an-insert-test
+  (let [robot (ui/robot)
+        [a b c] [(effect :scale) (effect :intensity) (effect :rotation)]]
+    (effect-cells! {[0 0] [a b c]})
+    (show-effects-cell! 0 0)
+    (ui/wait-for! #(= ["Scale" "Intensity" "Rotation"] (shown-names)))
+    (let [rows (effect-rows)]
+      (testing "a drag of the last row before the first moves the rows"
+        (events/dispatch! {:event/type :list/start-drag :component-id [:effect-chain 0 0] :item-id (:id c)
+                           :items-path [:chains :effect-chains [0 0] :items]})
+        (ui/wait-for! #(seq (get-in (state/get-raw-state) [:list-ui [:effect-chain 0 0] :dragging-ids])))
+        (is (:completed? (ui/fire-drop! (rows "Scale") (drag-content c) 20 2 :mode TransferMode/MOVE)))
+        (ui/wait-for! #(= (mapv :id [c a b]) (cell-ids)))
+        (ui/wait-for! #(= ["Rotation" "Scale" "Intensity"] (shown-names)))
+        (is (= rows (effect-rows)) "each item keeps its row's node"))
+      (testing "a click on a moved row selects its item, and Delete deletes that one"
+        (ui/click-node! robot (rows "Scale"))
+        (ui/wait-for! #(= #{(:id a)} (list-selection [:effect-chain 0 0])))
+        (push! robot KeyCode/DELETE)
+        (ui/wait-for! #(= (mapv :id [c b]) (cell-ids)))
+        (ui/wait-for! #(= ["Rotation" "Intensity"] (shown-names))))
+      (testing "Undo puts it back between the others, which keep their rows"
+        (events/dispatch! {:event/type :history/undo})
+        (ui/wait-for! #(= (mapv :id [c a b]) (cell-ids)))
+        (ui/wait-for! #(= ["Rotation" "Scale" "Intensity"] (shown-names)))
+        (is (every? #(identical? (rows %) ((effect-rows) %)) ["Rotation" "Intensity"])))
+      (testing "a double-click renames the row's own item"
+        (.doubleClickOn ^org.testfx.api.FxRobot robot ^Node ((effect-rows) "Intensity")
+                        (into-array MouseButton [MouseButton/PRIMARY]))
+        (ui/wait-for! #(some? (ui/query (str (effects-list 0 0) " .list-item-name-input"))))
+        (ui/wait-for! #(instance? javafx.scene.control.TextField (focus-owner (effects-list 0 0))))
+        (ui/on-fx-thread #(.setText ^javafx.scene.control.TextField (ui/query (str (effects-list 0 0) " .list-item-name-input"))
+                                    "Level"))
+        (push! robot KeyCode/ENTER)
+        (ui/wait-for! #(= "Level" (:name (second (rest (cell-effects 0 0))))))
+        (ui/wait-for! #(= ["Rotation" "Scale" "Level"] (shown-names))))
+      (testing "a row's On box turns its own item off"
+        (ui/click-node! robot (ui/on-fx-thread #(.lookup ^Node ((effect-rows) "Rotation") ".check-box")))
+        (ui/wait-for! #(= [false true true] (mapv (fn [i] (:enabled? i true)) (cell-effects 0 0))))))))
+
+(deftest a-reopened-list-keeps-its-rows-and-deletes-in-its-cell-test
+  ;; Plans 04, 33 and 34 together (overview: "04/33/34 list -> 36 cache"):
+  ;; Delete after the Effects editor showed another cell and reopened, with a
+  ;; cache that keeps every render, then an edit to another cell while it
+  ;; stays open. Its commands still act on the cell it shows, and it renders
+  ;; nothing for the other cell's edit: no body of the editor or its list
+  ;; runs, and its rows keep their nodes (no remount)
+  (let [ran (atom [])
+        call-context-fn @#'lifecycle/call-context-fn
+        editor-body? (fn [t]
+                       (let [n (.getName (class t))]
+                         (or (str/starts-with? n "laser_show.views.components.list$")
+                             (str/starts-with? n "laser_show.views.dialogs.effect_chain_editor$"))))]
+    (with-redefs-fn {#'lifecycle/call-context-fn (fn [context desc]
+                                                   (swap! ran conj (:fx/type desc))
+                                                   (call-context-fn context desc))
+                     #'state/cache-factory cache/basic-cache-factory}
+      (fn []
+        (app/start-test!)
+        (ui/sync-fx!)
+        (let [robot (ui/robot)
+              [a b] [(effect :scale) (effect :intensity)]]
+          (effect-cells! {[0 0] [a b] [1 0] [(effect :rotation)] [2 0] [(effect :hue-shift)]})
+          (show-effects-cell! 0 0)
+          (show-effects-cell! 1 0)
+          (events/dispatch! {:event/type :ui/close-dialog :dialog-id :effect-chain-editor})
+          (ui/wait-for! #(nil? (ui/query (effects-list 1 0))))
+          (show-effects-cell! 0 0)
+          (ui/wait-for! #(= ["Scale" "Intensity"] (shown-names)))
+          (testing "Delete after the editor showed [1 0] and reopened on [0 0]"
+            (ui/click-node! robot ((effect-rows) "Scale"))
+            (ui/wait-for! #(= #{(:id a)} (list-selection [:effect-chain 0 0])))
+            (push! robot KeyCode/DELETE)
+            (ui/wait-for! #(= [(:id b)] (cell-ids)))
+            (is (= 1 (count (cell-effects 1 0)))))
+          (let [row ((effect-rows) "Intensity")]
+            (reset! ran [])
+            (events/dispatch! {:event/type :effects/toggle-cell :col 2 :row 0})
+            (ui/wait-for! #(true? (get-in (state/get-raw-state) [:chains :effect-chains [2 0] :active?])))
+            (ui/sync-fx!)
+            (testing "another cell's edit: no body of the editor or its list runs, and the row keeps its node"
+              (is (= [] (filterv editor-body? @ran)))
+              (is (identical? row ((effect-rows) "Intensity"))))
+            (testing "Delete still deletes in the cell it shows"
+              (ui/click-node! robot row)
+              (ui/wait-for! #(= #{(:id b)} (list-selection [:effect-chain 0 0])))
+              (push! robot KeyCode/DELETE)
+              (ui/wait-for! #(empty? (cell-effects 0 0)))
+              (is (= 1 (count (cell-effects 1 0))) "[1 0] as it was"))))))))

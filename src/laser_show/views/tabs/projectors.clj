@@ -417,6 +417,12 @@
   []
   (u/map-into :id :name (get-calibration-effects)))
 
+(defn- calibration-effect-label
+  "A projector chain item's label, from labels (calibration-effect-labels):
+   its effect's name, or \"Unknown Effect\"."
+  [labels item]
+  (get labels (:effect-id item) "Unknown Effect"))
+
 
 ;; Effect Parameter Editors
 ;; Uses shared param-controls with projector-specific event templates
@@ -532,20 +538,17 @@
    It reads the chain through the context cljfx gives it, and its list
    editor gets one of its own the same way.
    Props:
-   - :projector-id - ID of the projector
-   - :selected-ids - Set of selected item IDs"
+   - :projector-id - ID of the projector"
   [{:keys [fx/context projector-id]}]
   (let [;; Read effects from chains domain, not from projector config
-        effects (fx/sub-ctx context subs/projector-effect-chain projector-id)
-        ;; Build label map from calibration effects
-        labels (calibration-effect-labels)]
+        effects (fx/sub-ctx context subs/projector-effect-chain projector-id)]
     {:fx/type list/list-editor
      :items (or effects [])
      :component-id [:projector-effects projector-id]
      :items-path [:chains :projector-effects projector-id :items]
-     ;; Custom label function that looks up effect-id in calibration-effect-labels
-     :get-item-label (fn [item]
-                       (get labels (:effect-id item) "Unknown Effect"))
+     ;; Each effect's name from calibration-effect-labels, as data with a
+     ;; top-level function: equal from render to render
+     :get-item-label [calibration-effect-label (calibration-effect-labels)]
      :on-change-event :chain/set-items
      ;; Copied and pasted as effects, from its component id
      ;; (state.clipboard/list-type): its Paste button and ⌘V agree
@@ -741,8 +744,7 @@
                                            :projector-id projector-id}]}
                               {:fx/type projector-effects-sidebar
                                :fx/key projector-id  ;; Force recreation when projector changes to avoid stale closures
-                               :projector-id projector-id
-                               :selected-ids selected-ids}
+                               :projector-id projector-id}
                               {:fx/type :separator}
                               {:fx/type :button
                                :id "projector-remove-button"

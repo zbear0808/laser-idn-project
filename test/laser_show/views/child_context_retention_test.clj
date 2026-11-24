@@ -8,19 +8,11 @@
    cache, which reaches the one before it. A callback or a node that keeps
    the whole props map a component got keeps its context too.
 
-   Each test mounts what it checks on a context of its own, on the FX
-   thread, with cljfx's context-aware lifecycle and the context in the
-   options, as fx/create-app's renderer has them; no app, and
-   events/dispatch! does nothing. The supplied probe's parent and child
-   (plans/probes/cljfx_reactivity_2026_11_23.clj) show what the checks see.
-
-   contexts-in and reachable-cache-atoms look into a context and its cache
-   by cljfx 1.10.6's private keys (the deps.edn pin): a diagnostic for these
-   tests only."
+   Each test mounts what it checks on a context of its own (views.harness).
+   The supplied probe's parent and child
+   (plans/probes/cljfx_reactivity_2026_11_23.clj) show what the checks see."
   (:require [cljfx.api :as fx]
-            [cljfx.lifecycle :as lifecycle]
             [clojure.core.cache :as cache]
-            [clojure.repl :as repl]
             [clojure.test :refer [deftest is testing]]
             [laser-show.animation.effects :as effects]
             ;; The effects the fixtures use, registered as the app's frame
@@ -29,7 +21,6 @@
             [laser-show.animation.effects.intensity]
             [laser-show.animation.effects.zone]
             [laser-show.animation.safety :as safety]
-            [laser-show.events.core :as events]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.domains :as domains]
             [laser-show.timeline.model :as model]
@@ -49,194 +40,13 @@
             [laser-show.views.dialogs.cue-chain-editor :as cue-editor]
             [laser-show.views.dialogs.effect-chain-editor :as effect-editor]
             [laser-show.views.dialogs.timeline-cue-editor :as timeline-cue-editor]
+            [laser-show.views.harness :as h :refer [contexts-in each-render given lru-512 mounted
+                                                    node-by-id none on-fx opts returned unbounded
+                                                    unrelated with-context]]
             [laser-show.views.tabs.projectors :as projectors])
-  (:import [java.lang.reflect Field Modifier]
-           [java.util IdentityHashMap]
-           [javafx.application Platform]
-           [javafx.scene Node Parent Scene]
+  (:import [javafx.scene Node Parent Scene]
            [javafx.scene.control Button ComboBox Label]
            [javafx.stage Stage]))
-
-
-;; The FX thread, cljfx's options
-
-
-(defn- on-fx
-  "(f) on the FX thread: its value, or what it threw, thrown here."
-  [f]
-  (let [result (promise)]
-    (Platform/runLater (bound-fn [] (deliver result (try [(f) nil] (catch Throwable t [nil t])))))
-    (let [[v t] (deref result 60000 [nil (ex-info "No result from the FX thread in 60 s" {})])]
-      (if t (throw t) v))))
-
-(defn- opts
-  "The options a component on ctx gets from fx/create-app's renderer: ctx,
-   cljfx's context-aware function lifecycle and a map event handler (one
-   that does nothing)."
-  [ctx]
-  {:fx/context ctx
-   :fx.opt/type->lifecycle #(or (fx/keyword->lifecycle %) (fx/fn->lifecycle-with-context %))
-   :fx.opt/map-event-handler (fn [_])})
-
-(defn- mount!
-  "desc created on a context of state with cache-factory's cache, then
-   advanced once for each of changes (fns of the state), each on a context
-   derived from the one before, as the app's commits are; (f {:ctx the
-   context :root the component's node}) after the last render, or with
-   each? after each one; then the component deleted. All on the FX thread,
-   with events/dispatch! doing nothing."
-  [state cache-factory desc changes f each?]
-  (with-redefs [events/dispatch! (fn [& _])]
-    (on-fx
-     (fn []
-       (let [ctx (volatile! (fx/create-context state cache-factory))
-             component (volatile! (fx/create-component desc (opts @ctx)))
-             now #(f {:ctx @ctx :root (fx/instance @component)})]
-         (try
-           (let [seen (volatile! (if each? [(now)] []))]
-             (doseq [change changes]
-               (vswap! ctx fx/swap-context change)
-               (vswap! component fx/advance-component desc (opts @ctx))
-               (when each? (vswap! seen conj (now))))
-             (if each? @seen (now)))
-           (finally (fx/delete-component @component (opts @ctx)))))))))
-
-(defn- mounted
-  "mount!: f's value after the last render."
-  [state cache-factory desc changes f]
-  (mount! state cache-factory desc changes f false))
-
-(defn- each-render
-  "mount!: f's values after the first render and after each change."
-  [state cache-factory desc changes f]
-  (mount! state cache-factory desc changes f true))
-
-(def ^:private lru-512
-  "The app's cache (state.core/cache-factory)."
-  #(cache/lru-cache-factory % :threshold 512))
-
-(def ^:private unbounded
-  "A cache that keeps every entry: every description a function component
-   got stays in it."
-  cache/basic-cache-factory)
-
-(defn- unrelated
-  "A change no view reads."
-  [state]
-  (update state ::unrelated (fnil inc 0)))
-
-
-;; What a context's cache holds
-
-
-(def ^:private call-context-fn
-  "What cljfx subscribes a function component with: the component's cache
-   key is [call-context-fn the-description-it-got]."
-  @#'lifecycle/call-context-fn)
-
-(defn- context? [x]
-  (and (map? x) (contains? x :cljfx.context/*cache)))
-
-(defn- closed-over
-  "What function f closes over."
-  [f]
-  (for [^Field field (.getDeclaredFields (class f))
-        :when (not (Modifier/isStatic (.getModifiers field)))]
-    (.get (doto field (.setAccessible true)) f)))
-
-(defn- contexts-in
-  "The contexts in x: x itself, or one in its maps (keys and values),
-   vectors, sets and realized sequences, a context ending the walk. With
-   fns?, also one a function in it closes over."
-  ([x] (contexts-in x false))
-  ([x fns?]
-   (let [seen (IdentityHashMap.)
-         found (volatile! [])]
-     (letfn [(walk [x]
-               (cond
-                 (context? x) (vswap! found conj x)
-                 (or (nil? x) (.containsKey seen x)) nil
-                 :else (do (.put seen x true)
-                           (cond
-                             (map? x) (run! (fn [[k v]] (walk k) (walk v)) x)
-                             (or (vector? x) (set? x)) (run! walk x)
-                             (instance? clojure.lang.LazySeq x) (when (realized? x) (run! walk x))
-                             (sequential? x) (run! walk x)
-                             (and fns? (fn? x)) (run! walk (closed-over x))))))]
-       (walk x)
-       @found))))
-
-(defn- component-key? [k]
-  (and (vector? k) (identical? call-context-fn (first k)) (map? (second k))))
-
-(defn- function-components
-  "The function components in ctx's cache: {:desc the description each one
-   got (before cljfx put its context in), :value the one it returned}."
-  [ctx]
-  (for [[k entry] (seq @(:cljfx.context/*cache ctx))
-        :when (component-key? k)]
-    {:desc (second k) :value (:cljfx.context/value entry)}))
-
-(defn- reachable-cache-atoms
-  "How many caches ctx's cache leads to: itself, then the cache of each
-   context in the description a function component in a cache reached got,
-   each cache once."
-  [ctx]
-  (loop [todo [(:cljfx.context/*cache ctx)] seen #{}]
-    (if-let [a (peek todo)]
-      (if (contains? seen a)
-        (recur (pop todo) seen)
-        (recur (into (pop todo)
-                     (for [[k _] (seq @a)
-                           :when (component-key? k)
-                           c (contexts-in (second k))]
-                       (:cljfx.context/*cache c)))
-               (conj seen a)))
-      (count seen))))
-
-(defn- type-name [t]
-  (if (fn? t) (repl/demunge (.getName (class t))) t))
-
-(defn- with-context
-  "Which of ctx's function components have a context: given one (in the
-   description it got), giving one (in the one it returned), or keeping one
-   in a function of either. Each a set of their types."
-  [ctx]
-  (let [types (fn [pred]
-                (into (sorted-set) (comp (filter pred) (map (comp type-name :fx/type :desc))) (function-components ctx)))]
-    {:given (types #(seq (contexts-in (:desc %))))
-     :returned (types #(seq (contexts-in (:value %))))
-     :closed-over (types #(seq (contexts-in [(:desc %) (:value %)] true)))}))
-
-(def ^:private none {:given #{} :returned #{} :closed-over #{}})
-
-(defn- given
-  "The descriptions function components of type f got, in ctx's cache."
-  [ctx f]
-  (keep #(when (identical? f (:fx/type (:desc %))) (:desc %)) (function-components ctx)))
-
-(defn- returned
-  "The descriptions function components of type f returned."
-  [ctx f]
-  (keep #(when (identical? f (:fx/type (:desc %))) (:value %)) (function-components ctx)))
-
-(defn- descs-in
-  "Every map in desc's tree."
-  [desc]
-  (filter map? (tree-seq coll? seq desc)))
-
-(defn- nodes
-  "node and every node under it (a control's skin's too)."
-  [^Node node]
-  (cons node (when (instance? Parent node) (mapcat nodes (.getChildrenUnmodifiable ^Parent node)))))
-
-(defn- node-by-id [root id]
-  (some #(when (= id (.getId ^Node %)) %) (nodes root)))
-
-(defn- kept-by-node
-  "What node keeps for itself: its user data and its properties."
-  [^Node node]
-  [(.getUserData node) (into {} (.getProperties node))])
 
 
 ;; The probe's parent and child
@@ -273,7 +83,7 @@
            (let [first-render @calls
                  _ (doseq [n (range 1 (inc updates))] (advance! assoc :n n))
                  after-updates @calls
-                 reachable (reachable-cache-atoms @ctx)]
+                 reachable (h/reachable-cache-atoms @ctx)]
              (advance! assoc :stable 2)
              {:calls [first-render after-updates @calls]
               :reachable reachable
@@ -319,13 +129,13 @@
     (testing "600 names of cell [1 0], each rendered while the editor shows [0 0] and its effect: the newest cache leads to no older one"
       (is (= 1 (mounted state lru-512 effects-editor
                         (for [i (range 600)] #(assoc-in % [:chains :effect-chains [1 0] :name] (str "Cell " i)))
-                        (comp reachable-cache-atoms :ctx)))))
+                        (comp h/reachable-cache-atoms :ctx)))))
     (testing "its effect selected and not, by turns, so the list renders its rows each time"
       (is (= {:reachable 1 :shows "1 selected"}
              (mounted state lru-512 effects-editor
                       (for [i (range 201)] #(selected % [:effect-chain 0 0] (if (even? i) #{u} #{})))
                       (fn [{:keys [ctx root]}]
-                        {:reachable (reachable-cache-atoms ctx)
+                        {:reachable (h/reachable-cache-atoms ctx)
                          :shows (some-> ^Label (.lookup ^Node root ".chain-selection-count") .getText)})))))))
 
 
@@ -417,14 +227,12 @@
                       :panels (given ctx keyframe-panel/keyframe-modulator-panel)
                       :addresses (mapv #(address-on root %) ["list-editor-cue-chain-0-0" "list-editor-item-effects-0-0"])}))]
       (testing "every branch is there"
-        (let [cue-rows (filter #(= [:cue-chain 0 0] (:component-id %)) rows)]
-          (is (= #{g p} (set (map (comp :id :item) cue-rows))) "the group's row, and its preset's inside it")
-          (is (= #{e} (set (map (comp :id :item) (remove (set cue-rows) rows)))) "the effect's, in the item's list"))
-        (is (every? #(= (:component-id %) (get-in % [:props :component-id])) rows) "each with its list's props")
+        (is (= #{[g 0] [p 1] [e 0]} (set (map (juxt (comp :id :item) :depth) rows)))
+            "the group's row, its preset's inside it, and the preset's effect's in the item's list")
         (is (= [g] (map (comp :id :group) headers)))
         (is (= [p] (map (comp :id :item) (filter :renaming? cards))))
-        (is (= [[p [:cue-chain 0 0]]] (map (juxt :item-id (comp :component-id :props)) renames)))
-        (is (= #{[:cue-chain 0 0] [:item-effects 0 0]} (set (map (comp :component-id :props) toolbars))))
+        (is (= [p] (map :item-id renames)))
+        (is (seq toolbars))
         (is (= #{:item :cue} (set (map :scope chips))) "the preset's Target and the cue's")
         (is (seq middle))
         (is (seq item-effect))
@@ -496,13 +304,13 @@
         (is (= [#{:fx/type :projector-id}] (map (comp set keys) calibration-descs)))
         (is (= [:p1] (map :projector-id calibration-descs)))
         (is (= ["Hide test pattern"]
-               (keep #(when (= "projector-calibration-button" (:id %)) (:text %)) (mapcat descs-in calibration)))))
+               (keep #(when (= "projector-calibration-button" (:id %)) (:text %)) (mapcat h/descs-in calibration)))))
       (is (= none found))))
 
   (testing "the safety zone's canvas keeps no context on its node"
     (let [kept (mounted (projectors-state (random-uuid)) unbounded {:fx/type safety-editor/safety-section :projector-id :p1}
                         [unrelated]
-                        (fn [{:keys [root]}] (kept-by-node (node-by-id root "safety-canvas"))))]
+                        (fn [{:keys [root]}] (h/kept-by-node (node-by-id root "safety-canvas"))))]
       (is (seq (second kept)) "it keeps what it draws from")
       (is (zero? (count (contexts-in kept true))))))
 
@@ -520,7 +328,7 @@
                       :cards (given ctx @#'device-chain/effect-card)
                       :editors (given ctx param-editor/effect-parameter-editor)
                       :canvases (given ctx ci/interactive-canvas)
-                      :kept (kept-by-node (node-by-id root "timeline-canvas"))}))]
+                      :kept (h/kept-by-node (node-by-id root "timeline-canvas"))}))]
       (testing "every branch is there"
         (is (= #{@#'timeline-editor/editor-body} (set (map :fx/type inner))) "the local state's inner description")
         (is (= #{[0 0]} (set (map (juxt :col :row) bodies))))
@@ -554,7 +362,7 @@
         selector (some (fn [n]
                          (when (and (instance? Label n) (= "Target Zone:" (.getText ^Label n)))
                            (some #(when (instance? ComboBox %) %) (.getChildrenUnmodifiable (.getParent ^Node n)))))
-                       (nodes root))]
+                       (h/nodes root))]
     {:selector (shown selector)
      :keyframe (shown (node-by-id root "keyframe-zone-value"))}))
 
