@@ -42,7 +42,9 @@
    - :item - The item data map
    - :item-name-key - Key to get display name (default :name)
    - :item-id-key - Key to get item ID (default :id)
-   - :event-template - Base event map to merge item-id into
+   - :event-template - Base event map to merge :item-id into: the click
+     sends the item's id alone, and its handler reads the definition when it
+     runs (reactivity plan 17)
    - :style-class - CSS class for button (default: \"bank-item-btn\")
    - :drag-kind - :preset or :effect makes the button a drag source too
                   (a :bank-item drag, see drag-drop-cell); nil: click only"
@@ -54,7 +56,7 @@
     (cond-> {:fx/type :button
              :text item-name
              :style-class (or style-class "bank-item-btn")
-             :on-action (merge event-template {:item-id item-id :item item})}
+             :on-action (merge event-template {:item-id item-id})}
       drag-kind
       (assoc :on-drag-detected (fn [^MouseEvent e]
                                  (dd/start-drag! (.getSource e) :bank-item
@@ -89,7 +91,7 @@
    - :items-by-category - Map of category-id -> items vector
    
    Item Configuration:
-   - :item-event-template - Event map base, will have :item-id and :item merged
+   - :item-event-template - Event map base, will have :item-id merged
    - :item-name-key - Key to get display name from item (default: :name)
    - :item-id-key - Key to get item ID (default: :id)
    - :button-style-class - CSS class for buttons (default: \"bank-item-btn\")

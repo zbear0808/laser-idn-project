@@ -33,7 +33,7 @@
    :active-tab (or active-bank-tab :shape)
    :on-tab-change {:event/type :ui/update-dialog-data
                    :dialog-id :effect-chain-editor}
-   ;; Data-driven event template - handler will receive :item-id and :item
+   ;; Data-driven event template - the handler receives :item-id, the effect's id
    :item-event-template {:event/type :effect-chain/add-effect-from-bank
                          :col col
                          :row row}

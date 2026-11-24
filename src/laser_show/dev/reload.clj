@@ -89,7 +89,10 @@
    
    This function:
    1. Discovers and reloads all code namespaces (views, events, animation, backend)
-   2. Triggers a re-render: :dev/reloaded {:kind :app} sets
+   2. Publishes the effect and modulator registries as they are now
+      (:registries/published, laser-show.animation.registries): a reloaded
+      namespace registers its effects and modulators again
+   3. Triggers a re-render: :dev/reloaded {:kind :app} sets
       [:ui :last-reload-timestamp]
 
    The show clock keeps running through it: its loop calls tick! through the
@@ -127,7 +130,12 @@
             (log/warn "  ⚠ Failed to reload" ns-sym ":" (.getMessage e)))))
       (log/info "  ✓ Code namespaces reloaded")
       
-      ;; Step 2: Trigger re-render by touching state
+      ;; Step 2: What the registries hold now, for the views that read them
+      ;; from app state (the effect banks, the tap reactions)
+      ((requiring-resolve 'laser-show.events.core/dispatch!)
+       ((requiring-resolve 'laser-show.animation.registries/published-event)))
+      
+      ;; Step 3: Trigger re-render by touching state
       ;; The renderer watches the context atom; updating state triggers re-render.
       ;; Since view functions use var references, the new code is used.
       (log/info "  Triggering re-render...")

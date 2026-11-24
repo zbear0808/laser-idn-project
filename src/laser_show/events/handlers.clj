@@ -26,6 +26,7 @@
    [laser-show.events.handlers.timeline :as timeline]
    [laser-show.events.handlers.history :as history]
    [laser-show.events.handlers.addons :as addons]
+   [laser-show.events.handlers.registries :as registries]
    [laser-show.events.handlers.dev :as dev]))
 
 (defn handle-event
@@ -79,6 +80,7 @@
       "timeline-cue-editor" (timeline/handle event)  ; Timeline open with initialization
       "history" (history/handle event)
       "addons" (addons/handle event)  ; Output drivers and add-ons
+      "registries" (registries/handle event)  ; The effect and modulator registries, as data
       "dev" (dev/handle event)  ; Tooling: events/flush!, events/write-state!, the dev reloads
       ;; Unknown domain
       (do

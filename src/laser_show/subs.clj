@@ -401,6 +401,47 @@
             (vals (fx/sub-val context get-in [:chains :effect-chains]))))
 
 
+;; Level 2: The effect and modulator registries, as data
+;; (laser-show.animation.registries, plans/2026-11-23-cljfx-reactivity/17)
+
+
+(defn effect-descriptors
+  "{id descriptor} of every registered effect, its definition without its
+   functions, as :registries/published last put them in [:backend
+   :registries :effects]: at start and after a code reload."
+  [context]
+  (fx/sub-val context get-in [:backend :registries :effects] {}))
+
+(defn modulator-descriptors
+  "{type descriptor} of every registered modulator type, without its
+   evaluator, as :registries/published last put them in [:backend
+   :registries :modulators]."
+  [context]
+  (fx/sub-val context get-in [:backend :registries :modulators] {}))
+
+(defn- offered?
+  "Does a bank of scope (:item or :global) offer the effect described by d:
+   one without a :scope is offered in both, a zone-stage effect (:scope
+   #{:global}) only on the effects grid (zones plan Z5)."
+  [scope d]
+  (let [s (:scope d)]
+    (or (nil? s) (contains? s scope))))
+
+(defn effect-bank-categories
+  "What an effect bank of scope offers (:item, a cue's items and the
+   timeline's; :global, the effects grid's), by tab: {category [descriptor
+   …]} from effect-descriptors. An effect is in each of its categories but
+   :calibration (projector-only); a :hidden? one (the Zone Selector, zones
+   plan Z4) is in none. A re-registered effect shows as it is now once it is
+   published."
+  [context scope]
+  (reduce (fn [acc d]
+            (let [cat (:category d)]
+              (reduce #(update %1 %2 (fnil conj []) d) acc (disj (if (set? cat) cat #{cat}) :calibration))))
+          {}
+          (filter #(offered? scope %) (remove :hidden? (vals (fx/sub-ctx context effect-descriptors))))))
+
+
 ;; Level 2: Computed Project Subscriptions
 
 
@@ -1955,18 +1996,29 @@
   [context cells]
   (into {} (map (fn [[col row :as cell]] [cell (fx/sub-ctx context cue-cell-chain col row)])) cells))
 
+(defn- with-modulators
+  "state, a selector's input to vibes.reactions, with the modulator types
+   as published (modulator-descriptors) at [:backend :registries
+   :modulators]. vibes.reactions reads a type's category and default source
+   from the registry these copy, so a re-registration that changes them,
+   once published, runs the selector again (reactivity plan 17)."
+  [context state]
+  (assoc-in state [:backend :registries :modulators] (fx/sub-ctx context modulator-descriptors)))
+
 (defn- vibe-reactions
   "The current vibe's tap reactions by role (vibes.reactions/reactions): its
    FX set, its flash FX, the effects grid's cells that are on and the cues
    its slots name, whether those play or not; {} without vibes. Recomputed
-   when the vibe, those cues or the effects grid change."
+   when the vibe, those cues, the effects grid or the modulator types
+   (with-modulators) change."
   [context]
   (let [id (fx/sub-ctx context vibe-current-id)]
     (if-let [vibe (fx/sub-val context library/vibe id)]
-      (reactions/reactions {:config {:vibes {:library {id vibe}}}
-                            :chains {:effect-chains (fx/sub-val context get-in [:chains :effect-chains])
-                                     :cue-chains (slot-chains context (into [] (mapcat #(library/slot-cells vibe %))
-                                                                            library/cue-slots))}}
+      (reactions/reactions (with-modulators context
+                             {:config {:vibes {:library {id vibe}}}
+                              :chains {:effect-chains (fx/sub-val context get-in [:chains :effect-chains])
+                                       :cue-chains (slot-chains context (into [] (mapcat #(library/slot-cells vibe %))
+                                                                              library/cue-slots))}})
                            id)
       {})))
 
@@ -2183,8 +2235,8 @@
 ;; (plans/2026-11-23-cljfx-reactivity/37): a vibe's slots and the cells
 ;; they name, not which cell is on, so an effect cell switched on or off
 ;; (by hand, or by a vibe as it plays) runs none of them again. One lint
-;; serves the tab's badge and its rows. vibes.reactions also reads the
-;; modulator registry, which isn't in the context (plan 17).
+;; serves the tab's badge and its rows. The tap reactions also follow the
+;; modulator types as published (with-modulators, plan 17).
 
 (defn- lint-vibe
   "What the lint reads of a vibe (vibes.library/lint): its id, name and
@@ -2236,21 +2288,23 @@
    chains every vibe of the library names (vibe-owned-chains), the
    audience routing (vibe-audience-routing: the projectors, virtual
    projectors, rig, groups, zone maps, column and show defaults), the keys
-   learned, the zones' labels and the manual map ([:zone-map :active]: the
-   rows say what the map the show is on does, not one a switch waits
-   for). A cell switched on or off, a cell no vibe names, a cue that plays
-   and the show clock's status leave it equal."
+   learned, the zones' labels, the manual map ([:zone-map :active]: the
+   rows say what the map the show is on does, not one a switch waits for)
+   and the modulator types its tap reactions follow (with-modulators). A
+   cell switched on or off, a cell no vibe names, a cue that plays and the
+   show clock's status leave it equal."
   [context]
   (let [vibes (fx/sub-ctx context lint-vibes)]
-    (-> (fx/sub-ctx context vibe-audience-routing)
-        (update :config assoc
-                :vibes vibes
-                :input {:trigger-map (fx/sub-ctx context input-trigger-map)})
-        (assoc :chains (reduce (fn [chains id] (merge-with merge chains (fx/sub-ctx context vibe-owned-chains id)))
-                               {:cue-chains {} :effect-chains {}}
-                               (keys (:library vibes)))
-               :zone-map {:active (fx/sub-val context get-in [:zone-map :active])}
-               :zones {:labels (fx/sub-ctx context zone-labels)}))))
+    (with-modulators context
+      (-> (fx/sub-ctx context vibe-audience-routing)
+          (update :config assoc
+                  :vibes vibes
+                  :input {:trigger-map (fx/sub-ctx context input-trigger-map)})
+          (assoc :chains (reduce (fn [chains id] (merge-with merge chains (fx/sub-ctx context vibe-owned-chains id)))
+                                 {:cue-chains {} :effect-chains {}}
+                                 (keys (:library vibes)))
+                 :zone-map {:active (fx/sub-val context get-in [:zone-map :active])}
+                 :zones {:labels (fx/sub-ctx context zone-labels)})))))
 
 (defn vibe-lint
   "What to fix before the show, worst first (vibes.library/lint of
@@ -2261,12 +2315,14 @@
 
 (defn- edited-reactions-world
   "What the tap reactions of the vibe the Vibes tab edits read: {:id :state
-   (its lint-vibes entry and its vibe-owned-chains, as a state)}."
+   (its lint-vibes entry and its vibe-owned-chains, as a state, with the
+   modulator types: with-modulators)}."
   [context]
   (let [id (fx/sub-ctx context vibe-edited-id)]
     {:id id
-     :state {:config {:vibes {:library {id (get-in (fx/sub-ctx context lint-vibes) [:library id])}}}
-             :chains (fx/sub-ctx context vibe-owned-chains id)}}))
+     :state (with-modulators context
+              {:config {:vibes {:library {id (get-in (fx/sub-ctx context lint-vibes) [:library id])}}}
+               :chains (fx/sub-ctx context vibe-owned-chains id)})}))
 
 (defn vibe-edited-reactions
   "The tap reactions of the vibe the Vibes tab edits, by role: its own cells

@@ -514,14 +514,18 @@
 (deftest add-effect-to-track-test
   (let [run (fn [extra] (get-in (timeline/handle (merge {:event/type :timeline/add-effect-to-item :col 0 :row 0
                                                           :item-id :scale
-                                                          :item {:id :scale :parameters [{:key :x-scale :default 1.0}]}
+                                                          ;; A definition the event carries (an old bank's): the
+                                                          ;; handler reads the registered one (reactivity plan 17)
+                                                          :item {:id :scale :parameters [{:key :x-scale :default 9.0}]}
                                                           :state (transport-state)}
                                                          extra))
                                 [:state :chains :cue-chains [0 0]]))]
-    (is (= [{:effect-id :scale :params {:x-scale 1.0} :enabled? true}]
+    (is (= [{:effect-id :scale :params (effects/get-default-params :scale) :enabled? true}]
            (mapv #(dissoc % :id) (get-in (run {:target-track-id :t}) [:tracks 0 :effects]))))
     (is (= :scale (get-in (run {:target-item-id :a}) [:items 0 :effects 0 :effect-id])))
-    (is (= (get-in (transport-state) [:chains :cue-chains [0 0]]) (run {})) "no target")))
+    (is (= (get-in (transport-state) [:chains :cue-chains [0 0]]) (run {})) "no target")
+    (is (= (get-in (transport-state) [:chains :cue-chains [0 0]]) (run {:target-track-id :t :item-id :no-such-effect}))
+        "an id no effect has")))
 
 (deftest track-effect-param-edit-via-chain-events-test
   (let [s0 (assoc-in (transport-state) [:chains :cue-chains [0 0] :tracks 0 :effects]
