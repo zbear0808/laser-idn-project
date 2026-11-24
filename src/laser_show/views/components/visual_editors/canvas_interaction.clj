@@ -226,12 +226,11 @@
   [{:keys [width height value render!
            on-press on-drag on-release on-hover on-key on-exit on-scroll
            on-drag-over on-drag-exited on-drag-dropped
-           initial-drag-state history-transaction?
+           initial-drag-state history-transaction? claimed-keys
            cursor focus-traversable? id style-class managed]
     :or {cursor "crosshair"
          value nil
-         history-transaction? true}
-    :as props}]
+         history-transaction? true}}]
   {:fx/type fx/ext-on-instance-lifecycle
    :on-created (fn [^Canvas canvas]
                  (let [canvas-id (keyword (gensym "canvas-"))]
@@ -243,7 +242,7 @@
                                                                     :preview-value nil
                                                                     :gesture-id    nil}
                                                                    initial-drag-state))})
-                   (draw-interactive-canvas! canvas props)))
+                   (draw-interactive-canvas! canvas {:render! render! :value value})))
    ;; The canvas going ends its press: what it sent is committed
    :on-deleted (fn [canvas] (gesture/finish! canvas nil :dispose))
    :desc (cond->
@@ -258,9 +257,12 @@
                                  focus-traversable?
                                  has-keyboard?))
           :draw (fn [^Canvas canvas]
-                  ;; :draw receives this render's props even when the node is reused.
-                  (set-key-claims! canvas props)
-                  (draw-interactive-canvas! canvas props))
+                  ;; :draw receives this render's props even when the node is
+                  ;; reused: the ones it draws and claims keys with, never the
+                  ;; whole map, which has the context cljfx gave this
+                  ;; component (reactivity plan 33)
+                  (set-key-claims! canvas {:on-key on-key :claimed-keys claimed-keys :value value})
+                  (draw-interactive-canvas! canvas {:render! render! :value value}))
 
           :on-mouse-pressed
           (fn [e]

@@ -12,7 +12,6 @@
    
    Usage in effect chain editor:
    {:fx/type effect-parameter-editor
-    :fx/context context
     :domain :effect-chains
     :entity-key [col row]
     :effect-path [0]               ; direct path to effect in chain
@@ -22,7 +21,6 @@
    
    Usage in cue chain editor:
    {:fx/type effect-parameter-editor
-    :fx/context context
     :domain :cue-chains
     :entity-key [col row]
     :effect-path [0]               ; path within item's :effects
@@ -59,7 +57,6 @@
   "Internal custom param renderer with keyframe-aware event routing.
    
    Props:
-   - :fx/context - cljfx context
    - :entity-key - [col row]
    - :full-effect-path - Full computed path to effect
    - :effect-def - Effect definition with :ui-hints
@@ -75,12 +72,11 @@
    - :spatial-event-template - Event for spatial editor updates
    - :modulator-event-base - Base of the modulator events, nil while
      keyframe mode is active"
-  [{:keys [fx/context entity-key full-effect-path effect-def current-params
+  [{:keys [entity-key full-effect-path effect-def current-params
            ui-mode params-map dialog-data domain keyframe-enabled? selected-kf-idx
            on-change-event on-text-event spatial-event-template on-color-change-event
            modulator-event-base]}]
   {:fx/type effect-param-ui/custom-param-renderer
-   :fx/context context
    :effect-def effect-def
    :current-params current-params
    :ui-mode ui-mode
@@ -125,7 +121,6 @@
    Works for both effect chains and cue chains.
    
    Props:
-   - :fx/context - cljfx context (required)
    - :domain - :effect-chains or :cue-chains (required)
    - :entity-key - [col row] grid coordinates (required)
    - :effect-path - Path to effect (required)
@@ -139,7 +134,7 @@
    - :effect-def - Effect definition from registry (required)
    - :dialog-data - Dialog state data for UI modes, etc. (required)
    - :current-phase - Current playback phase for timeline preview (optional)"
-  [{:keys [fx/context domain entity-key effect-path item-path owner-id
+  [{:keys [domain entity-key effect-path item-path owner-id
            effect effect-def dialog-data current-phase]}]
   (let [;; Compute full effect path based on domain
         full-effect-path (compute-full-effect-path domain item-path effect-path)
@@ -237,7 +232,6 @@
                         [;; Keyframe modulator panel (always shown for effects that could use it)
                          (when effect-def
                            {:fx/type keyframe-panel/keyframe-modulator-panel
-                            :fx/context context
                             :keyframe-modulator keyframe-mod
                             :domain domain
                             :entity-key entity-key
@@ -268,7 +262,6 @@
                                 :style-class "scroll-pane-base"
                                 :v-box/vgrow :always
                                 :content {:fx/type custom-param-renderer-internal
-                                          :fx/context context
                                           :entity-key entity-key
                                           :full-effect-path full-effect-path
                                           :effect-def effect-def

@@ -672,8 +672,9 @@
    Props: same as modulator-param-control plus support for non-numeric types."
   [{:keys [param-spec] :as props}]
   (case (if (and (= :choice (:type param-spec)) (:modulatable? param-spec)) :modulatable-choice (:type param-spec :float))
-    ;; A choice that may follow a modulator (zones plan Z5)
-    :modulatable-choice (assoc props :fx/type modulator-choice-control)
+    ;; A choice that may follow a modulator (zones plan Z5), given the props
+    ;; without this component's context: cljfx gives it its own
+    :modulatable-choice (assoc (dissoc props :fx/context) :fx/type modulator-choice-control)
     ;; Numeric types: use modulator-capable control
     (:float :int) {:fx/type modulator-param-control
                    :param-key (:param-key props)

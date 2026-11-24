@@ -423,7 +423,8 @@
 (defn toolbar
   "Length (8, 16, 32 and any from 1 to 64), Rate, Step on, Restart on while
    Step on is the beat, Offset (Z5's controls, ∿ to follow a modulator),
-   Start from, Copy, Paste and Clear. Props: :fx/context :target :grid."
+   Start from, Copy, Paste and Clear. Props: :target :grid; it reads
+   Paste's clip through the context cljfx gives it."
   [{:keys [fx/context target grid]}]
   (let [{:keys [length params]} grid
         can-paste? (fx/sub-ctx context subs/can-paste? :step-grid)

@@ -171,7 +171,7 @@
                (.consume e)))))))
 
 (defn- header-row
-  [{:keys [col row selected-track-id] :as props} idx r]
+  [{:keys [col row selected-track-id swap-state] :as props} idx r]
   (let [folder? (= :folder (:kind r))
         selected? (= selected-track-id (:id r))
         track-id (:id r)]
@@ -200,10 +200,12 @@
                      selected? (conj "tl-header-row-selected"))
       :min-height (:h r) :pref-height (:h r) :max-height (:h r)
       :min-width (:header-w layout/metrics) :pref-width (:header-w layout/metrics)
+      ;; The listener keeps the updater and the track, not props, which
+      ;; has the column's context (reactivity plan 33)
       :on-mouse-clicked (fn [^MouseEvent e]
                           (when (= MouseButton/PRIMARY (.getButton e))
                             (if (= 2 (.getClickCount e))
-                              ((:swap-state props) assoc :renaming-id track-id)
+                              (swap-state assoc :renaming-id track-id)
                               (events/dispatch! {:event/type :timeline/select-track
                                                  :col col :row row :track-id track-id}))))
       :children

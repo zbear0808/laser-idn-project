@@ -233,14 +233,15 @@
 
 (defn target-field
   "\"Target:\", the chip, then, dim, where an inherited target comes from
-   (\"from column 3\"). Props: target-chip's, and :from-id."
+   (\"from column 3\"). Props: target-chip's, and :from-id. The chip gets
+   them without the context cljfx gave the field: it gets its own."
   [{:keys [own inherited from-id] :as props}]
   (let [from (when (nil? (targets/normalize-target own)) (targets/from-text inherited))]
     {:fx/type :h-box
      :spacing 6
      :alignment :center-left
      :children (cond-> [{:fx/type :label :text "Target:" :min-width :use-pref-size :style-class ["label" "target-field-label"]}
-                        (assoc props :fx/type target-chip)]
+                        (assoc (dissoc props :fx/context) :fx/type target-chip)]
                  from (conj (cond-> {:fx/type :label :text from :min-width :use-pref-size :style-class ["label" "target-from"]}
                               from-id (assoc :id from-id))))}))
 

@@ -77,7 +77,6 @@
       (if effect-def
         {:fx/type param-editor/effect-parameter-editor
          :v-box/vgrow :always
-         :fx/context context
          :domain domain
          :entity-key [col row]
          :item-path (:path target)
