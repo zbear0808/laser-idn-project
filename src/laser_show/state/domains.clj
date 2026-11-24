@@ -537,19 +537,18 @@
                       :pending-installs []}
             :doc "The output drivers (laser-show.output.driver), as pure data: :drivers {id {:id :name :transport :fields :capabilities :discover? :addon}}, a copy of every registered driver's descriptor; :addons, a status per add-on the loader tried; :dir, the add-ons folder's path as the OS writes it. Written by :addons/loaded at startup. :pending-installs [{:id :name :version :file :replaced?}], the jars Install add-on… copied in since (each a <name>.jar.new that loads at the next start), written by :addons/installed. Never saved, never undone (the drivers themselves live in the registry)"}
    :input {:default {:midi {:enabled? true
-                            :devices {}                ; Map of device-name -> device instance
-                            :connected-devices #{}     ; Set of connected device names
-                            :handlers {}               ; Map of device-name -> handler fn
+                            :available-devices []      ; Names of the MIDI inputs the last Refresh found
+                            :connected-devices #{}     ; Names of the connected inputs (the device worker's, input.devices)
+                            :requests {}               ; {:list id :connections id}: the latest request to the device worker, until its result is in
                             :channel-filter nil        ; nil = all channels, or set of channel numbers (0-15)
                             :learn-mode nil            ; Promise when learning, nil otherwise
                             :note-mappings {}          ; Optional note remapping
                             :cc-mappings {}}           ; Optional CC remapping
                      :osc {:enabled? false
-                           :server nil                 ; OSC server instance
-                           :server-running? false
-                           :port 9000
+                           :server-running? false      ; The device worker's server is listening
+                           :port 9000                  ; The port Start Server listens on (while listening: the one it listens on)
+                           :requests {}                ; {:server id}: the latest Start or Stop, until its result is in
                            :address-mappings {}        ; Map of OSC address -> event config
-                           :handlers {}                ; Map of handler-id -> {:pattern :handler}
                            :learn-mode nil}            ; Promise when learning, nil otherwise
                      :mtc {:state :stopped :fps nil :text nil} ; the show clock's status of laser-show.input.mtc, see mirror-status
                      :gamepad {:enabled? true}
@@ -558,7 +557,7 @@
                               :event-log []
                               :enabled? true}
                      :values {}}
-           :doc "Input handling state for MIDI, OSC, and keyboard"}
+           :doc "Input handling state for MIDI, OSC, and keyboard. Plain data: the MIDI inputs and the OSC server themselves belong to the device worker (laser-show.input.devices), which reports their status back as events (handlers/input.clj applies only the latest request's result)"}
    :logging {:default {:enabled? false
                        :file nil
                        :path default-log-path}

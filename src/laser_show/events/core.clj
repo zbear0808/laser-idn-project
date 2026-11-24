@@ -32,8 +32,9 @@
      through run-inline, in the same turn
    - Effects that work later on another thread (futures: scan, learn,
      :dispatch-later, :rig/flush's wait; the FX thread: file chooser; the
-     output runtime's status thread; the rig writer) only do their side
-     effect there. Their result goes through the
+     output runtime's status thread; the rig writer; the input device
+     worker, input.devices, which owns the MIDI inputs and the OSC server)
+     only do their side effect there. Their result goes through the
      dispatch fn the effect was given, which queues it on the agent behind the
      current event
    - The streaming lifecycle effects only queue a command on the output
@@ -89,6 +90,7 @@
             [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.events.handlers.output-sync :as output-sync]
             [laser-show.common.util :as u]
+            [laser-show.input.devices :as devices]
             [laser-show.input.link :as link]
             [laser-show.animation.show-time :as show-time])
   (:import [javafx.stage FileChooser FileChooser$ExtensionFilter Stage]
@@ -490,6 +492,17 @@
       (catch Throwable t
         (log/error "Input learn failed:" (.getMessage t))))))
 
+;; Input Device Effects
+
+(defn- device-request
+  "The effect that hands its value, a request of kind op with its
+   :request-id, to the device worker (input.devices/submit!): it lists the
+   MIDI inputs or opens or closes a port off the event thread, then
+   dispatches its result, plain data, through dispatch."
+  [op]
+  (fn [request dispatch]
+    (devices/submit! (assoc request :op op) dispatch)))
+
 ;; Add-on Effects
 
 (defn- effect-addons-install
@@ -885,6 +898,11 @@
    - :show-clock/read - continue :on-read with the show clock's beats, or
      with :chase-cell its timecode episode there (inline)
    - :input/await-learn - wait for a learn capture, then dispatch the binding (later, future)
+   - :input/midi-list, :input/midi-connect, :input/midi-disconnect,
+     :input/osc-start, :input/osc-stop - list the MIDI inputs, connect or
+     disconnect one (or all), start or stop the OSC server, on the device
+     worker (input.devices); its result comes back (later, input-devices
+     thread)
    - :multi-engine/start, :multi-engine/refresh - queue a sync of the engines
      with {:projectors …} on the output thread; :output/status comes back
      later through dispatch (later, output-status thread)
@@ -922,6 +940,12 @@
     :link/sync-to-downbeat effect-link-sync-to-downbeat
     :show-clock/read effect-show-clock-read
     :input/await-learn effect-input-await-learn
+    ;; Input devices (on the device worker)
+    :input/midi-list (device-request :midi/list)
+    :input/midi-connect (device-request :midi/connect)
+    :input/midi-disconnect (device-request :midi/disconnect)
+    :input/osc-start (device-request :osc/start)
+    :input/osc-stop (device-request :osc/stop)
     ;; Streaming engines (queued on the output runtime)
     :multi-engine/start effect-output-sync
     :multi-engine/stop effect-output-stop

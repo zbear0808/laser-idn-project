@@ -30,10 +30,9 @@
             [laser-show.output.addons :as addons]
             [laser-show.output.driver :as driver]
             [laser-show.events.handlers.input-mapper :as input-mapper]
+            [laser-show.input.devices :as devices]
             [laser-show.input.link :as link]
             [laser-show.input.gamepad :as gamepad]
-            [laser-show.input.midi :as midi]
-            [laser-show.input.osc :as osc]
             [laser-show.input.router :as router]
             [laser-show.dev-config :as dev-config]
             [clojure.pprint :as pprint])
@@ -245,6 +244,7 @@
 
     (output-runtime/open!)
     (output-runtime/install-shutdown-hook!)
+    (devices/open!)
     (rig-store/install-shutdown-hook!)
 
     (let [app (create-app)]
@@ -292,19 +292,15 @@
       (log/warn "Error stopping streaming engines:" (.getMessage e)))))
 
 (defn- release-devices!
-  "Close what state lists: the MIDI ports and the OSC server, and the
-   Carabiner connection when it is connected. Each is closed once, in its
-   own try, and nothing is written back: the next start replaces app state."
+  "Close the MIDI inputs and the OSC server (input.devices/release!: what
+   their owner has open, whatever state says), and the Carabiner connection
+   when state says it is connected. Each is closed once, in its own try, and
+   nothing is written back: the next start replaces app state."
   [state]
-  (when-let [{:keys [midi osc]} (get-in state [:backend :input])]
-    (try
-      (midi/disconnect-all midi)
-      (catch Exception e
-        (log/warn "Error releasing MIDI ports:" (.getMessage e))))
-    (try
-      (osc/stop-server osc)
-      (catch Exception e
-        (log/warn "Error stopping the OSC server:" (.getMessage e)))))
+  (try
+    (devices/release! 1000)
+    (catch Exception e
+      (log/warn "Error releasing the MIDI inputs and the OSC server:" (.getMessage e))))
   (when (get-in state [:backend :link :carabiner-connected?])
     (try
       (link/disconnect-carabiner! (get-in state [:backend :link]))
@@ -338,10 +334,12 @@
    falls back to the synchronous handler afterwards, and the write guard
    start! or start-test! installed is removed.
 
-   It writes nothing to app state. The devices are closed from one read,
-   after the events already queued have run (within 1 s; on the event
-   thread, as on Quit, it can't wait for them and doesn't), and only by the
-   call that claimed the app, so each is closed once. Then the app instance
+   It writes nothing to app state. The devices are closed after the events
+   already queued have run (within 1 s; on the event thread, as on Quit, it
+   can't wait for them and doesn't), and only by the call that claimed the
+   app, so each is closed once: the MIDI inputs and the OSC server by their
+   owner (input.devices/release!, which takes no request until the next
+   start), the Carabiner link from one read. Then the app instance
    is retired (events/retire!), before the rig file's last write: what
    comes back to it later (that write's result, Exit after its wait for the
    rig, a scan, a learn, an event still running) is dropped, so it can't
@@ -419,6 +417,7 @@
      (state/init-state! (:state rig))
      (show-time/reset-runtime!)
      (output-runtime/open!)
+     (devices/open!)
      (let [app (create-app)]
        (reset! *app app)
        (events/set-dispatch-fn! (:handler app))
