@@ -3,7 +3,9 @@
    
    This module provides:
    - handle-event-pipeline, and ordered-pipeline (it with :state first), the
-     co-effects and effects maps that app/create-app gives to fx/create-app
+     co-effects and effects maps that app/create-app gives to fx/create-app,
+     with instance-handler, the pipeline for one app instance
+     (new-instance!, retire!)
    - Effect implementations for side-effects (IDN streaming, timing, etc.)
    - event-handler, the same pipeline run synchronously (tests, fallback)
    - dispatch! for programmatic event dispatch
@@ -25,17 +27,24 @@
    - UI callbacks (inline fns) run briefly on FX thread, then delegate to agent
    - Co-effects, handlers and effects run on the agent, on the one event
      thread (laser-show-events, event-executor), one event at a time
-   - An effect that continues the event (:dispatch, :project/save's :on-saved,
-     ...) runs the follow-up inline through run-inline, in the same turn
+   - An effect that continues the event (:dispatch, :project/save's
+     :project/mark-clean and its :on-saved, ...) runs the follow-up inline
+     through run-inline, in the same turn
    - Effects that work later on another thread (futures: scan, learn,
-     :dispatch-later; the FX thread: file chooser; the output runtime's status
-     thread; the rig writer) only do their side effect there. Their result goes through the
+     :dispatch-later, :rig/flush's wait; the FX thread: file chooser; the
+     output runtime's status thread; the rig writer) only do their side
+     effect there. Their result goes through the
      dispatch fn the effect was given, which queues it on the agent behind the
      current event
    - The streaming lifecycle effects only queue a command on the output
      runtime's own thread (backend/output_runtime.clj), which owns every engine
    - Nothing running on the agent may block waiting for an event it
      dispatched: that event only runs after the current one
+   - Each mounted app is an app instance (new-instance!, see App instances
+     below): once app/stop! retires it, its late events (a scan, a learn,
+     the rig writer's results, Exit coming back) are dropped as they come,
+     an effect of an event of it still running does nothing, and it never
+     writes into the context of the app started after it
    - Nothing writes app state outside the pipeline: an event's :state, or an
      effect of the same turn that runs after it (:output/write-status,
      :dev/swap-state), on the event thread. Start-up's init-state! runs
@@ -108,6 +117,52 @@
   []
   (System/currentTimeMillis))
 
+;; App instances
+;;
+;; Each mounted app (app/create-app) is an app instance, {:id n :epoch e}:
+;; e is the epoch of the context init-state! made for it (state/epoch).
+;; cljfx runs an app's events as actions of an agent of its own, on
+;; event-executor; instance-handler, the app's :event-handler, puts the
+;; instance on that agent's metadata, so the event's effects and the events
+;; they continue inline know whose they are (current-instance). Once
+;; app/stop! retires it (retire!), an event of it is dropped as it comes,
+;; an effect of one still running does nothing, and nothing it writes
+;; reaches a context of another epoch (effect-state): a late result of the
+;; app before can't change the app started after it. Without an app (unit
+;; tests, the REPL) there is no instance, and events run as before.
+
+(defonce ^{:private true :doc "How many app instances were made: the newest one's :id."}
+  !instances
+  (atom 0))
+
+(defonce ^{:private true :doc "The live app instance (new-instance!), or nil."}
+  !live-instance
+  (atom nil))
+
+(defn- live?
+  "Is instance the live app instance?"
+  [instance]
+  (identical? instance @!live-instance))
+
+(defn- current-instance
+  "The app instance whose event is being handled on this thread: the one on
+   the agent running it (instance-handler), nil without an app."
+  []
+  (some-> *agent* meta ::instance))
+
+(defn- retired
+  "The app instance of the event being handled on this thread when it is
+   retired, else nil (it is live, or there is no app)."
+  []
+  (when-let [instance (current-instance)]
+    (when-not (live? instance)
+      instance)))
+
+(defn- dropped
+  "Log what of a retired app instance was dropped. nil."
+  [instance what]
+  (log/info "App instance" (:id instance) "was stopped: dropped" what))
+
 ;; Effects (handle side effects FROM events)
 ;;
 ;; Every effect gets a dispatch fn. It is the way to CALL BACK LATER: from a
@@ -120,9 +175,11 @@
 
 (defn- run-inline
   "Run event now, on this thread, as part of the current turn. Its effects get
-   the same dispatch."
+   the same dispatch. Nothing for a retired app instance's event (logged)."
   [event dispatch]
-  (event-handler event dispatch))
+  (if-let [instance (retired)]
+    (dropped instance (:event/type event))
+    (event-handler event dispatch)))
 
 (defn- changed-paths
   "Paths (at most depth+1 keys long) where maps a and b differ."
@@ -162,15 +219,35 @@
                                          ::event-type (:event/type event)))
         result))))
 
+(def ^:private not-written
+  "What an app instance's write that found another epoch's context logs."
+  "state not written: init-state! has made another context since")
+
 (defn- effect-state
   "Effect that updates application state.
-   Preserves cljfx context memoization."
+   Preserves cljfx context memoization. An app instance's event writes only
+   into the context the instance was made for (state/swap-state-in-epoch!,
+   checked and written in one step): once init-state! has made another (a
+   restart), it writes nothing (logged)."
   [new-state _dispatch]
-  (if-let [snapshot (::snapshot (meta new-state))]
-    (let [event-type (::event-type (meta new-state))
-          [replaced _] (state/reset-state-vals! (vary-meta new-state dissoc ::snapshot ::event-type))]
-      (check-lost-update! event-type snapshot replaced))
-    (state/reset-state! new-state)))
+  (let [{::keys [snapshot event-type]} (meta new-state)
+        new-state (cond-> new-state snapshot (vary-meta dissoc ::snapshot ::event-type))
+        instance (current-instance)]
+    (if-let [[replaced _] (if instance
+                            (state/swap-state-in-epoch! (:epoch instance) (constantly new-state))
+                            (state/reset-state-vals! new-state))]
+      (when snapshot
+        (check-lost-update! event-type snapshot replaced))
+      (log/info "App instance" (:id instance) not-written))))
+
+(defn- swap-app-state!
+  "(apply state/swap-state! f args), but for an app instance's event only
+   into the context it was made for, as effect-state writes."
+  [f & args]
+  (if-let [instance (current-instance)]
+    (when-not (apply state/swap-state-in-epoch! (:epoch instance) f args)
+      (log/info "App instance" (:id instance) not-written))
+    (apply state/swap-state! f args)))
 
 (defn- effect-dispatch
   "Effect that continues with another event, inline in the current turn."
@@ -186,22 +263,27 @@
     (dispatch event)))
 
 (defn- effect-save-project
-  "Effect that writes a project zip.
+  "Effect that writes a project zip (persistent/write-project!: staged
+   beside the file, read back, then moved onto it).
    Args: {:file-path path :files {filename data} :on-saved event :on-failed event}
-   The handler has already marked the project saved. After a successful write,
-   continues with :on-saved (if given). On failure, continues with :on-failed
-   with :file-path so the handler can revert the saved status."
+   The handler changed nothing yet. Only once the file is written and
+   checked does it continue with :project/mark-clean, with :file-path and
+   :on-saved as its :then (if given), so what waited for the save runs
+   after the file and the saved status are there. On failure, it continues
+   with :on-failed with :file-path."
   [{:keys [file-path files on-saved on-failed]} dispatch]
   (if (persistent/write-project! file-path files)
-    (when on-saved
-      (run-inline on-saved dispatch))
+    (run-inline (cond-> {:event/type :project/mark-clean :file-path file-path}
+                  on-saved (assoc :then on-saved))
+                dispatch)
     (when on-failed
       (run-inline (assoc on-failed :file-path file-path) dispatch))))
 
 (defn- effect-load-project
   "Effect that reads a project zip.
    Args: {:file-path path :on-loaded event :on-failed event}
-   Continues with :on-loaded with :file-path and :contents, or :on-failed."
+   Continues with :on-loaded with :file-path and :contents (read-project's:
+   read strictly and checked), or :on-failed when there is no show to open."
   [{:keys [file-path on-loaded on-failed]} dispatch]
   (if-let [contents (persistent/read-project file-path)]
     (run-inline (assoc on-loaded :file-path file-path :contents contents) dispatch)
@@ -223,6 +305,23 @@
                                    (cond-> {:event/type :rig/written :path path :seq seq :at at}
                                      then (assoc :then then)))))
                      (if now? 0 rig-store/write-delay-ms)))
+
+(defn- effect-rig-flush
+  "Effect that waits, off the event thread (in a future), for the rig writer
+   to finish the rigs it was given (state.rig-store/flush!: the pending one
+   written at once, after the one it may be writing), at most
+   rig-store/flush-ms, then dispatches :then. Those writes' results
+   (:rig/written, :rig/write-failed) are dispatched before it, unless the
+   wait ran out.
+   Args: {:then event}"
+  [{:keys [then]} dispatch]
+  (future
+    (try
+      (rig-store/flush! rig-store/flush-ms)
+      (catch Throwable t
+        (log/warn "Could not wait for the rig file:" (.getMessage t))))
+    (when then
+      (dispatch then))))
 
 ;; The OS clipboard. JavaFX's Clipboard works only on the FX thread, so both
 ;; effects hand their call to it with Platform/runLater and never wait: the
@@ -276,15 +375,18 @@
 ;; Projector Scanning Effects
 
 (defn- effect-projectors-scan
-  "Scan for IDN and driver outputs off the event agent, and queue one result."
-  [opts dispatch]
+  "Scan for IDN and driver outputs off the event agent, and queue one result,
+   with the :scan-id of the Scan it answers (handlers/projector.clj) when
+   it was given one."
+  [{:keys [scan-id] :as opts} dispatch]
   (future
-    (let [result (try (discovery/scan opts)
+    (let [result (try (discovery/scan (dissoc opts :scan-id))
                       (catch Exception e
                         (log/error e "Device scan failed")
                         {:error (ex-message e)}))]
-      (dispatch (assoc result :event/type (if (contains? result :error)
-                                            :projectors/scan-failed :projectors/scan-complete))))))
+      (dispatch (cond-> (assoc result :event/type (if (contains? result :error)
+                                                    :projectors/scan-failed :projectors/scan-complete))
+                  scan-id (assoc :scan-id scan-id))))))
 
 ;; Link Effects
 
@@ -468,7 +570,7 @@
    args), on the event thread in this turn.
    Args: {:f :args}"
   [{:keys [f args]} _dispatch]
-  (apply state/swap-state! f args))
+  (apply swap-app-state! f args))
 
 ;; Main-window effects
 
@@ -578,7 +680,7 @@
    update of that path only). It runs after the event's :state
    (state-first), so a write-back can't undo it."
   [status _dispatch]
-  (state/swap-state! assoc-in output-runtime/status-path status))
+  (swap-app-state! assoc-in output-runtime/status-path status))
 
 (defn- effect-output-stop
   "Effect that queues a stop of every streaming engine, on the output
@@ -639,9 +741,9 @@
    tags the :state effect with the event's snapshot. Outermost, with-fx-event
    puts a map event's :fx/event value where its view wrote the placeholder.
 
-   app/create-app gives it, with :state first (ordered-pipeline), to
-   fx/create-app together with co-effects and effects, so it runs on the
-   cljfx agent."
+   app/create-app gives it, with :state first (ordered-pipeline) and for
+   one app instance (instance-handler), to fx/create-app together with
+   co-effects and effects, so it runs on the cljfx agent."
   (-> handlers/handle-event
       show-lock/wrap-show-lock
       timeline-handlers/wrap-normalize-timelines
@@ -668,7 +770,7 @@
 
 (def ordered-pipeline
   "handle-event-pipeline with its :state effect first (state-first). What
-   event-handler runs, and what app/create-app gives to fx/create-app."
+   event-handler runs, and an app's instance-handler while it is live."
   (state-first handle-event-pipeline))
 
 (def co-effects
@@ -678,10 +780,27 @@
   {:state co-effect-state
    :time co-effect-time})
 
+(defn- guard-all
+  "effects with each one doing nothing (logged) for an event of a retired
+   app instance, but :dev/deliver: events/flush!'s promise is delivered
+   anyway."
+  [effects]
+  (into {}
+        (map (fn [[k consumer]]
+               [k (if (= :dev/deliver k)
+                    consumer
+                    (fn [value dispatch]
+                      (if-let [instance (retired)]
+                        (dropped instance (str "its " k))
+                        (consumer value dispatch))))]))
+        effects))
+
 (def effects
   "Effects handled for every event. Those marked (inline) continue the current
    event through run-inline; those marked (later) call back through dispatch
    from another thread, which with the app running queues on the agent.
+   Each does nothing (logged) for an event of a retired app instance, but
+   :dev/deliver (guard-all).
    - :state - update application state
    - :dispatch - continue with another event (inline)
    - :dispatch-later - dispatch event after delay (later, future)
@@ -693,10 +812,12 @@
      later through dispatch (later, output-status thread)
    - :multi-engine/stop - queue a stop of every engine on the output thread
    - :output/write-status - store the output status at its path only
-   - :project/save - write project zip to disk, then :on-saved (inline)
+   - :project/save - write project zip to disk, then :project/mark-clean (inline)
    - :project/load - read project zip from disk, then :on-loaded (inline)
    - :rig/write - hand the rig file's contents to the rig writer; :rig/written
      or :rig/write-failed comes back (later, rig-writer thread)
+   - :rig/flush - wait for the rig writer to finish what it was given (at
+     most rig-store/flush-ms), then dispatch :then (later, future)
    - :addons/install - check an add-on jar and copy it into the add-ons
      folder as <name>.jar.new; :addons/installed or :addons/install-failed
      comes back (later, future)
@@ -716,41 +837,43 @@
    - :clipboard/read - read the OS clipboard, then dispatch :then with
      :clipboard/system (later, FX thread)
    - :projectors/scan - scan for IDN devices and every driver's (later, future)"
-  {:state effect-state
-   :dispatch effect-dispatch
-   :dispatch-later effect-dispatch-later
-   :link/sync-to-downbeat effect-link-sync-to-downbeat
-   :show-clock/read effect-show-clock-read
-   :input/await-learn effect-input-await-learn
-   ;; Streaming engines (queued on the output runtime)
-   :multi-engine/start effect-output-sync
-   :multi-engine/stop effect-output-stop
-   :multi-engine/refresh effect-output-sync
-   :output/write-status effect-output-write-status
-   ;; Project persistence
-   :project/save effect-save-project
-   :project/load effect-load-project
-   ;; The rig file
-   :rig/write effect-rig-write
-   ;; Add-ons
-   :addons/install effect-addons-install
-   ;; File chooser dialog
-   :fx/show-file-chooser effect-show-file-chooser
-   ;; The main window
-   :window/set-fullscreen effect-window-set-fullscreen
-   ;; System
-   :system/exit effect-system-exit
-   :system/open-url effect-system-open-url
-   :system/open-folder effect-system-open-folder
-   :dev/reload effect-dev-reload
-   ;; Tooling: events/flush! and events/write-state!
-   :dev/deliver effect-dev-deliver
-   :dev/swap-state effect-dev-swap-state
-   ;; The OS clipboard
-   :clipboard/write effect-clipboard-write
-   :clipboard/read effect-clipboard-read
-   ;; Projector scanning effects
-   :projectors/scan effect-projectors-scan})
+  (guard-all
+   {:state effect-state
+    :dispatch effect-dispatch
+    :dispatch-later effect-dispatch-later
+    :link/sync-to-downbeat effect-link-sync-to-downbeat
+    :show-clock/read effect-show-clock-read
+    :input/await-learn effect-input-await-learn
+    ;; Streaming engines (queued on the output runtime)
+    :multi-engine/start effect-output-sync
+    :multi-engine/stop effect-output-stop
+    :multi-engine/refresh effect-output-sync
+    :output/write-status effect-output-write-status
+    ;; Project persistence
+    :project/save effect-save-project
+    :project/load effect-load-project
+    ;; The rig file
+    :rig/write effect-rig-write
+    :rig/flush effect-rig-flush
+    ;; Add-ons
+    :addons/install effect-addons-install
+    ;; File chooser dialog
+    :fx/show-file-chooser effect-show-file-chooser
+    ;; The main window
+    :window/set-fullscreen effect-window-set-fullscreen
+    ;; System
+    :system/exit effect-system-exit
+    :system/open-url effect-system-open-url
+    :system/open-folder effect-system-open-folder
+    :dev/reload effect-dev-reload
+    ;; Tooling: events/flush! and events/write-state!
+    :dev/deliver effect-dev-deliver
+    :dev/swap-state effect-dev-swap-state
+    ;; The OS clipboard
+    :clipboard/write effect-clipboard-write
+    :clipboard/read effect-clipboard-read
+    ;; Projector scanning effects
+    :projectors/scan effect-projectors-scan}))
 
 (def event-handler
   "The ordered pipeline wrapped with co-effects and effects, run
@@ -758,6 +881,43 @@
   (-> ordered-pipeline
       (fx/wrap-co-effects co-effects)
       (fx/wrap-effects effects)))
+
+;; The app's handler
+
+(defn new-instance!
+  "A new app instance, the live one from now on (the one before it is
+   retired): {:id n :epoch e}, e the epoch of the context now (state/epoch),
+   the only context its events write. app/create-app makes one for each
+   app, after init-state!."
+  []
+  (reset! !live-instance {:id (swap! !instances inc) :epoch (state/epoch)}))
+
+(defn retire!
+  "Retire the live app instance (app/stop!): from now on its events are
+   dropped as they come, and an effect of one still running does nothing
+   (logged)."
+  []
+  (reset! !live-instance nil)
+  nil)
+
+(defn instance-handler
+  "The event handler of app instance (new-instance!): app/create-app's
+   :event-handler, so cljfx's handler for the app, the app's one dispatcher,
+   runs it for every event, on the app's agent. It puts the instance on that
+   agent's metadata, where the event's effects find it (current-instance),
+   then runs ordered-pipeline while the instance is live. Once it is
+   retired, an event is dropped as it comes (logged), but for
+   events/flush!'s marker, delivered: every event queued before it has been
+   handled, by being dropped."
+  [instance]
+  (fn [{:keys [event/type] :as event}]
+    (when-let [a *agent*]
+      (when-not (identical? instance (::instance (meta a)))
+        (alter-meta! a assoc ::instance instance)))
+    (cond
+      (live? instance) (ordered-pipeline event)
+      (= :dev/flush type) (do (deliver (:promise event) true) nil)
+      :else (dropped instance type))))
 
 ;; The event thread
 

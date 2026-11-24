@@ -16,9 +16,29 @@
    "reset-state!" #(state/reset-state! {:timing {:bpm 99.0}})
    "reset-state-vals!" #(state/reset-state-vals! {:timing {:bpm 99.0}})
    "assoc-in-state!" #(state/assoc-in-state! [:timing :bpm] 99.0)
+   "swap-state-in-epoch!" #(state/swap-state-in-epoch! (state/epoch) assoc-in [:timing :bpm] 99.0)
    "init-state!" #(state/init-state! {:timing {:bpm 99.0}})})
 
 (defn- bpm [] (get-in (state/get-raw-state) [:timing :bpm]))
+
+(deftest init-starts-an-epoch-that-writes-keep-test
+  (let [epoch (state/epoch)]
+    (is (number? epoch))
+    (doseq [[write-name write!] (dissoc writes "init-state!")]
+      (write!)
+      (is (= epoch (state/epoch)) (str write-name " keeps it")))
+    (state/init-state! {:timing {:bpm 120.0}})
+    (is (< epoch (state/epoch)) "init-state! starts another")))
+
+(deftest swap-in-epoch-writes-only-into-that-epoch-test
+  (let [epoch (state/epoch)]
+    (is (= [{:timing {:bpm 120.0}} {:timing {:bpm 99.0}}]
+           (state/swap-state-in-epoch! epoch assoc-in [:timing :bpm] 99.0))
+        "[old new], while the context is the one of epoch")
+    (state/init-state! {:timing {:bpm 60.0}})
+    (is (nil? (state/swap-state-in-epoch! epoch assoc-in [:timing :bpm] 99.0))
+        "nil, once init-state! made another")
+    (is (= 60.0 (bpm)) "which it leaves as it is")))
 
 (deftest no-guard-writes-from-any-thread-test
   (doseq [[write-name write!] writes]

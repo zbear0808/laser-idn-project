@@ -7,6 +7,9 @@
    - Context-aware state updates that preserve memoization cache
    - Low-level write primitives, which only the event pipeline calls while
      an app runs (guard-writes!)
+   - Epochs: each init-state! makes a context of a new epoch, which every
+     write after it keeps; swap-state-in-epoch! writes only into one, so an
+     app's event can't write into the context of the app started after it
    
    For READ operations:
    - Backend/services: Use extractors directly with get-raw-state (thread-safe, no memoization)
@@ -39,6 +42,11 @@
            :doc "The single cljfx context atom. Initialized by init-state!"}
   *context
   (atom nil))
+
+(defonce ^{:private true
+           :doc "How many contexts init-state! made: the newest one's ::epoch."}
+  !epochs
+  (atom 0))
 
 (defonce ^{:private true
            :doc "Registry of all defined state domains."}
@@ -127,6 +135,14 @@
           (throw e)
           (log/error e refused-message))))))
 
+(defn- successor
+  "The context after ctx holding (f state), of the same epoch (init-state!).
+   Throws when there is no context yet."
+  [ctx f]
+  (if ctx
+    (assoc (fx/swap-context ctx f) ::epoch (::epoch ctx))
+    (throw (ex-info "State not initialized. Call init-state! first." {}))))
+
 (defn swap-state!
   "Update state using a function, preserving context memoization.
    
@@ -139,11 +155,7 @@
    (swap-state! update-in [:playback :active-cues] dissoc [0 0])"
   [f & args]
   (check-write!)
-  (swap! *context
-         (fn [ctx]
-           (if ctx
-             (fx/swap-context ctx #(apply f % args))
-             (throw (ex-info "State not initialized. Call init-state! first." {}))))))
+  (swap! *context successor #(apply f % args)))
 
 (defn reset-state!
   "Reset state to a completely new value.
@@ -153,23 +165,37 @@
    - new-state: The new state map"
   [new-state]
   (check-write!)
-  (swap! *context
-         (fn [ctx]
-           (if ctx
-             (fx/swap-context ctx (constantly new-state))
-             (throw (ex-info "State not initialized. Call init-state! first." {}))))))
+  (swap! *context successor (constantly new-state)))
 
 (defn reset-state-vals!
   "Like reset-state!, but returns [old-state new-state], with old-state the
    value it replaced."
   [new-state]
   (check-write!)
-  (let [[old-ctx _] (swap-vals! *context
-                                (fn [ctx]
-                                  (if ctx
-                                    (fx/swap-context ctx (constantly new-state))
-                                    (throw (ex-info "State not initialized. Call init-state! first." {})))))]
+  (let [[old-ctx _] (swap-vals! *context successor (constantly new-state))]
     [(:cljfx.context/m old-ctx) new-state]))
+
+(defn epoch
+  "Which init-state! made the context: a number each one increases, kept by
+   every write after it. nil before the first."
+  []
+  (::epoch @*context))
+
+(defn swap-state-in-epoch!
+  "Like swap-state!, but only while the context is still the one init-state!
+   made at epoch (see epoch): [old-state new-state], or nil, writing
+   nothing, once another init-state! replaced it. The check and the write
+   are one atomic step, so a re-initialization can't come between them (the
+   app's events write so: events.core effect-state)."
+  [epoch f & args]
+  (check-write!)
+  (loop []
+    (let [ctx @*context]
+      (when (= epoch (::epoch ctx))
+        (let [next-ctx (successor ctx #(apply f % args))]
+          (if (compare-and-set! *context ctx next-ctx)
+            [(:cljfx.context/m ctx) (:cljfx.context/m next-ctx)]
+            (recur)))))))
 
 (defn get-in-state
   "Get a value at a path in state.
@@ -207,10 +233,12 @@
    - initial-state: Map containing all application state
    
    This creates a cljfx context wrapping the state with an LRU cache.
-   Call this once at application startup before mounting the renderer."
+   Call this once at application startup before mounting the renderer.
+   Each call starts a new epoch (see epoch): a write computed for the
+   context before it can be told apart (swap-state-in-epoch!)."
   [initial-state]
   (check-write!)
-  (reset! *context (fx/create-context initial-state cache-factory))
+  (reset! *context (assoc (fx/create-context initial-state cache-factory) ::epoch (swap! !epochs inc)))
   (log/info "State initialized with" (count initial-state) "top-level keys"))
 
 

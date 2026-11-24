@@ -11,7 +11,8 @@
   (:import [java.io File]
            [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
-           [java.time LocalDateTime ZoneId]))
+           [java.time LocalDateTime ZoneId]
+           [java.util.concurrent Executors ScheduledExecutorService ScheduledThreadPoolExecutor TimeUnit]))
 
 (def ^:dynamic ^File *dir* nil)
 
@@ -190,6 +191,83 @@
     (Thread/sleep 600)
     (is (= 1 (count @results)) "and only once")
     (is (true? (rig-store/flush! 2000)) "nothing pending: at once")))
+
+(defn- gated-write
+  "A stand-in for rig-store/write! that delivers entered once the writer has
+   taken its rig and started, then waits for gate before writing it."
+  [entered gate]
+  (let [write! rig-store/write!]
+    (fn [path doc]
+      (deliver entered true)
+      @gate
+      (write! path doc))))
+
+(deftest flush-waits-for-an-in-flight-write-test
+  ;; Before: the writer took the rig before its I/O, and flush! said true at
+  ;; once with nothing left in the slot, while that write was still running
+  (let [entered (promise)
+        gate (promise)
+        results (atom [])]
+    (with-redefs [rig-store/write! (gated-write entered gate)]
+      (try
+        (rig-store/submit! (rig-path) (doc "A") #(swap! results conj %) 0)
+        (is (true? (deref entered 2000 false)) "the writer has taken A and is writing it")
+        (testing "a wait shorter than the write: false, at its end"
+          (let [t0 (System/currentTimeMillis)]
+            (is (false? (rig-store/flush! 200)))
+            (is (<= 200 (- (System/currentTimeMillis) t0))))
+          (is (empty? @results))
+          (is (not (.exists (file "rig.edn")))))
+        (testing "flush! waits for the write running, and its result"
+          (let [flushed (future (rig-store/flush! 5000))]
+            (Thread/sleep 100)
+            (is (not (realized? flushed)) "not while A is being written")
+            (deliver gate true)
+            (is (true? (deref flushed 5000 :timeout)))
+            (is (= 1 (count @results)) "A's result was reported before flush! returned")
+            (is (= (doc "A") (:doc (rig-store/read! (rig-path)))))))
+        (finally
+          (deliver gate true))))))
+
+(defn- inline-writer
+  "A rig writer that runs a task due at once inside schedule, before submit!
+   goes on: as when the writer's thread starts it straight away. Other
+   delays, and what a task due at once returns (done), are delegate's."
+  ^ScheduledThreadPoolExecutor [^ScheduledExecutorService delegate]
+  (proxy [ScheduledThreadPoolExecutor] [1]
+    (schedule [task delay unit]
+      (if (zero? delay)
+        (do (.run ^Runnable task)
+            (.schedule delegate ^Runnable (fn []) 0 TimeUnit/MILLISECONDS))
+        (.schedule delegate ^Runnable task (long delay) ^TimeUnit unit)))))
+
+(deftest zero-delay-submit-always-writes-its-document-test
+  ;; Before: submit! scheduled the write before keeping the rig, so a write
+  ;; due at once (Retry, Exit's Try again) that started straight away found
+  ;; the rig before it, or none: that one was written and reported, the new
+  ;; one never
+  (let [delegate (Executors/newSingleThreadScheduledExecutor)
+        inline (inline-writer delegate)
+        results (atom [])
+        report (fn [label] #(swap! results conj [label %]))]
+    (try
+      (with-redefs-fn {#'rig-store/!writer (delay inline)}
+        (fn []
+          (testing "nothing pending: the rig submitted is written"
+            (rig-store/submit! (rig-path) (doc "B") (report :b) 0)
+            (is (= (doc "B") (:doc (rig-store/read! (rig-path)))))
+            (is (= [:b] (map first @results))))
+          (testing "one pending, superseded by one due at once: only the new one is written and reported"
+            (reset! results [])
+            (rig-store/submit! (rig-path) (doc "C") (report :c) 3600000)
+            (rig-store/submit! (rig-path) (doc "D") (report :d) 0)
+            (is (= (doc "D") (:doc (rig-store/read! (rig-path)))))
+            (is (= [:d] (map first @results)) "C was superseded: never written, never reported")
+            (is (true? (rig-store/flush! 2000)) "nothing is left to write")
+            (is (= [:d] (map first @results))))))
+      (finally
+        (.shutdownNow delegate)
+        (.shutdownNow inline)))))
 
 
 ;; Where it lives

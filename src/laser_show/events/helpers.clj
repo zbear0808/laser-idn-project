@@ -82,21 +82,57 @@
   (dissoc event :state :time :fx/event))
 
 
+;; The open show's identity (reactivity plan 20)
+
+(defn document-id
+  "The identity of the show open in state, [:project :document-id] (see
+   state.domains): new at start and with each File > New and Open; nil in a
+   bare state."
+  [state]
+  (get-in state [:project :document-id]))
+
+(defn for-document
+  "event, to come back later, stamped for the show open in state: with its
+   document-id as :document-id (none in a bare state). When it is back,
+   same-document? says whether that show is still the one open."
+  [event state]
+  (if-let [id (document-id state)]
+    (assoc event :document-id id)
+    event))
+
+(defn same-document?
+  "Is the show open in state the one event was stamped for (for-document)?
+   false once a New or an Open replaced it. An event without :document-id
+   counts as a show's without one, so a test that builds such an event by
+   hand for an app's show stamps it too."
+  [state event]
+  (= (:document-id event) (document-id state)))
+
+
 ;; The clipboard (keyboard plan Phase 4, Step 4a)
 
 (defn with-clipboard
   "The one place a paste looks at the clipboard: (f state clip), clip being
    [:ui :clipboard], f's effects, or nil when its target takes nothing from
    clip. While the slot is empty (nothing copied in this app yet), the paste
-   first asks the OS clipboard: {:clipboard/read {:then event}} (parked), and
-   the read continues with event and :clipboard/system, the clip it found or
-   nil, which the slot takes if it is still empty (clipboard/adopt). A paste
-   after a read that finds nothing to paste says so: \"Nothing to paste
-   here\". Without a read, a clip the target doesn't take does nothing."
+   first asks the OS clipboard: {:clipboard/read {:then event}} (parked, and
+   stamped for the show open now: for-document), and the read continues
+   with event and :clipboard/system, the clip it found or nil, which the
+   slot takes if it is still empty (clipboard/adopt). A read that comes back
+   after New or Open replaced that show does nothing at all ({}: no paste,
+   no slot, no notice). A paste after a read that finds nothing to paste
+   says so: \"Nothing to paste here\". Without a read, a clip the target
+   doesn't take does nothing."
   [{:keys [state] :as event} f]
   (let [read? (contains? event :clipboard/system)]
-    (if (and (nil? (get-in state [:ui :clipboard])) (not read?))
-      {:clipboard/read {:then (parked event)}}
+    (cond
+      (and (nil? (get-in state [:ui :clipboard])) (not read?))
+      {:clipboard/read {:then (for-document (parked event) state)}}
+
+      (and read? (not (same-document? state event)))
+      {}
+
+      :else
       (let [state' (clipboard/adopt state (:clipboard/system event))]
         (or (f state' (get-in state' [:ui :clipboard]))
             (if read?

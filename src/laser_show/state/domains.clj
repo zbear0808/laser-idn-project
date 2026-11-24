@@ -257,7 +257,9 @@
    :dirty? {:default false
             :doc "whether changes have been made since last save"}
    :last-saved {:default nil
-                :doc "timestamp of last save"}})
+                :doc "timestamp of last save"}
+   :document-id {:default nil
+                 :doc "The open show's identity (reactivity plan 20): a random UUID the starter show gets at start (app/starter-state), replaced by each File > New and Open that goes ahead (state.persistent/begin-document, from reset-session); Save, Save As, Undo and a cancelled or failed Open keep it. Work that comes back later for a show checks it (events.helpers/for-document and same-document?: an OS clipboard paste, Save As's chooser), and so does Open's chooser (handlers/menu.clj discard-authorization). Session only: never saved, undone or compared for unsaved changes. nil in a bare state (unit tests)"}})
 
 
 ;; Configuration Domains (persisted to disk)
@@ -383,6 +385,8 @@
                         :doc "Devices from the last scan: IDN addresses and services, or a driver's :device-key and :outputs. Each device carries :driver."}
    :scanning? {:default false
                :doc "Whether output drivers are being scanned"}
+   :scan-id {:default nil
+             :doc "The id of the scan in progress (a random UUID each Scan, and the one at start-up, gets), which its result brings back: a result with another id (an earlier scan's, or one already in) changes nothing (handlers/projector.clj current-scan?). nil when no scan runs"}
    :broadcast-address {:default "255.255.255.255"
                        :doc "Broadcast address for device discovery"}
    :expanded-devices {:default #{}

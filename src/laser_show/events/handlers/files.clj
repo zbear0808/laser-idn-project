@@ -6,16 +6,25 @@
    - Project folder/file path"
   (:require [clojure.tools.logging :as log]
             [laser-show.events.helpers :as h]
-            [laser-show.state.history :as history]))
+            [laser-show.state.history :as history]
+            [laser-show.state.persistent :as persistent]))
 
 
 (defn- handle-project-mark-clean
-  "Mark project as saved."
-  [{:keys [state] :as event}]
+  "Mark project as saved: the current document becomes the saved baseline.
+   With :file-path, the file a save has just written and checked (the
+   :project/save effect dispatches this only then), which becomes the
+   project's file (persistent/mark-saved). Then :then, when given: the event
+   that waited for the save (the unsaved-changes dialog's New, Open or
+   Exit)."
+  [{:keys [state file-path then] :as event}]
   (let [now (h/current-time-ms event)]
-    {:state (-> state
-                history/mark-clean
-                (assoc-in [:project :last-saved] now))}))
+    (cond-> {:state (if file-path
+                      (persistent/mark-saved state file-path now)
+                      (-> state
+                          history/mark-clean
+                          (assoc-in [:project :last-saved] now)))}
+      then (assoc :dispatch then))))
 
 
 ;; TODO: Implement :project/set-folder handler - set project folder/file path after loading
