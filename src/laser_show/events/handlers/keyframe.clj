@@ -26,6 +26,7 @@
    DEBUG: Set log level to DEBUG for this namespace to see keyframe operations."
   (:require
    [clojure.tools.logging :as log]
+   [laser-show.animation.interpolation :as interp]
    [laser-show.animation.modulator-registry :as reg]
    [laser-show.events.helpers :as h]
    [laser-show.events.handlers.chain :as chain]
@@ -86,6 +87,12 @@
   "Clamp a position to valid range [0.0, 1.0]."
   ^double [^double pos]
   (max 0.0 (min 1.0 pos)))
+
+(defn- keyframe-index?
+  "Is idx one of keyframe-mod's keyframes: an integer in range (not nil, a
+   negative or a 1.0)?"
+  [keyframe-mod idx]
+  (and (int? idx) (< -1 idx (count (:keyframes keyframe-mod [])))))
 
 (defn- normalize-param-value
   "Extract static value from a param that may be a modulator config.
@@ -312,15 +319,13 @@
    - param-key: Parameter key to update
    - value: New value
    
-   Returns: Updated state"
+   Returns: Updated state (unchanged when keyframe-idx is no keyframe's)"
   [state config effect-path keyframe-idx param-key value]
-  (let [keyframe-mod (get-keyframe-modulator state config effect-path)
-        keyframes (:keyframes keyframe-mod [])]
-    (if (and (>= keyframe-idx 0) (< keyframe-idx (count keyframes)))
-      (-> state
-          (update-keyframe-modulator config effect-path
-                                     assoc-in [:keyframes keyframe-idx :params param-key] value))
-      state)))
+  (if (keyframe-index? (get-keyframe-modulator state config effect-path) keyframe-idx)
+    (-> state
+        (update-keyframe-modulator config effect-path
+                                   assoc-in [:keyframes keyframe-idx :params param-key] value))
+    state))
 
 (defn- numeric-param?
   "Does param-key of the effect at effect-path hold a number: :float or :int
@@ -346,6 +351,32 @@
                     (and (numeric-param? state config effect-path keyframe-idx param-key)
                          (not (h/finite-number? value))))
         [value]))))
+
+(defn- zone-value
+  "The zone :keyframe/set-zone-value sets, or nil for no edit: its :value,
+   else its :fx/event, the zone combo box's option map, whose :id it is (or
+   a zone id there already); only a keyword."
+  [event]
+  (let [value (h/first-some (:value event) (:fx/event event))
+        id (if (map? value) (:id value) value)]
+    (when (keyword? id) id)))
+
+(defn- interpolation-mode
+  "The :interpolation :keyframe/set-interpolation sets, when it is a mode
+   interp/interpolation-fns has; nil, no edit, for anything else."
+  [{:keys [interpolation]}]
+  (when (contains? interp/interpolation-fns interpolation)
+    interpolation))
+
+(defn- keyframe-edit
+  "{:state new-state} for an edit of the keyframes of the effect at
+   effect-path, or {} when it changed none of them (no such keyframe, or the
+   value it has already): no commit, no undo step."
+  [state new-state config effect-path]
+  (if (= (get-keyframe-modulator state config effect-path)
+         (get-keyframe-modulator new-state config effect-path))
+    {}
+    {:state new-state}))
 
 (defn handle-update-spatial-params
   "Update keyframe params from spatial drag operation (translate, corner-pin).
@@ -393,13 +424,11 @@
    
    Returns: Updated state, or unchanged state if index is invalid"
   [state config effect-path keyframe-idx interpolation]
-  (let [keyframe-mod (get-keyframe-modulator state config effect-path)
-        keyframes (:keyframes keyframe-mod [])]
-    (if (and (>= keyframe-idx 0) (< keyframe-idx (count keyframes)))
-      (-> state
-          (update-keyframe-modulator config effect-path
-                                     assoc-in [:keyframes keyframe-idx :interpolation] interpolation))
-      state)))
+  (if (keyframe-index? (get-keyframe-modulator state config effect-path) keyframe-idx)
+    (-> state
+        (update-keyframe-modulator config effect-path
+                                   assoc-in [:keyframes keyframe-idx :interpolation] interpolation))
+    state))
 
 (defn handle-set-driver
   "Set the driver type for keyframe modulator.
@@ -522,10 +551,12 @@
 
       :keyframe/update-param
       (if-let [[value] (update-param-value state config event)]
-        {:state (handle-update-keyframe-param state config effect-path
-                                              (:keyframe-idx event)
-                                              (:param-key event)
-                                              value)}
+        (keyframe-edit state
+                       (handle-update-keyframe-param state config effect-path
+                                                     (:keyframe-idx event)
+                                                     (:param-key event)
+                                                     value)
+                       config effect-path)
         {})
 
       :keyframe/update-spatial-params
@@ -537,15 +568,21 @@
                                             (:param-map event))}
                                             
       :keyframe/set-zone-value
-      {:state (handle-update-keyframe-param state config effect-path
-                                            (:keyframe-idx event)
-                                            (:param-key event)
-                                            (h/first-some (:value event) (:fx/event event)))}
+      (if-let [zone (zone-value event)]
+        (keyframe-edit state
+                       (handle-update-keyframe-param state config effect-path
+                                                     (:keyframe-idx event)
+                                                     (:param-key event)
+                                                     zone)
+                       config effect-path)
+        {})
 
       :keyframe/set-interpolation
-      {:state (handle-set-interpolation state config effect-path
-                                        (:keyframe-idx event)
-                                        (:interpolation event))}
+      (if-let [mode (interpolation-mode event)]
+        (keyframe-edit state
+                       (handle-set-interpolation state config effect-path (:keyframe-idx event) mode)
+                       config effect-path)
+        {})
 
       ;; Driver settings events
       :keyframe/set-driver

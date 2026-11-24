@@ -6,16 +6,21 @@
    (plans/2026-11-18-vibe-mode/04 §4, invariant 4). And the Fader, which
    follows fader 1 or 2 (05). And a number typed into a parameter's field
    with Enter, while its modulator is off or keyframes set it: a number is
-   stored, other text is put back."
+   stored, other text is put back. And the selected keyframe's Value and
+   Interp controls: each change edits that keyframe once, and Undo and Redo
+   show in them."
   (:require [cljfx.api :as fx]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.keyframe :as keyframe]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
+            [laser-show.state.history :as history]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]
             [laser-show.views.components.modulator-param-control :as mod-param])
   (:import [javafx.scene Node Scene]
-           [javafx.scene.control CheckBox ComboBox TextField ToggleButton]
+           [javafx.scene.control CheckBox ComboBox Label Slider Spinner TextField ToggleButton]
            [javafx.stage Stage]))
 
 (use-fixtures :once fixtures/with-toolkit)
@@ -203,6 +208,195 @@
     (testing "the slider still sets it"
       (ui/slide! robot amount-slider 1.5)
       (is (ui/wait-for! #(and (= [0.3 1.5] (frames)) (= "1.50" (field-text))))))))
+
+
+;; The selected keyframe's Value and Interp (reactivity plan 06)
+
+
+(def ^:private kf-actions
+  "The keyframe panel's actions row: the selected keyframe's Value and
+   Interp, apart from Period, the driver and the Zone Selector's own zone."
+  ".keyframe-panel-actions")
+
+(defn- in-actions [selector] (str kf-actions " " selector))
+
+(defn- open-keyframed!
+  "Effects cell [0 0] with effect as its one effect, saved and with no
+   history yet, in the effect chain editor once its keyframe actions row
+   shows."
+  [effect]
+  (events/write-state! #(-> %
+                            (assoc-in [:chains :effect-chains [0 0]] {:active? false :items [effect]})
+                            (update :history history/clear-history)
+                            history/mark-clean))
+  (events/dispatch! {:event/type :effect-chain/open-editor :col 0 :row 0})
+  (ui/wait-for! #(some? (node kf-actions))))
+
+(defn- cell-effect [] (get-in (state/get-raw-state) [:chains :effect-chains [0 0] :items 0]))
+(defn- frames [] (get-in (cell-effect) [:keyframe-modulator :keyframes]))
+(defn- undo-depth [] (count (get-in (state/get-raw-state) [:history :undo-stack])))
+(defn- dirty? [] (get-in (state/get-raw-state) [:project :dirty?]))
+
+(defn- selection-text
+  "What the actions row says is selected."
+  []
+  (let [^Label label (node (in-actions ".label-secondary"))]
+    (ui/on-fx-thread #(.getText label))))
+
+(defn- spinner-value [selector]
+  (let [^Spinner spinner (node selector)]
+    (ui/on-fx-thread #(.getValue spinner))))
+
+(defn- text-of [selector]
+  (let [^TextField field (node selector)]
+    (ui/on-fx-thread #(.getText field))))
+
+(defn- slider-value [selector]
+  (let [^Slider slider (node selector)]
+    (ui/on-fx-thread #(.getValue slider))))
+
+(defn- with-keyframe-edits
+  "(f edits) while keyframe/handle also records each Value, zone or Interp
+   edit it is given, without its co-effects, into the atom edits."
+  [f]
+  (let [handle keyframe/handle
+        edits (atom [])]
+    (with-redefs [keyframe/handle (fn [event]
+                                    (when (#{:keyframe/update-param :keyframe/set-zone-value :keyframe/set-interpolation}
+                                           (:event/type event))
+                                      (swap! edits conj (dissoc event :state :time)))
+                                    (handle event))]
+      (f edits))))
+
+(defn- address
+  "Where a recorded edit is aimed: Effects cell [0 0]'s effect, a keyframe."
+  [edit]
+  (select-keys edit [:event/type :domain :entity-key :effect-path :keyframe-idx :param-key]))
+
+(deftest keyframe-zone-value-commits-id-once-test
+  (with-keyframe-edits
+    (fn [edits]
+      (let [zone (in-actions "#keyframe-zone-value")
+            zones #(mapv (comp :target-zone :params) (frames))]
+        (open-keyframed! {:id (random-uuid) :effect-id :zone-selector :enabled? true :params {:target-zone :all}
+                          :keyframe-modulator {:enabled? true :driver :time :period 4.0 :selected-keyframe 1
+                                               :keyframes [{:position 0.0 :params {:target-zone :auto/right} :interpolation :step}
+                                                           {:position 0.5 :params {:target-zone :all} :interpolation :step}
+                                                           {:position 1.0 :params {:target-zone :auto/odd} :interpolation :step}]}})
+        (is (ui/wait-for! #(= "All" (shown zone))))
+        (choose! zone (first (filter #(= :auto/left (:id %)) (items zone))))
+        (is (ui/wait-for! #(and (= [:auto/right :auto/left :auto/odd] (zones)) (= "Left" (shown zone))))
+            "Left's id, in the selected keyframe")
+        (is (= :all (get-in (cell-effect) [:params :target-zone])) "the effect's own zone stays")
+        (is (= [:step :step :step] (mapv :interpolation (frames))))
+        (is (nil? (node (in-actions "#keyframe-interp"))) "a zone has no Interp")
+        (is (= 1 (undo-depth)))
+        (testing "Undo once, then Redo"
+          (events/dispatch! {:event/type :edit/undo})
+          (is (ui/wait-for! #(and (= [:auto/right :all :auto/odd] (zones)) (false? (dirty?)) (= "All" (shown zone)))))
+          (events/dispatch! {:event/type :edit/redo})
+          (is (ui/wait-for! #(and (= [:auto/right :auto/left :auto/odd] (zones)) (= "Left" (shown zone))
+                                  (= "Selected: Keyframe 2 @ 50%" (selection-text))))))
+        (events/flush!)
+        (is (= [{:event/type :keyframe/set-zone-value :domain :effect-chains :entity-key [0 0] :effect-path [0]
+                 :keyframe-idx 1 :param-key :target-zone}]
+               (mapv address @edits))
+            "one edit for the choice, none for mounting, Undo or Redo")
+        (is (= :auto/left (:id (:fx/event (first @edits)))))))))
+
+(deftest keyframe-value-spinner-follows-selected-frame-test
+  (doseq [{:keys [what effect param before after field]}
+          [{:what "a :float: Intensity's Amount"
+            :effect {:id (random-uuid) :effect-id :intensity :enabled? true :params {:amount 1.0}
+                     :keyframe-modulator {:enabled? true :driver :time :period 4.0 :time-unit :beats :loop-mode :loop
+                                          :selected-keyframe 0
+                                          :keyframes [{:position 0.0 :params {:amount 0.2} :interpolation :linear}
+                                                      {:position 0.5 :params {:amount 0.5} :interpolation :linear}
+                                                      {:position 1.0 :params {:amount 0.9} :interpolation :linear}]}}
+            :param :amount :before 0.5 :after 0.6 :field "0.60"}
+           {:what "an :int: Decimate's scan rate steps to 26, never 25.1"
+            :effect {:id (random-uuid) :effect-id :decimate :enabled? true :params {:kpps 25 :fps 30}
+                     :keyframe-modulator {:enabled? true :driver :time :period 4.0 :time-unit :beats :loop-mode :loop
+                                          :selected-keyframe 0
+                                          :keyframes [{:position 0.0 :params {:kpps 20 :fps 30} :interpolation :linear}
+                                                      {:position 0.5 :params {:kpps 25 :fps 30} :interpolation :linear}
+                                                      {:position 1.0 :params {:kpps 40 :fps 30} :interpolation :linear}]}}
+            :param :kpps :before 25 :after 26 :field "26"}]]
+    (testing what
+      (with-keyframe-edits
+        (fn [edits]
+          (let [spinner (in-actions "#keyframe-value")
+                values #(mapv (comp param :params) (frames))
+                [first-value _ last-value] (mapv (comp param :params) (get-in effect [:keyframe-modulator :keyframes]))]
+            (open-keyframed! effect)
+            (is (ui/wait-for! #(= "Selected: Keyframe 1 @ 0%" (selection-text))))
+            (testing "the middle keyframe, selected on the timeline"
+              (ui/click! (ui/robot) ".keyframe-panel-timeline Canvas")
+              (is (ui/wait-for! #(and (= "Selected: Keyframe 2 @ 50%" (selection-text)) (= before (spinner-value spinner)))))
+              (events/flush!)
+              (is (zero? (undo-depth)) "selecting adds no history"))
+            (let [^Spinner s (node spinner)]
+              (ui/on-fx-thread #(.increment s)))
+            (is (ui/wait-for! #(and (= [first-value after last-value] (values)) (= after (spinner-value spinner))
+                                    (= field (text-of (str "#param-" (name param) "-field")))))
+                "one step: the keyframe, and the parameter's own field")
+            (is (= (integer? after) (integer? (get-in (frames) [1 :params param]))) "an :int stays whole")
+            (is (== after (slider-value (str "#param-" (name param) "-slider"))) "and its slider")
+            (is (= (:params effect) (:params (cell-effect))) "the effect's own values stay")
+            (is (= 4.0 (get-in (cell-effect) [:keyframe-modulator :period])) "and Period")
+            (is (= 1 (undo-depth)))
+            (testing "Undo once, then Redo"
+              (events/dispatch! {:event/type :edit/undo})
+              (is (ui/wait-for! #(and (= [first-value before last-value] (values)) (= before (spinner-value spinner))
+                                      (false? (dirty?)))))
+              (events/dispatch! {:event/type :edit/redo})
+              (is (ui/wait-for! #(and (= [first-value after last-value] (values)) (= after (spinner-value spinner))
+                                      (= "Selected: Keyframe 2 @ 50%" (selection-text))))))
+            (events/flush!)
+            (is (= [{:event/type :keyframe/update-param :domain :effect-chains :entity-key [0 0] :effect-path [0]
+                     :keyframe-idx 1 :param-key param}]
+                   (mapv address @edits))
+                "one edit for the step, none for mounting, selecting, Undo or Redo")
+            (is (= after (:value (first @edits))))))))))
+
+(deftest keyframe-interp-choice-refreshes-on-undo-test
+  (with-keyframe-edits
+    (fn [edits]
+      (let [interp (in-actions "#keyframe-interp")
+            modes #(mapv :interpolation (frames))]
+        (open-keyframed! {:id (random-uuid) :effect-id :intensity :enabled? true :params {:amount 1.0}
+                          :keyframe-modulator {:enabled? true :driver :pos-x :edge-behavior :clamp :selected-keyframe 1
+                                               :keyframes [{:position 0.0 :params {:amount 0.2} :interpolation :linear}
+                                                           {:position 0.5 :params {:amount 0.5} :interpolation :linear}
+                                                           {:position 1.0 :params {:amount 0.9} :interpolation :exp-decay}]}})
+        (is (ui/wait-for! #(= "Linear" (shown interp))))
+        (choose! interp :exp-grow)
+        (is (ui/wait-for! #(and (= [:linear :exp-grow :exp-decay] (modes)) (= "Ease In" (shown interp))))
+            "only the selected keyframe's mode")
+        (is (= [0.2 0.5 0.9] (mapv (comp :amount :params) (frames))) "its values stay")
+        (is (= 1 (undo-depth)))
+        (testing "Undo once, then Redo"
+          (events/dispatch! {:event/type :edit/undo})
+          (is (ui/wait-for! #(and (= [:linear :linear :exp-decay] (modes)) (= "Linear" (shown interp)))))
+          (events/dispatch! {:event/type :edit/redo})
+          (is (ui/wait-for! #(and (= [:linear :exp-grow :exp-decay] (modes)) (= "Ease In" (shown interp))))))
+        (events/flush!)
+        (is (= [{:event/type :keyframe/set-interpolation :domain :effect-chains :entity-key [0 0] :effect-path [0]
+                 :keyframe-idx 1}]
+               (mapv #(dissoc (address %) :param-key) @edits))
+            "one edit for the choice, none for mounting, Undo or Redo")
+        (is (= :exp-grow (:interpolation (first @edits))))
+        (testing "a Zone pattern's Style isn't a number: no Value spinner, but Interp"
+          (let [pattern (zone-patterns/preset-instance :alternate :cell)]
+            (open-keyframed! (assoc pattern :id (random-uuid)
+                                    :keyframe-modulator {:enabled? true :driver :time :period 4.0 :selected-keyframe 1
+                                                         :keyframes [{:position 0.0 :params (:params pattern)}
+                                                                     {:position 0.5 :params (assoc (:params pattern) :style :alternate)}
+                                                                     {:position 1.0 :params (assoc (:params pattern) :style :chase)}]}))
+            (is (ui/wait-for! #(and (some? (node "#zone-pattern-visual"))
+                                    (= "Selected: Keyframe 2 @ 50%" (selection-text)) (some? (node interp)))))
+            (is (nil? (node (in-actions "#keyframe-value"))))
+            (is (nil? (node (in-actions ".spinner"))))))))))
 
 (defn- mount!
   "The modulator control for an Intensity amount, as an editor of domain
