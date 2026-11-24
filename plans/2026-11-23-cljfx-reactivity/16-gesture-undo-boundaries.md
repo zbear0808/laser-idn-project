@@ -1,6 +1,6 @@
 # 16 · Finish the Undo step when its gesture ends
 
-**Status:** Proposed · **Last verified against:** `7b320b3` (source trace); audit observations at `a7e414e`.
+**Status:** Implemented in `b2d41fd` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` (source trace); audit observations at `a7e414e`.
 
 **Supersedes / Superseded by:** none · **Related findings:** [audit: missed release and beat activity](../2026-11-23-cljfx-reactivity-audit.md#L72-L81); [improvement review 02 #5](../2026-11-07-improvement-review/02-events-state.md#L49-L59); [Z6's one-step-per-drag contract](../2026-11-19-zones/08-phase-z6-step-grid.md#L318-L322). **Depends on:** [05 · Step Grid target](05-step-grid-target.md) for the pattern address. Source paths are relative to `src/laser_show/`; `T/` means `test/laser_show/`.
 

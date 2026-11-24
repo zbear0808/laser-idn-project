@@ -1,10 +1,61 @@
 # cljfx reactivity repairs
 
-**Status:** Proposed · **Last verified against:** `7b320b3` · **Audit baseline:** `a7e414e` · **Related findings:** [reactivity audit](../2026-11-23-cljfx-reactivity-audit.md), [state-outcome probes](../probes/cljfx_state_outcomes_2026_11_23.clj), [render/cache probes](../probes/cljfx_reactivity_2026_11_23.clj).
+**Status:** Implemented on branch `reactivity/integration` (2026-11-24); not yet merged to `master`. See [Implementation status](#implementation-status-2026-11-24). · **Planned against:** `7b320b3` · **Audit baseline:** `a7e414e` · **Related findings:** [reactivity audit](../2026-11-23-cljfx-reactivity-audit.md), [state-outcome probes](../probes/cljfx_state_outcomes_2026_11_23.clj), [render/cache probes](../probes/cljfx_reactivity_2026_11_23.clj).
 
 **Supersedes / superseded by:** implements the audit's recommendations; it does not supersede the completed keyboard, zone or single-writer work. Page numbers refer to this folder unless another plan is named.
 
-The plan preserves the one context atom, the single event writer and the separate frame/input runtime. [The app-specific cljfx guide](../../docs/CLJFX_STATE_MANAGEMENT.md#reactive-state-in-this-app) is the design reference. The audit documents what was observed; the numbered pages below are implementation work, not changes already made.
+The plan preserves the one context atom, the single event writer and the separate frame/input runtime. [The app-specific cljfx guide](../../docs/CLJFX_STATE_MANAGEMENT.md#reactive-state-in-this-app) is the design reference. The audit documents what was observed. The numbered pages below were written as implementation work before the repairs. Pages 01, 04, 09, 14, 17, 19–22, 25, 26, 34 and 36 were never written; their implementation followed design briefs derived from the audit.
+
+## Implementation status (2026-11-24)
+
+Each package landed as one commit (09 and 13 as two). Each has regression tests that fail on the base behaviour, except where a row says otherwise. The lanes were merged into `reactivity/integration`; two integration fixes followed: `c08ca5a` (a dropped effect registration and a duplicated test helper) and `8ea4862` (10's and 26's momentary-press tests reconciled).
+
+**Final gates on the merged tree:**
+- **Unit** (`clj -M:mac-arm:test`): 2107 tests and 574,898 assertions. One timing failure appeared once in about ten full runs, `streaming-engine-test/device-paced-driver-waits-for-ready-test`. Three targeted re-runs passed. The engine's readiness code is unchanged; the test's ready predicate reads the global latest tick.
+- **Headless UI** (`clj -M:test-ui:mac-arm:test-ui-headless`): 426 tests, 2,789 assertions, 0 failures.
+
+| Pkg | Commit | Remaining risk or follow-up |
+|---|---|---|
+| 01 | `225daa5` | The colour picker still sends a JavaFX event. `:int` modulator subfields (e.g. Steps) store decimals (existing). |
+| 02 | `0c28982` | Projector keywords built from an IPv6 host aren't readable EDN, so Save refuses that show (existing). An atomic replace turns a symlinked show into a regular file. On a filesystem that can't rename atomically, Save fails (the decision below). |
+| 03 | `b699583` | — |
+| 04 | `517b96e` | — |
+| 05 | `b5e9866` | — |
+| 06 | `9c1e1f1` | — |
+| 07 | `2e5703a` | The Modulate toggle still addresses its effect by `:effect-path`. |
+| 08 | `26350ca` | Canvas drags still use the whole-zone question. |
+| 09 | `9551660` (Add), `3cbe86d` (OSC) | An out-of-range IDN port becomes 7255 rather than being refused. A programmatic port change while OSC is listening shows the new port before any restart. |
+| 10 | `6bbc308` | Double-click, right-click and drag still use the rendered content flag. |
+| 11 | `b222a39` | — |
+| 12 | `50567aa` | — |
+| 13 | `6629d64` (13a), `1f65567` (13b) | The colour picker and the transform-clamp box aren't wrapped. |
+| 14 | `a15687b` | Generic `:chain/*` writers can still create an orphan calibration chain for a missing projector. |
+| 15 | `6bfb56e` | Toggling off a cue that follows running timecode is undone by the clock's next On (existing). |
+| 16 | `b2d41fd` | A slider re-rendered for another control under the same label keeps its press. |
+| 17 | `3e2bd4a5` | Modulator controls, the calibration list and the chain editors' `effects/get-effect` calls still read the registries at render time; they refresh on code reload. |
+| 18 | `ef8393e` | Real-hardware checks are still owed: Z3 R-1, the Phase 5 real-DAC run and the hidden-window pacing check. |
+| 19 | `39349c9` | An effect already running when its app retires still finishes its own side effect. Only the continuation is dropped. |
+| 20 | `3f82e19` | Under Show Lock, a returning paste still shows the lock's refusal notice. An Open re-checked while the unsaved-changes dialog is already open is dropped (logged). |
+| 21 | `fab89cb` | A Try again write superseded by autosave loses its `:then` (existing). With a stuck write, quitting takes up to about 4 s. |
+| 22 | `f04c7ef` | A move that replaced a cell leaves both cells vibe-owned after Undo. Trigger-held switches and cue voices aren't remapped. |
+| 23 | `1367ecc` | The rig-file status line subscribes to the whole `:rig-file` map. |
+| 24 | `0fe3f454` | — |
+| 25 | `797d44e` | The Link listener is still in app state, and Carabiner is still closed from a state read. |
+| 26 | `a0cd589` | All Notes Off doesn't retire MIDI activations. An OSC restart on a new port doesn't retire the old server's holds. |
+| 27 | `d1fd0813` | — |
+| 28 | `0c962ed` | — |
+| 29 | `153b648` | The pad chip tooltip still says "in use". |
+| 30 | `5d36428` | Errors still show in the tooltip while Stopping. |
+| 31 | `db90de8` | A CI step running the `:dev` renderer tests isn't added yet. |
+| 32 | `c1cfa68` | A possible right-click selection bug in lists, unverified on a real display. |
+| 33 | `b923ddd` | Existing bug: in `canvas_interaction.clj`, `:on-scroll` sits inside `:on-key-pressed` and is never installed. It is latent because nothing passes `:on-scroll`. |
+| 34 | `e5e0096d` | The cue item Target menu still sends `:item-path`, so moved items' menus re-render on reorder. |
+| 35 | `780f41a` | — |
+| 36 | `3b9f6921` | The LRU is 4096 entries. Stale descriptions are retained up to that size, about 16 KB per grid cell: 48 MB after 3000 renames, against 19 MB at 2048. 2048 also gave zero unrelated view runs, with only 1.98× headroom. |
+| 37 | `8315b073` | — |
+| 38 | `7f3849ca` | The windowed real-drag test (`grid-test/native-cell-drag-clears-on-drop-and-escape-test`) needs a display and wasn't run. |
+
+The decisions below were implemented with their proposed defaults: 02 fails instead of risking the last good file, 13 keeps controls interactive and restores the applied value, and 36's capacity came from measurements. Each is still open for confirmation.
 
 ## Start here
 

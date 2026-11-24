@@ -1,6 +1,6 @@
 # 35 · Only rebuild the grid cells whose indicators change
 
-**Status:** Proposed · **Last verified against:** `7b320b3` (headless counts below)
+**Status:** Implemented in `780f41a` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` (headless counts below)
 
 **Supersedes / Superseded by:** None. **Related findings:** [reactivity audit, “A per-cell lookup…”](../2026-11-23-cljfx-reactivity-audit.md#subscription-hot-spots-that-were-measured); [November 7 F16](../2026-11-07-improvement-review/01-views-ui.md#L102-L103) and its [M4 binding-index proposal](../2026-11-07-improvement-review/01-views-ui.md#L281-L284). The earlier [F11](../2026-11-07-improvement-review/01-views-ui.md#L67-L71) grid fix (`03314bf`, [review status](../2026-11-07-improvement-review/00-overview.md#L33)) is a regression guard.
 

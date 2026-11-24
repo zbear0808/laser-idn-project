@@ -1,6 +1,6 @@
 # 28 · Follow stored pattern references across rigs and into the zone picker
 
-**Status:** Proposed · **Last verified against:** `7b320b3`
+**Status:** Implemented in `0c962ed` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3`
 
 **Supersedes / Superseded by:** none · **Related findings:** [zone catalogue and portable pins](../2026-11-23-cljfx-reactivity-audit.md#L74-L82); [Z5/Z6 as built](../2026-11-19-zones/00-overview.md#L132-L133); [ZR's pin-matching decision](../2026-11-19-zones/09-phase-zr-rig-file.md#L360). **#12** owns the audience indicator projection ([audit, line 62](../2026-11-23-cljfx-reactivity-audit.md#L62)).
 

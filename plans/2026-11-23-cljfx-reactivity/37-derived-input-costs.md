@@ -1,6 +1,6 @@
 # 37 · Run lint, cue sorting and pattern-fold text only when their inputs change
 
-**Status:** Proposed · **Last verified against:** `7b320b3` (2026-11-23; three selector counts reproduced).
+**Status:** Implemented in `8315b073` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` (2026-11-23; three selector counts reproduced).
 
 **Supersedes / Superseded by:** none · **Related findings:** [reactivity audit, subscription hot spots](../2026-11-23-cljfx-reactivity-audit.md#subscription-hot-spots-that-were-measured); [November 7 review, T5](../2026-11-07-improvement-review/00-overview.md#t5-over-broad-subscriptions-and-hot-path-allocation); [Z5's correction to the lint inputs](../2026-11-19-zones/07-phase-z5-zone-patterns.md#L743). [36](36-cache-working-set.md) owns cache sizing **after** these changes.
 

@@ -1,6 +1,6 @@
 # 23 — Restore the group definition with its last rig member
 
-**Status:** Proposed · **Last verified against:** `7b320b3` (2026-11-23; in-memory event pipeline).  
+**Status:** Implemented in `1367ecc` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` (2026-11-23; in-memory event pipeline).  
 **Supersedes / Superseded by:** none · **Related findings:** [audit: half-restored identities](../2026-11-23-cljfx-reactivity-audit.md#L82); [zones ZR, as built](../2026-11-19-zones/09-phase-zr-rig-file.md#L423-L426). Source citations below are relative to `src/laser_show/`; `T/` means `test/laser_show/`.
 
 ## 1. Current behaviour

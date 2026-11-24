@@ -1,6 +1,6 @@
 # Rig thumbnail: show the last successful driver call
 
-**Status:** Proposed · **Last verified against:** `7b320b3` (source and test definitions; no output run)
+**Status:** Implemented in `ef8393e` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` (source and test definitions; no output run)
 
 **Supersedes / Superseded by:** the *provider-as-thumbnail-source* decision only in `plans/2026-11-19-zones/05-phase-z3-routing-core.md:135–140`; none supersedes this page. **Related findings:** [redraw gate and attempted frame](../2026-11-23-cljfx-reactivity-audit.md) at lines 73 and 90; `plans/2026-11-07-improvement-review/04-output-pipeline.md:138–143` (local sends vs link health).
 

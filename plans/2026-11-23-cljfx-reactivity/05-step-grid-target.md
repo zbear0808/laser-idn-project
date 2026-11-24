@@ -1,6 +1,6 @@
 # 05 — Keep the Step Grid on the pattern that opened it
 
-**Status:** Proposed · **Last verified against:** `7b320b3` (`master`, 2026-11-23).
+**Status:** Implemented in `b5e9866` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` (`master`, 2026-11-23).
 
 **Supersedes / Superseded by:** none · **Related findings:** [wrong-pattern audit](../2026-11-23-cljfx-reactivity-audit.md#L61); [zones Z6 as built](../2026-11-19-zones/08-phase-z6-step-grid.md#L316-L338). Paths are relative to `src/laser_show/`; `T/` means `test/laser_show/`.
 

@@ -1,6 +1,6 @@
 # 24 — Give each input Learn attempt one owner
 
-**Status:** Proposed · **Last verified against:** `7b320b3801b8` (source and fixtures, 2026-11-23).  
+**Status:** Implemented in `0fe3f454` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3801b8` (source and fixtures, 2026-11-23).  
 **Supersedes / Superseded by:** none · **Related findings:** [Settings Learn](../2026-11-23-cljfx-reactivity-audit.md#L67), [old-show completion](../2026-11-23-cljfx-reactivity-audit.md#L79), [Learn All and cell behavior](../2026-11-23-cljfx-reactivity-audit.md#L88); [earlier input review F9–F11](../2026-11-07-improvement-review/05-input-triggers.md#L85-L107). Source paths are relative to `src/laser_show/`; `T/` means `test/laser_show/`.
 
 ## 1. Current behaviour

@@ -1,6 +1,6 @@
 # 29 · Tell the map being edited apart from the map chosen on a tick
 
-**Status:** Proposed · **Last verified against:** `7b320b3801b8`
+**Status:** Implemented in `153b648` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3801b8`
 
 **Supersedes / Superseded by:** none · **Related findings:** [reactivity audit, map editor](../2026-11-23-cljfx-reactivity-audit.md#L74); [Z4, UI map vs tick map](../2026-11-19-zones/06-phase-z4-zones-maps-targets.md#L498); [Z5, pressing a map during a cycle](../2026-11-19-zones/10-questions.md#L319-L321).
 

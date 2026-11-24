@@ -1,6 +1,6 @@
 # 10 — Resolve a cue-grid click against the current cell
 
-**Status:** Proposed · **Last verified against:** `7b320b3` (2026-11-23; headless click callback, real selectors and handlers).
+**Status:** Implemented in `6bbc308` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` (2026-11-23; headless click callback, real selectors and handlers).
 
 **Supersedes / Superseded by:** none · **Related findings:** [queued cue click](../2026-11-23-cljfx-reactivity-audit.md#L66); [events review Q13, duplicated grid handlers](../2026-11-07-improvement-review/02-events-state.md#L234). This page owns the grid part of Q13.
 

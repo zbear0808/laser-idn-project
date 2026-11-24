@@ -41,9 +41,11 @@ The `laser-show.dev-config/dev-mode?` function checks this property.
 
 ### 3. Which tools are actually active?
 
-The REPL help and `explain-desc` below are usable with `:dev`. Automatic validation, component stacks and the F12 inspector also need a dev lifecycle installed on the renderer. The current [`app/create-app`](../src/laser_show/app.clj#L95-L112) computes a dev resolver but passes it as `:opts` to `fx/create-app`. [cljfx 1.10.6](https://github.com/cljfx/cljfx/blob/1.10.6/src/cljfx/api.clj#L584-L613) builds its own renderer options and ignores that key. It uses the standard context-aware function lifecycle. The supplied `:error-handler` is also ignored; the `create-app` option is `:renderer-error-handler`.
+The REPL help and `explain-desc` below are usable with `:dev`. With `:dev`, [`app/create-app`](../src/laser_show/app.clj) also installs `laser-show.dev-renderer/middleware` ([`dev/laser_show/dev_renderer.clj`](../dev/laser_show/dev_renderer.clj)) as the renderer's `:renderer-middleware`. That adds automatic validation, cljfx component stacks in render errors and the F12 inspector around the app's own type->lifecycle. Without `:dev` the middleware is `identity`. In every mode the app's error handler is passed as `:renderer-error-handler`, the option [cljfx 1.10.6](https://github.com/cljfx/cljfx/blob/1.10.6/src/cljfx/api.clj#L584-L613) `create-app` reads. If the middleware can't be loaded, one warning is logged and rendering continues without it.
 
-If changing that wiring, preserve the [context-aware rendering and event pipeline](CLJFX_STATE_MANAGEMENT.md#reactive-state-in-this-app) and verify what reaches the renderer. The startup message alone is not evidence that the inspector is active.
+`dev_renderer.clj` re-registers three cljfx.dev specs that reject descriptions cljfx 1.10.6 renders: `ext-many` children with `:fx/key`, and string collections as `:style-class` on menu items and split menu buttons. `laser-show.renderer-wiring-test` pins both sides; after a cljfx/dev upgrade, drop a correction and rerun that test. Validation runs on every render, so dev mode renders more slowly; take performance or cache measurements without `:dev`.
+
+If changing that wiring, preserve the [context-aware rendering and event pipeline](CLJFX_STATE_MANAGEMENT.md#reactive-state-in-this-app). Keep the single app-instance dispatcher. Verify what reaches the renderer: the startup message alone is not evidence that the inspector is active.
 
 ## Tools and Usage
 
@@ -104,7 +106,7 @@ Invoking this fn will open a window with props and types reference.
 
 ### Improved error messages with spec
 
-With the validating lifecycle installed, invalid component descriptions produce errors like the one below. With the current wiring, use `explain-desc` directly to validate a description.
+With `:dev`, invalid component descriptions produce errors like the one below, with the cljfx component stack. You can also use `explain-desc` directly to validate a description.
 
 Example of an error in the REPL:
 
@@ -145,7 +147,7 @@ You can also validate individual descriptions while developing using `explain-de
 
 ### Cljfx component inspector
 
-With a dev type->lifecycle installed, **F12** opens the component tree inspector while the application is focused. For the current app, the [plorer skill](../.agents/skills/plorer/SKILL.md) inspects the live JavaFX scene graph independently of that option.
+With `:dev`, **F12** opens the component tree inspector while the application is focused. The [plorer skill](../.agents/skills/plorer/SKILL.md) inspects the live JavaFX scene graph independently of it.
 
 Inspector shows a live tree of components and their props.
 
@@ -169,7 +171,7 @@ Dev tools are automatically disabled in production:
 1. The `:dev` alias is not used in production builds
 2. The `laser-show.dev` system property is not set
 3. `dev-config/dev-mode?` returns `false`
-4. Standard cljfx lifecycle is used (no validation overhead)
+4. The renderer middleware is `identity`: the standard cljfx lifecycle, no validation overhead
 
 ## References
 

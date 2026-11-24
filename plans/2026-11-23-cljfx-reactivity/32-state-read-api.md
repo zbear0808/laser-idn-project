@@ -1,6 +1,6 @@
 # 32 — Make snapshot reads explicit
 
-**Status:** Proposed · **Last verified against:** `7b320b3801b8` · **Library pin:** cljfx `1.10.6` (`deps.edn:12–16`).
+**Status:** Implemented in `c1cfa68` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3801b8` · **Library pin:** cljfx `1.10.6` (`deps.edn:12–16`).
 
 **Supersedes / Superseded by:** none · **Related findings:** [reactivity audit, render wiring #2](../2026-11-23-cljfx-reactivity-audit.md#L42); [completed single-writer and single-tick-read work](../2026-11-07-improvement-review/00-overview.md#L29-L30).
 

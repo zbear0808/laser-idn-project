@@ -1,6 +1,6 @@
 # 38 · End the drag payload with the gesture that supplied it
 
-**Status:** Proposed · **Last verified against:** `7b320b3` (source trace and synthetic JavaFX probe, 2026-11-23).
+**Status:** Implemented in `7f3849ca` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` (source trace and synthetic JavaFX probe, 2026-11-23).
 
 **Supersedes / Superseded by:** none · **Related finding:** [grid-review supplement, finding 38](00-overview.md#L79). [10](10-grid-click-intent.md#L35), [11](11-stored-effect-occupancy.md#L69-L77) and [35](35-grid-subscription-fanout.md#L97-L101) own click intent, drag eligibility and subscription costs respectively. This page owns the lifetime of the payload **after a drag starts**.
 

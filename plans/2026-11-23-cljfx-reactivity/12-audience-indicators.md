@@ -1,6 +1,6 @@
 # 12. Make the Perform pad and Vibes picker agree about audience cues
 
-**Status:** Proposed · **Last verified against:** `7b320b3` (source, headless selector reproduction and seven existing tests)
+**Status:** Implemented in `50567aa` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` (source, headless selector reproduction and seven existing tests)
 
 **Supersedes / Superseded by:** none · **Related findings:** [reactivity audit, Perform pad](../2026-11-23-cljfx-reactivity-audit.md#L62) and [recommended regression](../2026-11-23-cljfx-reactivity-audit.md#L101); [zones Z5 audience contract](../2026-11-19-zones/07-phase-z5-zone-patterns.md#L430-L444). Independent of [28, persisted pattern references](00-overview.md#L62).
 

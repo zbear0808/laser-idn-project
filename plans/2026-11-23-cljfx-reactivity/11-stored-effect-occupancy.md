@@ -1,6 +1,6 @@
 # 11. A disabled effect still occupies its cell
 
-**Status:** Proposed · **Last verified against:** `7b320b3` (source and test review)
+**Status:** Implemented in `b222a39` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` (source and test review)
 
 **Supersedes / Superseded by:** none · **Related finding:** [reactivity audit, stored vs. playable effects](../2026-11-23-cljfx-reactivity-audit.md#L71).
 

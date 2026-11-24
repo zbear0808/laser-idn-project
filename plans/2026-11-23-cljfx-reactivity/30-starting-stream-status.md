@@ -1,6 +1,6 @@
 # 30 — Show “Starting…” until an output reports streaming
 
-**Status:** Proposed · **Last verified against:** `7b320b3801b8`
+**Status:** Implemented in `5d36428` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3801b8`
 
 **Supersedes / Superseded by:** none · **Related findings:** [reactivity audit, toolbar projection](../2026-11-23-cljfx-reactivity-audit.md#L74); [output-runtime O-10](../2026-11-16-output-runtime/00-overview.md#L68) and [Phase 4 as built](../2026-11-16-output-runtime/04-phase4-engine-ownership.md#L200-L212).
 

@@ -1,6 +1,6 @@
 # 03 — Keep Stop in force when a cue ends
 
-**Status:** Proposed · **Last verified against:** `7b320b3` (2026-11-23; real handlers and synthetic clock steps).
+**Status:** Implemented in `b699583` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` (2026-11-23; real handlers and synthetic clock steps).
 
 **Supersedes / Superseded by:** none · **Related findings:** [Stop → cue-ended](../2026-11-23-cljfx-reactivity-audit.md#device-and-runtime-boundaries); [15: timecode chase pruning](15-timecode-chase-lifetime.md). Source paths below are relative to `src/laser_show/`; `T/` means `test/laser_show/`.
 

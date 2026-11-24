@@ -1,6 +1,6 @@
 # 27 · Publish slow axis motion and give Map cycle the tick's inputs
 
-**Status:** Proposed · **Last verified against:** `7b320b3801b8` (2026-11-23)  
+**Status:** Implemented in `d1fd0813` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3801b8` (2026-11-23)  
 **Supersedes / Superseded by:** none · **Related findings:** [reactivity audit, two publication gaps](../2026-11-23-cljfx-reactivity-audit.md#L91); [input review F4/Q4, gamepad → router](../2026-11-07-improvement-review/05-input-triggers.md#L201-L211); [Z5, cycle before routing](../2026-11-19-zones/07-phase-z5-zone-patterns.md#L415-L419).
 
 Source paths below are relative to `src/laser_show/`; `T/` means `test/laser_show/`.

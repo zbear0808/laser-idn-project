@@ -1,6 +1,6 @@
 # 13 · Show the value that was applied after a refused edit
 
-**Status:** Proposed · **Last verified against:** `7b320b3`
+**Status:** Implemented in `6629d64` (13a) and `1f65567` (13b` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3`
 
 **Supersedes / Superseded by:** none. **Related findings:** [reactivity audit, rig On checkbox](../2026-11-23-cljfx-reactivity-audit.md#L63), [output-drivers follow-up on refused fields and projector Name](../2026-11-19-output-drivers/02-phases.md#L454-L467), [safety-zone lock decision](../2026-11-19-zones/03-phase-z1-safety.md#L461). Source paths below are relative to `src/laser_show/`; test paths beginning `T/` are relative to `test/laser_show/`.
 

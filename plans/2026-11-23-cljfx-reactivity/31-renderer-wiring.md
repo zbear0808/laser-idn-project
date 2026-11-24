@@ -1,6 +1,6 @@
 # 31 — Wire dev validation into the app renderer
 
-**Status:** Proposed · **Last verified against:** `7b320b3` (2026-11-23, macOS arm64, JavaFX headless)
+**Status:** Implemented in `db90de8` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` (2026-11-23, macOS arm64, JavaFX headless)
 
 **Supersedes / Superseded by:** none · **Related findings:** [reactivity audit, renderer #1](../2026-11-23-cljfx-reactivity-audit.md#L30-L43); [previously deferred event-reentry finding](../2026-11-16-output-runtime/03-phase3-event-reentry.md#L176-L177); [improvement review F17, vendored dev help](../2026-11-07-improvement-review/06-testing-build-tooling.md#L225-L230).
 

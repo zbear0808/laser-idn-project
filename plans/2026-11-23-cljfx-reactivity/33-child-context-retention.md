@@ -1,6 +1,6 @@
 # 33 — Keep render contexts out of child descriptions
 
-**Status:** Proposed · **Last verified against:** `7b320b3` (2026-11-23, fresh headless JVMs, macOS arm64).
+**Status:** Implemented in `b923ddd` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` (2026-11-23, fresh headless JVMs, macOS arm64).
 
 **Supersedes / Superseded by:** none · **Related findings:** [audit, render wiring #3 and open chain editors](../2026-11-23-cljfx-reactivity-audit.md#render-wiring-and-cache-findings); [04: list callbacks](04-list-target-lifetimes.md), [34: chain subscriptions](34-chain-editor-subscriptions.md), [36: cache working set](36-cache-working-set.md).
 

@@ -1,6 +1,6 @@
 # 07 · Keep both edits to a modulator’s range
 
-**Status:** Proposed · **Last verified against:** `7b320b3`
+**Status:** Implemented in `2e5703a` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3`
 
 **Supersedes / Superseded by:** None · **Related findings:** [reactivity audit, field edits](../2026-11-23-cljfx-reactivity-audit.md#L65), [improvement review 02 #12 and its toggle fix](../2026-11-07-improvement-review/02-events-state.md#L98-L104).
 

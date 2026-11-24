@@ -1,6 +1,6 @@
 # 02 — Reject unreadable shows; replace a saved file only after verifying it
 
-**Status:** Proposed · **Last verified against:** `7b320b3` · **Supersedes / Superseded by:** none
+**Status:** Implemented in `0c28982` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` · **Supersedes / Superseded by:** none
 
 **Related findings:** [reactivity audit, line 58](../2026-11-23-cljfx-reactivity-audit.md#L58) (audit baseline `a7e414e`); [improvement review 02 M3, lines 266–274](../2026-11-07-improvement-review/02-events-state.md#L266). State model: [Reactive state in this app, lines 3–13](../../docs/CLJFX_STATE_MANAGEMENT.md#reactive-state-in-this-app). Source paths below are relative to `src/laser_show/`; `test/` paths are repository-relative.
 

@@ -1,6 +1,6 @@
 # 15 — End timecode chase when its cue stops following
 
-**Status:** Proposed · **Last verified against:** `7b320b3` (2026-11-23; source and test fixtures inspected).
+**Status:** Implemented in `6bfb56e` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` (2026-11-23; source and test fixtures inspected).
 
 **Supersedes / Superseded by:** none · **Related findings:** [Follow Timecode Off → duplicate run](../2026-11-23-cljfx-reactivity-audit.md#L89), [Stop → cleanup](../2026-11-23-cljfx-reactivity-audit.md#L86). Paths below are relative to `src/laser_show/`; `T/` means `test/laser_show/`.
 

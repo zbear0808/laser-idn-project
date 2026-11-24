@@ -1,6 +1,6 @@
 # 08 · Commit one safety-zone coordinate without losing another
 
-**Status:** Proposed · **Last verified against:** `7b320b3` (2026-11-23, offline handlers and headless controls)
+**Status:** Implemented in `26350ca` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3` (2026-11-23, offline handlers and headless controls)
 
 **Supersedes / Superseded by:** none · **Related findings:** [reactivity audit, field edits](../2026-11-23-cljfx-reactivity-audit.md#L65); [Z1’s unreadable-zone editor](../2026-11-19-zones/03-phase-z1-safety.md#L406-L410); [Show Lock decision Q-Z1-5](../2026-11-19-zones/10-questions.md#L77-L85). Source paths below are relative to `src/laser_show/`; `T/` means `test/laser_show/`.
 

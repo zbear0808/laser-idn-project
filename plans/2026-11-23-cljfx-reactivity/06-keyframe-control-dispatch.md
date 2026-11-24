@@ -1,6 +1,6 @@
 # 06 · Make the selected keyframe’s Value and Interp controls commit
 
-**Status:** Proposed · **Last verified against:** `7b320b3`  
+**Status:** Implemented in `9c1e1f1` on `reactivity/integration` (2026-11-24); see [implementation status](00-overview.md#implementation-status-2026-11-24). Planned as: Proposed · **Last verified against:** `7b320b3`  
 **Supersedes / Superseded by:** none · **Related finding:** [reactivity audit, “Several keyframe controls silently do nothing”](../2026-11-23-cljfx-reactivity-audit.md#L60). [01](01-numeric-commits.md) owns numeric text Enter.
 
 ## 1. Current behaviour
