@@ -430,6 +430,19 @@
         (is (= {2 :zone/a} (:column-targets ctx)))
         (is (= :zone/b (:show-target ctx)))))))
 
+(deftest render-context-takes-raw-or-prepared-inputs-test
+  (testing "reactivity plan 27: render-context derives the faders' slots from the store's own values;
+            render-context-with-inputs takes the clock's, already derived, as they are"
+    (let [state (assoc-in (domains/build-initial-state) [:config :input :macro-map] {[:gamepad 0 :trigger-left] :slider-1})
+          raw {[:gamepad 0 :trigger-left] 0.75 [:macro :slider-2] 0.0}
+          prepared {[:gamepad 0 :trigger-left] 0.75 [:macro :slider-1] 0.75}
+          inputs (juxt :input-values (comp :input-values :global-ctx))]
+      (is (= [prepared prepared] (inputs (frame-service/render-context state raw {:effective-beats 0.0})))
+          "the learned trigger's value at fader 1's slot, the stale slot gone")
+      (let [ctx (frame-service/render-context-with-inputs state prepared {:effective-beats 0.0} nil {})]
+        (is (= [prepared prepared] (inputs ctx)))
+        (is (identical? prepared (:input-values ctx)) "not looked up again")))))
+
 (deftest frame-keys-ignore-the-map-test
   ;; zones plan Z4, invariant 2: frame keys name zones, never lanes, so a
   ;; map switch re-routes the same frames (the routing resolves the zones)

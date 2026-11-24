@@ -4,10 +4,10 @@
    a slot, :slider-1 or :slider-2, and a Fader modulator ({:type :macro
    :slot}) on any parameter follows it. Where a fader is comes from the
    control learned for it ([:config :input :macro-map], handlers/input.clj)
-   at each tick: fader-values, which the render (frame-service/
-   render-context) and the Perform tab's meters (the snapshot's :faders)
-   share. Nothing keeps a copy, so a slot never outlives its binding (05
-   §11).
+   at each tick: tick-inputs, whose one lookup (fader-values) the Map
+   cycle, the render (show-clock, frame-service/render-context-with-inputs)
+   and the Perform tab's meters (the snapshot's :faders) share. Nothing
+   keeps a copy, so a slot never outlives its binding (05 §11).
 
    Here too: the cells that wire them in one click, the Master (an
    effects-grid cell, at [0 3] in a new project, state.templates) and the
@@ -38,14 +38,26 @@
              {}
              macro-map))
 
+(defn tick-inputs
+  "What one read of the input store (raw, its values) gives a tick, with
+   the faders looked up once in macro-map (fader-values): {:faders {slot
+   value}, for the meters, :input-values raw as the Fader modulators read
+   it, each fader's value at [:macro slot] and no other [:macro slot],
+   whatever the store holds}. The show clock makes it once a tick, for the
+   Map cycle, every cue and the meters alike."
+  [raw macro-map]
+  (let [levels (fader-values raw macro-map)]
+    {:faders levels
+     :input-values (reduce-kv (fn [m slot v] (assoc m [:macro slot] v))
+                              (apply dissoc raw slot-keys)
+                              levels)}))
+
 (defn with-faders
-  "input-values as the Fader modulators read them: each fader's value
-   (fader-values) at [:macro slot], and no other [:macro slot], whatever
-   the store holds."
+  "input-values as the Fader modulators read them (tick-inputs'
+   :input-values): each fader's value (fader-values) at [:macro slot], and
+   no other [:macro slot], whatever the store holds."
   [input-values macro-map]
-  (reduce-kv (fn [m slot v] (assoc m [:macro slot] v))
-             (apply dissoc input-values slot-keys)
-             (fader-values input-values macro-map)))
+  (:input-values (tick-inputs input-values macro-map)))
 
 (defn- fader
   "A Fader modulator: lo..hi as the fader on slot goes 0..1, at default
