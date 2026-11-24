@@ -233,11 +233,19 @@
     (is (= {:event/type :zone-maps/delete :map :map/custom-1} (:confirm-event dialog)))
     (is (:danger? dialog))
     (testing "what else goes with it"
-      (is (= "Nothing else uses it." (message (with-sweep))))
-      (is (= "It's the zone map in use: the show switches to Left / Right." (message (assoc-in (with-sweep) [:zone-map :active] :map/custom-1))))
+      (is (= "Delete this map from the show?" (message (with-sweep))))
+      (is (= "If this is still the manual map, deleting it selects Left / Right and pauses a running Map cycle."
+             (message (assoc-in (with-sweep) [:zone-map :active] :map/custom-1))))
       (is (= "Its learned key goes too." (message (assoc-in (with-sweep) [:config :input :trigger-map {:source :midi :channel 0 :note 48}]
                                                             {:type :zone-map :target :map/custom-1}))))
-      (is (= "Its pad setting goes too." (message (assoc-in (with-sweep) [:config :zone-map-pads :map/custom-1 :bar?] true)))))
+      (is (= "Its pad setting goes too." (message (assoc-in (with-sweep) [:config :zone-map-pads :map/custom-1 :bar?] true))))
+      (testing "a map a running Map cycle lists, with no key or pad setting: the check counts no cycle, so it never says unused"
+        (let [listed (message (assoc-in (with-sweep) [:chains :effect-chains [1 1]]
+                                        {:active? true :items [(-> (zone-patterns/cycle-instance)
+                                                                   (assoc :id :c1)
+                                                                   (assoc-in [:params :maps] [:map/left-right :map/custom-1]))]}))]
+          (is (= "Delete this map from the show?" listed))
+          (is (not (re-find #"(?i)nothing else|unused" listed))))))
     (testing "a built-in map has no Delete"
       (is (not (get-in (run s {:event/type :zone-maps/request-delete :map :map/odd-even}) [:ui :dialogs :confirm :open?]))))
     (testing "yes deletes it, in one undo step"
@@ -309,7 +317,21 @@
   (testing "pressing the map that is active pauses on it too: the cycle's pick was in use"
     (let [s (run (with-cycle) {:event/type :zone-map/schedule :map :map/unison :clock (clock 16.04)})]
       (is (= :map/unison (get-in s [:zone-map :active])))
-      (is (paused? s)))))
+      (is (paused? s))))
+  (testing "Use now on the manual map itself takes over, whatever the cycle picked (plans/2026-11-23-cljfx-reactivity/29 §7)"
+    (let [slot #(select-keys (:zone-map %) [:active :pending :cycle-paused?])
+          taken (run (with-cycle) {:event/type :zone-maps/use-now :map :map/unison})
+          waiting (run taken {:event/type :zone-map/schedule :map :cycle :clock (clock 7.5 :id 7)})
+          again (run waiting {:event/type :zone-maps/use-now :map :map/unison})
+          late (run again {:event/type :show-clock/zone-map-due :id 7 :map :cycle})]
+      (is (= {:id 7 :map :cycle :at-beat 8.0 :bar? false} (get-in waiting [:zone-map :pending])) "then CYCLE waits for beat 8")
+      (doseq [[label s] [["Use now" taken]
+                         ["Use now again, with CYCLE waiting: it no longer waits" again]
+                         ["the waiting CYCLE's report, come late" late]]]
+        (testing label
+          (is (= {:active :map/unison :pending nil :cycle-paused? true} (slot s)))
+          (is (empty? (get-in s [:history :undo-stack])) "live: no undo step")
+          (is (false? (get-in s [:project :dirty?])) "not unsaved"))))))
 
 (deftest cycle-pad-resumes-test
   (let [paused (run (with-cycle) {:event/type :zone-maps/use-now :map :map/left-right})]

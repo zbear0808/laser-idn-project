@@ -1029,8 +1029,10 @@
   (zone-maps/map-by-id {:zone-maps (fx/sub-val context :zone-maps)} id))
 
 (defn active-zone-map
-  "The map in use, as the UI shows it (06 SQ-7): [:zone-map :active], Left
-   / Right for an id that is no map."
+  "The manual map (06 SQ-7): [:zone-map :active] as the UI shows it, Left
+   / Right for an id that is no map. A state fact, not the map a tick
+   routes by: a due switch or a running Map cycle's pick comes first
+   (routing.zone-maps/effective-map-id)."
   [context]
   (or (fx/sub-ctx context zone-map (fx/sub-val context get-in [:zone-map :active]))
       (fx/sub-ctx context zone-map zone-maps/default-map-id)))
@@ -1110,23 +1112,33 @@
        vec))
 
 (defn map-cycle-running?
-  "Does a Map cycle pick the map (zones plan Z5): a Map cycle cell is on,
-   and no map pad's press paused it?"
+  "Is a Map cycle enabled and unpaused (zones plan Z5): an enabled Map
+   cycle in a cell that is on, and no switch that landed paused it? A
+   state fact: it says nothing of the map a tick picks, which can be none."
   [context]
   (and (zone-maps/cycle-on? {:chains {:effect-chains (fx/sub-val context get-in [:chains :effect-chains])}})
        (not (fx/sub-val context get-in [:zone-map :cycle-paused?]))))
 
+(defn manual-map-marker-id
+  "The map the Manual mark is on, the map editor's list's and the pads'
+   alike: the manual map's id (active-zone-map), or nil while a Map cycle
+   runs (map-cycle-running?). nil means no manual mark, not no map routed."
+  [context]
+  (when-not (fx/sub-ctx context map-cycle-running?)
+    (:id (fx/sub-ctx context active-zone-map))))
+
 (defn map-pad
   "One zone map pad, its booleans and keys only (06 §4.5): {:id :name
-   :active? (the map in use, as the UI shows it; none while a Map cycle
-   picks it, zones plan Z5) :pending (nil, or :beat or :bar while a switch
-   to it waits) :bar? (its Switch on the bar) :learning? :bindings}."
+   :active? (the Manual mark is on it, manual-map-marker-id: on none while
+   a Map cycle runs, zones plan Z5) :pending (nil, or :beat or :bar while
+   a switch to it waits) :bar? (its Switch on the bar) :learning?
+   :bindings}."
   [context id]
-  (let [pending (fx/sub-val context get-in [:zone-map :pending])]
+  (let [pending (fx/sub-val context get-in [:zone-map :pending])
+        marker (fx/sub-ctx context manual-map-marker-id)]
     {:id id
      :name (:name (fx/sub-ctx context zone-map id))
-     :active? (and (= id (:id (fx/sub-ctx context active-zone-map)))
-                   (not (fx/sub-ctx context map-cycle-running?)))
+     :active? (and (some? marker) (= id marker))
      :pending (when (= id (:map pending)) (if (:bar? pending) :bar :beat))
      :bar? (true? (fx/sub-val context get-in [:config :zone-map-pads id :bar?]))
      :learning? (= {:type :zone-map :target id} (fx/sub-val context get-in [:backend :input :learning-target]))
@@ -1155,13 +1167,32 @@
   (vec (sort-by targets/zone-index (into #{:zone/a :zone/b} (fx/sub-ctx context zones-in-use)))))
 
 (defn selected-zone-map-id
-  "The map the map editor shows: the one selected while it is there, else
-   the one in use."
+  "The map the map editor shows, and its Use now chooses: the one selected
+   while it is there, else the manual map (active-zone-map). Selecting one
+   switches nothing."
   [context]
   (let [id (fx/sub-val context get-in [:ui :zone-maps :selected])]
     (if (and id (fx/sub-ctx context zone-map id))
       id
       (:id (fx/sub-ctx context active-zone-map)))))
+
+(defn editor-map-switch
+  "What the map editor says of how the map is chosen, editing map id
+   (plans/2026-11-23-cljfx-reactivity/29): {:mode (:manual while the
+   Manual mark shows, manual-map-marker-id; :cycle while a Map cycle runs)
+   :manual-name (the manual map's, active-zone-map) :queued? (a switch
+   waits: [:zone-map :pending], CYCLE's too) :can-use-now? (would Use now
+   change anything: id is a map, and a Map cycle runs, a switch waits, or
+   the stored manual id isn't id, a dangling one too)}. State facts only:
+   never the map a tick routed by, which it can't know."
+  [context id]
+  (let [cycle? (nil? (fx/sub-ctx context manual-map-marker-id))
+        queued? (some? (fx/sub-val context get-in [:zone-map :pending]))]
+    {:mode (if cycle? :cycle :manual)
+     :manual-name (:name (fx/sub-ctx context active-zone-map))
+     :queued? queued?
+     :can-use-now? (boolean (and (fx/sub-ctx context zone-map id)
+                                 (or cycle? queued? (not= id (fx/sub-val context get-in [:zone-map :active])))))}))
 
 (defn cue-target-explain
   "How each level of the cue at [col row] resolves, its column's and the

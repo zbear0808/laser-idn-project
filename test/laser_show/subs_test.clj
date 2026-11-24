@@ -9,6 +9,7 @@
    [laser-show.state.domains :as domains]
    [laser-show.subs :as subs]
    [laser-show.events.handlers :as handlers]
+   [laser-show.routing.zone-maps :as zone-maps]
    [laser-show.routing.zone-patterns :as zone-patterns]
    [laser-show.state.templates :as templates]
    [laser-show.vibes.engine :as engine]
@@ -1658,6 +1659,103 @@
       (is (:active? (fx/sub-ctx (context s) subs/map-pad :map/left-right)))
       (is (not (:active? (fx/sub-ctx (context on) subs/map-pad :map/left-right))))
       (is (:active? (fx/sub-ctx (context (assoc-in on [:zone-map :cycle-paused?] true)) subs/map-pad :map/left-right))))))
+
+(defn- tick-map
+  "The map a tick at beats routes by (show-clock's order, the cycle's
+   stored parameters): an oracle beside the editor, whose subs read no
+   tick."
+  [s beats]
+  (zone-maps/effective-map-id s beats (some-> (zone-patterns/active-cycle s)
+                                              :params
+                                              (zone-patterns/cycle-pick {} beats (mapv :id (zone-maps/all-maps s))))))
+
+(defn- manual-marks
+  "{id [list? pad?]} for each map the Manual mark is on: in the map
+   editor's list (manual-map-marker-id) or on its pad (map-pad :active?)."
+  [ctx]
+  (let [marker (fx/sub-ctx ctx subs/manual-map-marker-id)]
+    (into {}
+          (keep (fn [id]
+                  (let [marks [(= id marker) (:active? (fx/sub-ctx ctx subs/map-pad id))]]
+                    (when (some true? marks) [id marks]))))
+          (fx/sub-ctx ctx subs/map-pad-ids))))
+
+(deftest map-editor-mode-and-takeover-test
+  ;; plans/2026-11-23-cljfx-reactivity/29 §7: the editor says how the map is
+  ;; chosen, never which one a tick routed by; Use now takes over whenever it
+  ;; would change something
+  (let [s (domains/build-initial-state)
+        on (-> s
+               (assoc-in [:chains :effect-chains [1 1]] {:active? true :items [(zone-patterns/cycle-instance)]})
+               (assoc-in [:zone-map :active] :map/unison))
+        lists #(assoc-in on [:chains :effect-chains [1 1] :items 0 :params :maps] %)
+        editor #(fx/sub-ctx %1 subs/editor-map-switch %2)
+        use-now #(handle %1 {:event/type :zone-maps/use-now :map %2})
+        slot #(select-keys (fx/sub-val % :zone-map) [:active :pending :cycle-paused?])
+        cycle-mode {:mode :cycle :manual-name "Unison" :queued? false :can-use-now? true}
+        taken-over {:active :map/unison :pending nil :cycle-paused? true}]
+    (doseq [[label s edited beats tick before marks after]
+            [["cycling off: Left / Right manual, Odd / Even edited"
+              s :map/odd-even 4.0 :map/left-right
+              {:mode :manual :manual-name "Left / Right" :queued? false :can-use-now? true} {:map/left-right [true true]}
+              {:active :map/odd-even :pending nil :cycle-paused? false}]
+             ["on, the default cycle at beat 4: it picks Odd / Even, Unison edited"
+              on :map/unison 4.0 :map/odd-even cycle-mode {} taken-over]
+             ["on, a cycle of Unison alone: it picks the manual map"
+              (lists [:map/unison]) :map/unison 4.0 :map/unison cycle-mode {} taken-over]
+             ["on, a cycle of no known map: no pick, so the manual map routes"
+              (lists [:map/gone]) :map/unison 4.0 :map/unison cycle-mode {} taken-over]
+             ["paused, CYCLE waiting for beat 8, which a tick reaches before its commit"
+              (-> on
+                  (assoc-in [:zone-map :cycle-paused?] true)
+                  (assoc-in [:zone-map :pending] {:id 7 :map :cycle :at-beat 8.0 :bar? false}))
+              :map/unison 8.0 :map/left-right
+              {:mode :manual :manual-name "Unison" :queued? true :can-use-now? true} {:map/unison [true true]}
+              taken-over]
+             ["cycling off: Unison manual and edited, a switch to Odd / Even waiting"
+              (-> s
+                  (assoc-in [:zone-map :active] :map/unison)
+                  (assoc-in [:zone-map :pending] {:id 8 :map :map/odd-even :at-beat 8.0 :bar? false}))
+              :map/unison 4.0 :map/unison
+              {:mode :manual :manual-name "Unison" :queued? true :can-use-now? true} {:map/unison [true true]}
+              {:active :map/unison :pending nil :cycle-paused? false}]]]
+      (testing label
+        (let [ctx (context s)]
+          (is (= tick (tick-map s beats)) "the tick's map, for the record: no editor sub reads it")
+          (is (= before (editor ctx edited)))
+          (is (= marks (manual-marks ctx)) "the list's Manual mark and the pads' agree: on one map, or none while cycling")
+          (is (false? (:can-use-now? (editor ctx :map/gone))) "a map that isn't there: nothing to use")
+          (testing "Use now, then the same context's next state: Manual, nothing left to do"
+            (let [ctx' (use-now ctx edited)]
+              (is (= after (slot ctx')))
+              (is (= {:mode :manual :manual-name (:name (fx/sub-ctx ctx' subs/zone-map edited)) :queued? false :can-use-now? false}
+                     (editor ctx' edited)))
+              (is (= {edited [true true]} (manual-marks ctx'))))))))
+    (testing "the waiting CYCLE's report, after Use now cleared it, changes nothing"
+      (let [taken (use-now (context (-> on
+                                        (assoc-in [:zone-map :cycle-paused?] true)
+                                        (assoc-in [:zone-map :pending] {:id 7 :map :cycle :at-beat 8.0 :bar? false})))
+                           :map/unison)
+            late (handle taken {:event/type :show-clock/zone-map-due :id 7 :map :cycle})]
+        (is (= taken-over (slot late)))
+        (is (= {:mode :manual :manual-name "Unison" :queued? false :can-use-now? false} (editor late :map/unison)))))
+    (testing "a stored id that is no map shows as Left / Right, which Use now can choose"
+      (let [ctx (context (assoc-in s [:zone-map :active] :map/gone))
+            shown (fx/sub-ctx ctx subs/selected-zone-map-id)
+            ctx' (use-now ctx shown)]
+        (is (= :map/left-right shown))
+        (is (= {:mode :manual :manual-name "Left / Right" :queued? false :can-use-now? true} (editor ctx shown)))
+        (is (= {:map/left-right [true true]} (manual-marks ctx)))
+        (is (= :map/left-right (fx/sub-val ctx' get-in [:zone-map :active])) "chosen, so stored")
+        (is (false? (:can-use-now? (editor ctx' shown))))))
+    (testing "browsing chooses nothing"
+      (let [ctx (context on)
+            ctx' (handle ctx {:event/type :zone-maps/select :map :map/odd-even})]
+        (is (= :map/odd-even (fx/sub-ctx ctx' subs/selected-zone-map-id)))
+        (is (= (slot ctx) (slot ctx')))
+        (is (= cycle-mode (editor ctx' :map/unison)))
+        (is (= cycle-mode (editor ctx' :map/odd-even)) "while cycling, Use now takes over on any map")
+        (is (= {} (manual-marks ctx')))))))
 
 
 (deftest vibe-pick-fx-blocks-audience-cells-test
