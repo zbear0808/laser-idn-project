@@ -654,6 +654,299 @@
     (testing "the vibe that plays: another one's rule isn't this one's"
       (is (false? (fx/sub-ctx (context (assoc-in allowing [:vibe-runtime :current] :vibe-2)) subs/vibe-audience?))))))
 
+
+;; Audience indication (plans/2026-11-23-cljfx-reactivity/12): the pads, the
+;; picker and the full state agree on what can reach the crowd, a cue whose
+;; zone pattern alone names a custom group too
+
+(def ^:private balcony-lane [:auto.laser/main :balcony])
+
+(def ^:private balcony-cue
+  "A cue on the laser that doesn't scan the crowd, whose zone pattern alone
+   reaches the scanner: through :balcony, a custom group only it is in."
+  {:target :auto.laser/main
+   :items [{:type :preset :preset-id :circle}]
+   :zone-patterns [(assoc-in (zone-patterns/preset-instance :alternate :cue) [:params :zones] balcony-lane)]})
+
+(defn- audience-state
+  "12 §7's fixture on the starter show: :main, and :aud, a crowd scanner
+   that is off, out of All and in :balcony alone; the balcony cue at [0 0]
+   and its pattern in the effect cell [2 1], off. Shapes' cue slots name
+   cues that reach no crowd, and its FX set the Energy size reaction, which
+   follows HIT, ACCENT and FLASH."
+  []
+  (-> (vibe-state)
+      (assoc-in [:rig :order] [:main :aud])
+      (assoc :projectors {:main {:enabled? true}
+                          :aud {:enabled? false :exclude-from-all? true :tags #{:crowd-scanning} :zone-groups [:balcony]}})
+      (assoc-in [:zone-groups :balcony] {:name "Balcony"})
+      (assoc-in [:chains :cue-chains [0 0]] balcony-cue)
+      (assoc-in [:chains :effect-chains [2 1]]
+                {:active? false :items [(assoc-in (zone-patterns/preset-instance :alternate :cell) [:params :zones] balcony-lane)]})
+      (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [[1 0]])
+      (reactions/add-to-vibe :vibe-1 :energy-size)))
+
+(defn- allowing [s] (assoc-in s [:config :vibes :library :vibe-1 :allow-audience?] true))
+
+(defn- naming
+  "s with Shapes' role naming cells: its pool, or FLASH's cue (the first)."
+  [s role cells]
+  (if (= :flash role)
+    (assoc-in s [:config :vibes :library :vibe-1 :flash :cue] (first cells))
+    (assoc-in s [:config :vibes :library :vibe-1 role :cells] cells)))
+
+(def ^:private pad-cue-status @#'subs/vibe-pad-cue-status)
+
+(defn- pad-quiet?
+  "Does role's press start no cue (the pad's own status, which its Effects
+   only and its mark read)?"
+  [ctx role]
+  (:quiet? (fx/sub-ctx ctx pad-cue-status role)))
+
+(def ^:private cue-slot {:hit :hit :accent :accent :flash :flash-cue})
+
+(defn- expected-pads
+  "12 §7's oracle on the full state s, each pad's {:quiet? :mark? :reactions
+   :effects-only?}: quiet when the vibe that plays may start none of its
+   role's cues (vibes.library/playable-cells), marked when it allows the
+   audience and one of those can reach it."
+  [s]
+  (let [id (library/current-id s)
+        vibe (library/vibe s id)
+        by-role (reactions/reactions s id)]
+    (into {} (for [role roles
+                   :let [slot (cue-slot role)
+                         playable (library/playable-cells s vibe (library/slot-cells vibe slot))
+                         quiet? (and (some? slot) (empty? playable))
+                         names (mapv :name (get by-role role))]]
+               [role {:quiet? quiet?
+                      :mark? (boolean (and slot (:allow-audience? vibe) (some #(library/audience-cell? s %) playable)))
+                      :reactions names
+                      :effects-only? (boolean (and quiet? (seq names)))}]))))
+
+(defn- shown-pads
+  "What ctx's pads show, as expected-pads has it."
+  [ctx]
+  (into {} (for [role roles
+                 :let [pad (fx/sub-ctx ctx subs/vibe-pad role)]]
+             [role {:quiet? (pad-quiet? ctx role)
+                    :mark? (fx/sub-ctx ctx subs/vibe-pad-audience? role)
+                    :reactions (:reactions pad)
+                    :effects-only? (:effects-only? pad)}])))
+
+(defn- edited-groups
+  "The audience groups the vibe edited keeps out on the full state s; nil
+   when it allows them."
+  [s]
+  (when-not (:allow-audience? (library/vibe s (library/edited-id s)))
+    (library/audience-groups s)))
+
+(defn- expected-blocked
+  "12 §7's oracle for the picker's mark on the cue at cell: :crowd or
+   :timecode (vibes.library/unplayable for the vibe edited); nil for one it
+   plays, or an empty cell."
+  [s cell]
+  (#{:crowd :timecode} (library/unplayable s cell (get-in s [:chains :cue-chains cell]) (edited-groups s))))
+
+(defn- expected-fx-blocked
+  "The same for the effect cell at cell: :crowd while the vibe edited keeps
+   the audience out and the cell can reach it."
+  [s cell]
+  (when-let [groups (edited-groups s)]
+    (when (library/audience-fx? s cell groups) :crowd)))
+
+(defn- agree
+  "ctx's pads, and its picker at the balcony cells, say what the full state
+   s does."
+  [s ctx msg]
+  (is (= (expected-pads s) (shown-pads ctx)) msg)
+  (is (= (expected-blocked s [0 0]) (:blocked (fx/sub-ctx ctx subs/vibe-pick-cell 0 0))) msg)
+  (is (= (expected-fx-blocked s [2 1]) (:blocked (fx/sub-ctx ctx subs/vibe-pick-fx 2 1))) msg))
+
+(defn- display
+  "12 §7's display for role: [its pad's mark, quiet?, effects only?, the
+   picker's mark at [0 0]]."
+  [ctx role]
+  [(fx/sub-ctx ctx subs/vibe-pad-audience? role)
+   (pad-quiet? ctx role)
+   (:effects-only? (fx/sub-ctx ctx subs/vibe-pad role))
+   (:blocked (fx/sub-ctx ctx subs/vibe-pick-cell 0 0))])
+
+(defn- successors
+  "[[s ctx] …]: s in a new context, then after each edit (a fn of the
+   state), applied to the full map and to the context (fx/swap-context)."
+  [s edits]
+  (reductions (fn [[s ctx] f] [(f s) (fx/swap-context ctx f)]) [s (context s)] edits))
+
+(deftest audience-indicators-match-full-state-for-each-role-test
+  (let [;; [what, allowed?, an edit, the role's cells, what plays (full state), the display]
+        rows [["its pattern's custom group reaches the scanner" false identity [[0 0]] [] [false true true :crowd]]
+              ["the vibe allows the audience" true identity [[0 0]] [[0 0]] [true false false nil]]
+              ["the pattern off" true #(assoc-in % [:chains :cue-chains [0 0] :zone-patterns 0 :enabled?] false)
+               [[0 0]] [[0 0]] [false false false nil]]
+              ["a cue that reaches no crowd after it" false identity [[0 0] [1 0]] [[1 0]] [false false false :crowd]]
+              ["following MIDI timecode" true #(update-in % [:chains :cue-chains [0 0]] merge {:editor-type :timeline :timeline/chase :mtc})
+               [[0 0]] [] [false true true :timecode]]]]
+    (doseq [role [:hit :accent :flash]
+            [label allow? edit cells playable shown] rows
+            :when (or (not= :flash role) (= 1 (count cells)))
+            :let [s (cond-> (edit (naming (audience-state) role cells)) allow? allowing)
+                  ctx (context s)
+                  msg (str (name role) ": " label)]]
+      (is (= playable (library/playable-cells s (library/vibe s :vibe-1) cells)) msg)
+      (is (= shown (display ctx role)) msg)
+      (agree s ctx msg))
+    (testing "an empty cell, or FLASH without a cue: quiet and unmarked, effects only with a reaction; no mark on an empty cell"
+      (doseq [[role cells] [[:hit [[0 2]]] [:accent [[0 2]]] [:flash [[0 2]]] [:flash []]]
+              allow? [false true]
+              :let [s (cond-> (naming (audience-state) role cells) allow? allowing)
+                    ctx (context s)
+                    msg (str (name role) " " cells (when allow? ", allowed"))]]
+        (is (= {:quiet? true :mark? false :reactions ["Energy size"] :effects-only? true} (get (shown-pads ctx) role)) msg)
+        (is (nil? (:blocked (fx/sub-ctx ctx subs/vibe-pick-cell 0 2))) msg)
+        (agree s ctx msg)))
+    (testing "quiet without a reaction: not effects only"
+      (let [s (-> (audience-state) (naming :hit [[0 0]]) (assoc-in [:config :vibes :library :vibe-1 :fx] []))
+            ctx (context s)]
+        (is (= [false true false :crowd] (display ctx :hit)))
+        (agree s ctx "no reaction")))
+    (testing "the cue still blocked: the reaction out of the FX set, then its cell switched on on the effects grid"
+      (let [s (naming (audience-state) :hit [[0 0]])
+            cell (first (get-in s [:config :vibes :library :vibe-1 :fx]))
+            [_ [out out-ctx] [on on-ctx]] (successors s [#(assoc-in % [:config :vibes :library :vibe-1 :fx] [])
+                                                         #(assoc-in % [:chains :effect-chains cell :active?] true)])]
+        (is (= [false true false :crowd] (display out-ctx :hit)) "no reaction names it: not effects only")
+        (is (= [false true true :crowd] (display on-ctx :hit)) "on, it reacts to every press: effects only, still no mark")
+        (is (= ["Energy size"] (:reactions (fx/sub-ctx on-ctx subs/vibe-pad :hit))))
+        (agree out out-ctx "out of the FX set")
+        (agree on on-ctx "on on the effects grid")))
+    (testing "VIBE and BLACKOUT never mark, nor does FLASH for effects alone that can reach the crowd"
+      (doseq [flash-cue [[6 0] nil]
+              :let [s (-> (audience-state)
+                          (allowing)
+                          (naming :hit [[0 0]])
+                          (assoc-in [:config :vibes :library :vibe-1 :flash] {:cue flash-cue :fx [[2 1]] :solo? true}))
+                    ctx (context s)
+                    msg (str "FLASH's cue " flash-cue)]]
+        (is (= {:hit true :accent false :flash false :vibe false :blackout false} (update-vals (shown-pads ctx) :mark?)) msg)
+        (agree s ctx msg)))
+    (testing "the effect cell holding the same pattern, off: the FX picker's own mark"
+      (is (= :crowd (:blocked (fx/sub-ctx (context (audience-state)) subs/vibe-pick-fx 2 1))))
+      (is (nil? (:blocked (fx/sub-ctx (context (allowing (audience-state))) subs/vibe-pick-fx 2 1)))))))
+
+(deftest audience-indicators-follow-routing-edits-test
+  (let [hit (naming (audience-state) :hit [[0 0]])
+        each (fn [f steps] (mapv (fn [[_ ctx]] (f ctx)) steps))
+        check (fn [label s edits {:keys [mark quiet blocked fx-blocked]}]
+                (let [on (successors (allowing s) edits)
+                      off (successors s edits)]
+                  (is (= mark (each #(fx/sub-ctx % subs/vibe-pad-audience? :hit) on)) (str label ": HIT's mark, allowed"))
+                  (is (= quiet (each #(pad-quiet? % :hit) off)) (str label ": HIT quiet, not allowed"))
+                  (is (= blocked (each #(:blocked (fx/sub-ctx % subs/vibe-pick-cell 0 0)) off)) (str label ": the picker"))
+                  (when fx-blocked
+                    (is (= fx-blocked (each #(:blocked (fx/sub-ctx % subs/vibe-pick-fx 2 1)) off)) (str label ": the FX picker")))
+                  (doseq [[s ctx] (concat on off)]
+                    (agree s ctx label))))]
+    (testing "the group's definition: none, added, removed"
+      (check "definition"
+             (update hit :zone-groups dissoc :balcony)
+             [#(assoc-in % [:zone-groups :balcony] {:name "Balcony"}) #(update % :zone-groups dissoc :balcony)]
+             {:mark [false true false] :quiet [false true false] :blocked [nil :crowd nil] :fx-blocked [nil :crowd nil]}))
+    (testing "the membership on a virtual output of the scanner; that output gone; then tagged itself, on an untagged parent"
+      (check "virtual"
+             (-> hit
+                 (assoc-in [:projectors :aud :zone-groups] [])
+                 (assoc :virtual-projectors {:v1 {:name "Aud B" :parent-projector-id :aud :zone-groups [:balcony]}}))
+             [#(update % :virtual-projectors dissoc :v1)
+              #(-> %
+                   (update-in [:projectors :aud] dissoc :tags)
+                   (assoc :virtual-projectors {:v1 {:name "Aud B" :parent-projector-id :aud :zone-groups [:balcony]
+                                                    :tags #{:crowd-scanning}}}))]
+             {:mark [true false true] :quiet [true false true] :blocked [:crowd nil :crowd] :fx-blocked [:crowd nil :crowd]}))
+    (testing "a scanner on and in All, moved from the left end to the right: a cue on Left"
+      (check "order"
+             (-> hit
+                 (assoc :projectors {:aud {:enabled? true :tags #{:crowd-scanning}} :main {:enabled? true}})
+                 (assoc-in [:rig :order] [:aud :main])
+                 (assoc-in [:chains :cue-chains [0 0]] {:target :auto/left :items [{:type :preset :preset-id :circle}]}))
+             [#(assoc-in % [:rig :order] [:main :aud])]
+             {:mark [true false] :quiet [true false] :blocked [:crowd nil]}))
+    (let [inheriting (-> hit
+                         (assoc-in [:chains :cue-chains [0 0]] {:items [{:type :preset :preset-id :circle}]})
+                         (assoc-in [:grid :column-targets 0] :zone/b))
+          balcony-map {:name "Balcony" :lanes [:auto.laser/main] :overrides {:zone/b :balcony}}]
+      (testing "an inheriting cue on its column's zone B, which a map not in use sends to :balcony"
+        (check "zone map"
+               inheriting
+               [#(assoc-in % [:zone-maps :map/custom-1] balcony-map)
+                #(assoc-in % [:zone-maps :map/custom-1 :overrides] {})
+                #(-> %
+                     (assoc-in [:zone-maps :map/custom-1 :overrides] {:zone/b :balcony})
+                     (update-in [:grid :column-targets] dissoc 0)
+                     (assoc-in [:config :default-target] :zone/b))
+                #(assoc-in % [:grid :column-targets 0] :auto.laser/main)]
+               {:mark [false true false true false] :quiet [false true false true false]
+                :blocked [nil :crowd nil :crowd nil]}))
+      (testing "the map in use, the show clock's status and a cue no slot of Shapes names change nothing"
+        (let [s (allowing (assoc-in inheriting [:zone-maps :map/custom-1] balcony-map))
+              ctx (context s)
+              routing (fx/sub-ctx ctx subs/vibe-audience-routing)
+              groups (fx/sub-ctx ctx subs/vibe-audience-groups)
+              pad (fx/sub-ctx ctx subs/vibe-pad :hit)
+              shown (shown-pads ctx)
+              pick (fx/sub-ctx ctx subs/vibe-pick-cell 0 0)]
+          (is (true? (get-in shown [:hit :mark?])))
+          (doseq [[label f] [["the map in use" #(assoc-in % [:zone-map :active] :map/custom-1)]
+                             ["the show clock's status" #(-> %
+                                                             (assoc-in [:timing :beat-index] 1)
+                                                             (assoc-in [:backend :streaming :frame-stats] {:avg-latency-us 123}))]
+                             ["a cue no slot names, now on :crowd" #(assoc-in % [:chains :cue-chains [5 0] :target] :crowd)]]
+                  :let [ctx' (fx/swap-context ctx f)]]
+            (is (= shown (shown-pads ctx')) label)
+            (is (= pick (fx/sub-ctx ctx' subs/vibe-pick-cell 0 0)) label)
+            (is (identical? pad (fx/sub-ctx ctx' subs/vibe-pad :hit)) label)
+            (agree (f s) ctx' label))
+          (let [ctx' (status-write ctx)]
+            (is (identical? routing (fx/sub-ctx ctx' subs/vibe-audience-routing)) "a status-only successor keeps the routing")
+            (is (identical? groups (fx/sub-ctx ctx' subs/vibe-audience-groups)))))))))
+
+(deftest audience-indicators-distinguish-current-from-edited-test
+  (let [both (fn [cue current edited]
+               (-> (audience-state)
+                   (assoc-in [:chains :cue-chains [0 0]] cue)
+                   (allowing)
+                   (naming :hit [[0 0]])
+                   (assoc-in [:config :vibes :library :vibe-2 :hit :cells] [[0 0]])
+                   (assoc-in [:vibe-runtime :current] current)
+                   (assoc-in [:ui :vibes :selected] edited)))
+        crowd {:target :crowd :items [{:type :preset :preset-id :circle}]}
+        from-balcony (update-in balcony-cue [:zone-patterns 0 :params] merge {:zones [:auto.laser/main :auto/left] :from :balcony})
+        hit (fn [ctx] [(fx/sub-ctx ctx subs/vibe-pad-audience? :hit) (pad-quiet? ctx :hit)
+                       (:blocked (fx/sub-ctx ctx subs/vibe-pick-cell 0 0))])]
+    (doseq [[label cue reaches?] [["a pattern through :balcony" balcony-cue true]
+                                  ["a cue on :crowd" crowd true]
+                                  ["a pattern from :balcony alone" from-balcony false]]]
+      (testing label
+        (let [s (both cue :vibe-1 :vibe-2)
+              ctx (context s)]
+          (is (= [reaches? false (when reaches? :crowd)] (hit ctx))
+              "Shapes, which allows the audience, plays; Lines, which doesn't, is edited: the pad marks it, the picker blocks it")
+          (agree s ctx label))
+        (let [s (both cue :vibe-2 :vibe-1)
+              ctx (context s)]
+          (is (= [false reaches? nil] (hit ctx)) "swapped: no mark, no block, and the HIT that plays is quiet")
+          (agree s ctx label))))
+    (testing "only the vibe edited changes: the picker does, the pad doesn't; only the vibe that plays: the other way round"
+      (let [ctx (context (both balcony-cue :vibe-1 :vibe-2))
+            pad (fx/sub-ctx ctx subs/vibe-pad :hit)
+            pick (fx/sub-ctx ctx subs/vibe-pick-cell 0 0)
+            edited (fx/swap-context ctx assoc-in [:ui :vibes :selected] :vibe-1)
+            playing (fx/swap-context ctx assoc-in [:vibe-runtime :current] :vibe-2)]
+        (is (= [true false nil] (hit edited)))
+        (is (identical? pad (fx/sub-ctx edited subs/vibe-pad :hit)))
+        (is (= [false true :crowd] (hit playing)))
+        (is (identical? pick (fx/sub-ctx playing subs/vibe-pick-cell 0 0)))))))
+
 (deftest vibes-tab-label-sub-test
   (let [s (vibe-state)]
     (is (= "Vibes" (fx/sub-ctx (context s) subs/vibes-tab-label)) "the starter vibes: no error, warnings and info aside")
