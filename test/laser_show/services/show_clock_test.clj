@@ -409,7 +409,8 @@
           k ::zone-map]
       (add-watch (state/get-context-atom) k
                  (fn [_ _ old new]
-                   (when (not= (get-in old [:cljfx.context/m :zone-map]) (get-in new [:cljfx.context/m :zone-map]))
+                   (when (not= (:zone-map (state/root-context->snapshot old))
+                               (:zone-map (state/root-context->snapshot new)))
                      (swap! writes inc))))
       (try
         (with-redefs [events/dispatch! (fn [_])]
@@ -562,8 +563,8 @@
         strip #(reduce (fn [m p] (assoc-in m p nil)) % status-paths)]
     (add-watch (state/get-context-atom) k
                (fn [_ _ old new]
-                 (let [o (:cljfx.context/m old)
-                       n (:cljfx.context/m new)]
+                 (let [o (state/root-context->snapshot old)
+                       n (state/root-context->snapshot new)]
                    (swap! writes conj (cond-> (set (filter #(not= (get-in o %) (get-in n %)) status-paths))
                                         (not= (strip o) (strip n)) (conj :other))))))
     (try (f) (finally (remove-watch (state/get-context-atom) k)))

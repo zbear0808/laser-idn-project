@@ -47,9 +47,12 @@
 ;; State Access Helpers
 
 (defn- get-ui-state
-  "Get the list-ui state for a component."
+  "The list-ui state of component-id in the app map as it is now
+   (state/get-raw-state): for a callback, read when its input comes. A
+   snapshot, no subscription: the list's render subscribes through its
+   context (subs/list-ui-state)."
   [component-id]
-  (state/get-in-state [:list-ui component-id]))
+  (get-in (state/get-raw-state) [:list-ui component-id]))
 
 (defn- get-selected-ids
   "Get selected IDs set from component state."
