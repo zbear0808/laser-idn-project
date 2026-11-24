@@ -385,6 +385,8 @@
                         :doc "Devices from the last scan: IDN addresses and services, or a driver's :device-key and :outputs. Each device carries :driver."}
    :scanning? {:default false
                :doc "Whether output drivers are being scanned"}
+   :scan-id {:default nil
+             :doc "The id of the scan in progress (a random UUID each Scan, and the one at start-up, gets), which its result brings back: a result with another id (an earlier scan's, or one already in) changes nothing (handlers/projector.clj current-scan?). nil when no scan runs"}
    :broadcast-address {:default "255.255.255.255"
                        :doc "Broadcast address for device discovery"}
    :expanded-devices {:default #{}

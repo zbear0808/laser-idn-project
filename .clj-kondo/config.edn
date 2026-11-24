@@ -23,6 +23,9 @@
    laser-show.state.core/assoc-in-state!
    {:level :error
     :message "App state is written by the event pipeline: return :state from a handler, or dispatch an event (docs/CLJFX_STATE_MANAGEMENT.md)"}
+   laser-show.state.core/swap-state-in-epoch!
+   {:level :error
+    :message "App state is written by the event pipeline: return :state from a handler, or dispatch an event (docs/CLJFX_STATE_MANAGEMENT.md)"}
    laser-show.state.core/init-state!
    {:level :error
     :message "App state is written by the event pipeline: return :state from a handler, or dispatch an event (docs/CLJFX_STATE_MANAGEMENT.md)"}}}
@@ -34,7 +37,8 @@
   laser-show.state.core {:linters {:discouraged-var {:level :off}}}
   laser-show.events.core {:linters {:discouraged-var {laser-show.state.core/swap-state! {:level :off}
                                                       laser-show.state.core/reset-state! {:level :off}
-                                                      laser-show.state.core/reset-state-vals! {:level :off}}}}
+                                                      laser-show.state.core/reset-state-vals! {:level :off}
+                                                      laser-show.state.core/swap-state-in-epoch! {:level :off}}}}
   laser-show.app {:linters {:discouraged-var {laser-show.state.core/init-state! {:level :off}}}}}
 
  :hooks

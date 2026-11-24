@@ -670,6 +670,67 @@
          (update-vals (get-in (scan base-state (scanned "10.0.0.5" unit-l 1 2)) [:state :projectors]) :stable-id))))
 
 
+;; Scan requests: only the scan in progress completes (reactivity plan 19)
+
+
+(defn- start-scan
+  "Scan on state: [the state it leaves, the :projectors/scan effect's args]."
+  [state]
+  (let [{:keys [state] scan :projectors/scan} (projectors/handle {:event/type :projectors/scan-network :state state})]
+    [state scan]))
+
+(defn- completed
+  "What the scan with scan-id found, as the effect reports it."
+  [scan-id & devices]
+  {:event/type :projectors/scan-complete :scan-id scan-id :devices (vec devices) :warnings []})
+
+(defn- piped
+  "event's effects through the whole event pipeline, on state."
+  [state event]
+  (events/handle-event-pipeline (assoc event :state state :time 0)))
+
+(deftest scan-records-a-new-id-test
+  (let [[s1 scan1] (start-scan placed-rig)
+        [s2 scan2] (start-scan s1)
+        id1 (get-in s1 [:projector-ui :scan-id])
+        id2 (get-in s2 [:projector-ui :scan-id])]
+    (is (uuid? id1))
+    (is (true? (get-in s1 [:projector-ui :scanning?])) "Scanning...")
+    (is (= {:broadcast-address "255.255.255.255" :scan-id id1} scan1) "the effect is given it, to send back")
+    (is (and (uuid? id2) (not= id1 id2)) "each Scan a new one")
+    (is (= id2 (:scan-id scan2)))))
+
+(deftest only-the-scan-in-progress-completes-test
+  (let [[a scan-a] (start-scan placed-rig)
+        [b scan-b] (start-scan a)
+        found-a (completed (:scan-id scan-a) (scanned "10.0.0.57" unit-l 1))
+        found-b (completed (:scan-id scan-b) (scanned "10.0.0.58" unit-l 1))
+        host #(get-in % [:projectors :projector-10-0-0-5-1 :host])]
+    (testing "an older scan's result, once another scan started: no commit, no notice, nothing"
+      (is (= {} (piped b found-a)))
+      (is (= {} (piped b (assoc found-a :event/type :projectors/scan-failed :error "Network is unreachable")))))
+    (testing "the scan in progress completes, and Scan is back"
+      (let [done (:state (piped b found-b))]
+        (is (= "10.0.0.58" (host done)))
+        (is (false? (get-in done [:projector-ui :scanning?])))
+        (is (= [(scanned "10.0.0.58" unit-l 1)] (get-in done [:projector-ui :discovered-devices])))
+        (testing "then the same result again, or the older scan's: nothing"
+          (is (= {} (piped done found-b)))
+          (is (= {} (piped done found-a))))))
+    (testing "the other way round: the newer scan answers first, the older one later"
+      (let [done (:state (piped b found-b))]
+        (is (= {} (piped done found-a)))
+        (is (= "10.0.0.58" (host done)) "the newer scan's address stays")))
+    (testing "the scan in progress fails: its notice, and Scan is back"
+      (let [failed (:state (piped b (assoc found-b :event/type :projectors/scan-failed :error "Network is unreachable")))]
+        (is (false? (get-in failed [:projector-ui :scanning?])))
+        (is (= "Could not scan the network: Network is unreachable" (get-in failed [:ui :notice :text])))
+        (is (= {} (piped failed found-b)) "and its result can't come after")))
+    (testing "a result without a scan id (made by hand) counts only while no scan runs"
+      (is (= {} (piped b (dissoc found-b :scan-id))))
+      (is (= "10.0.0.57" (host (:state (piped placed-rig (dissoc found-a :scan-id)))))))))
+
+
 ;; Removing a projector
 
 

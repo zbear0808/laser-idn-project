@@ -98,11 +98,15 @@
    and effects and runs it on its agent, on the one event thread
    (events/event-executor, shared by every app instance), so every
    effect's dispatch queues on that agent. The :fx/context co-effect cljfx
-   would add is switched off: events carry :state instead."
+   would add is switched off: events carry :state instead. Each app is a
+   new app instance (events/new-instance!, for the context init-state!
+   made last): its handler, the one dispatcher of this app, runs the
+   pipeline through events/instance-handler, so once stop! retires it,
+   nothing that comes back to it changes the app after it."
   []
   (fx/create-app
    (state/get-context-atom)
-   :event-handler events/ordered-pipeline
+   :event-handler (events/instance-handler (events/new-instance!))
    :co-effects (assoc events/co-effects :fx/context (constantly nil))
    :effects events/effects
    :desc-fn (fn [_] {:fx/type root/root-view})
@@ -326,7 +330,11 @@
    It writes nothing to app state. The devices are closed from one read,
    after the events already queued have run (within 1 s; on the event
    thread, as on Quit, it can't wait for them and doesn't), and only by the
-   call that claimed the app, so each is closed once.
+   call that claimed the app, so each is closed once. Then the app instance
+   is retired (events/retire!), before the rig file's last write: what
+   comes back to it later (that write's result, Exit after its wait for the
+   rig, a scan, a learn, an event still running) is dropped, so it can't
+   change an app started after it.
 
    This is intentionally idempotent so UI fixtures can safely call it from
    `finally` blocks after a failed startup or test."
@@ -343,6 +351,7 @@
     (when app
       (events/flush! 1000)
       (release-devices! (state/get-raw-state)))
+    (events/retire!)
     (stop-rig-file!)
     (events/set-exit-fn! nil)
     (events/set-dispatch-fn! nil)
