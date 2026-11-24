@@ -357,6 +357,14 @@
 (defn- caption [text]
   {:fx/type :label :text text :min-width :use-pref-size :style-class ["label-secondary"]})
 
+(defn- control-keys
+  "What the window's parameter controls send with each edit: its pattern
+   ({:domain :entity-key :effect-instance-id}) and the window, so the
+   pipeline edits that pattern where it is now, and nothing once the
+   window shows another (events.handlers.step-grid/wrap-step-grid-control-target)."
+  [target]
+  (assoc (select-keys target [:domain :entity-key :effect-instance-id]) :dialog-id :step-grid-editor))
+
 (defn toolbar
   "Length (8, 16, 32 and any from 1 to 64), Rate, Step on, Restart on while
    Step on is the beat, Offset (Z5's controls, ∿ to follow a modulator),
@@ -364,7 +372,7 @@
   [{:keys [fx/context target grid]}]
   (let [{:keys [length params]} grid
         can-paste? (fx/sub-ctx context subs/can-paste? :step-grid)
-        keys (select-keys target [:domain :entity-key :effect-path])
+        keys (control-keys target)
         props {:current-params params
                :params-map (param-controls/params-vector->map zone-patterns/pattern-parameters)
                :on-change-event (assoc keys :event/type :chain/update-param)
@@ -421,7 +429,7 @@
   "Moves (Z5's three radio buttons) and Follows the pattern pads (Z6-Q2 A:
    a grid doesn't, until it is ticked). Props: :target :grid."
   [{:keys [target grid]}]
-  (let [keys (select-keys target [:domain :entity-key :effect-path])
+  (let [keys (control-keys target)
         on-change (assoc keys :event/type :chain/update-param)
         params (:params grid)]
     {:fx/type :v-box

@@ -37,6 +37,7 @@
             [laser-show.animation.chains :as chains]
             [laser-show.animation.presets :as presets]
             [laser-show.animation.safety :as safety]
+            [laser-show.events.handlers.chain.helpers :as chain-helpers]
             [laser-show.output.driver :as driver]
             [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
@@ -1323,17 +1324,21 @@
 
 (defn step-grid
   "The step grid window's grid at target ({:domain :entity-key
-   :effect-path}, a cue's zone pattern or an effects cell's), or nil when it
-   holds no zone pattern: {:id (the pattern's, for the playhead) :params
+   :effect-instance-id}: the zone pattern with that id among a cue's
+   patterns or an effects cell's items, wherever it is among them now,
+   routing.step-grid/locate-pattern), or nil when they hold no zone pattern
+   with that id: {:id (the pattern's, for the playhead) :params
    (the grid as it shows, routing.step-grid/as-grid: a pattern that isn't
    one yet shows the grid it becomes) :grid? (it is one already) :rows
    [{:ref :text}] (each row and where it goes under the map in use) :lit
    (each step's refs, as sets) :length :cursor [row step] :keyframes? (its
    keyframes are on: the grid is greyed out) :locked? (the show lock is on)
    :wrap-note (S-5) :every-laser-note (S-4, once it became zones)}."
-  [context {:keys [domain entity-key effect-path] :as target}]
-  (let [fx (fx/sub-ctx context zone-pattern-at domain entity-key effect-path)]
-    (when (= :zone-pattern (:effect-id fx))
+  [context {:keys [domain entity-key effect-instance-id] :as target}]
+  (let [items-path (chain-helpers/zone-pattern-items-path domain entity-key)
+        fx (when items-path
+             (:instance (step-grid/locate-pattern (fx/sub-val context get-in items-path) effect-instance-id)))]
+    (when fx
       (let [world (fx/sub-ctx context pattern-world)
             params (step-grid/as-grid (:params fx) (count (rig/e-order (rig/rig-inputs world))))
             names (fx/sub-ctx context names-ctx)

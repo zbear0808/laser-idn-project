@@ -269,3 +269,22 @@
     (is (= out (sg/normalize out)) "normal is normal")
     (is (= [] (:steps (sg/normalize {:style :steps :zones [A]}))) "no steps")
     (is (= [[] []] (:steps (sg/normalize {:zones [] :steps [[A] [B]]}))) "no rows: rests")))
+
+
+;; Finding a grid (reactivity plan 05)
+
+(deftest locate-pattern-test
+  (let [p-id #uuid "00000000-0000-0000-0000-0000000005a1"
+        q-id #uuid "00000000-0000-0000-0000-0000000005b2"
+        p (assoc (zone-patterns/preset-instance :steps :cell) :id p-id)
+        q (assoc (zone-patterns/preset-instance :chase :cell) :id q-id)
+        scale {:effect-id :scale :id #uuid "00000000-0000-0000-0000-0000000005c3" :params {}}]
+    (is (= {:effect-path [1] :instance p} (sg/locate-pattern [q p] p-id)) "by its id, wherever it is")
+    (is (= {:effect-path [1 :items 0] :instance p}
+           (sg/locate-pattern [q {:type :group :id #uuid "00000000-0000-0000-0000-0000000005d4" :items [p]}] p-id))
+        "in a group too")
+    (is (nil? (sg/locate-pattern [q] p-id)) "gone: nothing, not what took its place")
+    (is (nil? (sg/locate-pattern [scale] (:id scale))) "not a zone pattern")
+    (is (nil? (sg/locate-pattern [(dissoc q :id)] nil)) "no id finds nothing, not an item without one")
+    (is (nil? (sg/locate-pattern [(assoc q :id :q)] :q)) "an id that isn't a UUID")
+    (is (nil? (sg/locate-pattern nil p-id)))))

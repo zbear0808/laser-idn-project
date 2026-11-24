@@ -93,6 +93,7 @@
    :spatial-event-keys {:domain domain
                         :entity-key entity-key
                         :effect-path full-effect-path
+                        :effect-instance-id (:effect-instance-id on-change-event)
                         :keyframe-idx (when keyframe-enabled? selected-kf-idx)}
 
    ;; Event templates for param controls
@@ -166,17 +167,20 @@
                            :entity-key entity-key
                            :effect-path full-effect-path}
 
-        ;; Choose event types based on keyframe mode
+        ;; Choose event types based on keyframe mode; both name the instance
+        ;; (the step grid window opens on it, from Edit grid…)
         on-change-event (if keyframe-enabled?
                           {:event/type :keyframe/update-param
                            :domain domain
                            :entity-key entity-key
                            :effect-path full-effect-path
+                           :effect-instance-id (:id effect)
                            :keyframe-idx selected-kf-idx}
                           {:event/type :chain/update-param
                            :domain domain
                            :entity-key entity-key
-                           :effect-path full-effect-path})
+                           :effect-path full-effect-path
+                           :effect-instance-id (:id effect)})
 
         on-text-event (if keyframe-enabled?
                         {:event/type :keyframe/update-param

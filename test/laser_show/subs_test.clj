@@ -1297,9 +1297,10 @@
 ;; The step grid window (zones plan Z6, 08 §4, §7)
 
 (deftest step-grid-sub-test
-  (let [target {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]}
+  (let [g1 #uuid "00000000-0000-0000-0000-0000000013a1"
+        target {:domain :cue-zone-patterns :entity-key [0 0] :effect-instance-id g1}
         grid (-> (zone-patterns/preset-instance :steps :cue)
-                 (assoc :id :g1)
+                 (assoc :id g1)
                  (update :params merge {:zones [:zone/a :zone/b :zone/c :graphics]
                                         :steps [[:zone/a] [] [:zone/b :zone/c] [:graphics]]}))
         s (-> (domains/build-initial-state)
@@ -1313,7 +1314,7 @@
       (is (= [{:ref :zone/a :text "A · Beams → Left"} {:ref :zone/b :text "B → Right"} {:ref :zone/c :text "C → Left"}
               {:ref :graphics :text "Graphics"}]
              (:rows sg))))
-    (is (= :g1 (:id sg)) "the pattern's id, for the playhead")
+    (is (= g1 (:id sg)) "the pattern's id, for the playhead")
     (is (= 4 (:length sg)))
     (is (= [#{:zone/a} #{} #{:zone/b :zone/c} #{:graphics}] (:lit sg)) "the refs each step lights")
     (is (= [1 2] (:cursor sg)))
@@ -1335,11 +1336,16 @@
       (is (true? (:locked? (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :show-lock?] true) subs/step-grid target)))))
     (testing "a pattern that isn't a grid yet shows the grid it becomes"
       (let [chase (fx/swap-context ctx assoc-in [:chains :cue-chains [0 0] :zone-patterns]
-                                   [(assoc (zone-patterns/preset-instance :chase :cue) :id :p1 :params
+                                   [(assoc (zone-patterns/preset-instance :chase :cue) :id g1 :params
                                            (assoc (:params (zone-patterns/preset-instance :chase :cue)) :zones [:zone/a :zone/b :zone/c]))])
             sg (fx/sub-ctx chase subs/step-grid target)]
+        (is (= g1 (:id sg)) "the same pattern, its style switched")
         (is (false? (:grid? sg)))
         (is (= [#{:zone/a} #{:zone/b} #{:zone/c} #{:zone/a} #{:zone/b} #{:zone/c} #{:zone/a} #{:zone/b}] (:lit sg)))))
+    (testing "another pattern in its place, with an id of its own, isn't the window's: nothing"
+      (is (nil? (fx/sub-ctx (fx/swap-context ctx assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :id]
+                                             #uuid "00000000-0000-0000-0000-0000000013a2")
+                            subs/step-grid target))))
     (testing "Every laser's note, once it became zones"
       (is (= "Every laser can't be a row, because the number of lasers changes. It became zones A–D: pick a zone map that sends them where you want."
              (:every-laser-note (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :dialogs :step-grid-editor :every-laser]
@@ -1349,7 +1355,32 @@
              (:every-laser-note (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :dialogs :step-grid-editor :every-laser] [:zone/a :zone/b])
                                             subs/step-grid target)))))
     (testing "no zone pattern there: nothing"
-      (is (nil? (fx/sub-ctx ctx subs/step-grid {:domain :cue-zone-patterns :entity-key [5 0] :effect-path [0]}))))))
+      (is (nil? (fx/sub-ctx ctx subs/step-grid (assoc target :entity-key [5 0]))))
+      (is (nil? (fx/sub-ctx ctx subs/step-grid {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]}))
+          "a place is no target"))
+    (testing "the window's pattern where it is now (reactivity plan 05, examples 2 and 5)"
+      (let [p-id #uuid "00000000-0000-0000-0000-0000000013b1"
+            q-id #uuid "00000000-0000-0000-0000-0000000013b2"
+            p (-> (zone-patterns/preset-instance :steps :cell) (assoc :id p-id)
+                  (update :params merge {:zones [:zone/a] :steps [[] [:zone/a]]}))
+            q (-> (zone-patterns/preset-instance :steps :cell) (assoc :id q-id)
+                  (update :params merge {:zones [:zone/b] :steps [[:zone/b] [:zone/b] []]}))
+            t {:domain :effect-chains :entity-key [2 1] :effect-instance-id p-id}
+            items #(fx/swap-context %1 assoc-in [:chains :effect-chains [2 1] :items] %2)
+            c0 (context (-> (domains/build-initial-state)
+                            (assoc-in [:chains :effect-chains [2 1]] {:active? true :items [p q]})
+                            (assoc-in [:ui :dialogs :step-grid-editor] {:open? true :target t :cursor [0 1]})))
+            c1 (items c0 [q {:type :group :id #uuid "00000000-0000-0000-0000-0000000013b3" :items [p]}])
+            c2 (items c1 [q])
+            c3 (fx/swap-context c2 assoc-in [:chains :effect-chains [3 1]] {:active? true :items [p]})
+            c4 (items c3 [q p])]
+        (doseq [[why c] [["at first" c0] ["in a group behind Q" c1] ["back in its cell, after Q" c4]]]
+          (let [sg (fx/sub-ctx c subs/step-grid t)]
+            (is (= p-id (:id sg)) why)
+            (is (= [#{} #{:zone/a}] (:lit sg)) why)
+            (is (= [0 1] (:cursor sg)) why)))
+        (is (nil? (fx/sub-ctx c2 subs/step-grid t)) "gone from its cell: nothing, and not Q in its place")
+        (is (nil? (fx/sub-ctx c3 subs/step-grid t)) "in another cell: still nothing")))))
 
 (deftest can-paste-test
   ;; Keyboard plan Phase 4, Step 4a (D13 B): Paste follows the clipboard; an

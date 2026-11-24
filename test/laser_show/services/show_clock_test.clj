@@ -1084,8 +1084,9 @@
 ;; Zones plan Z6: a step grid on the clock (08 §8)
 
 (deftest zone-steps-follow-a-grid-test
-  (let [grid (-> (zone-patterns/preset-instance :steps :cue)
-                 (assoc :id :g1)
+  (let [g1 #uuid "00000000-0000-0000-0000-0000000006f1"
+        grid (-> (zone-patterns/preset-instance :steps :cue)
+                 (assoc :id g1)
                  (assoc-in [:params :steps] [[:zone/a] [] [:zone/b] [:zone/a :zone/b]]))]
     (init! {[0 0] (assoc (cue :circle) :zone-patterns [grid])})
     (two-lasers!)
@@ -1097,8 +1098,8 @@
             [one-half n3] (ticks-to! (+ n2 100000000) 1.5)
             [two n4] (ticks-to! (+ n3 100000000) 2.0)]
         (testing "the snapshot has the grid's step, 2 a beat from the cue's start (Z6-Q1 A)"
-          (is (= {:g1 0} (:zone-steps first-tick)))
-          (is (= [1 2 3 4] (mapv #(get-in % [:zone-steps :g1]) [half one one-half two]))
+          (is (= {g1 0} (:zone-steps first-tick)))
+          (is (= [1 2 3 4] (mapv #(get-in % [:zone-steps g1]) [half one one-half two]))
               "the step goes on: the playhead is step mod 4"))
         (testing "each step lights its own zones; a rest lights none"
           (is (= #{:zone/a} (drawn-keys first-tick)))
@@ -1107,7 +1108,7 @@
           (is (= #{[:zone/a :zone/b]} (drawn-keys one-half)) "A and B: one frame under both")
           (is (= #{:zone/a} (drawn-keys two)) "step 4 is step 0 again"))
         (testing "a grid edited while it plays shows from the next tick (08 invariant 8)"
-          (events/event-handler {:event/type :step-grid/toggle
-                                 :target {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]}
-                                 :row :zone/b :step 0})
+          (let [target {:domain :cue-zone-patterns :entity-key [0 0] :effect-instance-id g1}]
+            (events/event-handler {:event/type :step-grid/open :target target})
+            (events/event-handler {:event/type :step-grid/toggle :target target :row :zone/b :step 0}))
           (is (= #{[:zone/a :zone/b]} (drawn-keys (show-clock/tick! (+ n4 16666667))))))))))

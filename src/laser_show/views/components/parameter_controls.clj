@@ -400,8 +400,8 @@
 
 (defn param-step-list
   "A step grid's steps (:step-list), in the numeric list: how many there
-   are, and Edit grid… to draw them in the step grid window (its address
-   is on-change-event's :domain, :entity-key and :effect-path)."
+   are, and Edit grid… to draw them in the step grid window (its target is
+   on-change-event's :domain, :entity-key and :effect-instance-id)."
   [{:keys [param-key param-spec current-value on-change-event label-width]}]
   {:fx/type :h-box
    :spacing 8
@@ -421,7 +421,7 @@
                :focus-traversable false
                :style-class ["button-secondary"]
                :on-action {:event/type :step-grid/open
-                           :target (select-keys on-change-event [:domain :entity-key :effect-path])}}]})
+                           :target (select-keys on-change-event [:domain :entity-key :effect-instance-id])}}]})
 
 
 ;; Parameter Control Router

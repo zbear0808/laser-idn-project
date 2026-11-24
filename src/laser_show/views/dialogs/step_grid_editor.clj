@@ -7,7 +7,9 @@
    and a column per step: click or drag to paint, the keys move the cursor
    and toggle, and ⌘Z / ⇧⌘Z / ⌘Y (Ctrl too) undo and redo as the chain
    editors do. While the pattern's keyframes are on, or the show lock is,
-   the grid is greyed out and says why. The playhead and the Now line
+   the grid is greyed out and says why. It shows the pattern it opened on
+   wherever that is in its cell now (subs/step-grid), and says so once the
+   pattern is gone. The playhead and the Now line
    (\"Step 5 of 8\", \"Not playing\") come from the show clock's newest
    tick, never from app state."
   (:require [cljfx.api :as fx]
@@ -86,7 +88,8 @@
          :alignment :center
          :style-class "dialog-placeholder"
          :children [{:fx/type :label
-                     :text "There's no zone pattern here to draw on a grid."
+                     :id "step-grid-missing"
+                     :text "This pattern is no longer in this cell."
                      :style-class "dialog-placeholder-text"}]})
       {:fx/type :h-box
        :alignment :center-left

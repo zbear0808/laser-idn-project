@@ -28,8 +28,10 @@
 (def ^:private B :zone/b)
 (def ^:private C :zone/c)
 
-(def ^:private cue-target {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]})
-(def ^:private cell-target {:domain :effect-chains :entity-key [3 1] :effect-path [0]})
+(def ^:private cue-target
+  {:domain :cue-zone-patterns :entity-key [0 0] :effect-instance-id #uuid "00000000-0000-0000-0000-00000000a6a1"})
+(def ^:private cell-target
+  {:domain :effect-chains :entity-key [3 1] :effect-instance-id #uuid "00000000-0000-0000-0000-00000000a6b2"})
 
 (defn- cue-params [] (get-in (app-state) [:chains :cue-chains [0 0] :zone-patterns 0 :params]))
 (defn- cell-params [] (get-in (app-state) [:chains :effect-chains [3 1] :items 0 :params]))
@@ -46,7 +48,7 @@
                              (assoc-in [:chains :cue-chains [0 0] :name] "Beams")
                              (assoc-in [:chains :cue-chains [0 0] :zone-patterns]
                                        [(-> (zone-patterns/preset-instance :steps :cue)
-                                            (assoc :id #uuid "00000000-0000-0000-0000-00000000a6a1")
+                                            (assoc :id (:effect-instance-id cue-target))
                                             (update :params merge extra))])))))
 
 (defn- open-grid! [target]
@@ -188,6 +190,73 @@
       (fire-grid! MouseEvent/MOUSE_PRESSED x y)
       (fire-grid! MouseEvent/MOUSE_RELEASED x y))
     (ui/wait-for! #(= [A B] (first (:steps (cell-params)))))))
+
+
+;; The pattern it opened on (reactivity plan 05): the window follows the
+;; pattern's id, never the place it had in its cell
+
+(defn- chip
+  "The chip button that says text (an editor's Visual | Numeric), in any
+   window."
+  ^ButtonBase [text]
+  (let [nodes (ui/query-all ".chip")]
+    (ui/on-fx-thread #(some (fn [n] (when (and (instance? ButtonBase n) (= text (.getText ^Labeled n))) n)) nodes))))
+
+(defn- fire-chip! [text]
+  (ui/wait-for! #(some? (chip text)))
+  (let [b (chip text)]
+    (ui/on-fx-thread #(.fire b)))
+  (ui/sync-fx!))
+
+(deftest open-window-follows-pattern-through-reorder-and-removal-test
+  (let [p-id #uuid "00000000-0000-0000-0000-00000000a6c1"
+        q-id #uuid "00000000-0000-0000-0000-00000000a6c2"
+        p (-> (zone-patterns/preset-instance :steps :cell) (assoc :id p-id)
+              (update :params merge {:zones [A B] :steps [[A] [] [] []]}))
+        q (-> (zone-patterns/preset-instance :steps :cell) (assoc :id q-id)
+              (update :params merge {:zones [A B] :steps [[] [B] [] []]}))
+        title "Step Grid — Effects B4 \"Run\" · Zone pattern"
+        items #(get-in (app-state) [:chains :effect-chains [3 1] :items])
+        steps-of (fn [id] (some #(when (= id (:id %)) (get-in % [:params :steps])) (items)))
+        set-items! #(events/dispatch! {:event/type :chain/set-items :domain :effect-chains :entity-key [3 1] :items %})]
+    (events/write-state! assoc-in [:chains :effect-chains [3 1]] {:name "Run" :active? false :items [p q]})
+    (events/dispatch! {:event/type :effect-chain/open-editor :col 3 :row 1})
+    (events/dispatch! {:event/type :list/select-item :component-id [:effect-chain 3 1] :item-id p-id :mode :single})
+    (testing "Numeric's Edit grid… opens P's grid"
+      (fire-chip! "Numeric")
+      (fire! "#zone-pattern-edit-grid")
+      (ui/wait-for! #(window-open? title))
+      (ui/wait-for! #(some? (body)))
+      (is (= {:domain :effect-chains :entity-key [3 1] :effect-instance-id p-id}
+             (get-in (app-state) [:ui :dialogs :step-grid-editor :target])))
+      (ui/wait-for! #(lit-cell? 0 0))
+      (is (not (lit-cell? 1 1)) "P's cells, not Q's"))
+    (testing "the effects list puts Q first: the window still shows P"
+      (set-items! [q p])
+      (ui/wait-for! #(= [q-id p-id] (mapv :id (items))))
+      (ui/wait-for! #(and (lit-cell? 0 0) (not (lit-cell? 1 1)))))
+    (testing "its keys edit P where it is now; Q stays as it was"
+      (key! KeyCode/RIGHT)
+      (key! KeyCode/SPACE)
+      (ui/wait-for! #(= [[A] [A] [] []] (steps-of p-id)))
+      (ui/wait-for! #(lit-cell? 0 1))
+      (is (= q (first (items)))))
+    (testing "and so does a click"
+      (let [[x y] (cell-centre 1 2)]
+        (fire-grid! MouseEvent/MOUSE_PRESSED x y)
+        (fire-grid! MouseEvent/MOUSE_RELEASED x y))
+      (ui/wait-for! #(= [[A] [A] [B] []] (steps-of p-id)))
+      (ui/wait-for! #(lit-cell? 1 2))
+      (is (= q (first (items)))))
+    (testing "P removed: the window says so, with no grid, and Close"
+      (set-items! [q])
+      (ui/wait-for! #(= [q-id] (mapv :id (items))))
+      (ui/assert-text! "#step-grid-missing" "This pattern is no longer in this cell.")
+      (is (nil? (body)) "no grid to edit")
+      (is (ui/enabled? "#step-grid-close"))
+      (is (= [q] (items)) "Q, in P's old place, untouched")
+      (fire! "#step-grid-close")
+      (ui/wait-for! #(not (window-open? title))))))
 
 
 ;; The mouse
@@ -350,7 +419,7 @@
   (events/write-state! assoc-in [:chains :effect-chains [3 1]]
                        {:active? false
                         :items [(-> (zone-patterns/preset-instance :steps :cell)
-                                    (assoc :id #uuid "00000000-0000-0000-0000-00000000a6b2")
+                                    (assoc :id (:effect-instance-id cell-target))
                                     (update :params merge {:zones [C] :steps [[C] [] [C] []]}))]})
   (open-grid! cue-target)
   (testing "the tooltips name the keys as the platform writes them"
