@@ -53,6 +53,7 @@
   (is (every? #(contains? events/effects %)
               [:state :dispatch :dispatch-later :link/sync-to-downbeat
                :input/await-learn :multi-engine/start :multi-engine/stop :multi-engine/refresh
+               :input/midi-list :input/midi-connect :input/midi-disconnect :input/osc-start :input/osc-stop
                :output/write-status
                :project/save :project/load :fx/show-file-chooser :system/exit :system/open-url
                :dev/reload :dev/deliver :dev/swap-state :clipboard/write :clipboard/read

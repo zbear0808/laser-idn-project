@@ -2,9 +2,12 @@
   "OSC input handler using overtone/osc-clj.
    Converts OSC messages to standardized input events.
    
-   This module provides pure functions for OSC state management.
-   State is passed as a parameter and returned as output.
-   Actual state storage is managed by the application state in domains.clj."
+   It also builds the handler the server hands its messages to, and opens
+   and closes the server (open-server!, close-server!):
+   laser-show.input.devices, which owns it, calls those on its worker
+   thread. App state ([:backend :input :osc]) holds plain data only (the
+   switch, the port, the address mappings, whether the server listens);
+   the pure functions below take that map and return it changed."
   (:require [clojure.tools.logging :as log]
             [overtone.osc :as o]
             [laser-show.input.events :as events]))
@@ -137,55 +140,42 @@
             (dispatch-fn event)))))))
 
 
-;; Server Management (state transformations with side effects)
+;; Server Management (side effects: the device worker's, input.devices)
 
 
-(defn start-server
-  "Starts the OSC server on the specified port.
-   Returns updated state map.
-   
-   Note: This function performs side effects (opens network socket)."
-  ([osc-state dispatch-fn get-state-fn]
-   (start-server osc-state (:port osc-state 9000) dispatch-fn get-state-fn))
-  ([osc-state port dispatch-fn get-state-fn]
-   (try
-     ;; Close existing server if any
-     (when-let [existing (:server osc-state)]
-       (try
-         (o/osc-close existing)
-         (catch Exception _)))
-     
-     (let [server (o/osc-server port)
-           handler (create-osc-handler dispatch-fn get-state-fn)]
-       ;; Use osc-listen to catch ALL messages (no pattern matching)
-       ;; This avoids the issue with wildcard patterns not being allowed
-       (o/osc-listen server handler :laser-show-handler)
-       
-       (log/info "OSC server started on port" port)
-       (-> osc-state
-           (assoc :server server)
-           (assoc :port port)
-           (assoc :server-running? true)))
-     (catch Exception e
-       (log/error "Error starting OSC server:" (.getMessage e))
-       (assoc osc-state :server-running? false)))))
+(def ^:private listener-key
+  "The key of the server's listener (create-osc-handler's)."
+  :laser-show-handler)
 
-(defn stop-server
-  "Stops the OSC server.
-   Returns updated state map."
-  [osc-state]
-  (when-let [server (:server osc-state)]
+(defn close-server!
+  "Removes our listener from server, then closes it. Each step is attempted
+   independently."
+  [server]
+  (try
+    (o/osc-rm-listener server listener-key)
+    (catch Exception e
+      (log/warn "Error removing the OSC listener:" (.getMessage e))))
+  (try
+    (o/osc-close server)
+    (catch Exception e
+      (log/warn "Error closing the OSC server:" (.getMessage e))))
+  (log/info "OSC server stopped")
+  server)
+
+(defn open-server!
+  "Opens an OSC server on port (a socket) with one listener for every
+   message, handler (create-osc-handler): osc-listen catches all of them,
+   as a wildcard pattern isn't allowed. Returns the server; throws when the
+   port won't open."
+  [port handler]
+  (let [server (o/osc-server port)]
     (try
-      ;; Remove the listener before closing
-      (o/osc-rm-listener server :laser-show-handler)
-      (catch Exception _))
-    (try
-      (o/osc-close server)
-      (catch Exception _))
-    (log/info "OSC server stopped"))
-  (-> osc-state
-      (assoc :server nil)
-      (assoc :server-running? false)))
+      (o/osc-listen server handler listener-key)
+      (catch Exception e
+        (close-server! server)
+        (throw e)))
+    (log/info "OSC server started on port" port)
+    server))
 
 (defn server-running?
   "Returns true if OSC server is running."
@@ -231,29 +221,6 @@
   "Returns current address mappings."
   [osc-state]
   (:address-mappings osc-state {}))
-
-
-;; Dynamic Handler Registration
-
-
-(defn register-handler
-  "Registers a specific OSC handler for an address pattern.
-   The handler receives the raw OSC message.
-   Returns updated state."
-  [osc-state handler-id address-pattern handler-fn]
-  (when-let [server (:server osc-state)]
-    (o/osc-handle server address-pattern handler-fn))
-  (assoc-in osc-state [:handlers handler-id] 
-            {:pattern address-pattern :handler handler-fn}))
-
-(defn unregister-handler
-  "Removes a registered OSC handler.
-   Returns updated state."
-  [osc-state handler-id]
-  (when-let [server (:server osc-state)]
-    (when-let [{:keys [pattern]} (get-in osc-state [:handlers handler-id])]
-      (o/osc-rm-handler server pattern)))
-  (update osc-state :handlers dissoc handler-id))
 
 
 ;; OSC Learn (pure functions for state)
@@ -313,38 +280,14 @@
 
 
 (def initial-state
-  "Default OSC state structure."
+  "Default OSC state structure: plain data (the server is the device
+   worker's, input.devices)."
   {:enabled? false
-   :server nil
    :server-running? false
    :port 9000
+   :requests {}
    :address-mappings {}
-   :handlers {}
    :learn-mode nil})
-
-(defn init
-  "Initializes OSC state with default mappings.
-   Optionally starts the server.
-   Returns initialized state."
-  ([osc-state]
-   (init osc-state false 9000 nil nil))
-  ([osc-state start-server?]
-   (init osc-state start-server? 9000 nil nil))
-  ([osc-state start-server? port dispatch-fn get-state-fn]
-   (let [state (-> osc-state
-                   load-default-mappings
-                   enable)]
-     (if start-server?
-       (start-server state port dispatch-fn get-state-fn)
-       state))))
-
-(defn shutdown
-  "Shuts down OSC system.
-   Returns cleaned up state."
-  [osc-state]
-  (-> osc-state
-      stop-server
-      disable))
 
 
 ;; Utility Functions

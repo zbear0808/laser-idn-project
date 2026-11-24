@@ -1,9 +1,12 @@
 (ns laser-show.ui-test.settings-test
   "The Settings tab: its cards, the MIDI card's buttons and fields, and the
    OSC and keyboard switches. Nothing here opens a device or a socket:
-   the connected and listening states are put in the state by hand."
+   the connected and listening states are put in the state by hand, or the
+   device worker (input.devices) finds a fake MIDI input."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.input.fixtures :as input-fixtures]
+            [laser-show.input.midi :as midi]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
@@ -27,6 +30,23 @@
                                (fn [^Parent p] (seq (.getChildrenUnmodifiable p)))
                                (.getRoot (.getScene ^Node (first (ui/query-all "#osc-server-button")))))))]
     (set (keep #(when (instance? Labeled %) (ui/on-fx-thread (fn [] (.getText ^Labeled %)))) nodes))))
+
+(defn- button
+  "The button on the Settings tab whose text is text, or nil."
+  [text]
+  (ui/on-fx-thread
+   #(->> (tree-seq (fn [n] (instance? Parent n))
+                   (fn [^Parent p] (seq (.getChildrenUnmodifiable p)))
+                   (.getRoot (.getScene ^Node (first (ui/query-all "#osc-server-button")))))
+         (filter (fn [n] (and (instance? Button n) (= text (.getText ^Button n)))))
+         first)))
+
+(defn- fire!
+  "Fire the button whose text is text, as a click does. Fired, not clicked:
+   the card can be below the tab's scrolled view."
+  [text]
+  (ui/wait-for! #(some? (button text)))
+  (ui/on-fx-thread #(.fire ^Button (button text))))
 
 (defn- fill-hex
   "A region's background colour as #RRGGBB, with its CSS applied, or nil."
@@ -86,6 +106,26 @@
     (events/write-state! assoc-in [:backend :input :midi :connected-devices] #{"Launchpad"})
     (ui/assert-enabled! "#midi-disconnect-all-button")
     (is (= "#505050" (fill-hex "#midi-disconnect-all-button")) "Auto-Connect's look")))
+
+(deftest refresh-and-connect-go-through-the-device-worker-test
+  ;; The device worker lists one fake input; nothing real is opened
+  (let [pad (input-fixtures/midi-source "Pad")
+        midi-status #(get-in (state/get-raw-state) [:backend :input :midi])]
+    (with-redefs [midi/list-devices (constantly [pad])]
+      (open-settings!)
+      (fire! "Refresh")
+      (ui/wait-for! #(= ["Pad"] (:available-devices (midi-status))))
+      (testing "the input's row, with Connect"
+        (fire! "Connect")
+        (ui/wait-for! #(= #{"Pad"} (:connected-devices (midi-status))))
+        (ui/wait-for! #(some? (button "Disconnect")))
+        (is (nil? (button "Connect")) "its row's button says Disconnect now")
+        (ui/assert-enabled! "#midi-disconnect-all-button"))
+      (testing "and Disconnect closes it"
+        (fire! "Disconnect")
+        (ui/wait-for! #(empty? (:connected-devices (midi-status))))
+        (ui/wait-for! #(some? (button "Connect")))
+        (is (empty? (get-in (state/get-raw-state) [:backend :input :midi :requests])) "every request answered")))))
 
 (deftest midi-channel-filter-commits-test
   (let [robot (ui/robot)

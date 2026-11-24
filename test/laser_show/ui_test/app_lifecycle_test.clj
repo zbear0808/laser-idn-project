@@ -17,6 +17,8 @@
             [laser-show.events.handlers.input :as input]
             [laser-show.events.handlers.timing :as timing]
             [laser-show.events.helpers :as h]
+            [laser-show.input.devices :as devices]
+            [laser-show.input.fixtures :as input-fixtures]
             [laser-show.input.link :as link]
             [laser-show.input.midi :as midi]
             [laser-show.input.osc :as osc]
@@ -117,18 +119,24 @@
 (deftest stop-writes-nothing-and-closes-each-device-once-test
   (let [calls (atom {})
         count! #(swap! calls update % (fnil inc 0))
+        pad-calls (atom [])
+        pad (input-fixtures/midi-source "Pad" pad-calls)
         handler (current-handler)
         threads (atom {})]
-    (events/write-state! assoc-in [:backend :link :carabiner-connected?] true)
-    (let [before (state/get-raw-state)]
-      (try
-        (with-redefs [midi/disconnect-all (fn [m]
-                                            (count! :midi)
-                                            ;; Closing the ports takes a moment
-                                            (Thread/sleep 300)
-                                            m)
-                      osc/stop-server (fn [o] (count! :osc) o)
-                      link/disconnect-carabiner! (fn [l] (count! :link) (assoc l :carabiner-connected? false))]
+    (with-redefs [midi/list-devices (constantly [pad])
+                  osc/open-server! (fn [port _handler] {::server port})
+                  osc/close-server! (fn [server] (count! [:osc (::server server)]) server)
+                  link/disconnect-carabiner! (fn [l] (count! :link) (assoc l :carabiner-connected? false))]
+      ;; A MIDI input and the OSC server opened by the device worker, as
+      ;; Connect and Start Server do
+      (events/dispatch! {:event/type :input/midi-connect-device :device-name "Pad"})
+      (events/dispatch! {:event/type :input/osc-start-server})
+      (ui/wait-for! #(let [{:keys [midi osc]} (get-in (state/get-raw-state) [:backend :input])]
+                       (and (= #{"Pad"} (:connected-devices midi)) (:server-running? osc)
+                            (empty? (:requests midi)) (empty? (:requests osc)))))
+      (events/write-state! assoc-in [:backend :link :carabiner-connected?] true)
+      (let [before (state/get-raw-state)]
+        (try
           ;; An event in flight that writes neither [:backend :input] nor
           ;; [:backend :link] (:show-clock/status writes the MTC status)
           (slowed :timing/set-bpm 200 threads
@@ -140,14 +148,19 @@
                     (let [p (promise)]
                       (handler {:event/type :dev/flush :promise p})
                       (is (deref p 2000 false)))
-                    (app/stop!))))
-        (let [after (state/get-raw-state)]
-          (is (= {:midi 1 :osc 1 :link 1} @calls) "each device closed once")
-          (is (identical? (get-in before [:backend :input]) (get-in after [:backend :input])) "nothing written")
-          (is (identical? (get-in before [:backend :link]) (get-in after [:backend :link])) "nothing written"))
-        (finally
-          ;; Nothing left connected for the fixture's stop!
-          (events/write-state! assoc-in [:backend :link :carabiner-connected?] false))))))
+                    (app/stop!)))
+          (let [after (state/get-raw-state)]
+            (is (= 1 (count (filter #{:close-device} @pad-calls))) "the MIDI input closed once")
+            (is (= {[:osc 9000] 1 :link 1} @calls) "the server and the link, once each")
+            (is (= {:midi #{} :osc nil} (devices/open-ports)) "nothing left open")
+            (is (identical? (get-in before [:backend :input]) (get-in after [:backend :input])) "nothing written")
+            (is (identical? (get-in before [:backend :link]) (get-in after [:backend :link])) "nothing written"))
+          (testing "a request after stop opens nothing, till the next app"
+            (is (false? (devices/submit! {:op :midi/connect :request-id (random-uuid) :device-name "Pad"} (fn [_]))))
+            (is (= 1 (count (filter #{:get-transmitter} @pad-calls)))))
+          (finally
+            ;; Nothing left connected for the fixture's stop!
+            (events/write-state! assoc-in [:backend :link :carabiner-connected?] false)))))))
 
 (deftest stop-on-the-event-thread-does-not-wait-test
   (let [flushes (atom [])
