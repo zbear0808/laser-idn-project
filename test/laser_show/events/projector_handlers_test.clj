@@ -783,6 +783,20 @@
                   (:state (projectors/handle {:event/type :projectors/remove :projector-id :nope
                                               :state removable-state})))))
 
+(deftest remove-lets-go-of-its-selected-virtual-projector-test
+  ;; Reactivity plan 14
+  (let [remove-p1 #(:state (projectors/handle {:event/type :projectors/remove :projector-id :p1 :state %}))
+        selected-vp #(get-in (remove-p1 (assoc-in removable-state [:projector-ui :active-virtual-projector] %))
+                             [:projector-ui :active-virtual-projector])]
+    (is (nil? (selected-vp :vp1)) "Laser L's virtual projector went with it")
+    (is (= :vp2 (selected-vp :vp2)) "Laser R's stays selected")
+    (is (= {:p2 1} (get-in (remove-p1 (assoc-in removable-state [:projector-ui :identify] {:p1 5 :p2 1}))
+                           [:projector-ui :identify]))
+        "its Identify flash goes, another's stays")
+    (is (= :p2 (get-in (remove-p1 (assoc-in removable-state [:projector-ui :active-projector] :p2))
+                       [:projector-ui :active-projector]))
+        "and another selected card stays selected")))
+
 (deftest remove-takes-the-laser-out-of-the-order-test
   (let [placed (assoc-in removable-state [:rig :order] [:p2 :p1])]
     (is (= [:p2] (get-in (projectors/handle {:event/type :projectors/remove :projector-id :p1 :state placed})
@@ -1032,6 +1046,100 @@
                  {:event/type :projectors/copy-safety :from :nope :to [:p1]}]]
     (is (identical? outputting-state (:state (projectors/handle (assoc event :state outputting-state))))
         (str (:event/type event)))))
+
+
+;; A projector Undo took away (reactivity plan 14): nothing selects it, and
+;; nothing writes it back as a phantom
+
+(deftest writers-on-a-missing-projector-change-nothing-test
+  (let [s (-> outputting-state
+              (assoc-in [:virtual-projectors :vp1] {:name "VP" :parent-projector-id :p1 :zone-groups []})
+              (assoc-in [:backend :output :drivers] (driver/descriptors)))]
+    (doseq [event [{:event/type :projectors/update-settings :projector-id :nope :updates {:name "Renamed"}}
+                   {:event/type :projectors/update-driver-config :projector-id :nope :key :host :value "127.0.0.1"}
+                   {:event/type :projectors/toggle-enabled :projector-id :nope}
+                   {:event/type :projectors/set-enabled :projector-id :nope :enabled? false}
+                   {:event/type :projectors/set-exclude-from-all :projector-id :nope :exclude? true}
+                   {:event/type :projectors/set-tag :projector-id :nope :tag :graphics :on? true}
+                   {:event/type :projectors/set-fit :projector-id :nope :key :min-fps :value 20}
+                   {:event/type :projectors/toggle-zone-group :projector-id :nope :zone-group-id :graphics}
+                   {:event/type :projectors/vp-toggle-zone-group :vp-id :nope :zone-group-id :graphics}
+                   {:event/type :projectors/add-effect :projector-id :nope :effect {:effect-id :rgb-curves}}
+                   {:event/type :projectors/toggle-calibration :projector-id :nope}
+                   {:event/type :projectors/identify :projector-id :nope :time 1000}]]
+      (is (true? (identical? s (:state (projectors/handle (assoc event :state s))))) (str (:event/type event))))
+    (testing "a projector that is there still takes them"
+      (is (= "Renamed" (get-in (projectors/handle {:event/type :projectors/update-settings :projector-id :p1
+                                                   :updates {:name "Renamed"} :state s})
+                               [:state :projectors :p1 :name])))
+      (is (= :p1 (get-in (projectors/handle {:event/type :projectors/toggle-calibration :projector-id :p1 :state s})
+                         [:state :projector-ui :calibrating-projector-id])))
+      (is (nil? (get-in (projectors/handle {:event/type :projectors/toggle-calibration :projector-id :nope
+                                            :state (assoc-in s [:projector-ui :calibrating-projector-id] :nope)})
+                        [:state :projector-ui :calibrating-projector-id]))
+          "and the test pattern of one that isn't can still be turned off"))))
+
+(defn- piped
+  "state after event through the real pipeline at time 1000."
+  [state event]
+  (:state (events/handle-event-pipeline (assoc event :state state :time 1000))))
+
+(deftest undo-of-add-leaves-no-phantom-projector-test
+  (let [saved (history/mark-clean base-state)
+        added (piped saved {:event/type :projectors/add-manual :name "Stage L" :host "10.0.0.5" :port 7255})
+        id (get-in added [:projector-ui :active-projector])
+        undone (piped added {:event/type :edit/undo})
+        late (piped undone {:event/type :projectors/update-settings :projector-id id :updates {:name "Renamed"}})
+        redone (piped undone {:event/type :edit/redo})]
+    (is (= "Stage L" (get-in added [:projectors id :name])) "Add selects the new projector")
+    (is (= {} (:projectors undone)))
+    (is (nil? (get-in undone [:projector-ui :active-projector])) "Undo: nothing is selected")
+    (is (= {} (:projectors late)) "an edit that comes for it after makes no projector")
+    (is (= (:history undone) (:history late)) "nor an undo step")
+    (is (false? (get-in late [:project :dirty?])) "nor an unsaved change")
+    (testing "Redo brings it back, and leaves it to a click to select it"
+      (is (= "Stage L" (get-in redone [:projectors id :name])))
+      (is (nil? (get-in redone [:projector-ui :active-projector]))))))
+
+(deftest undo-lets-go-of-what-named-a-gone-projector-test
+  (let [saved (history/mark-clean (assoc-in base-state [:projectors :q] {:name "Laser Q" :host "10.0.0.9" :zone-groups []}))
+        added (piped saved {:event/type :projectors/add-manual :name "Stage L" :host "10.0.0.5" :port 7255})
+        id (get-in added [:projector-ui :active-projector])
+        busy (-> added
+                 (piped {:event/type :projectors/toggle-calibration :projector-id id})
+                 (assoc-in [:projector-ui :identify] {id 99999 :q 99999})
+                 (assoc-in [:virtual-projectors :vp] {:name "VP" :parent-projector-id id :zone-groups []})
+                 (assoc-in [:projector-ui :active-virtual-projector] :vp))
+        undone (piped busy {:event/type :edit/undo})
+        ui-keys [:active-projector :active-virtual-projector :calibrating-projector-id :identify]]
+    (is (= {:active-projector id :active-virtual-projector :vp :calibrating-projector-id id :identify {id 99999 :q 99999}}
+           (select-keys (:projector-ui busy) ui-keys)))
+    (is (= {:active-projector nil :active-virtual-projector nil :calibrating-projector-id nil :identify {:q 99999}}
+           (select-keys (:projector-ui undone) ui-keys))
+        "the selection, the selected virtual projector, the test pattern and Identify let go of it; Q's flash stays")
+    (is (= [0 1] [(count (get-in undone [:history :undo-stack])) (count (get-in undone [:history :redo-stack]))])
+        "the Add's step, and no other")
+    (testing "a selection that still exists stays, Undo after Undo, and on an abort"
+      (let [q-selected (piped saved {:event/type :projectors/select-projector :projector-id :q})
+            renamed (piped q-selected {:event/type :projectors/update-settings :projector-id :q :updates {:name "Q2"}})
+            back (piped renamed {:event/type :edit/undo})
+            press #uuid "00000000-0000-0000-0000-0000000014a1"
+            aborted (-> q-selected
+                        (piped {:event/type :history/begin-transaction :label "Edit" :history/gesture-id press})
+                        (piped {:event/type :projectors/update-settings :projector-id :q :updates {:name "Q3"}
+                                :history/gesture-id press})
+                        (piped {:event/type :history/abort-transaction :history/gesture-id press}))]
+        (is (= ["Laser Q" :q] [(get-in back [:projectors :q :name]) (get-in back [:projector-ui :active-projector])]))
+        (is (= ["Laser Q" :q] [(get-in aborted [:projectors :q :name]) (get-in aborted [:projector-ui :active-projector])]))))
+    (testing "an abort that takes a projector away lets go of it too"
+      (let [press #uuid "00000000-0000-0000-0000-0000000014a2"
+            begun (piped saved {:event/type :history/begin-transaction :label "Add" :history/gesture-id press})
+            during (piped begun {:event/type :projectors/add-manual :name "Stage L" :host "10.0.0.5" :port 7255
+                                 :history/gesture-id press})
+            aborted (piped during {:event/type :history/abort-transaction :history/gesture-id press})]
+        (is (some? (get-in during [:projector-ui :active-projector])))
+        (is (= #{:q} (set (keys (:projectors aborted)))))
+        (is (nil? (get-in aborted [:projector-ui :active-projector])))))))
 
 
 

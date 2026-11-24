@@ -10,7 +10,8 @@
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
-  (:import [javafx.stage WindowEvent]))
+  (:import [javafx.scene.control Labeled]
+           [javafx.stage WindowEvent]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -55,6 +56,38 @@
     (ui/wait-for! #(some? (added)))
     (is (= {:name "Stage left" :host "10.0.0.5" :port 7300 :enabled? true}
            (select-keys (added) [:name :host :port :enabled?])))))
+
+(defn- no-selection-shown?
+  "Does the inspector show its no-selection text?"
+  []
+  (let [labels (ui/query-all ".label")]
+    (ui/on-fx-thread #(boolean (some (fn [^Labeled l] (= "Click a card to set it up" (.getText l))) labels)))))
+
+(deftest undo-of-add-shows-no-projector-test
+  ;; Reactivity plan 14: Undo takes the projector away, and the inspector
+  ;; doesn't keep a phantom of it
+  (let [robot (ui/robot)]
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! no-selection-shown?)
+    (ui/click! robot "#projectors-add-manual-button")
+    (ui/wait-for! #(window-showing? "Add Projector"))
+    (ui/fill! robot "#add-projector-host-field" "10.0.0.5")
+    (ui/fill! robot "#add-projector-name-field" "Stage left")
+    (ui/wait-for! #(= "Stage left" (get-in (app-state) [:ui :dialogs :add-projector-manual :name])))
+    (ui/click! robot "#add-projector-confirm-button")
+    (ui/assert-text! "#projector-config-title" "CONFIGURE: Stage left")
+    (let [id (get-in (app-state) [:projector-ui :active-projector])]
+      (events/dispatch! {:event/type :edit/undo})
+      (ui/wait-for! #(empty? (:projectors (app-state))))
+      (ui/wait-for! no-selection-shown?)
+      (ui/assert-no-node! "#projector-config-title")
+      (ui/assert-no-node! "#projector-name-field")
+      (is (nil? (get-in (app-state) [:projector-ui :active-projector])))
+      (testing "Redo brings its card back, and nothing is selected"
+        (events/dispatch! {:event/type :edit/redo})
+        (ui/wait-for! #(seq (ui/query-all (str "#rig-card-enable-" (name id)))))
+        (is (no-selection-shown?))
+        (ui/assert-no-node! "#projector-config-title")))))
 
 (deftest add-projector-closes-after-add-test
   (let [robot (ui/robot)

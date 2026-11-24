@@ -158,6 +158,59 @@
       (is (= 2 (get-in restored [:timing :beat-index])))
       (is (nil? (get-in restored [:project :dirty?]))))))
 
+(def ^:private balcony {:id :group-balcony :name "Balcony" :description "House" :color "#2468AC"})
+
+(deftest snapshot-carries-only-listed-rig-only-definitions-test
+  ;; Reactivity plan 23: the definitions an undo step needs to bring a
+  ;; membership back, beside its document
+  (let [graphics {:id :graphics :name "Graphics" :color "#9B59B6"}
+        rigged (-> sample-state
+                   (assoc-in [:zone-groups :graphics] graphics)
+                   (assoc-in [:projectors :proj-1 :zone-groups] [:group-balcony :graphics :all :auto/left :group-unknown])
+                   (assoc :rig-file {:path nil :status :saved :requested 3 :written 3 :error nil
+                                     :group-copy {:group-balcony balcony
+                                                  :graphics {:id :graphics :name "Graphics (old)"}
+                                                  :group-unused {:id :group-unused :name "Unused"}
+                                                  :all {:id :all :name "Everything"}
+                                                  :auto/left {:id :auto/left :name "Left"}}}))
+        snapshot (history/make-snapshot {:state rigged :description "Remove Projector"})
+        ;; Since: the member removed, the copy kept to what is listed
+        removed (-> rigged
+                    (update :projectors dissoc :proj-1)
+                    (assoc-in [:rig-file :group-copy] {}))
+        copy-after (fn [current snapshot] (get-in (history/restore-snapshot current snapshot) [:rig-file :group-copy]))]
+    (is (= {:group-balcony balcony} (:rig-only-group-definitions snapshot))
+        "a listed group only the rig's copy defines: not the show's Graphics, an unused or derived one, nor the unknown")
+    (is (not-any? (set (keys (:document-state snapshot))) [:rig-file :rig-only-group-definitions]) "not in the document")
+    (is (not-any? (set (keys (get-in (history/mark-clean rigged) [:project :saved-document]))) [:rig-file :rig-only-group-definitions])
+        "nor in the saved baseline")
+    (testing "restored: the membership with its definition, the writer's fields as they are now"
+      (let [current (update removed :rig-file assoc :status :write-failed :requested 5 :written 4 :error "disk full")
+            restored (history/restore-snapshot current snapshot)]
+        (is (= [:group-balcony :graphics :all :auto/left :group-unknown] (get-in restored [:projectors :proj-1 :zone-groups])))
+        (is (= {:group-balcony balcony :graphics graphics} (get-in restored [:rig-file :group-copy]))
+            "the unknown group stays unknown")
+        (is (= {:path nil :status :write-failed :requested 5 :written 4 :error "disk full"}
+               (dissoc (:rig-file restored) :group-copy)))))
+    (testing "a snapshot from before the field: the copy as it is, if it still knows the group"
+      (let [legacy (dissoc snapshot :rig-only-group-definitions)]
+        (is (= {:group-balcony balcony :graphics graphics}
+               (copy-after (assoc-in removed [:rig-file :group-copy] {:group-balcony balcony}) legacy)))
+        (is (= {:graphics graphics} (copy-after removed legacy)))))
+    (testing "a present {}: no definition to bring back, whatever the copy knows now"
+      (is (= {:graphics graphics}
+             (copy-after (assoc-in removed [:rig-file :group-copy] {:group-balcony balcony})
+                         (assoc snapshot :rig-only-group-definitions {})))))
+    (testing "the copy keeps its map when it is the same"
+      (let [kept (assoc-in rigged [:rig-file :group-copy] {:group-balcony balcony :graphics graphics})]
+        (is (identical? (:rig-file kept) (:rig-file (history/restore-snapshot kept snapshot))))))
+    (testing "a discovery's backfill in between stays, and the field with it"
+      (let [h (history/backfill-history {:undo-stack [snapshot] :redo-stack []}
+                                        #(assoc-in % [:projectors :found] {:name "Found" :zone-groups []}))
+            restored (history/restore-snapshot removed (peek (:undo-stack h)))]
+        (is (= "Found" (get-in restored [:projectors :found :name])))
+        (is (= {:group-balcony balcony :graphics graphics} (get-in restored [:rig-file :group-copy])))))))
+
 (deftest restore-document-grafts-live-item-fields-by-id-test
   (let [snapshot-doc (doc sample-state)
         ;; Since the snapshot: the group was collapsed, then moved behind a new item
@@ -310,6 +363,26 @@
       (is (false? (history/undoable-changed?
                    (doc sample-state)
                    (doc (assoc-in sample-state [:chains :effect-chains [7 7]] {:active? true}))))))))
+
+(deftest effect-cell-sources-are-where-restore-takes-on-off-test
+  ;; Reactivity plan 22: the live state that names effect cells (the vibes'
+  ;; switches) follows them by the same cells
+  (let [x {:id #uuid "55555555-5555-5555-5555-5555555555a1" :effect-id :scale}
+        y {:id #uuid "55555555-5555-5555-5555-5555555555b1" :effect-id :hue-shift}
+        z {:id #uuid "55555555-5555-5555-5555-5555555555c1" :effect-id :rotation}
+        cells #(assoc-in sample-state [:chains :effect-chains] %)
+        snapshot-doc (doc (cells {[0 0] {:active? false :items [x]}
+                                  [1 0] {:active? false :items [y]}
+                                  [2 0] {:active? false :items [z]}}))
+        ;; Since: [0 0] moved to [3 0], [1 0] cleared, [2 0] given another
+        ;; effect, both switched on
+        current (cells {[3 0] {:active? true :items [x]}
+                        [2 0] {:active? true :items [y z]}})]
+    (is (= {[0 0] [3 0] [2 0] [2 0]} (history/effect-cell-sources current snapshot-doc))
+        "moved: from where it is now; still there: from itself; cleared: none")
+    (is (= {[0 0] true [1 0] false [2 0] true}
+           (update-vals (get-in (history/restore-document current snapshot-doc) [:chains :effect-chains]) :active?))
+        "their on/off is what restore-document grafts")))
 
 (deftest restore-clamps-selected-keyframe-test
   (let [kf (fn [n sel] {:enabled? true :selected-keyframe sel

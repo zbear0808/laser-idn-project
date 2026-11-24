@@ -24,8 +24,10 @@
    change, a :history/gesture-alarm wake-up) seal it too."
   (:require [clojure.tools.logging :as log]
             [clojure.string :as str]
+            [laser-show.events.helpers :as h]
             [laser-show.events.safety-guard :as guard]
-            [laser-show.state.history :as history]))
+            [laser-show.state.history :as history]
+            [laser-show.vibes.refs :as refs]))
 
 (defn- settle
   "state with its open transaction, whichever press it is, sealed against
@@ -34,6 +36,22 @@
   (if (get-in state [:history :transaction])
     (assoc state :history (history/commit-transaction (:history state) state))
     state))
+
+(defn- restore
+  "state with snapshot restored (history/restore-snapshot: its document, and
+   the rig's copy of the definitions its membership needs): the restore of
+   Undo, Redo and a press's abort. The effect cells the vibe engine
+   switched on stay its own where the restore takes their on/off
+   (history/effect-cell-sources, on the state before it; refs/restore-fx),
+   so the next vibe and Save still switch them off. The projector UI lets go
+   of a projector or virtual projector the restore took away
+   (h/prune-projector-ui), and selects nothing: Redo of an Add brings the
+   projector back unselected (reactivity plans 22, 23, 14)."
+  [state snapshot]
+  (-> state
+      (history/restore-snapshot snapshot)
+      (refs/restore-fx (history/effect-cell-sources state (:document-state snapshot)))
+      (h/prune-projector-ui)))
 
 (defn handle-begin-transaction
   "A press's transaction, on mouse down: :history/gesture-id is the press's
@@ -64,7 +82,7 @@
         {:keys [history baseline]} (history/abort-transaction current-history id)]
     (if baseline
       {:state (-> state
-                  (history/restore-document (:document-state baseline))
+                  (restore baseline)
                   (assoc :history history))}
       {:state (assoc state :history history)})))
 
@@ -109,7 +127,7 @@
   "Restore a popped snapshot and build the effects map."
   [state {:keys [history snapshot]} verb]
   (let [restored-state (-> state
-                           (history/restore-document (:document-state snapshot))
+                           (restore snapshot)
                            (assoc :history history)
                            prune-active-cues)]
     (log/info verb "performed:" (:description snapshot))

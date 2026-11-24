@@ -432,7 +432,8 @@
    never changes (OD-11), and its settings change through
    :projectors/update-driver-config, which checks them.
    A projector known by its address ([:host …] stable id) is known by the new
-   one after a host change; a unit's identity doesn't change."
+   one after a host change; a unit's identity doesn't change. An unknown
+   projector changes nothing."
   [{:keys [projector-id updates state]}]
   (let [descriptor (descriptor-of state (driver/projector-driver-id (get-in state [:projectors projector-id])))
         updates (cond-> (dissoc updates :driver :driver-config)
@@ -451,7 +452,9 @@
                         (if (and (contains? updates :host) (= :host kind))
                           (assoc p :stable-id [:host (:host p) s])
                           p)))]
-    {:state (update-in state [:projectors projector-id] #(follow-host (merge % updates)))}))
+    {:state (if (contains? (:projectors state) projector-id)
+              (update-in state [:projectors projector-id] #(follow-host (merge % updates)))
+              state)}))
 
 (defn- handle-projectors-update-driver-config
   "Set one of a non-IDN projector's driver fields (:key) to :value, typed
@@ -475,10 +478,13 @@
 
 (defn- handle-projectors-toggle-enabled
   "Toggle a projector's enabled state.
-   Coerces enabled? to boolean to prevent ClassCastException."
+   Coerces enabled? to boolean to prevent ClassCastException. An unknown
+   projector changes nothing."
   [{:keys [projector-id state]}]
   (let [current (boolean (get-in state [:projectors projector-id :enabled?]))]
-    {:state (assoc-in state [:projectors projector-id :enabled?] (not current))}))
+    {:state (cond-> state
+              (contains? (:projectors state) projector-id)
+              (assoc-in [:projectors projector-id :enabled?] (not current)))}))
 
 
 ;; The rig strip and its inspector (plans/2026-11-19-zones/04 §6): setters,
@@ -563,9 +569,10 @@
 (defn- handle-projectors-toggle-zone-group
   "Toggle a projector's membership in a custom zone group. All and the
    automatic groups (routing.rig/derived-ref?) are never stored: they are
-   refused, and state is returned as it is."
+   refused, and state is returned as it is. An unknown projector changes
+   nothing."
   [{:keys [projector-id zone-group-id state]}]
-  (if (rig/derived-ref? zone-group-id)
+  (if (or (rig/derived-ref? zone-group-id) (not (contains? (:projectors state) projector-id)))
     {:state state}
     {:state (update-in state [:projectors projector-id :zone-groups] toggled-groups zone-group-id)}))
 
@@ -577,9 +584,9 @@
 
 (defn- handle-vp-toggle-zone-group
   "Toggle a virtual projector's membership in a custom zone group (never All
-   or an automatic group)."
+   or an automatic group). An unknown virtual projector changes nothing."
   [{:keys [vp-id zone-group-id state]}]
-  (if (rig/derived-ref? zone-group-id)
+  (if (or (rig/derived-ref? zone-group-id) (not (contains? (:virtual-projectors state) vp-id)))
     {:state state}
     {:state (update-in state [:virtual-projectors vp-id :zone-groups] toggled-groups zone-group-id)}))
 
@@ -590,11 +597,12 @@
 
 
 (defn- handle-projectors-add-effect
-  "Add an effect to a projector's chain."
+  "Add an effect to a projector's chain. An unknown projector gets no chain."
   [{:keys [projector-id effect state]}]
   (let [effect-with-fields (h/ensure-item-fields effect)]
-    {:state (-> state
-                (update-in [:chains :projector-effects projector-id :items] conj effect-with-fields))}))
+    {:state (cond-> state
+              (contains? (:projectors state) projector-id)
+              (update-in [:chains :projector-effects projector-id :items] conj effect-with-fields))}))
 
 
 
@@ -652,16 +660,16 @@
 
 (defn- handle-projectors-remove
   "Remove a projector, its calibration chain, its editor and list state, its
-   virtual projectors and its place in the rig order, and clear the selection
-   and calibration mode that point at it. Cues pinned to it go to
-   :retarget-to (zone-groups/retarget-value: All by default, nil or :inherit
-   for Nothing), with a notice, so nothing names it any more. While
-   streaming, the output-sync middleware stops its engine. An unknown id
-   changes nothing."
+   virtual projectors and its place in the rig order, and let go of the
+   selection, the selected virtual projector, the test pattern and the
+   Identify flash that named it or them (h/prune-projector-ui). Cues pinned
+   to it go to :retarget-to (zone-groups/retarget-value: All by default, nil
+   or :inherit for Nothing), with a notice, so nothing names it any more.
+   While streaming, the output-sync middleware stops its engine. An unknown
+   id changes nothing."
   [{:keys [projector-id state] :as event}]
   (if-let [p (get-in state [:projectors projector-id])]
-    (let [clear-if (fn [s path] (if (= projector-id (get-in s path)) (assoc-in s path nil) s))
-          pin (rig/laser-ref projector-id)
+    (let [pin (rig/laser-ref projector-id)
           pinned (count (refs/cues-using (get-in state [:chains :cue-chains]) pin))
           target (zone-groups/retarget-value state pin event)
           removed (-> state
@@ -673,9 +681,7 @@
                       (update :virtual-projectors
                               #(into {} (remove (fn [[_ vp]] (= projector-id (:parent-projector-id vp)))) %))
                       (update-in [:rig :order] #(filterv (complement #{projector-id}) %))
-                      (clear-if [:projector-ui :active-projector])
-                      (clear-if [:projector-ui :calibrating-projector-id])
-                      (update-in [:projector-ui :identify] dissoc projector-id)
+                      (h/prune-projector-ui)
                       (update-in [:projector-ui :discovered-devices] drop-discovered-output p))]
       (if (pos? pinned)
         (h/show-notice removed
@@ -813,11 +819,14 @@
 
 (defn- handle-projectors-toggle-calibration
   "Toggle calibration mode for a specific projector.
-   Only one projector can be in calibration mode at a time."
+   Only one projector can be in calibration mode at a time. An unknown
+   projector's can only be turned off."
   [{:keys [projector-id state]}]
   (let [current (get-in state [:projector-ui :calibrating-projector-id])]
-    {:state (assoc-in state [:projector-ui :calibrating-projector-id]
-                      (if (= current projector-id) nil projector-id))}))
+    (cond
+      (= current projector-id) {:state (assoc-in state [:projector-ui :calibrating-projector-id] nil)}
+      (contains? (:projectors state) projector-id) {:state (assoc-in state [:projector-ui :calibrating-projector-id] projector-id)}
+      :else {:state state})))
 
 
 (defn- handle-projectors-set-calibration-brightness

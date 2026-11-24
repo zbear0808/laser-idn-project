@@ -7,6 +7,8 @@
      ([:vibe-runtime]), so a release still finds the cue its press started.
    - move-fx, remove-fx: the vibes' FX sets and flash effect cells, and the
      effect cells the engine switched on.
+   - restore-fx: the effect cells the engine switched on, after a restore
+     (Undo, Redo) put cells back (reactivity plan 22).
    - move-trigger-targets, remove-trigger-targets: the trigger map, for
      either grid.
 
@@ -147,6 +149,32 @@
                             (update-some [:fx-on] without cell)
                             (update-some [:voices :flash :fx] without cell)
                             (update-some [:voices :flash :fx-on] without cell))))))
+
+(defn- restored
+  "cells after a restore that took each restored cell's on/off from a cell
+   (sources: restored -> that cell): for each of cells in order, the
+   restored cells that took theirs from it (sorted, when several), each
+   once. One no restored cell took from is gone."
+  [cells sources]
+  (let [takers (reduce-kv (fn [m to from] (update m from (fnil conj []) to)) {} sources)
+        cells' (into [] (comp (mapcat #(sort (get takers %))) (distinct)) cells)]
+    (if (= cells cells') cells cells')))
+
+(defn restore-fx
+  "state after a document restore (Undo, Redo, a press's abort) put effect
+   cells back, each taking its on/off from the cell sources names for it
+   (state.history/effect-cell-sources): the cells the engine switched on,
+   and those the held flash asked for and switched on, are now the
+   restored cells that took theirs from one of them, so each switch keeps
+   its owner. One whose content is gone is let go of, and no other becomes
+   the engine's. Nothing is switched here, and the vibes' own FX sets and
+   flash cells are the document's, restored with it."
+  [state sources]
+  (update-runtime state (fn [rt]
+                          (-> rt
+                              (update-some [:fx-on] restored sources)
+                              (update-some [:voices :flash :fx] restored sources)
+                              (update-some [:voices :flash :fx-on] restored sources)))))
 
 
 ;; The trigger map

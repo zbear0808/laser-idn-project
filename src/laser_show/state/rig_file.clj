@@ -45,13 +45,27 @@
 
 (defn group-copy
   "The rig's copy of the groups its lasers are in: the previous copy
-   ([:rig-file :group-copy]) with the show's current definitions over it,
-   kept to the groups some projector or virtual projector lists. Membership
-   is the rig's and definitions are the show's (spec 01 §12): the copy lets
-   New Project bring the groups back and the report name them."
-  [state]
-  (select-keys (merge (get-in state [:rig-file :group-copy]) (:zone-groups state))
-               (listed-groups state)))
+   ([:rig-file :group-copy]), or the fallback definitions given, with the
+   show's current definitions over it, kept to the groups some projector or
+   virtual projector lists. Membership is the rig's and definitions are the
+   show's (spec 01 §12): the copy lets New Project bring the groups back and
+   the report name them. An undo step's fallback is the definitions its
+   snapshot kept (state.history/restore-snapshot)."
+  ([state] (group-copy state (get-in state [:rig-file :group-copy])))
+  ([state fallback]
+   (select-keys (merge fallback (:zone-groups state)) (listed-groups state))))
+
+(defn with-group-copy
+  "state with its copy ([:rig-file :group-copy]) brought to group-copy of
+   it, from fallback (the copy itself when not given): the definitions
+   this window remembers, written or not. The copy keeps its map when it is
+   equal."
+  ([state] (with-group-copy state (get-in state [:rig-file :group-copy])))
+  ([state fallback]
+   (let [copy (group-copy state fallback)]
+     (if (= copy (get-in state [:rig-file :group-copy] {}))
+       state
+       (assoc-in state [:rig-file :group-copy] copy)))))
 
 (defn rig-document
   "The rig file's contents for state (09 §8): {:rig-file/version :projectors
@@ -69,11 +83,13 @@
 (defn rig-changed?
   "Did the rig the file holds change from old to new: a rig path (an equal
    value rebuilt doesn't count), or the definition of a group the rig's
-   lasers are in (the group copy)?"
+   lasers are in (the group copy, when the show's groups or the copy itself
+   changed)?"
   [old new]
   (boolean
    (or (some #(differs? (get-in old %) (get-in new %)) rig-paths)
-       (and (not (identical? (:zone-groups old) (:zone-groups new)))
+       (and (or (not (identical? (:zone-groups old) (:zone-groups new)))
+                (not (identical? (get-in old [:rig-file :group-copy]) (get-in new [:rig-file :group-copy]))))
             (not= (group-copy old) (group-copy new))))))
 
 ;; Matching a show's lasers onto this rig
