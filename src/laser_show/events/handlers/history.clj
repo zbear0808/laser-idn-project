@@ -37,16 +37,17 @@
     state))
 
 (defn- restore
-  "state with snapshot's document restored (history/restore-document): the
-   restore of Undo, Redo and a press's abort. The effect cells the vibe
-   engine switched on stay its own where the restore takes their on/off
-   (history/effect-cell-sources, refs/restore-fx), so the next vibe and
-   Save still switch them off (reactivity plan 22)."
+  "state with snapshot restored (history/restore-snapshot: its document, and
+   the rig's copy of the definitions its membership needs): the restore of
+   Undo, Redo and a press's abort. The effect cells the vibe engine
+   switched on stay its own where the restore takes their on/off
+   (history/effect-cell-sources, on the state before it; refs/restore-fx),
+   so the next vibe and Save still switch them off (reactivity plans 22,
+   23)."
   [state snapshot]
-  (let [document (:document-state snapshot)]
-    (-> state
-        (history/restore-document document)
-        (refs/restore-fx (history/effect-cell-sources state document)))))
+  (-> state
+      (history/restore-snapshot snapshot)
+      (refs/restore-fx (history/effect-cell-sources state (:document-state snapshot)))))
 
 (defn handle-begin-transaction
   "A press's transaction, on mouse down: :history/gesture-id is the press's

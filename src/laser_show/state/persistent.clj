@@ -234,7 +234,10 @@
    machine's rig (projectors, virtual projectors, [:rig], calibration) stays
    as it is (D-30): the zip's copy of it is only read, to match the show onto
    this rig. The show's pins follow their units to this rig's ids
-   (rig-file/rename-pins).
+   (rig-file/rename-pins). The rig's group copy keeps the definitions of the
+   groups its lasers are in that the incoming show doesn't define, as the
+   outgoing show and copy had them (rig-file/with-group-copy); the incoming
+   show's own win, and none goes into the incoming show.
    
    zip-contents is the {filename data} map from serialization/load-from-zip.
    An old show is converted (state.migration: Z2's rows, its groups judged by
@@ -242,7 +245,8 @@
    baseline is taken, so it isn't \"unsaved\" right after loading."
   [state zip-contents zip-path]
   (let [initial (domains/build-initial-state)
-        hardware (get zip-contents (:hardware zip-filenames))]
+        hardware (get zip-contents (:hardware zip-filenames))
+        outgoing-copy (rig-file/group-copy state)]
     (-> state
         (replace-document initial (zip-contents->file-data zip-contents) #{:show})
         (reset-session initial)
@@ -251,6 +255,7 @@
         (migration/zones-z2-show hardware)
         (migration/zones-z4)
         (rig-file/rename-pins hardware)
+        (rig-file/with-group-copy outgoing-copy)
         history/mark-clean
         (assoc-in [:project :current-file] zip-path))))
 

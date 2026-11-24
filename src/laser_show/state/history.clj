@@ -5,12 +5,15 @@
    - Extracting document-only subtrees from global state
    - The document policy: which document data is undoable, which only marks
      the project unsaved, and which is live (neither)
-   - Capturing immutable snapshots
+   - Capturing immutable snapshots: the document, and beside it the
+     definitions of the groups only the rig's copy defines that its
+     membership lists (:rig-only-group-definitions, reactivity plan 23)
    - Pushing/popping undo and redo stacks
    - Gesture transactions (press -> continuous drag -> release): one open
      whole-document baseline at a time, owned by one press, its
      :gesture-id (reactivity plan 16)
-   - Restoring snapshots while keeping live state and preferences
+   - Restoring snapshots while keeping live state and preferences, the rig's
+     group copy with the restored membership (restore-snapshot)
    - Deriving the unsaved-changes flag by comparing against the saved document
    
    Document policy (see plans/2026-11-08-undo-history-boundary.md):
@@ -32,7 +35,8 @@
    Everything above is still written when the project is saved; the rig
    also has a file of its own, saved by itself (zones plan ZR, state.rig-file)."
   (:require [clojure.walk :as walk]
-            [laser-show.common.util :as u]))
+            [laser-show.common.util :as u]
+            [laser-show.state.rig-file :as rig-file]))
 
 (def default-max-depth
   "Default maximum number of history snapshots to retain."
@@ -337,6 +341,21 @@
         (assoc :rig (or rig {}))
         (assoc :chains (graft-live-chains (:chains state) (or chains {}))))))
 
+(defn restore-snapshot
+  "Restore snapshot into state: its document (restore-document), and the
+   rig's copy of the groups its lasers are in ([:rig-file :group-copy])
+   brought to the restored membership with the definitions the snapshot
+   kept (:rig-only-group-definitions) as its fallback, so the last member of
+   a group only the rig defines comes back with the definition. A present
+   {} is all there was; a snapshot without the field falls back on the copy
+   as it is. No other [:rig-file] field changes, and the copy keeps its map
+   when it is equal."
+  [state snapshot]
+  (rig-file/with-group-copy (restore-document state (:document-state snapshot))
+                            (if (contains? snapshot :rig-only-group-definitions)
+                              (:rig-only-group-definitions snapshot)
+                              (get-in state [:rig-file :group-copy]))))
+
 
 ;; Backfill
 ;;
@@ -389,12 +408,23 @@
              (persisted-changed? (extract-document-state old-state)
                                  (extract-document-state new-state))))))
 
+(defn- rig-only-definitions
+  "The definitions of the groups state's projectors and virtual projectors
+   are in that its show doesn't define, as the rig's copy has them
+   (rig-file/group-copy): {id definition}, {} for none."
+  [state]
+  (apply dissoc (rig-file/group-copy state) (keys (:zone-groups state))))
+
 (defn make-snapshot
-  "Create a HistorySnapshot map from current state."
+  "Create a HistorySnapshot map from current state: its document and, beside
+   it, :rig-only-group-definitions (rig-only-definitions), what a restore of
+   its membership needs (restore-snapshot). Neither the document nor the
+   saved baseline holds them."
   [{:keys [state description ui-context timestamp]}]
   (let [document-state (extract-document-state state)
+        rig-only-group-definitions (rig-only-definitions state)
         snapshot-time (or timestamp (System/currentTimeMillis))]
-    (u/->map& document-state description ui-context
+    (u/->map& document-state rig-only-group-definitions description ui-context
               :timestamp snapshot-time)))
 
 (defn- cap-stack

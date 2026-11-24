@@ -595,7 +595,7 @@
    :written {:default 0
              :doc "The newest request a write answered (:rig/written or :rig/write-failed): a write is pending while it is below :requested"}
    :group-copy {:default {}
-                :doc "The rig file's copy of the groups its lasers are in (rig-file/group-copy), as last written or read"}})
+                :doc "This window's copy of the definitions of the groups its lasers are in (rig-file/group-copy): kept to the rig and the show's groups after every event that changes them (handlers/rig_autosave.clj), Undo and Redo (history/restore-snapshot) and Open, whether or not the file can be written; what the next write of the file holds. Not a written file's acknowledgement"}})
 
 
 ;; State Builder
