@@ -9,13 +9,15 @@
    apply.
 
    applied-control sends each change once, as the event its :on-change
-   makes of the new value. settle-ms after the newest change (one timer per
-   control, started again by each), if the control is still bound to the
-   same :address, still shows that change and what applies (:value, from
-   the view's subscription) isn't it, it shows what applies. The timer is
-   no answer: a value that applies later is rendered when it comes, and
-   wins. Bound to another address (the inspector shows another laser), it
-   shows that one's value at once. Setting itself back is no edit: it sends
+   makes of the new value; a control that sends its own (a gesture/slider,
+   whose drag is one press) has no :on-change. settle-ms after the newest
+   change (one timer per control, started again by each, and again while a
+   press holds the control), if the control is still bound to the same
+   :address, still shows that change and what applies (:value, from the
+   view's subscription) isn't it, it shows what applies. The timer is no
+   answer: a value that applies later is rendered when it comes, and wins.
+   Bound to another address (the inspector shows another laser), it shows
+   that one's value at once. Setting itself back is no edit: it sends
    nothing, so it can't toggle, warn or start another wait; neither does a
    value cljfx renders.
 
@@ -27,7 +29,8 @@
             [cljfx.lifecycle :as lifecycle]
             [cljfx.mutator :as mutator]
             [cljfx.prop :as prop]
-            [laser-show.events.core :as events])
+            [laser-show.events.core :as events]
+            [laser-show.views.components.gesture :as gesture])
   (:import [javafx.animation PauseTransition]
            [javafx.beans.value ChangeListener ObservableValue WritableValue]
            [javafx.collections ObservableMap]
@@ -118,13 +121,19 @@
 
 ;; Showing what applies
 
+(defn- pressed?
+  "Is a pointer press on owner, a gesture's (gesture/capture)? Its value is
+   the press's until it ends."
+  [owner]
+  (and (instance? Node owner) (some? (gesture/capture owner))))
+
 (defn- show-applied!
-  "Set owner to what applies (its :user-data :value), unless it shows it.
-   No edit: the listener lets it by."
+  "Set owner to what applies (its :user-data :value), unless it shows it or
+   a press holds it. No edit: the listener lets it by."
   [owner]
   (when-let [{:keys [^ObservableValue property]} (instance-of owner)]
     (let [{:keys [value]} (binding-of owner)]
-      (when-not (same? value (.getValue property))
+      (when-not (or (same? value (.getValue property)) (pressed? owner))
         (binding [*showing-applied?* true]
           (set-native! owner property value)
           (when (instance? TextInputControl owner)
@@ -132,15 +141,17 @@
 
 (defn- changed!
   "A change of owner's value to v that neither cljfx nor show-applied!
-   made: the event its :on-change makes of v, sent once, and what applies
-   again settle-ms after this newest change. A change that is no edit
+   made: the event its :on-change makes of v, sent once (a control without
+   :on-change, a gesture/slider, sends its own), and what applies again
+   settle-ms after this newest change. A change that is no edit
    (:on-change gives nil) shows what applies at once."
   [owner v]
   (let [{:keys [address on-change]} (binding-of owner)
-        {:keys [^PauseTransition timer attempt]} (instance-of owner)]
-    (if-let [event (on-change v)]
+        {:keys [^PauseTransition timer attempt]} (instance-of owner)
+        event (when on-change (on-change v))]
+    (if (or event (nil? on-change))
       (do (vreset! attempt {:address address :value v})
-          (events/dispatch! event)
+          (when event (events/dispatch! event))
           (.playFromStart timer))
       (do (vreset! attempt nil)
           (.stop timer)
@@ -148,14 +159,17 @@
 
 (defn- settled!
   "settle-ms after owner's last change: what applies, if owner is still
-   bound to the address it was changed for and still shows that change."
+   bound to the address it was changed for and still shows that change.
+   While a press still holds it, it waits again."
   [owner]
-  (when-let [{:keys [^ObservableValue property attempt]} (instance-of owner)]
-    (when-let [{:keys [address value]} @attempt]
-      (vreset! attempt nil)
-      (when (and (= address (:address (binding-of owner)))
-                 (same? value (.getValue property)))
-        (show-applied! owner)))))
+  (when-let [{:keys [^ObservableValue property ^PauseTransition timer attempt]} (instance-of owner)]
+    (if (pressed? owner)
+      (.playFromStart timer)
+      (when-let [{:keys [address value]} @attempt]
+        (vreset! attempt nil)
+        (when (and (= address (:address (binding-of owner)))
+                   (same? value (.getValue property)))
+          (show-applied! owner))))))
 
 (defn- rebound!
   "A render bound owner to another address: what it showed for the last
@@ -214,7 +228,9 @@
    - :value - what applies there (the view's subscription)
    - :on-change - (fn [v]) of the control's new value, plain data: the
      event to send, or nil when the change is no edit (it then shows what
-     applies at once)
+     applies at once). Leave it out for a control that sends its own edits
+     (gesture/slider: :desc {:fx/type gesture/slider …}, whose :value is the
+     model's): applied-control then only shows what applies after them
 
    Layout props (:grid-pane/row, :h-box/hgrow …) and :fx/key go with it,
    as with any component."

@@ -3,6 +3,7 @@
    
    Contains:
    - Configuration factory (chain-config)
+   - The vector a step grid looks its zone pattern up in (zone-pattern-items-path)
    - Where an effect instance is now (resolve-effect-instance-path)
    
    This module has NO dependencies on other chain sub-modules to avoid cycles.
@@ -50,6 +51,18 @@
                 :cue-zone-patterns [:ui :dialogs :zone-pattern-editor])
      :domain domain
      :entity-key entity-key}))
+
+(defn zone-pattern-items-path
+  "The one vector a step grid looks its zone pattern up in (zones plan Z6),
+   where chain-config keeps it: a cue's :zone-patterns for
+   :cue-zone-patterns, an effects cell's :items for :effect-chains. nil for
+   any other domain, or an entity-key that isn't a cell's [col row]."
+  [domain entity-key]
+  (when (and (contains? #{:cue-zone-patterns :effect-chains} domain)
+             (vector? entity-key)
+             (= 2 (count entity-key))
+             (every? nat-int? entity-key))
+    (:items-path (chain-config domain entity-key))))
 
 (def ^:private direct-domains
   "The domains whose chain holds the effects themselves."

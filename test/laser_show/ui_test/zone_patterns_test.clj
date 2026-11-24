@@ -16,9 +16,11 @@
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.css PseudoClass]
+           [javafx.event Event]
            [javafx.scene Node]
            [javafx.scene.control CheckBox CheckMenuItem ComboBox Control Labeled Menu MenuButton MenuItem Slider Spinner
-            ToggleButton]))
+            ToggleButton]
+           [javafx.scene.input MouseButton MouseEvent]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -585,6 +587,27 @@
                         Slider (.getValue ^Slider node)
                         Spinner (.getValue ^Spinner node)))))
 
+(defn- click-track!
+  "A primary click, its press and its release, on the slider selector
+   finds, at fraction of its track, as a real mouse sends it (headless, a
+   robot drag loses its button): a press of its own, whose value
+   gesture/slider sends."
+  [selector fraction]
+  (let [^Slider slider (ui/query selector)]
+    (ui/on-fx-thread
+     #(let [^Node track (.lookup slider ".track")
+            b (.getLayoutBounds track)
+            x (* fraction (.getWidth b))
+            y (/ (.getHeight b) 2.0)
+            scene (.localToScene track x y)
+            screen (.localToScreen track x y)]
+        (doseq [t [MouseEvent/MOUSE_PRESSED MouseEvent/MOUSE_RELEASED]]
+          (Event/fireEvent track (MouseEvent. t (.getX scene) (.getY scene) (.getX screen) (.getY screen)
+                                              MouseButton/PRIMARY 1 false false false false
+                                              (= t MouseEvent/MOUSE_PRESSED) false false
+                                              false false false nil)))))
+    (ui/sync-fx!)))
+
 (defn- lock! [locked?]
   (events/dispatch! {:event/type :vibe/set-show-lock :locked? locked?})
   (ui/wait-for! #(= locked? (true? (get-in (app-state) [:ui :show-lock?])))))
@@ -634,7 +657,7 @@
         (is (= 1.0 (param :rate)))
         (ui/wait-for! #(false? (ticked "#modulate-rate"))))
       (testing "a modulator's field, and its type"
-        (attempt! :modulator/update-param #(ui/slide! robot "#modulator-offset-period" 4.0))
+        (attempt! :modulator/update-param #(click-track! "#modulator-offset-period" 0.6))
         (is (= wave (param :offset)))
         (ui/wait-for! #(== 2.0 (value-of "#modulator-offset-period")))
         (attempt! :modulator/update-param #(ui/select! robot "#modulator-offset-time-unit" ":seconds"))
@@ -658,8 +681,9 @@
                #(and (= :hit (param :step-on)) (= :hit (value-of "#param-step-on-choice"))))
         (once! #(ui/select! robot "#choice-path" ":bounce")
                #(and (= :bounce (param :path)) (= :bounce (value-of "#choice-path"))))
-        (once! #(ui/slide! robot "#modulator-offset-period" 4.0)
-               #(and (= 4.0 (:period (param :offset))) (== 4.0 (value-of "#modulator-offset-period"))))
+        (once! #(click-track! "#modulator-offset-period" 0.6)
+               #(let [period (:period (param :offset))]
+                  (and (not= 2.0 period) (== period (value-of "#modulator-offset-period")))))
         (once! #(ui/select! robot "#modulator-type-offset" "Sine")
                #(and (= :sine (:type (param :offset))) (= :sine (:id (value-of "#modulator-type-offset")))))
         (ui/scroll-into-view! "#modulate-rate")
@@ -700,7 +724,7 @@
         (is (= :linear (get-in (cue-pattern) [:keyframe-modulator :keyframes 1 :interpolation])))
         (ui/wait-for! #(= :linear (value-of "#keyframe-interp"))))
       (testing "the selected keyframe's value, in the Numeric list"
-        (attempt! :keyframe/update-param #(ui/slide! robot "#param-rate-slider" 3.0))
+        (attempt! :keyframe/update-param #(click-track! "#param-rate-slider" 0.8))
         (is (= 2.0 (frame-rate)))
         (ui/wait-for! #(== 2.0 (value-of "#param-rate-slider"))))
       (testing "Enable"
@@ -723,8 +747,9 @@
         (once! #(ui/select! robot "#keyframe-interp" ":exp-grow")
                #(and (= :exp-grow (get-in (cue-pattern) [:keyframe-modulator :keyframes 1 :interpolation]))
                      (= :exp-grow (value-of "#keyframe-interp"))))
-        (once! #(ui/slide! robot "#param-rate-slider" 3.0)
-               #(and (= 3.0 (frame-rate)) (== 3.0 (value-of "#param-rate-slider"))))
+        (once! #(click-track! "#param-rate-slider" 0.8)
+               #(let [rate (frame-rate)]
+                  (and (not= 2.0 rate) (== rate (value-of "#param-rate-slider")))))
         (once! #(ui/click! robot "#keyframe-enabled")
                #(and (false? (kf :enabled?)) (false? (ticked "#keyframe-enabled"))))
         (is (= (+ depth 5) (undo-depth)))))))

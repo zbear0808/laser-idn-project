@@ -34,6 +34,7 @@
             [laser-show.subs :as subs]
             [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.commit-field :as commit-field]
+            [laser-show.views.components.gesture :as gesture]
             [laser-show.views.components.target-control :as target-control]))
 
 
@@ -111,23 +112,23 @@
                  :text display-label
                  :pref-width label-w
                  :style-class ["label-secondary"]}
+                ;; A drag is one press, one undo step (reactivity plan 16):
+                ;; gesture/slider sends its changes; after one the app refused
+                ;; (the show lock), it shows the value that applies (applied-value)
                 {:fx/type applied-value/applied-control
                  :property :value
                  :address [on-change-event param-key]
                  :value (double value)
-                 :on-change (fn [v] (assoc on-change-event :param-key param-key :fx/event v))
-                 :desc {:fx/type :slider
+                 :desc {:fx/type gesture/slider
                         :id (str "param-" (name param-key) "-slider")
                         :min min
                         :max max
                         :pref-width 150
                         :snap-to-ticks is-int?
                         :major-tick-unit (if is-int? 1.0 (/ (- max min) 10.0))
-                        :on-mouse-pressed {:event/type :history/begin-transaction
-                                           :label (str "Adjust " display-label)
-                                           :source-id [:slider param-key]}
-                        :on-mouse-released {:event/type :history/commit-transaction
-                                            :source-id [:slider param-key]}}}
+                        :gesture {:label (str "Adjust " display-label)
+                                  :source-id [:slider param-key]
+                                  :on-value-changed (assoc on-change-event :param-key param-key)}}}
                 {:fx/type number-field
                  :id (str "param-" (name param-key) "-field")
                  :text (if is-int?
@@ -437,8 +438,8 @@
 
 (defn param-step-list
   "A step grid's steps (:step-list), in the numeric list: how many there
-   are, and Edit grid… to draw them in the step grid window (its address
-   is on-change-event's :domain, :entity-key and :effect-path)."
+   are, and Edit grid… to draw them in the step grid window (its target is
+   on-change-event's :domain, :entity-key and :effect-instance-id)."
   [{:keys [param-key param-spec current-value on-change-event label-width]}]
   {:fx/type :h-box
    :spacing 8
@@ -458,7 +459,7 @@
                :focus-traversable false
                :style-class ["button-secondary"]
                :on-action {:event/type :step-grid/open
-                           :target (select-keys on-change-event [:domain :entity-key :effect-path])}}]})
+                           :target (select-keys on-change-event [:domain :entity-key :effect-instance-id])}}]})
 
 
 ;; Parameter Control Router

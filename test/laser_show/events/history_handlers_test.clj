@@ -6,6 +6,7 @@
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.history :as history-handlers]
             [laser-show.events.core :as events]
+            [laser-show.routing.zone-patterns :as zp]
             [laser-show.timeline.model :as model]))
 
 (def item-id #uuid "11111111-1111-1111-1111-111111111111")
@@ -46,6 +47,28 @@
 
 (defn- size-of [s] (get-in s [:chains :cue-chains [0 0] :items 0 :params :size]))
 
+;; A press (reactivity plan 16): its begin, its own edits and its end carry
+;; its id
+
+(def ^:private press-g #uuid "00000000-0000-0000-0000-0000000016c1")
+(def ^:private press-h #uuid "00000000-0000-0000-0000-0000000016c2")
+
+(defn- begin
+  ([id] (begin id nil))
+  ([id t] (cond-> {:event/type :history/begin-transaction :label "Adjust Size" :source-id [:slider :size]
+                   :history/gesture-id id}
+            t (assoc :time t))))
+
+(defn- member
+  "Press id's slider edit of the size to value."
+  ([id value] (member id value nil))
+  ([id value t] (cond-> (assoc edit-size :value value :history/gesture-id id) t (assoc :time t))))
+
+(defn- commit
+  ([id] (commit id nil))
+  ([id t] (cond-> {:event/type :history/commit-transaction :source-id [:slider :size] :history/gesture-id id}
+            t (assoc :time t))))
+
 (deftest discrete-event-automatic-history-test
   (testing "discrete event automatically captures pre-action snapshot on undo stack"
     (let [s0 (test-state)
@@ -70,14 +93,13 @@
           (is (false? (history/can-redo? h3))))))))
 
 (deftest continuous-transaction-lifecycle-test
-  (testing "mouse-down and mouse-up group intermediate changes into one undo step"
-    (let [s1 (run (test-state) {:event/type :history/begin-transaction
-                                :label "Adjust Size" :source-id [:slider :size]})
+  (testing "a press's begin and end group its own changes into one undo step"
+    (let [s1 (run (test-state) (begin press-g))
           _ (is (some? (get-in s1 [:history :transaction])))
-          s2 (run s1 (assoc edit-size :value 1.5))
-          s3 (run s2 (assoc edit-size :value 2.0))
+          s2 (run s1 (member press-g 1.5))
+          s3 (run s2 (member press-g 2.0))
           _ (is (= 0 (undo-count s3)) "no snapshots while the transaction is open")
-          s4 (run s3 {:event/type :history/commit-transaction :source-id [:slider :size]})]
+          s4 (run s3 (commit press-g))]
       (is (nil? (get-in s4 [:history :transaction])))
       (is (= 1 (undo-count s4)))
       (is (= "Adjust Size" (history/undo-label (:history s4))))
@@ -87,14 +109,15 @@
 
 (deftest continuous-transaction-abort-test
   (testing "abort-transaction reverts document back to baseline snapshot"
-    (let [s1 (run (test-state) {:event/type :history/begin-transaction
-                                :label "Adjust Size" :source-id [:slider :size]})
-          s2 (run s1 edit-size)
-          s3 (run s2 {:event/type :history/abort-transaction})]
+    (let [s1 (run (test-state) (begin press-g))
+          s2 (run s1 (member press-g 2.0))
+          s3 (run s2 {:event/type :history/abort-transaction :history/gesture-id press-g})]
       (is (= 2.0 (size-of s2)))
       (is (nil? (get-in s3 [:history :transaction])))
       (is (= 1.0 (size-of s3)))
-      (is (false? (history/can-undo? (:history s3)))))))
+      (is (false? (history/can-undo? (:history s3))))
+      (testing "another press's abort does nothing"
+        (is (= s2 (run s2 {:event/type :history/abort-transaction :history/gesture-id press-h})))))))
 
 (deftest runtime-events-do-not-trigger-history-test
   (testing "runtime events such as selection do not push undo snapshots"
@@ -110,10 +133,11 @@
     (is (false? (get-in s1 [:project :dirty?])) "BPM is live: not an unsaved change")
     (testing "a slider transaction with only a BPM change creates no step"
       (let [s (-> s0
-                  (run {:event/type :history/begin-transaction :label "x" :source-id :bpm})
+                  (run {:event/type :history/begin-transaction :label "x" :source-id :bpm :history/gesture-id press-g})
                   (run {:event/type :timing/set-bpm :bpm 140.0})
-                  (run {:event/type :history/commit-transaction :source-id :bpm}))]
-        (is (= 0 (undo-count s)))))))
+                  (run {:event/type :history/commit-transaction :source-id :bpm :history/gesture-id press-g}))]
+        (is (= 0 (undo-count s)))
+        (is (nil? (get-in s [:history :transaction])))))))
 
 (deftest effect-toggle-is-not-undoable-test
   (let [s0 (clean-state)
@@ -249,12 +273,30 @@
                   (keys effects))
         label)))
 
+(def ^:private grid-id #uuid "00000000-0000-0000-0000-0000000016d1")
+(def ^:private grid-session #uuid "00000000-0000-0000-0000-0000000016d2")
+(def ^:private grid-target {:domain :cue-zone-patterns :entity-key [0 0] :effect-instance-id grid-id})
+
+(defn- grid-press-events
+  "Valid step grid press events (with their :state): they do nothing ({})
+   without the window open on the grid, and :paint without its press."
+  []
+  (let [s (-> (test-state)
+              (assoc-in [:chains :cue-chains [0 0] :zone-patterns] [(assoc (zp/preset-instance :steps :cue) :id grid-id)])
+              (run {:event/type :step-grid/open :target grid-target :editor-id grid-session}))
+        press {:editor-id grid-session :target grid-target :history/gesture-id press-g}
+        pressed (run s (assoc press :event/type :step-grid/paint-start :row 0 :step 0))]
+    {:step-grid/paint-start (assoc press :state s :row 0 :step 1)
+     :step-grid/paint (assoc press :state pressed :row 0 :step 2)}))
+
 (deftest history-labels-name-real-events-test
-  (doseq [event-type (keys history-handlers/event-descriptions)]
-    (let [result (try (handlers/handle-event {:event/type event-type :state (test-state)})
-                      (catch Throwable _ ::threw))]
-      (is (not= {} result)
-          (str event-type " is not routed to a handler (unknown events return {})")))))
+  (let [valid (grid-press-events)]
+    (doseq [event-type (keys history-handlers/event-descriptions)]
+      (let [event (get valid event-type {:state (test-state)})
+            result (try (handlers/handle-event (assoc event :event/type event-type))
+                        (catch Throwable _ ::threw))]
+        (is (not= {} result)
+            (str event-type " is not routed to a handler (unknown events return {})"))))))
 
 ;; Regression tests for the 2026-11-08 review
 
@@ -262,34 +304,89 @@
 (def scan {:event/type :projectors/scan-complete :devices devices})
 
 (deftest drag-back-to-saved-value-is-clean-test
-  (let [begin {:event/type :history/begin-transaction :label "Size" :source-id :size}
-        commit {:event/type :history/commit-transaction :source-id :size}]
-    (testing "clean -> drag away and back -> commit is clean"
-      (let [s (-> (clean-state) (run begin) (run (assoc edit-size :value 2.0))
-                  (run (assoc edit-size :value 1.0)) (run commit))]
-        (is (false? (get-in s [:project :dirty?])))
-        (is (= 0 (undo-count s)))))
-    (testing "dirty -> drag back to the saved value -> commit is clean"
-      (let [s (-> (clean-state) (run (assoc edit-size :value 3.0)) (run begin)
-                  (run (assoc edit-size :value 1.0)) (run commit))]
-        (is (false? (get-in s [:project :dirty?])))))))
+  (testing "clean -> drag away and back -> commit is clean"
+    (let [s (-> (clean-state) (run (begin press-g)) (run (member press-g 2.0))
+                (run (member press-g 1.0)) (run (commit press-g)))]
+      (is (false? (get-in s [:project :dirty?])))
+      (is (= 0 (undo-count s)))))
+  (testing "dirty -> drag back to the saved value -> commit is clean"
+    (let [s (-> (clean-state) (run (assoc edit-size :value 3.0)) (run (begin press-g))
+                (run (member press-g 1.0)) (run (commit press-g)))]
+      (is (false? (get-in s [:project :dirty?]))))))
 
 (deftest long-drag-stays-one-step-test
   (let [t0 1000000
-        s (reduce (fn [s n] (run s (assoc edit-size :value (+ 1.0 (* n 0.01)) :time (+ t0 (* n 1000)))))
-                  (run (clean-state) {:event/type :history/begin-transaction :label "Size" :source-id :size :time t0})
+        s (reduce (fn [s n] (run s (member press-g (+ 1.0 (* n 0.01)) (+ t0 (* n 1000)))))
+                  (run (clean-state) (begin press-g t0))
                   (range 1 100))
-        s (run s {:event/type :history/commit-transaction :source-id :size :time (+ t0 100000)})]
+        s (run s (commit press-g (+ t0 100000)))]
     (is (= 1 (undo-count s)) "a 100 s drag with activity is one step")))
 
 (deftest stale-transaction-auto-commits-after-inactivity-test
   (let [t0 1000000
         s (-> (clean-state)
-              (run {:event/type :history/begin-transaction :label "Size" :source-id :size :time t0})
-              (run (assoc edit-size :time (+ t0 10))))
+              (run (begin press-g t0))
+              (run (member press-g 2.0 (+ t0 10))))
         s (run s {:event/type :grid/clear-cell :col 0 :row 0 :time (+ t0 history/stale-transaction-ms 100)})]
     (is (nil? (get-in s [:history :transaction])))
     (is (= 2 (undo-count s)) "the stale drag, then the clear as its own step")))
+
+(defn- beat-report
+  "The show clock's status report with beat in the bar beat, at t: what
+   :show-clock/status writes (the beat into [:timing], a document root)."
+  [beat t]
+  {:event/type :show-clock/status :time t
+   :status {:beat-index beat :frame-stats {} :mtc {:state :stopped :fps nil :text nil} :cue-warnings nil}})
+
+(deftest only-owned-undoable-changes-renew-the-deadline-test
+  ;; Reactivity plan 16 §4.4: the deadline is the press's last undoable
+  ;; change + 60 s; beats, UI and other presses never move it
+  (let [begun (-> (clean-state) (run (begin press-g 0)) (run (member press-g 2.0 0)))
+        beats (fn [s from to] (reduce (fn [s t] (run s (beat-report (mod (quot t 500) 4) t))) s (range from to 500)))]
+    (testing "beats until 59,999 ms: status updates, the press's activity doesn't"
+      (let [s (-> begun (beats 500 60000) (run (beat-report 3 59999)))]
+        (is (= 3 (get-in s [:timing :beat-index])) "the beat still shows")
+        (is (= 0 (get-in s [:history :transaction :last-activity])) "the last activity is the press's own")
+        (is (= press-g (history/gesture-id (:history s))) "still open")
+        (is (= 0 (undo-count s)))
+        (let [due (run s (beat-report 0 60000))]
+          (is (nil? (get-in due [:history :transaction])) "at 60,000 ms the press's step is sealed")
+          (is (= 1 (undo-count due)))
+          (is (= 0 (get-in due [:timing :beat-index])) "and the report applied"))))
+    (testing "an event that returns no state at the deadline still publishes the seal"
+      (let [effects (pipeline {:event/type :ui/clear-notice :id (random-uuid) :state begun :time 60000})]
+        (is (nil? (get-in effects [:state :history :transaction])))
+        (is (= 1 (undo-count (:state effects))))
+        (is (= {:cancel-id press-g} (:history/gesture-alarm effects)) "and its wake-up is cancelled")))
+    (testing "the press's wake-up with nothing else happening seals it"
+      (let [effects (pipeline {:event/type :history/gesture-timeout :history/gesture-id press-g :state begun :time 60000})]
+        (is (nil? (get-in effects [:state :history :transaction])))
+        (is (= 1 (undo-count (:state effects))))
+        (is (= 2.0 (size-of (:state effects))) "the value it set stays")))
+    (testing "an early wake-up after the press's own change waits the rest of its time, writing nothing"
+      (let [later (run begun (member press-g 2.5 50000))
+            effects (pipeline {:event/type :history/gesture-timeout :history/gesture-id press-g :state later :time 60000})]
+        (is (= 50000 (get-in later [:history :transaction :last-activity])))
+        (is (= {:history/gesture-alarm {:arm {:gesture-id press-g :delay-ms 50000}}} effects))
+        (let [held (-> later (run (member press-g 3.0 100000)) (run (commit press-g 100001)))]
+          (is (= 1 (undo-count held)) "every value of the press is one step")
+          (is (= 1.0 (size-of (run held {:event/type :edit/undo})))))))
+    (testing "a wake-up for an older press while H is held does nothing"
+      (let [h (run begun (begin press-h 1000))]
+        (is (= press-h (history/gesture-id (:history h))) "H's begin sealed G")
+        (is (= {} (pipeline {:event/type :history/gesture-timeout :history/gesture-id press-g :state h :time 60000})))
+        (is (= {} (pipeline (assoc (member press-g 9.0 2000) :state h))) "nor an old press's edit")
+        (is (= {} (pipeline (assoc (commit press-g 2000) :state h))) "nor its end")))
+    (testing "the alarm follows the open press: armed on begin, cancelled on its end, handed over to the next"
+      (is (= {:arm {:gesture-id press-g :delay-ms history/stale-transaction-ms}}
+             (:history/gesture-alarm (pipeline (assoc (begin press-g 0) :state (clean-state))))))
+      (is (= {:cancel-id press-g} (:history/gesture-alarm (pipeline (assoc (commit press-g 10) :state begun)))))
+      (is (= {:cancel-id press-g :arm {:gesture-id press-h :delay-ms history/stale-transaction-ms}}
+             (:history/gesture-alarm (pipeline (assoc (begin press-h 10) :state begun))))))
+    (testing "a drag moved back to its saved value is no step, and the project is clean"
+      (let [s (-> begun (run (member press-g 1.0 10)) (run (commit press-g 20)))]
+        (is (= 0 (undo-count s)))
+        (is (false? (get-in s [:project :dirty?])))))))
 
 (deftest scan-backfill-survives-undo-and-redo-test
   (testing "edit -> undo -> scan -> redo keeps the projectors"
@@ -446,14 +543,26 @@
         (is (= undo-min ignored))
         (is (= (assoc triangle :min 0.3 :max 0.9) (amount redone)) "Redo puts both back")
         (is (true? (get-in redone [:project :dirty?])))))
-    (testing "Min's changes inside one press and release are one step"
-      (let [s (reduce run initial [{:event/type :history/begin-transaction :label "Adjust Min" :source-id [:modulator-slider :min]}
-                                   (field :min 0.25) (field :min 0.3) (field :min 0.35)
-                                   {:event/type :history/commit-transaction :source-id [:modulator-slider :min]}])]
+    (testing "Min's changes inside one press and release are one step: each carries the press's id"
+      (let [press #(assoc (field :min %) :history/gesture-id press-g)
+            s (reduce run initial [{:event/type :history/begin-transaction :label "Adjust Min" :source-id [:modulator-slider :min]
+                                    :history/gesture-id press-g}
+                                   (press 0.25) (press 0.3) (press 0.35)
+                                   {:event/type :history/commit-transaction :source-id [:modulator-slider :min]
+                                    :history/gesture-id press-g}])]
         (is (= (assoc triangle :min 0.35) (amount s)))
         (is (= 1 (undo-count s)))
+        (is (nil? (get-in s [:history :transaction])))
         (is (= "Adjust Min" (history/undo-label (:history s))))
-        (is (= triangle (amount (run s {:event/type :edit/undo}))))))))
+        (is (= triangle (amount (run s {:event/type :edit/undo}))))
+        (testing "and the Max set meanwhile, with no press, is a step of its own"
+          (let [s (reduce run initial [{:event/type :history/begin-transaction :label "Adjust Min" :source-id [:modulator-slider :min]
+                                        :history/gesture-id press-g}
+                                       (press 0.25) (field :max 0.9) (press 0.3)
+                                       {:event/type :history/commit-transaction :source-id [:modulator-slider :min]
+                                        :history/gesture-id press-g}])]
+            (is (= (assoc triangle :min 0.25 :max 0.9) (amount s)) "the press's later change does nothing")
+            (is (= 2 (undo-count s)))))))))
 
 (deftest timeline-nudge-coalesces-test
   (let [base (-> (test-state)

@@ -35,6 +35,7 @@
             [laser-show.animation.modulator-registry :as reg]
             [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.commit-field :as commit-field]
+            [laser-show.views.components.gesture :as gesture]
             [laser-show.views.components.parameter-controls :as param-controls]))
 
 
@@ -138,21 +139,22 @@
                  :pref-width 90
                  :style-class ["text-small"]
                  :style "-fx-text-fill: #909090;"}
+                ;; A drag is one press, one undo step (reactivity plan 16):
+                ;; gesture/slider sends its value events (the template with
+                ;; mod-param-key); after one the app refused (the show lock),
+                ;; it shows the value that applies (applied-value)
                 {:fx/type applied-value/applied-control
                  :property :value
                  :address [on-change-event key]
                  :value (double value)
-                 :on-change (fn [v] (assoc on-change-event :mod-param-key key :fx/event v))
-                 :desc {:fx/type :slider
+                 :desc {:fx/type gesture/slider
                         :id (param-id on-change-event key)
                         :min min
                         :max max
                         :pref-width 80
-                        :on-mouse-pressed {:event/type :history/begin-transaction
-                                           :label (str "Adjust " (or label (name key)))
-                                           :source-id [:modulator-slider key]}
-                        :on-mouse-released {:event/type :history/commit-transaction
-                                            :source-id [:modulator-slider key]}}}
+                        :gesture {:label (str "Adjust " (or label (name key)))
+                                  :source-id [:modulator-slider key]
+                                  :on-value-changed (assoc on-change-event :mod-param-key key)}}}
                 {:fx/type param-controls/number-field
                  :id (str (param-id on-change-event key) "-field")
                  :text (format "%.2f" (double value))

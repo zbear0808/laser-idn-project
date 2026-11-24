@@ -290,10 +290,11 @@
    :style-class ["label" "label-hint" "zone-pattern-hint"]})
 
 (defn- grid-target
-  "The step grid's address of the pattern a renderer edits (effect-keys:
-   {:domain :entity-key :effect-path}, a keyframe's index left out)."
+  "The step grid window's target for the pattern a renderer edits
+   (effect-keys: {:domain :entity-key :effect-instance-id}, the instance
+   whose params it shows; its place and a keyframe's index left out)."
   [effect-keys]
-  (select-keys effect-keys [:domain :entity-key :effect-path]))
+  (select-keys effect-keys [:domain :entity-key :effect-instance-id]))
 
 (def ^:private mini-cell 9.0)
 
@@ -392,7 +393,7 @@
    should know (zone-patterns/warnings). Props: the custom renderer's
    :current-params :params-map :on-change-event :on-text-event
    :modulator-event-base, and :effect-keys {:domain :entity-key
-   :effect-path}."
+   :effect-path :effect-instance-id}."
   [{:keys [fx/context current-params effect-keys] :as props}]
   (let [params current-params
         style (style-of params)
@@ -557,8 +558,15 @@
                                [{:fx/type :separator-menu-item}
                                 {:fx/type :menu-item
                                  :text "Step grid…"
-                                 :on-action {:event/type :step-grid/open
-                                             :target {:domain :cue-zone-patterns :entity-key [col row] :effect-path [0]}}}
+                                 ;; The pattern by its id, even while it is off; with none, the cue
+                                 ;; asks for its first
+                                 :on-action (if pattern
+                                              {:event/type :step-grid/open
+                                               :target {:domain :cue-zone-patterns :entity-key [col row]
+                                                        :effect-instance-id (:id pattern)}}
+                                              {:event/type :step-grid/open
+                                               :target {:domain :cue-zone-patterns :entity-key [col row]}
+                                               :create-first? true})}
                                 {:fx/type :menu-item
                                  :text "Edit pattern…"
                                  :disable (nil? pattern)

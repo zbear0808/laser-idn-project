@@ -225,48 +225,69 @@
                                        (history/push-undo-snapshot (snap "a"))
                                        (history/push-undo-snapshot (snap "b"))))))))))
 
+(def ^:private press-a #uuid "00000000-0000-0000-0000-0000000016a1")
+(def ^:private press-b #uuid "00000000-0000-0000-0000-0000000016b2")
+
 (deftest transaction-lifecycle-test
   (testing "transaction captures baseline on begin, and commits on mouse-up only if changed"
     (let [h0 {:undo-stack [] :redo-stack [] :transaction nil}
-          h1 (history/begin-transaction h0 sample-state {:label "Drag Slider" :source-id [:slider :size]})]
+          h1 (history/begin-transaction h0 sample-state {:label "Drag Slider" :gesture-id press-a :source-id [:slider :size]})]
       (is (some? (:transaction h1)))
       (is (= "Drag Slider" (get-in h1 [:transaction :label])))
-      (let [h-no-change (history/commit-transaction h1 sample-state)]
+      (is (= press-a (history/gesture-id h1)))
+      (let [h-no-change (history/finish-transaction h1 sample-state press-a)]
         (is (nil? (:transaction h-no-change)))
         (is (false? (history/can-undo? h-no-change))))
       (testing "live changes alone don't create a step"
-        (is (false? (history/can-undo? (history/commit-transaction h1 (assoc-in sample-state [:timing :bpm] 150.0))))))
-      (let [h-committed (history/commit-transaction h1 (edit-content sample-state))]
+        (is (false? (history/can-undo? (history/finish-transaction h1 (assoc-in sample-state [:timing :bpm] 150.0) press-a)))))
+      (let [h-committed (history/finish-transaction h1 (edit-content sample-state) press-a)]
         (is (nil? (:transaction h-committed)))
         (is (true? (history/can-undo? h-committed)))
         (is (= "Drag Slider" (history/undo-label h-committed))))))
 
   (testing "abort-transaction returns baseline and clears transaction"
-    (let [h1 (history/begin-transaction {} sample-state {:label "Drag Slider" :source-id [:slider :size]})
-          {:keys [history baseline]} (history/abort-transaction h1)]
+    (let [h1 (history/begin-transaction {} sample-state {:label "Drag Slider" :gesture-id press-a :source-id [:slider :size]})
+          {:keys [history baseline]} (history/abort-transaction h1 press-a)]
       (is (nil? (:transaction history)))
-      (is (some? baseline)))))
+      (is (some? baseline))))
+  (testing "without a press id nothing begins"
+    (is (nil? (:transaction (history/begin-transaction {} sample-state {:label "x" :source-id [:slider :size]}))))))
 
 (deftest transaction-source-scoping-test
-  (let [h1 (history/begin-transaction {} sample-state {:label "A" :source-id [:slider :a]})
+  ;; Reactivity plan 16: a press owns the transaction by its id; the control
+  ;; (:source-id) is only described
+  (let [h1 (history/begin-transaction {} sample-state {:label "A" :gesture-id press-a :source-id [:slider :a] :now 0})
         edited (edit-content sample-state)]
-    (testing "any mouse-up commits the open transaction (a missed mouse-up can't leave it stuck)"
-      (is (nil? (:transaction (history/commit-transaction h1 edited))))
-      (is (= "A" (history/undo-label (history/commit-transaction h1 edited)))))
-    (testing "begin from the same source keeps the open transaction"
-      (is (= (:transaction h1) (:transaction (history/begin-transaction h1 edited {:label "A" :source-id [:slider :a]})))))
-    (testing "begin from a new source commits the open one first"
-      (let [h2 (history/begin-transaction h1 edited {:label "B" :source-id [:slider :b]})]
-        (is (= "A" (history/undo-label h2)))
-        (is (= "B" (get-in h2 [:transaction :label])))))))
+    (testing "two presses on the same control get two baselines: a new press seals the open one first"
+      (let [h2 (history/begin-transaction h1 edited {:label "A" :gesture-id press-b :source-id [:slider :a] :now 10})]
+        (is (= "A" (history/undo-label h2)) "the first press's step")
+        (is (= press-b (history/gesture-id h2)))
+        (is (= (doc edited) (get-in h2 [:transaction :baseline-snapshot :document-state]))
+            "the second press's baseline is the document after the first")))
+    (testing "the same press again is inert"
+      (is (= h1 (history/begin-transaction h1 edited {:label "A" :gesture-id press-a :source-id [:slider :a] :now 99}))))
+    (testing "another press's touch, commit or abort does nothing"
+      (is (= h1 (history/touch-transaction h1 press-b 500)))
+      (is (= h1 (history/finish-transaction h1 edited press-b)))
+      (is (= {:history h1 :baseline nil} (history/abort-transaction h1 press-b)))
+      (is (= h1 (history/finish-transaction h1 edited nil)) "nor an end with no press"))
+    (testing "the open press's touch marks its activity"
+      (is (= 500 (get-in (history/touch-transaction h1 press-a 500) [:transaction :last-activity]))))
+    (testing "a late end, after its press was sealed, does nothing"
+      (let [sealed (history/finish-transaction h1 edited press-a)]
+        (is (= sealed (history/finish-transaction sealed edited press-a)))
+        (is (= 1 (count (:undo-stack sealed))))))))
 
 (deftest stale-transaction-test
-  (let [h (history/begin-transaction {} sample-state {:label "A" :source-id :x :now 0})]
+  (let [h (history/begin-transaction {} sample-state {:label "A" :gesture-id press-a :source-id :x :now 0})]
     (is (not (history/stale-transaction? h 1000)))
-    (is (history/stale-transaction? h (inc history/stale-transaction-ms)))
+    (is (not (history/stale-transaction? h (dec history/stale-transaction-ms))))
+    (is (history/stale-transaction? h history/stale-transaction-ms) "due at its deadline")
+    (is (= history/stale-transaction-ms (history/transaction-deadline h)))
     (testing "activity keeps a long drag fresh"
-      (let [touched (history/touch-transaction h 50000)]
+      (let [touched (history/touch-transaction h press-a 50000)]
         (is (not (history/stale-transaction? touched 100000)))
+        (is (= (+ 50000 history/stale-transaction-ms) (history/transaction-deadline touched)))
         (is (history/stale-transaction? touched (+ 50001 history/stale-transaction-ms)))))
     (is (not (history/stale-transaction? {} (inc history/stale-transaction-ms))))))
 
