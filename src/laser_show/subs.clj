@@ -195,6 +195,17 @@
 ;; These compose from simpler subscriptions for better cache reuse.
 
 
+(defn cell-selected?
+  "Is [col row] its grid's selected cell: the cue grid's
+   (selected-grid-cell) for action-type :trigger-cue, the effects grid's
+   (selected-effects-cell) for :trigger-effect? true or false, false while
+   none is. The cells' display data read this, not the selection, so a
+   move rebuilds only the old cell's and the new one's."
+  [context action-type col row]
+  (= [col row] (case action-type
+                 :trigger-cue (fx/sub-ctx context selected-grid-cell)
+                 :trigger-effect (fx/sub-ctx context selected-effects-cell))))
+
 (defn cue-cell-chain
   "Cue chain stored at [col row], or {:items []} when the cell is empty.
    Only depends on this cell's entry, not the whole :chains domain."
@@ -254,7 +265,7 @@
    Depends on:
    - cue-cell-chain (this cell's cue chain)
    - cue-cell-active? (whether this cell is playing)
-   - selected-grid-cell
+   - cell-selected? (whether this cell is the selected one)
    
    Returns map with:
    - :col, :row - position
@@ -275,7 +286,7 @@
             :name (:name cue-chain-data)
             :cue-chain cue-chain-data
             :active? (fx/sub-ctx context cue-cell-active? col row)
-            :selected? (= (fx/sub-ctx context selected-grid-cell) [col row])}
+            :selected? (fx/sub-ctx context cell-selected? :trigger-cue col row)}
            (cue-chains/grid-content cue-chain-data))))
 
 (defn- held-count [state]
@@ -332,8 +343,9 @@
 (defn effect-cell-display-data
   "Computed display data for an effects grid cell.
    
-   Depends on: effect-cell-chain (this cell's effect chain) and
-   stored-effect-cell (what it stores)
+   Depends on: effect-cell-chain (this cell's effect chain),
+   stored-effect-cell (what it stores) and cell-selected? (whether it is
+   the selected one)
    
    Returns map with:
    - :col, :row - position
@@ -352,7 +364,7 @@
         {:keys [has-content? leaves]} (fx/sub-ctx context stored-effect-cell col row)
         first-effect (first leaves)
         effect-count (count leaves)
-        selected? (= (fx/sub-ctx context selected-effects-cell) [col row])]
+        selected? (fx/sub-ctx context cell-selected? :trigger-effect col row)]
     {:col col
      :row row
      :name (:name cell-data)
@@ -1608,6 +1620,38 @@
    Depends on: backend domain"
   [context]
   (fx/sub-val context get-in [:backend :input :learning-target]))
+
+(def ^:private cell-action-types
+  "The actions that trigger a grid cell: a cue cell, an effects cell."
+  #{:trigger-cue :trigger-effect})
+
+(defn cell-trigger-targets
+  "The grid cells an input triggers, #{[action-type [col row]]}: an entry
+   for each cell a :trigger-cue or :trigger-effect binding of the trigger
+   map names, whatever its key and :behavior, and whether the cell plays
+   or holds anything. Both grids share it, so a change to the trigger map
+   walks it once; each cell reads its own entry (cell-has-trigger?). Only
+   the cells' ⚡ reads it: the trigger editor lists the keys themselves,
+   and the resolver plays the bindings."
+  [context]
+  (into #{}
+        (keep (fn [{:keys [type target]}]
+                (when (contains? cell-action-types type) [type target])))
+        (vals (fx/sub-ctx context input-trigger-map))))
+
+(defn cell-has-trigger?
+  "Does an input trigger the cell [col row] of action-type's grid
+   (cell-trigger-targets)? true or false, so another cell's bindings
+   changing, or a binding's :behavior, leaves it be."
+  [context action-type col row]
+  (contains? (fx/sub-ctx context cell-trigger-targets) [action-type [col row]]))
+
+(defn cell-learning?
+  "Is a learn waiting for the input of the cell [col row] of action-type's
+   grid (input-learning-target)? true or false: a learn for anything else,
+   or none, is false, so one starting or ending leaves the other cells be."
+  [context action-type col row]
+  (= {:type action-type :target [col row]} (fx/sub-ctx context input-learning-target)))
 
 (defn trigger-definitions
   "Get configured internal trigger definitions."

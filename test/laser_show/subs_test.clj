@@ -2,6 +2,7 @@
   "Subscription tests run against a real cljfx context (no FX toolkit needed)."
   (:require
    [cljfx.api :as fx]
+   [clojure.core.cache :as cache]
    [clojure.test :refer [deftest is testing]]
    [laser-show.events.handlers.timing :as timing]
    [laser-show.output.driver]
@@ -208,6 +209,146 @@
             "a pattern and a scale in a disabled group")
         (is (true? (empty? (assoc-in mastered [:chains :effect-chains [2 0]] {:items [{:type :group :items []}]})))
             "a group alone: no effect yet")))))
+
+
+;; Both grids: an edit builds again only the cells it changes
+;; (plans/2026-11-23-cljfx-reactivity/35)
+
+(defn- comparison-context
+  "A context whose cache keeps every entry these tests make (4,096, nothing
+   evicted), so a count says what depends on what."
+  [s]
+  (fx/create-context s #(cache/lru-cache-factory % :threshold 4096)))
+
+(def ^:private grid-cells (for [row (range 4) col (range 8)] [col row]))
+
+(defn- counting
+  "Call (f counts) while each var of vars ({var kind}) counts its body's
+   runs in counts, {[kind args] n}. The counting fns are in place before
+   anything subscribes to them: they are what the cache keys on."
+  [vars f]
+  (let [counts (atom {})]
+    (with-redefs-fn (into {} (for [[v kind] vars :let [body @v]]
+                               [v (fn [ctx & args]
+                                    (swap! counts update [kind (vec args)] (fnil inc 0))
+                                    (apply body ctx args))]))
+      #(f counts))))
+
+(def ^:private grid-state
+  "base-state with the effects grid's selection on A1 as well, and an
+   effects cell of a group."
+  (-> base-state
+      (assoc-in [:effects :selected-cell] [0 0])
+      (assoc-in [:chains :effect-chains [2 0]] {:items [{:type :group :items [{:type :effect :effect-id :hue-shift}]}]})))
+
+(defn- rebuilt
+  "Both grids' display data in ctx, {[:cue [col row]] map, [:fx [col row]]
+   map}, and the cells whose body ran for them, each once (counts, of
+   counting)."
+  [counts ctx]
+  (reset! counts {})
+  (let [displays (into {} (for [[kind sub] [[:cue subs/cell-display-data] [:fx subs/effect-cell-display-data]]
+                                [col row] grid-cells]
+                            [[kind [col row]] (fx/sub-ctx ctx sub col row)]))]
+    (is (every? #{1} (vals @counts)) "no cell built twice")
+    [displays (set (keys @counts))]))
+
+(deftest grid-selection-rebuilds-only-old-and-new-cells-test
+  (counting
+   {#'subs/cell-display-data :cue #'subs/effect-cell-display-data :fx}
+   (fn [counts]
+     (let [ctx (comparison-context grid-state)
+           [before warm] (rebuilt counts ctx)
+           selected (fn [displays & cells] (mapv #(:selected? (displays %)) cells))
+           kept? (fn [after changed]
+                   (every? #(identical? (before %) (after %)) (remove changed (keys before))))
+           A1 [:cue [0 0]] A2 [:cue [1 0]]]
+       (is (= 64 (count warm)) "warm: each cell of both grids built once")
+       (testing "the cue grid's selection moves from A1 to A2: those two cells, no other"
+         (let [[after ran] (rebuilt counts (fx/swap-context ctx assoc-in [:grid :selected-cell] [1 0]))]
+           (is (= #{A1 A2} ran))
+           (is (= [true false] (selected before A1 A2)))
+           (is (= [false true] (selected after A1 A2)))
+           (is (= (map #(dissoc (before %) :selected?) [A1 A2]) (map #(dissoc (after %) :selected?) [A1 A2]))
+               "only :selected? changes")
+           (is (kept? after #{A1 A2}) "the other 30 cells and the effects grid: the same maps")))
+       (testing "the effects grid's, on its own"
+         (let [[after ran] (rebuilt counts (fx/swap-context ctx assoc-in [:effects :selected-cell] [1 0]))]
+           (is (= #{[:fx [0 0]] [:fx [1 0]]} ran))
+           (is (= [true false] (selected before [:fx [0 0]] [:fx [1 0]])))
+           (is (= [false true] (selected after [:fx [0 0]] [:fx [1 0]])))
+           (is (kept? after #{[:fx [0 0]] [:fx [1 0]]}) "the cue grid and the other 30: the same maps")))
+       (testing "the same cell selected again: none"
+         (let [[after ran] (rebuilt counts (fx/swap-context ctx assoc-in [:grid :selected-cell] [0 0]))]
+           (is (= #{} ran))
+           (is (kept? after #{}))))
+       (testing "no cell selected, then one: a cell each time"
+         (let [none (fx/swap-context ctx assoc-in [:grid :selected-cell] nil)
+               [after-none ran] (rebuilt counts none)
+               [after ran'] (rebuilt counts (fx/swap-context none assoc-in [:grid :selected-cell] [1 0]))]
+           (is (= #{A1} ran))
+           (is (= [false false] (selected after-none A1 A2)))
+           (is (= #{A2} ran'))
+           (is (= [false true] (selected after A1 A2)))))))))
+
+(def ^:private key-h {:source :keyboard :id :h})
+(def ^:private note-60 {:source :midi :channel 0 :note 60})
+(def ^:private cue-a2 {:type :trigger-cue :target [1 0]})
+(def ^:private fx-a2 {:type :trigger-effect :target [1 0]})
+(def ^:private vibe-hit {:type :vibe :role :hit})
+
+(defn- cells-with-trigger
+  "The cells of both grids that say an input triggers them, each asked on
+   its own (cell-has-trigger?): #{[action-type [col row]]}."
+  [ctx]
+  (set (for [type [:trigger-cue :trigger-effect]
+             [col row] grid-cells
+             :when (fx/sub-ctx ctx subs/cell-has-trigger? type col row)]
+         [type [col row]])))
+
+(deftest cell-trigger-index-is-shared-by-both-grids-test
+  (counting
+   {#'subs/cell-trigger-targets :index}
+   (fn [counts]
+     (let [walks #(get @counts [:index []] 0)
+           asked (fn [ctx] (let [n (walks) cells (cells-with-trigger ctx)] [cells (- (walks) n)]))
+           bindings (fn [m] #(assoc-in % [:config :input :trigger-map] m))
+           ctx (comparison-context base-state)]
+       (testing "the 64 cells' first look walks the bindings once"
+         (is (= [#{} 1] (asked ctx))))
+       (let [last-ctx
+             (reduce
+              (fn [ctx [label f expected]]
+                (let [ctx' (fx/swap-context ctx f)]
+                  (testing label
+                    (is (= expected (asked ctx')) "[the cells with ⚡, walks of the bindings]"))
+                  ctx'))
+              ctx
+              [["a key for a Vibe role: one walk, no cell" (bindings {key-h vibe-hit}) [#{} 1]]
+               ["two keys for cue A2" (bindings {key-h cue-a2 note-60 cue-a2}) [#{[:trigger-cue [1 0]]} 1]]
+               ["one of them gone: it still has one" (bindings {note-60 cue-a2}) [#{[:trigger-cue [1 0]]} 1]]
+               ["its last key on the effects cell at the same place" (bindings {note-60 fx-a2})
+                [#{[:trigger-effect [1 0]]} 1]]
+               ["and on a Vibe role" (bindings {note-60 vibe-hit}) [#{} 1]]
+               ["two keys for an empty cell" (bindings {key-h fx-a2 note-60 fx-a2}) [#{[:trigger-effect [1 0]]} 1]]
+               ["both kinds at one place" (bindings {key-h fx-a2 note-60 cue-a2})
+                [#{[:trigger-cue [1 0]] [:trigger-effect [1 0]]} 1]]
+               ["the last key gone" (bindings {}) [#{} 1]]
+               ["a key that follows the cue's mode" (bindings {note-60 (assoc cue-a2 :behavior :follow)})
+                [#{[:trigger-cue [1 0]]} 1]]
+               ["its behavior alone: a walk, the same cells" (bindings {note-60 (assoc cue-a2 :behavior :momentary)})
+                [#{[:trigger-cue [1 0]]} 1]]
+               ["a selection: no walk" #(assoc-in % [:grid :selected-cell] [1 0]) [#{[:trigger-cue [1 0]]} 0]]
+               ["a learn starting: no walk" #(assoc-in % [:backend :input :learning-target] fx-a2)
+                [#{[:trigger-cue [1 0]]} 0]]
+               ["and ending: none" #(update-in % [:backend :input] dissoc :learning-target) [#{[:trigger-cue [1 0]]} 0]]
+               ["a key for the cue that plays, as for any" (bindings {key-h {:type :trigger-cue :target [0 0]}
+                                                                      note-60 (assoc cue-a2 :behavior :momentary)})
+                [#{[:trigger-cue [0 0]] [:trigger-cue [1 0]]} 1]]
+               ["that cue stopping: no walk" #(update-in % [:playback :active-cues] dissoc [0 0])
+                [#{[:trigger-cue [0 0]] [:trigger-cue [1 0]]} 0]]])]
+         (is (= (assoc cue-a2 :behavior :momentary) (get (fx/sub-ctx last-ctx subs/input-trigger-map) note-60))
+             "the bindings themselves, which the trigger editor lists, keep their behavior"))))))
 
 (deftest beat-index-sub-test
   (let [ctx (context base-state)]
