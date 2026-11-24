@@ -199,13 +199,14 @@
                                            drag's press (its undo transaction)
 
    Drag-and-drop target opts (drops from other nodes, not mouse drags on the
-   canvas; attached only when given). Each receives the Dragboard; the
-   canvas accepts COPY only, and redraws only when :drag-updates change the
-   interaction state:
-     :on-drag-over     - (fn [mx my ^Dragboard db value drag-info])
+   canvas; attached only when given). Each receives the DragEvent: read its
+   payload with drag-drop-cell/read-payload during the call, and keep only
+   plain data. The canvas accepts COPY only, and redraws only when
+   :drag-updates change the interaction state:
+     :on-drag-over     - (fn [mx my ^DragEvent e value drag-info])
                          Returns {:accept? bool :drag-updates map}
      :on-drag-exited   - (fn [value drag-info]) Returns {:drag-updates map}
-     :on-drag-dropped  - (fn [mx my ^Dragboard db value drag-info])
+     :on-drag-dropped  - (fn [mx my ^DragEvent e value drag-info])
                          Returns {:dispatch event(s) :drag-updates map}; the
                          drop completes when :dispatch is non-nil
 
@@ -388,7 +389,7 @@
           (assoc :on-drag-over
                  (fn [^DragEvent e]
                    (let [{:keys [canvas drag-state x y]} (extract-event-info e)
-                         {:keys [accept? drag-updates]} (on-drag-over x y (.getDragboard e) value drag-state)]
+                         {:keys [accept? drag-updates]} (on-drag-over x y e value drag-state)]
                      (when accept?
                        (.acceptTransferModes e (into-array TransferMode [TransferMode/COPY])))
                      (merge-and-render! canvas render! value drag-state drag-updates)
@@ -406,7 +407,7 @@
           (assoc :on-drag-dropped
                  (fn [^DragEvent e]
                    (let [{:keys [canvas drag-state x y]} (extract-event-info e)
-                         {:keys [dispatch drag-updates]} (on-drag-dropped x y (.getDragboard e) value drag-state)]
+                         {:keys [dispatch drag-updates]} (on-drag-dropped x y e value drag-state)]
                      (dispatch-result! dispatch)
                      (.setDropCompleted e (some? dispatch))
                      (merge-and-render! canvas render! value drag-state drag-updates)

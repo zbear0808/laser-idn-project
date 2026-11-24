@@ -112,7 +112,8 @@
    - :on-click - Event map for a single primary click (augmented with :col,
      :row only: its handler reads what the cell holds when it handles it)
    - :on-right-click - Event map for right-click (augmented with :col, :row)
-   - :drag-config - Map with :drag-type and :on-drop event
+   - :drag-config - Map with :drag-type and :on-drop event; without it the
+     cell has no drag handlers at all (the Vibes picker's)
    - :label-fn - Function (fn [display-data] -> string)
    - :tooltip-fn - Optional (fn [display-data] -> string or nil): the cell's
      tooltip, on the label that carries its context menu
@@ -138,7 +139,6 @@
         label-text (label-fn display-data)
         tooltip-text (when tooltip-fn (tooltip-fn display-data))
         style-classes (build-style-classes cell-type display-data)
-        ;; Create drag handlers with current values (re-created on each render)
         drag-type (:drag-type drag-config)
         on-drop (:on-drop drag-config)
         has-context-menu? (boolean (seq context-menu-items))
@@ -176,26 +176,6 @@
                                       (= button MouseButton/PRIMARY)
                                       (events/dispatch! (assoc on-click :col col :row row)))))
 
-              ;; Drag handlers - use inline handlers that are re-created on each render
-              ;; This ensures has-content? and other values are always current
-              :on-drag-detected (when drag-config
-                                  (drag-drop/make-drag-detected-handler
-                                   {:drag-type drag-type
-                                    :col col
-                                    :row row
-                                    :has-content? has-content?}))
-
-              :on-drag-over (when drag-config
-                              (drag-drop/make-drag-over-handler
-                               {:drag-type drag-type}))
-
-              :on-drag-dropped (when drag-config
-                                 (drag-drop/make-drag-dropped-handler
-                                  {:drag-type drag-type
-                                   :col col
-                                   :row row
-                                   :on-drop on-drop}))
-
               :children (filterv some?
                                  [{:fx/type :v-box
                                    :alignment :center
@@ -229,7 +209,26 @@
                                                                                  :id (format "%s-cell-warning-%d-%d" (name cell-type) col row)
                                                                                  :text "⚠"
                                                                                  :style-class "grid-cell-warning-indicator"})])})])}
-                                  badge])}]
+                                  badge])}
+        ;; The drag's four handlers on the one node, or none (cljfx can't take
+        ;; a nil handler): the cell starts a drag only while it holds
+        ;; something, and takes a drop and ends its own drag either way.
+        ;; Re-created each render, so they have current values.
+        node (cond-> node
+               drag-config
+               (assoc :on-drag-detected (drag-drop/make-drag-detected-handler
+                                         {:drag-type drag-type
+                                          :col col
+                                          :row row
+                                          :has-content? has-content?})
+                      :on-drag-done (drag-drop/make-drag-done-handler)
+                      :on-drag-over (drag-drop/make-drag-over-handler
+                                     {:drag-type drag-type})
+                      :on-drag-dropped (drag-drop/make-drag-dropped-handler
+                                        {:drag-type drag-type
+                                         :col col
+                                         :row row
+                                         :on-drop on-drop})))]
     (if has-context-menu?
       (cond-> {:fx/type :label
                :content-display :graphic-only

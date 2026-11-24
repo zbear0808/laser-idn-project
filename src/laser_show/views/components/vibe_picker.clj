@@ -62,29 +62,24 @@
                        (blocked-text blocked)
                        (str/join " · " (map role-names roles)))}]})
 
-(defn- undraggable
-  "The grid's cell, made by grid-cell/generic-grid-cell (a function of its
-   props) with no drag: without a :drag-config its drag handlers are nil,
-   which cljfx can't take."
-  [props]
-  (dissoc (grid-cell/generic-grid-cell props) :on-drag-detected :on-drag-over :on-drag-dropped))
-
 (defn- pick-cell
-  "A picker cell: the grid cell, in (blue) or out of the slot, and its marks."
+  "A picker cell: the grid cell, in (blue) or out of the slot, and its marks.
+   The grid cell has no drag configuration, so it is no drag source or
+   target."
   [{:keys [col row size font-size id kind cell-type label-fn event label pick]}]
   {:fx/type :stack-pane
    :id id
    :style-class [kind (if (:in? pick) "vibe-pick-in" "vibe-pick-out")]
-   :children [(undraggable {:col col
-                            :row row
-                            :size size
-                            :font-size font-size
-                            :cell-type cell-type
-                            :display-data (assoc label :active? (:in? pick))
-                            ;; A double click is two clicks, as everywhere on the picker
-                            :on-click event
-                            :on-right-click event
-                            :label-fn label-fn})
+   :children [(grid-cell/generic-grid-cell {:col col
+                                            :row row
+                                            :size size
+                                            :font-size font-size
+                                            :cell-type cell-type
+                                            :display-data (assoc label :active? (:in? pick))
+                                            ;; A double click is two clicks, as everywhere on the picker
+                                            :on-click event
+                                            :on-right-click event
+                                            :label-fn label-fn})
               (assoc pick :fx/type marks :id id)]})
 
 (defn vibe-pick-cell

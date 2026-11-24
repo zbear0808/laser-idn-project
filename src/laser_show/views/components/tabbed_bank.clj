@@ -64,7 +64,7 @@
              ;; startDragAndDrop can leave the button armed (pressed look,
              ;; and the next release would fire it)
              :on-drag-done (fn [^DragEvent e]
-                             (dd/end-drag! :bank-item)
+                             (dd/end-drag! (.getSource e))
                              (.disarm ^ButtonBase (.getSource e))
                              (.consume e))))))
 
