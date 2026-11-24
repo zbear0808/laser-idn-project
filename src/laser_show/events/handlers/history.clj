@@ -154,6 +154,7 @@
    :grid/paste-cell "Paste Cell"
    :grid/set-column-target "Change Column Target"
    :chain/set-items "Modify Chain"
+   :modulator/toggle "Toggle Modulation"
    :cue-chain/add-preset "Add Preset"
    :cue-chain/add-effect-from-bank "Add Effect"
    :cue-chain/set-name "Rename Cue"

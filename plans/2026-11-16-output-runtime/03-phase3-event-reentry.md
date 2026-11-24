@@ -104,7 +104,7 @@ With an app running, the agent's threads (`clojure-agent-send-pool-*`, cljfx's d
 
 - `laser-show.ui-test.reentry-test` (NEW; `with-toolkit` once, `with-app` each):
   - `lifecycle-results-run-on-the-agent-test`: dispatch `:idn/start-multi-streaming` with no projectors. Record the thread that handles `:idn/multi-streaming-started`, using `with-redefs` around `connection/handle` with the original called inside. Its name starts with `clojure-agent-send-pool-`; today it's a `send-off` future thread.
-  - `dispatch-later-runs-on-the-agent-test`: `:modulator/toggle` on an effect whose keyframes are on returns `:dispatch` plus `:dispatch-later` (`modulator.clj:85-100`). The delayed `:chain/update-param` is handled on an agent thread; today it runs on a future thread.
+  - `dispatch-later-runs-on-the-agent-test`: a notice's expiry timer delivers `:ui/clear-notice` on the event thread. This replaced the delayed `:chain/update-param` fixture when `:modulator/toggle` became a single state edit.
 - `laser-show.events.core-test/fallback-runs-every-effect-test` (NEW): without an app, `dispatch!` of `:file/exit` on a clean project calls the exit fn registered with `events/set-exit-fn!`. Today the fallback drops `:system/exit`.
 - `laser-show.events.core-test/lost-update-detector-test`: a write between snapshot and reset is reported.
 - Existing: `menu-file-handlers-test` and `menu-system-handlers-test` pass unchanged (invariant 2); the full UI suite passes, including the dialogs and list operations that chain through `:dispatch`.

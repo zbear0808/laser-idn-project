@@ -398,7 +398,7 @@
                  {:event/type :chain/update-param :domain :effect-chains :entity-key [4 2] :effect-path [0] :param-key :zones :value [:zone/a]}
                  {:event/type :chain/update-param :domain :effect-chains :entity-key [5 2] :effect-path [0] :param-key :rate :value 1.0}
                  {:event/type :modulator/toggle :domain :cue-zone-patterns :entity-key [0 0] :effect-path [0] :param-key :offset
-                  :param-spec {:min -64.0 :max 64.0} :current-value 0.0 :fx/event true}
+                  :param-spec {:min -64.0 :max 64.0} :fx/event true}
                  ;; a step grid's steps, edited as any parameter (zones plan Z6)
                  {:event/type :chain/update-param :domain :cue-zone-patterns :entity-key [0 0] :effect-path [0] :param-key :steps
                   :value [[:zone/a] []]}]]

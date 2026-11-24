@@ -28,61 +28,27 @@
 ;; Toggle Tests
 
 
+(defn- toggle-effect [effect enabled?]
+  (let [state {:chains {:effect-chains {[0 0] {:items [effect]}}}}
+        result (modulator/handle (assoc sample-event-base :event/type :modulator/toggle :state state
+                                        :param-spec sample-param-spec :fx/event enabled?))]
+    (get-in (:state result) [:chains :effect-chains [0 0] :items 0])))
+
 (deftest test-toggle-static-to-modulated
-  (testing "Toggling static value creates default sine modulator"
-    (let [event (merge sample-event-base
-                       {:event/type :modulator/toggle
-                        :param-spec sample-param-spec
-                        :current-value 1.0
-                        :fx/event true})  ; User wants modulation ON
-          result (modulator/handle event)]
-      (is (contains? result :dispatch))
-      (let [dispatch (:dispatch result)]
-        (is (= :chain/update-param (:event/type dispatch)))
-        (is (= :effect-chains (:domain dispatch)))
-        (is (= [0 0] (:entity-key dispatch)))
-        (is (= [0] (:effect-path dispatch)))
-        (is (= :test-param (:param-key dispatch)))
-        (let [new-value (:value dispatch)]
-          (is (map? new-value))
-          (is (= :sine (:type new-value)))
-          (is (contains? new-value :min))
-          (is (contains? new-value :max)))))))
+  (let [effect (toggle-effect {:params {:test-param 1.0}} true)]
+    (is (= {:type :sine :min 0.0 :max 2.0 :active? true}
+           (select-keys (get-in effect [:params :test-param]) [:type :min :max :active?]))
+        "a new modulator uses the parameter's bounds")
+    (is (not (contains? effect :keyframe-modulator)))))
 
 (deftest test-toggle-modulated-to-static
-  (testing "Toggling modulator preserves config with :active? false"
-    (let [event (merge sample-event-base
-                       {:event/type :modulator/toggle
-                        :param-spec sample-param-spec
-                        :current-value sample-modulator-config
-                        :fx/event false})  ; User wants modulation OFF
-          result (modulator/handle event)]
-      (is (contains? result :dispatch))
-      (let [dispatch (:dispatch result)
-            new-value (:value dispatch)]
-        ;; Should preserve modulator config with :active? false
-        (is (map? new-value))
-        (is (= false (:active? new-value)))
-        ;; Should set :value to midpoint of 0.5 and 1.5 = 1.0
-        (is (= 1.0 (:value new-value)))
-        ;; Should preserve other modulator settings
-        (is (= :sine (:type new-value)))
-        (is (= 0.5 (:min new-value)))
-        (is (= 1.5 (:max new-value)))))))
-
-(deftest test-toggle-uses-param-spec-bounds
-  (testing "New modulator uses param-spec bounds when reasonable"
-    (let [spec {:min 0.0 :max 1.0 :default 0.5 :type :float}
-          event (merge sample-event-base
-                       {:event/type :modulator/toggle
-                        :param-spec spec
-                        :current-value 0.5
-                        :fx/event true})  ; User wants modulation ON
-          result (modulator/handle event)
-          new-value (get-in result [:dispatch :value])]
-      ;; When param-spec bounds are not -10/10, they should be used
-      (is (= 0.0 (:min new-value)))
-      (is (= 1.0 (:max new-value))))))
+  (doseq [[value expected-static] [[sample-modulator-config 1.0]
+                                   [(assoc sample-modulator-config :value 0.75) 0.75]]]
+    (let [off (toggle-effect {:params {:test-param value}} false)]
+      (is (= (assoc value :active? false :value expected-static) (get-in off [:params :test-param]))
+          "use the saved static value, or the midpoint on first deactivation")
+      (is (= (assoc value :active? true :value expected-static)
+             (get-in (toggle-effect off true) [:params :test-param]))))))
 
 
 ;; Set Type Tests
@@ -182,47 +148,26 @@
 ;; Keyframe Mutual Exclusion Tests
 
 
-(defn- state-with-keyframes [domain entity-key enabled?]
-  {:chains {domain {entity-key {:items [{:effect-id :test
-                                         :params {:test-param 1.0}
-                                         :keyframe-modulator {:enabled? enabled?}}]}}}})
-
 (deftest test-toggle-on-disables-active-keyframes
   (doseq [[domain entity-key] [[:effect-chains [0 0]]
                                [:cue-chains [2 1]]
                                [:projector-effects :proj-1]]]
-    (testing (str "keyframes enabled in " domain)
-      (let [event (merge sample-event-base
-                         {:event/type :modulator/toggle
-                          :domain domain
-                          :entity-key entity-key
-                          :param-spec sample-param-spec
-                          :current-value 1.0
-                          :fx/event true
-                          :state (state-with-keyframes domain entity-key true)})
-            result (modulator/handle event)]
-        (is (= {:event/type :keyframe/toggle-enabled
-                :domain domain
-                :entity-key entity-key
-                :effect-path [0]
-                :enabled? false}
-               (dissoc (:dispatch result) :history/description :history/coalesce-key)))
-        (is (= :chain/update-param (get-in result [:dispatch-later :event :event/type])))
-        (testing "both events form one undo step"
-          (is (some? (get-in result [:dispatch :history/coalesce-key])))
-          (is (= (get-in result [:dispatch :history/coalesce-key])
-                 (get-in result [:dispatch-later :event :history/coalesce-key]))))))))
+    (testing (str "a nested effect in " domain)
+      (let [effect {:effect-id :test
+                    :params {:test-param (assoc sample-modulator-config :active? false) :other 0.4}
+                    :keyframe-modulator {:enabled? true :keyframes [{:position 0.0 :params {:test-param 0.5}}]}}
+            items-path [:chains domain entity-key :items]
+            state (assoc-in {} items-path [{:type :group :items [effect]}])
+            result (modulator/handle (assoc sample-event-base :event/type :modulator/toggle :state state
+                                            :domain domain :entity-key entity-key :effect-path [0 :items 0]
+                                            :param-spec sample-param-spec :fx/event true))]
+        (is (= (-> effect (assoc-in [:keyframe-modulator :enabled?] false)
+                          (assoc-in [:params :test-param :active?] true))
+               (get-in (:state result) (into items-path [0 :items 0]))))))))
 
-(deftest test-toggle-on-without-keyframes-just-updates
-  (let [event (merge sample-event-base
-                     {:event/type :modulator/toggle
-                      :param-spec sample-param-spec
-                      :current-value 1.0
-                      :fx/event true
-                      :state (state-with-keyframes :effect-chains [0 0] false)})
-        result (modulator/handle event)]
-    (is (= :chain/update-param (get-in result [:dispatch :event/type])))
-    (is (not (contains? result :dispatch-later)))))
+(deftest test-toggle-off-leaves-keyframes-alone
+  (let [effect {:params {:test-param 0.5} :keyframe-modulator {:enabled? true}}]
+    (is (= effect (toggle-effect effect false)))))
 
 
 ;; Unknown Event Type Test

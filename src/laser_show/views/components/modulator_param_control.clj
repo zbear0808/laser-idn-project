@@ -351,8 +351,7 @@
         toggle-event (assoc modulator-event-base
                             :event/type :modulator/toggle
                             :param-key param-key
-                            :param-spec param-spec
-                            :current-value current-value)
+                            :param-spec param-spec)
         set-type-event (assoc modulator-event-base
                               :event/type :modulator/set-type
                               :param-key param-key
@@ -436,8 +435,7 @@
         toggle-event (assoc modulator-event-base
                             :event/type :modulator/toggle
                             :param-key param-key
-                            :param-spec param-spec
-                            :current-value current-value)
+                            :param-spec param-spec)
         set-type-event (assoc modulator-event-base
                               :event/type :modulator/set-type
                               :param-key param-key
@@ -584,7 +582,7 @@
                                       :focus-traversable false
                                       :style-class [(if modulated? "modulator-toggle-active" "modulator-toggle")]
                                       :tooltip {:fx/type :tooltip :text (if modulated? "Stop modulating" "Follow a modulator")}
-                                      :on-selected-changed (event :modulator/toggle :param-spec spec :current-value current-value)}
+                                      :on-selected-changed (event :modulator/toggle :param-spec spec)}
                                      (if modulated?
                                        {:fx/type modulator-type-selector
                                         :current-type (:type current-value)

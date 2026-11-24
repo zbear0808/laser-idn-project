@@ -204,7 +204,7 @@
     (is (seq (get-in edited [:history :undo-stack])) "an undo step")
     (testing "a modulator on its Offset"
       (let [m (run s {:event/type :modulator/toggle :domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]
-                      :param-key :offset :param-spec {:min -64.0 :max 64.0} :current-value 0.0 :fx/event true})]
+                      :param-key :offset :param-spec {:min -64.0 :max 64.0} :fx/event true})]
         (is (= :sine (get-in (patterns m 0 0) [0 :params :offset :type])))))
     (testing "the cue's items are untouched"
       (is (= (get-in s [:chains :cue-chains [0 0] :items]) (get-in edited [:chains :cue-chains [0 0] :items]))))))

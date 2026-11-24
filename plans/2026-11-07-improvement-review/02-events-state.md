@@ -99,6 +99,10 @@ The architecture is sound in principle. There is one cljfx context atom, handler
     `modulator.clj:29-42` builds paths like `[:grid :effect-chains …]` and `[:projectors id :effects]`, a pre-`:chains` layout. `keyframe-enabled?` is therefore always false.
     `handle-toggle` (`:90-103`) also sequences two events with a 10 ms `:dispatch-later` hack, which produces two undo entries. All modulator handlers trust `:current-value` captured at render time (`:61,123,170,236`), not the value in state, so rapid slider events can overwrite each other.
 
+    **Toggle fix (2026-11-23):** `e4885bc` introduced the wait to “Dispatch keyframe disable, then update param”; it documents an order, not a minimum elapsed time. `b4a940c` fixed the path and `d8a4693` coalesced adjacent history entries, but an immediate Undo could still run before the delayed write and lose Redo. The toggle now reads the stored parameter and applies both changes to one state.
+
+    `modulator-toggle-is-one-undoable-edit-test` reproduced the late write without sleeps. The mounted editor test queues Keyframes, Modulate and Undo before a redraw, then verifies that Redo restores the custom modulator. Full suites: 1,929 unit tests and 358 headless UI tests passed.
+
 13. **`(or (:fx/event e) (:value e))` turns `false` into `nil` (Med).**
     - `chain/params.clj:83`: unchecking a boolean param writes `nil`.
     - `keyframe.clj:515,529,538-544`: `:keyframe/set-normalize false` becomes `nil`.
@@ -221,7 +225,7 @@ The architecture is sound in principle. There is one cljfx context atom, handler
 | Q4 | **Fix trigger routing.** Route `"trigger-group"` in `handlers.clj`. Either implement `:timeline/start`/`:stop`/`:preset/apply` or drop them from `action-event` with a debug log. | `events/handlers.clj`, `handlers/triggers.clj` | S | Low |
 | Q5 | **Keep the input timestamp.** Rename the input-mapper key to `:input-time`. Make `h/current-time-ms` prefer `:input-time` over `:time`. Use event time in `grid/trigger-cue`. | `input_mapper.clj`, `events/helpers.clj`, `handlers/grid.clj`, `handlers/timing.clj` | S | Low |
 | Q6 | **Fix false-to-nil.** Replace `(or (:fx/event e) (:value e))` with an `h/event-value` helper using `contains?`/`some?`. | `chain/params.clj`, `handlers/keyframe.clj`, `handlers/modulator.clj`, `events/helpers.clj` | S | Low |
-| Q7 | **Fix modulator paths.** In `get-keyframe-enabled?`, use `(chain/chain-config domain entity-key)`'s `:items-path`. In `handle-toggle`, compose `keyframe/handle-toggle-enabled` and the param update in one `:state` result (no `:dispatch-later`). | `handlers/modulator.clj` | S | Low |
+| Q7 | **Done: fix modulator paths and toggle atomically.** `handle-toggle` uses `chain-config`'s `:items-path` and composes `keyframe/handle-toggle-enabled` and the param update in one `:state` result. See finding 12. | `handlers/modulator.clj` | S | Low |
 | Q8 | **Fix sync-to-downbeat.** Read `ex/global-accumulated-beats`. Move the Link call into a `:link/sync-to-downbeat` effect that receives `dispatch`. | `handlers/timing.clj`, `events/core.clj` | S | Low |
 | Q9 | **Compute tap-tempo BPM in the handler.** Do it in `handle-timing-tap-tempo` and delete the `:timing/calculate-bpm` effect. | `handlers/timing.clj`, `events/core.clj` | S | Low |
 | Q10 | **Narrow the grid-cell subscriptions.** In `cell-display-data`, use `(fx/sub-val context get-in [:chains :cue-chains [col row]])` and a boolean `(fx/sub-val context (fn [s] (contains? (get-in s [:playback :active-cues]) [col row])))`. Do the same for `effect-cell-display-data`. Removes per-tick recompute for 64 cells. | `subs.clj` | S | Low |

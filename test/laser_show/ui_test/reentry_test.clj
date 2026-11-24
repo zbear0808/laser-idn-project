@@ -4,9 +4,9 @@
    that produced them."
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [laser-show.events.core :as events]
-            [laser-show.events.handlers.chain :as chain]
             [laser-show.events.handlers.connection :as connection]
-            [laser-show.events.handlers.keyframe :as keyframe]
+            [laser-show.events.handlers.ui :as ui-handlers]
+            [laser-show.events.helpers :as h]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]))
@@ -16,13 +16,6 @@
 
 (defn- agent-thread? [thread-name]
   (= events/event-thread-name thread-name))
-
-(defn- recording-threads
-  "Wrap handle so it records [event-type thread-name] into threads."
-  [handle threads]
-  (fn [event]
-    (swap! threads conj [(:event/type event) (.getName (Thread/currentThread))])
-    (handle event)))
 
 (deftest lifecycle-results-run-on-the-agent-test
   (let [threads (atom [])
@@ -44,24 +37,14 @@
     (is (every? (comp agent-thread? second) @threads) (pr-str (mapv pop @threads)))))
 
 (deftest dispatch-later-runs-on-the-agent-test
-  (let [threads (atom [])
-        entity-key [0 0]]
-    (events/write-state! assoc-in [:chains :effect-chains entity-key]
-                        {:items [{:effect-id :scale
-                                  :params {:x-scale 1.0}
-                                  :keyframe-modulator {:enabled? true}}]})
-    (with-redefs [chain/handle (recording-threads chain/handle threads)
-                  keyframe/handle (recording-threads keyframe/handle threads)]
-      (events/dispatch! {:event/type :modulator/toggle
-                         :domain :effect-chains
-                         :entity-key entity-key
-                         :effect-path [0]
-                         :param-key :x-scale
-                         :param-spec {:min 0.0 :max 2.0 :default 1.0 :type :float}
-                         :current-value 1.0
-                         :fx/event true})
-      (ui/wait-for! #(some (fn [[t]] (= :chain/update-param t)) @threads)))
-    (is (= [:keyframe/toggle-enabled :chain/update-param] (mapv first @threads)))
-    (is (every? (comp agent-thread? second) @threads) (pr-str @threads))
-    (is (some? (get-in (state/get-raw-state)
-                       [:chains :effect-chains entity-key :items 0 :params :x-scale :type])))))
+  (let [expired (promise)
+        handle ui-handlers/handle
+        text "Using the backup rig"]
+    (with-redefs [h/notice-ms 10
+                  ui-handlers/handle (fn [{:keys [event/type id state] :as event}]
+                                       (when (and (= :ui/clear-notice type) (= id (get-in state [:ui :notice :id])))
+                                         (deliver expired [(get-in state [:ui :notice :text]) (.getName (Thread/currentThread))]))
+                                       (handle event))]
+      (events/dispatch! {:event/type :rig/startup-notice :text text})
+      (is (= [text events/event-thread-name] (deref expired 3000 ::timeout)))
+      (ui/wait-for! #(nil? (get-in (state/get-raw-state) [:ui :notice]))))))

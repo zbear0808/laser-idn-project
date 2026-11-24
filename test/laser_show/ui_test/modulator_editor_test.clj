@@ -13,7 +13,7 @@
             [laser-show.ui-test.testfx :as ui]
             [laser-show.views.components.modulator-param-control :as mod-param])
   (:import [javafx.scene Node Scene]
-           [javafx.scene.control ComboBox]
+           [javafx.scene.control CheckBox ComboBox ToggleButton]
            [javafx.stage Stage]))
 
 (use-fixtures :once fixtures/with-toolkit)
@@ -59,6 +59,27 @@
 
 (def ^:private pulse-types #{:envelope :step :energy})
 
+
+(deftest immediate-undo-of-modulate-restores-keyframe-editor-test
+  (let [config {:type :triangle :active? true :period 7.0 :min 0.2 :max 0.8 :value 0.6}
+        enable-keyframes ".keyframe-panel-header .check-box"]
+    (open-amount-editor! config)
+    (ui/click! (ui/robot) ".modulator-toggle-active")
+    (ui/wait-for! #(and (= (assoc config :active? false) (amount)) (some? (node ".modulator-toggle"))))
+    ;; Queue both real controls before the editor can re-render and hide Modulate.
+    (ui/on-fx-thread
+     #(let [keyframes (node enable-keyframes)
+            modulate (node ".modulator-toggle")]
+        (.fire ^CheckBox keyframes)
+        (.fire ^ToggleButton modulate)
+        (events/dispatch! {:event/type :edit/undo})))
+    (is (ui/wait-for! #(and (ui/selected? enable-keyframes) (nil? (node "#modulator-type-amount"))
+                            (= (assoc config :active? false) (amount))))
+        "Undo returns the editor to keyframes")
+    (events/dispatch! {:event/type :edit/redo})
+    (is (ui/wait-for! #(and (not (ui/selected? enable-keyframes)) (ui/selected? ".modulator-toggle-active")
+                            (= "△ Triangle" (shown "#modulator-type-amount")) (= config (amount))))
+        "Redo restores the stored modulator and its controls")))
 
 (deftest pulse-types-are-in-the-dropdown-test
   (open-amount-editor! {:type :sine :active? true :min 0.0 :max 1.0 :period 1.0})

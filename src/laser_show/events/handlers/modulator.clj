@@ -2,8 +2,8 @@
   "Event handlers for modulator parameter operations.
    
    Handles modulator toggle, type selection, and sub-parameter updates.
-   These handlers transform modulator-specific events into the appropriate
-   parameter values and delegate to :chain/update-param for state updates.
+   The toggle updates the parameter and its effect's keyframe mode together.
+   Type and sub-parameter changes delegate to :chain/update-param.
    
    Event Types:
    - :modulator/toggle - Toggle between static value and modulator
@@ -21,92 +21,34 @@
    [clojure.tools.logging :as log]
    [laser-show.animation.modulation :as mod]
    [laser-show.animation.modulator-defs :as mod-defs]
-   [laser-show.events.handlers.chain.helpers :as chain-helpers]))
+   [laser-show.events.handlers.chain.helpers :as chain-helpers]
+   [laser-show.events.handlers.chain.params :as params]
+   [laser-show.events.handlers.keyframe :as keyframe]))
 
 
 ;; Handler Functions
 
 
-(defn- get-keyframe-enabled?
-  "Check if keyframe modulator is enabled for the given effect.
-   Returns true if the effect has an active keyframe modulator."
-  [state domain entity-key effect-path]
-  (let [items-path (:items-path (chain-helpers/chain-config domain entity-key))
-        effect (get-in state (into items-path effect-path))]
-    (boolean (get-in effect [:keyframe-modulator :enabled?] false))))
-
 (defn- handle-toggle
-  "Handle toggling between static value and modulator.
-   
-   When toggling ON (to modulated):
-   - If keyframes are enabled, first disables them (mutual exclusivity)
-   - If modulator config exists with :active? false, set :active? true
-   - Otherwise create a default sine modulator with :active? true
-   
-   When toggling OFF (to static):
-   - Set :active? false on existing modulator config (preserves settings)
-   - Set :value to midpoint of min/max (so slider starts at sensible position)
-   
-   The :fx/event from the toggle-button contains the NEW selected state:
-   - true = user wants modulation enabled
-   - false = user wants static value
-   
-   Returns effects to update the parameter (and optionally disable keyframes)."
-  [{:keys [domain entity-key effect-path param-key param-spec current-value state] :as event}]
-  (let [want-modulated? (:fx/event event)
-        keyframe-enabled? (and state (get-keyframe-enabled? state domain entity-key effect-path))
-        new-value (if want-modulated?
-                    ;; User wants modulation enabled
-                    (if (mod/modulator-config? current-value)
-                      ;; Existing modulator - just activate it
-                      (assoc current-value :active? true)
-                      ;; No modulator exists - create default
-                      (mod-defs/build-default-modulator :sine param-spec))
-                    ;; User wants static - deactivate modulator (preserves settings)
-                    (if (mod/modulator-config? current-value)
-                      ;; Deactivate and set initial :value for slider
-                      (let [mod-min (get current-value :min 0.0)
-                            mod-max (get current-value :max 1.0)
-                            ;; Use existing :value if present, otherwise compute midpoint
-                            initial-value (or (:value current-value)
-                                              (/ (+ (double mod-min) (double mod-max)) 2.0))]
-                        (assoc current-value
-                               :active? false
-                               :value initial-value))
-                      ;; Already static - no change needed
-                      current-value))]
-    (log/trace "modulator/toggle - param-key:" param-key
-               "want-modulated?:" want-modulated?
-               "keyframe-enabled?:" keyframe-enabled?
-               "has-existing-config?:" (mod/modulator-config? current-value))
-    ;; If enabling modulation and keyframes are active, disable keyframes first
-    ;; (keyframes and per-param modulators are mutually exclusive).
-    ;; Both events share a coalesce key so they form one undo step.
-    (if (and want-modulated? keyframe-enabled?)
-      (let [coalesce-key [:modulator/toggle domain entity-key effect-path param-key]]
-        {:dispatch {:event/type :keyframe/toggle-enabled
-                    :domain domain
-                    :entity-key entity-key
-                    :effect-path effect-path
-                    :enabled? false
-                    :history/description "Toggle Modulation"
-                    :history/coalesce-key coalesce-key}
-         :dispatch-later {:event {:event/type :chain/update-param
-                                  :domain domain
-                                  :entity-key entity-key
-                                  :effect-path effect-path
-                                  :param-key param-key
-                                  :value new-value
-                                  :history/description "Toggle Modulation"
-                                  :history/coalesce-key coalesce-key}
-                          :delay-ms 10}})
-      ;; Just update the param
-      {:dispatch {:event/type :chain/update-param
-                  :domain domain
-                  :entity-key entity-key
-                  :effect-path effect-path
-                  :param-key param-key
-                  :value new-value}})))
+  "Disable active keyframes before enabling per-parameter modulation, in one edit.
+   Use the effect's stored settings; the editor may be showing a keyframe's value."
+  [{:keys [state domain entity-key effect-path param-key param-spec] enabled? :fx/event}]
+  (let [config (chain-helpers/chain-config domain entity-key)
+        effect (get-in state (into (:items-path config) effect-path))
+        value (get-in effect [:params param-key])
+        configured? (mod/modulator-config? value)
+        new-value (cond
+                    (and enabled? configured?) (assoc value :active? true)
+                    enabled? (mod-defs/build-default-modulator :sine param-spec)
+                    configured? (assoc value :active? false
+                                       :value (or (:value value)
+                                                  (/ (+ (double (:min value 0.0)) (double (:max value 1.0))) 2.0)))
+                    :else value)]
+    {:state (cond-> state
+              (and enabled? (get-in effect [:keyframe-modulator :enabled?]))
+              (keyframe/handle-toggle-enabled config effect-path false)
+              (and effect (not= value new-value))
+              (params/handle-update-param config {:effect-path effect-path :param-key param-key :value new-value}))}))
 
 (defn- handle-set-type
   "Handle changing the modulator type.

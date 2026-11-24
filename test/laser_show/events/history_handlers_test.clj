@@ -360,14 +360,30 @@
     (is (some? (get-in s [:chains :effect-chains [1 0]])))
     (is (true? (get-in s [:chains :effect-chains [1 0] :active?])))))
 
-(deftest modulator-toggle-pair-is-one-step-test
-  (let [coalesce [:modulator/toggle :cue-chains [0 0] [0] :size]
-        s (-> (test-state)
-              (assoc-in [:chains :cue-chains [0 0] :items 0 :keyframe-modulator] {:enabled? true :keyframes []})
-              (run {:event/type :keyframe/toggle-enabled :domain :cue-chains :entity-key [0 0] :effect-path [0]
-                    :enabled? false :history/coalesce-key coalesce :time 5000})
-              (run (assoc edit-size :history/coalesce-key coalesce :time 5010)))]
-    (is (= 1 (undo-count s)))))
+(deftest modulator-toggle-is-one-undoable-edit-test
+  (let [before {:id item-id :effect-id :intensity :enabled? true
+                :params {:amount {:type :triangle :period 7.0 :min 0.2 :max 0.8 :value 0.6 :active? false}}
+                :keyframe-modulator {:enabled? true :keyframes [{:position 0.0 :params {:amount 0.3}}
+                                                                {:position 1.0 :params {:amount 0.9}}]}}
+        after (-> before (assoc-in [:keyframe-modulator :enabled?] false)
+                         (assoc-in [:params :amount :active?] true))
+        path [:chains :effect-chains [1 0] :items 0]
+        initial (assoc-in (test-state) path before)
+        {:keys [state dispatch dispatch-later]}
+        (pipeline {:event/type :modulator/toggle :state initial :domain :effect-chains :entity-key [1 0]
+                   :effect-path [0] :param-key :amount :param-spec {:min 0.0 :max 1.0}
+                   :current-value 0.3 :fx/event true}) ; stale value from the keyframe editor
+        toggled (cond-> (or state initial) dispatch (run dispatch))
+        ;; Undo before delivering any timer the toggle scheduled. No clock or sleep involved.
+        undone (cond-> (run toggled {:event/type :edit/undo})
+                 dispatch-later (run (:event dispatch-later)))]
+    (is (= after (get-in toggled path)) "the stored modulator is active as soon as keyframes are off")
+    (is (= 1 (undo-count toggled)))
+    (is (= "Toggle Modulation" (history/undo-label (:history toggled))))
+    (is (= before (get-in undone path)) "no late write reactivates modulation after Undo")
+    (is (zero? (undo-count undone)))
+    (is (= "Toggle Modulation" (history/redo-label (:history undone))))
+    (is (= after (get-in (run undone {:event/type :edit/redo}) path)))))
 
 (deftest timeline-nudge-coalesces-test
   (let [base (-> (test-state)
