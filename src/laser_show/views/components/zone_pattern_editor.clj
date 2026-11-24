@@ -459,7 +459,7 @@
                      :style-class ["label" "zone-pattern-now"]}})
         {:fx/type :label
          :id "zone-pattern-fold"
-         :text (fx/sub-ctx context subs/pattern-fold params)
+         :text (fx/sub-ctx context subs/pattern-fold (:zones params))
          :wrap-text true
          :graphic {:fx/type :label :text "ⓘ" :style-class ["label" "zone-pattern-fold-icon"]}
          :style-class ["label" "zone-pattern-fold"]}]

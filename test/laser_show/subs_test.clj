@@ -10,6 +10,8 @@
    [laser-show.state.domains :as domains]
    [laser-show.subs :as subs]
    [laser-show.events.handlers :as handlers]
+   [laser-show.routing.rig :as rig]
+   [laser-show.routing.targets :as targets]
    [laser-show.routing.zone-maps :as zone-maps]
    [laser-show.routing.zone-patterns :as zone-patterns]
    [laser-show.state.templates :as templates]
@@ -622,7 +624,22 @@
     (is (= [:hit false] (nth (done (assoc-in (vibe-state) [:config :vibes :library :vibe-2 :hit :cells] [])) 2))
         "a vibe with no HIT cue to play")
     (is (= [:hit false] (nth (done (assoc-in (vibe-state) [:config :vibes :library :vibe-2 :hit :cells] [[0 3]])) 2))
-        "nor with an empty cell")))
+        "nor with an empty cell")
+    (testing "Make cues counts a cue no vibe names, and only the cue grid's (reactivity plan 37)"
+      (let [s (assoc-in (vibe-state) [:chains :cue-chains] {[3 3] {:items [{:type :preset :preset-id :circle}]}})
+            ctx (context s)
+            steps (fx/sub-ctx ctx subs/vibe-checklist)]
+        (is (= (library/checklist s) steps))
+        (is (= [[:cues true] [:vibes true] [:hit false] [:controls false]] (mapv (juxt :step :done?) steps))
+            "D4 is in no vibe, and every HIT cell is empty")
+        (is (= [:cues false] ((juxt :step :done?)
+                              (first (fx/sub-ctx (fx/swap-context ctx update-in [:chains :cue-chains] dissoc [3 3])
+                                                 subs/vibe-checklist))))
+            "gone: no cue on the grid")
+        (is (identical? steps (fx/sub-ctx (fx/swap-context ctx assoc-in [:chains :effect-chains [0 3]]
+                                                           (assoc (reactions/reaction-cell :punch-size nil) :active? true))
+                                          subs/vibe-checklist))
+            "an effect cell is none of its business")))))
 
 (deftest vibe-lint-sub-test
   (let [ctx (context (vibe-state))
@@ -659,7 +676,22 @@
            (fx/sub-ctx (handle playing {:event/type :vibe/select-for-edit :vibe :vibe-2}) subs/vibe-edited-reactions))
         "it follows the selection")
     (is (identical? moves (fx/sub-ctx (-> playing (press :hit 2000) (status-write)) subs/vibe-edited-reactions))
-        "a press and the show clock's status leave it alone")))
+        "a press and the show clock's status leave it alone")
+    (testing "the vibe edited changes and the vibe that plays doesn't (reactivity plan 37)"
+      (let [lines (handle playing {:event/type :vibe/select-for-edit :vibe :vibe-2})]
+        (is (= :vibe-1 (fx/sub-ctx lines subs/vibe-current-id)) "Shapes still plays")
+        (is (= {:hit ["Punch size"] :flash ["Swell"]}
+               (into {} (for [role [:hit :flash]] [role (:reactions (fx/sub-ctx lines subs/vibe-pad role))])))
+            "its pads name its reactions, and the cell switched on on the Effects tab")
+        (is (= (reactions/reactions (in-state lines) :vibe-2 :own? true) (fx/sub-ctx lines subs/vibe-edited-reactions)))))
+    (testing "the vibe that plays changes, which switches both vibes' cells, and the vibe edited doesn't: the same reactions"
+      (let [lines-play (handle playing {:event/type :vibe/select :vibe :vibe-2 :time 3000})]
+        (is (= :vibe-2 (fx/sub-ctx lines-play subs/vibe-current-id)))
+        (is (= [false true] [(in-state lines-play :chains :effect-chains [0 3] :active?)
+                             (in-state lines-play :chains :effect-chains [1 3] :active?)])
+            "Shapes' Punch off, Lines' Flip on")
+        (is (= :vibe-1 (fx/sub-ctx lines-play subs/vibe-edited-id)))
+        (is (identical? moves (fx/sub-ctx lines-play subs/vibe-edited-reactions)))))))
 
 (deftest vibe-controls-sub-test
   (let [ctx (context (vibe-state))
@@ -1253,6 +1285,311 @@
     (is (= "Vibes ⚠ 2" (fx/sub-ctx (context (-> s (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [])
                                                 (assoc-in [:config :vibes :library :vibe-2 :hit :cells] [])))
                                    subs/vibes-tab-label)))))
+
+
+;; Derived input costs (plans/2026-11-23-cljfx-reactivity/37): the lint, the
+;; Playing list's sort and the pattern fold run again when what they read
+;; changes, not for a live edit beside it. Counted inside the function, each
+;; successor made from its parent once that was asked, as the app's next
+;; commit is.
+
+(defn- counted-calls
+  "[calls f]: f calls the function var v holds now, and counts each call in
+   the atom calls."
+  [v]
+  (let [calls (atom 0)
+        original @v]
+    [calls (fn [& args] (swap! calls inc) (apply original args))]))
+
+(defn- edit-steps
+  "[[s ctx shown] …]: s in a new context, then after each edit (a fn of
+   the state) in turn, the state and a successor of the last context, made
+   only once (shown ctx) asked that one what it shows."
+  [s shown edits]
+  (loop [s s ctx (context s) edits edits acc []]
+    (let [acc (conj acc [s ctx (shown ctx)])]
+      (if-let [[edit & more] (seq edits)]
+        (recur (edit s) (fx/swap-context ctx edit) more acc)
+        acc))))
+
+(def ^:private groove
+  "37 §7: Groove, the one vibe, nothing in its HIT; Punch size at [7 3],
+   off, in no vibe."
+  (-> (domains/build-initial-state)
+      (assoc-in [:config :vibes] {:order [:groove] :next-id 2 :library {:groove (library/new-vibe :groove 1 "Groove")}})
+      (assoc-in [:chains :cue-chains] {})
+      (assoc-in [:chains :effect-chains] {[7 3] (reactions/reaction-cell :punch-size "Groove")})))
+
+(deftest vibes-badge-skips-live-cell-switches-test
+  (let [lint library/lint
+        [lints counted] (counted-calls #'library/lint)
+        switch (fn [on?] #(assoc-in % [:chains :effect-chains [7 3] :active?] on?))
+        envelope-off (fn [k] #(assoc-in % [:chains :effect-chains [7 3] :items 0 :params k :active?] false))
+        shown (fn [ctx] {:label (fx/sub-ctx ctx subs/vibes-tab-label)
+                         :rows (fx/sub-ctx ctx subs/vibe-lint)
+                         :lints @lints
+                         :perform (:reactions (fx/sub-ctx ctx subs/vibe-pad :hit))
+                         :edited (fx/sub-ctx ctx subs/vibe-edited-reactions)})
+        no-hit {:level :error :vibe :groove :text "Groove: HIT does nothing (no cues, no tap reactions)"}
+        moves {:level :info :vibe :groove :text "Groove: HIT moves effects only (Punch size)"}]
+    (with-redefs [library/lint counted]
+      (let [walk (edit-steps groove shown [(switch true)
+                                           #(assoc-in % [:config :vibes :library :groove :fx] [[7 3]])
+                                           (switch false)
+                                           (switch true)
+                                           (envelope-off :x-scale)
+                                           (envelope-off :y-scale)])
+            [start on-grid assigned off on] (map peek walk)]
+        (is (= ["Vibes ⚠ 1" "Vibes ⚠ 1" "Vibes" "Vibes" "Vibes" "Vibes" "Vibes ⚠ 1"] (mapv (comp :label peek) walk))
+            "switched on in no vibe, HIT still does nothing; in the FX set, on or off, it moves Punch size, until neither envelope follows HIT")
+        (is (= [1 1 2 2 2 3 4] (mapv (comp :lints peek) walk))
+            "one lint for the badge and the rows; none for a switch, in no vibe or in the FX set; one for each edit of what it reads")
+        (doseq [[s _ {:keys [rows]}] walk]
+          (is (= (lint s) rows) "the rows the lint gives the full state"))
+        (is (some #{no-hit} (:rows start)))
+        (is (identical? (:rows start) (:rows on-grid)) "the switch alone: the same rows")
+        (is (some #{moves} (:rows off)) "in the FX set, and off: HIT moves effects only")
+        (is (not-any? #{no-hit} (:rows off)))
+        (is (identical? (:rows assigned) (:rows off)))
+        (is (identical? (:rows assigned) (:rows on)))
+        (testing "the switch alone: Perform's HIT moves the cell that is on; the Vibes tab's reactions are Groove's own cells"
+          (is (= [[] ["Punch size"]] [(:perform start) (:perform on-grid)]))
+          (is (= [{} {}] [(:edited start) (:edited on-grid)]))
+          (let [[s] (second walk)]
+            (is (= {:hit [{:grid :effects :cell [7 3] :name "Punch size"}]} (reactions/reactions s :groove)))
+            (is (= {} (reactions/reactions s :groove :own? true))))
+          (is (identical? (:edited assigned) (:edited off)) "in the FX set: switched off, the same reactions"))
+        (doseq [[s _ {:keys [perform edited]}] walk]
+          (is (= (mapv :name (:hit (reactions/reactions s :groove))) perform) "Perform's, as the full state's")
+          (is (= (reactions/reactions s :groove :own? true) edited) "the Vibes tab's, as the full state's"))))))
+
+(def ^:private chasing
+  "A cue that follows MIDI timecode."
+  {:editor-type :timeline :timeline/chase :mtc
+   :items [{:type :preset :preset-id :circle :timeline/start 0.0 :timeline/duration 4.0}]})
+
+(defn- lint-rig
+  "The starter show with its five controls learned, and p1-p4 on and in
+   All, none scanning the crowd."
+  []
+  (assoc (learned-all (vibe-state))
+         :projectors (into {} (for [n (range 1 5)]
+                                [(keyword (str "p" n)) {:name (str "p" n) :host (str "10.0.0." n) :zone-groups [] :tags #{}}]))))
+
+(defn- pattern-cell
+  "An effects cell, off, with an Alternate zone pattern, more merged into
+   its params."
+  [& {:as more}]
+  {:active? false :items [(update (zone-patterns/preset-instance :alternate :cell) :params merge more)]})
+
+(defn- vibes-shown
+  "What the Vibes tab shows of ctx's lint, checklist and tap reactions."
+  [ctx]
+  {:lint (fx/sub-ctx ctx subs/vibe-lint)
+   :badge (fx/sub-ctx ctx subs/vibes-tab-label)
+   :checklist (fx/sub-ctx ctx subs/vibe-checklist)
+   :edited (fx/sub-ctx ctx subs/vibe-edited-reactions)})
+
+(defn- readers-agree
+  "Each step's lint (all of it, in order), checklist and Vibes tab
+   reactions, on its successor and on a new context, are what
+   vibes.library and vibes.reactions give its full state."
+  [walk]
+  (doseq [[s _ {:keys [lint checklist edited]}] walk]
+    (is (= (library/lint s) lint (fx/sub-ctx (context s) subs/vibe-lint)))
+    (is (= (library/checklist s) checklist (fx/sub-ctx (context s) subs/vibe-checklist)))
+    (is (= (reactions/reactions s (library/edited-id s) :own? true) edited))))
+
+(defn- lint-rows
+  "The [level text] rows of a step's lint."
+  [[_ _ {:keys [lint]}]]
+  (set (map (juxt :level :text) lint)))
+
+(deftest vibe-lint-inputs-preserve-all-row-levels-test
+  (testing "37 §7: a pattern's missing group defined, then the Zone step key learned: the badge says 1, 0, 0, the rows change each time"
+    (let [walk (edit-steps (-> (lint-rig)
+                               (update :zone-groups dissoc :graphics)
+                               (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [[0 0]])
+                               (assoc-in [:chains :effect-chains [2 1]] (pattern-cell :zones [:zone/a :graphics] :step-on :zone-step))
+                               (assoc-in [:config :vibes :library :vibe-1 :fx] [[2 1]]))
+                           vibes-shown
+                           [#(assoc-in % [:zone-groups :graphics] {:name "Graphics"})
+                            #(assoc-in % [:config :input :trigger-map {:source :midi :channel 0 :note 50}] {:type :zone-step})
+                            #(update-in % [:chains :effect-chains [2 1] :items] (fn [items] [{:type :group :enabled? false :items items}]))])
+          [missing defined learned grouped] (map lint-rows walk)
+          two "Shapes: B3 (Zone pattern) needs two zones (it has one: A)"
+          dark "Shapes: B3 (Zone pattern): Graphics has no laser, so the picture vanishes on that step"
+          step-key "Shapes: B3 (Zone pattern) steps on the Zone step key, which has no key yet"]
+      (readers-agree walk)
+      (is (= ["Vibes ⚠ 1" "Vibes" "Vibes" "Vibes"] (mapv (comp :badge peek) walk)))
+      (is (every? missing [[:error two] [:warn "Shapes: B3 (Zone pattern) lists Graphics, which no longer exists"] [:info step-key]]))
+      (is (every? defined [[:warn dark] [:info step-key]]) "two places now; Graphics has no laser")
+      (is (not (defined [:error two])))
+      (is (and (learned [:warn dark]) (not (learned [:info step-key]))) "the key learned: the badge stays, a row goes")
+      (is (= #{[:warn "Shapes: one cue in HIT repeats on every press"]} grouped) "in a group that is off, the pattern says nothing")))
+  (testing "37 §7: a map not in use sends the column's zone B to the crowd: the last HIT goes, an error more; allowed, it is back"
+    (let [walk (edit-steps (-> (lint-rig)
+                               (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [[0 0]])
+                               (assoc-in [:chains :cue-chains [0 0]] {:items [{:type :preset :preset-id :circle}]})
+                               (assoc-in [:grid :column-targets 0] :zone/b))
+                           vibes-shown
+                           [#(assoc-in % [:zone-maps :map/custom-1] {:name "Crowd sweep" :lanes [:auto/left :auto/right]
+                                                                     :overrides {:zone/b :crowd}})
+                            #(assoc-in % [:config :vibes :library :vibe-1 :allow-audience?] true)])]
+      (readers-agree walk)
+      (is (= ["Vibes" "Vibes ⚠ 1" "Vibes"] (mapv (comp :badge peek) walk)))
+      (is (some #(re-find #"^Shapes: A1 reaches the audience through Zone B \(the Crowd sweep map" (second %)) (lint-rows (second walk))))
+      (is (= :hit (:step (nth (:checklist (peek (second walk))) 2))))
+      (is (false? (:done? (nth (:checklist (peek (second walk))) 2))) "the checklist: Shapes has no HIT cue to play")))
+  (testing "the order and the library, cues that can't play, a virtual projector, a zone's label, the map the show is on"
+    (let [walk (edit-steps (-> (lint-rig)
+                               (assoc-in [:chains :effect-chains [2 1]] (pattern-cell :zones [:zone/a]))
+                               (assoc-in [:chains :effect-chains [3 1]] (pattern-cell :zones [:zone/a :zone/b]))
+                               (assoc-in [:config :vibes :library :vibe-1 :fx] [[2 1] [3 1]]))
+                           vibes-shown
+                           [#(update-in % [:config :vibes :order] conj :vibe-1)
+                            #(assoc-in % [:config :vibes :order] [:vibe-1])
+                            #(assoc-in % [:config :vibes :order] [:vibe-1 :vibe-2 :gone])
+                            #(assoc-in % [:config :vibes :order] [:vibe-1 :vibe-2])
+                            #(update-in % [:chains :cue-chains] dissoc [2 0])
+                            #(assoc-in % [:chains :cue-chains [2 0]] chasing)
+                            #(assoc % :virtual-projectors {:v1 {:name "Aud B" :parent-projector-id :p1 :zone-groups []
+                                                                :tags #{:crowd-scanning}}})
+                            #(-> % (update-in [:virtual-projectors :v1] dissoc :tags) (assoc-in [:projectors :p1 :tags] #{:crowd-scanning}))
+                            #(-> % (update :virtual-projectors dissoc :v1) (update-in [:projectors :p1] dissoc :tags))
+                            #(assoc-in % [:zones :labels :zone/a] "Beams")
+                            #(assoc-in % [:zone-map :active] :map/unison)
+                            #(assoc-in % [:config :vibes :library :vibe-2 :name] "Shapes")])
+          rows (mapv lint-rows walk)
+          has? (fn [i row] (contains? (rows i) row))]
+      (readers-agree walk)
+      (is (has? 0 [:error "Shapes: B3 (Zone pattern) needs two zones (it has one: A)"]))
+      (doseq [i [1 2 3]]
+        (is (has? i [:error "Order and library disagree"]) "a repeat, a vibe left out, an id with no vibe"))
+      (is (not (has? 4 [:error "Order and library disagree"])))
+      (is (has? 5 [:error "Shapes: A3 can't be played (empty)"]))
+      (is (has? 6 [:error "Shapes: A3 can't be played (follows timecode)"]))
+      (doseq [i [7 8]]
+        (is (some #(re-find #"reaches the audience through All" (second %)) (rows i)) "the virtual projector, then its projector"))
+      (is (not-any? #(re-find #"reaches the audience" (second %)) (rows 9)))
+      (is (has? 10 [:error "Shapes: B3 (Zone pattern) needs two zones (it has one: A · Beams)"]) "a zone by its label")
+      (is (has? 11 [:info "Shapes: B4 (Zone pattern) doesn't move under Unison"]) "the map the show is on")
+      (is (has? 12 [:warn "Two vibes are called Shapes"])))))
+
+(deftest playing-cues-sorts-only-on-membership-change-test
+  (let [[sorts counted] (counted-calls #'subs/cue-cells-in-grid-order)
+        cue (fn [col row cue-name preset-id n timeline?]
+              {:col col :row row :name cue-name :first-preset-id preset-id :preset-count n :timeline? timeline?})
+        a1 (cue 0 0 "Intro" :circle 3 false)
+        a2 (cue 1 0 nil :line 1 false)
+        b1 (cue 0 1 nil :star 1 false)
+        a3 (cue 2 0 nil :wave 1 false)
+        opener (assoc a1 :name "Opener")
+        ;; [what, the edit, the list after it (nil: the one before, identical), sorts so far]
+        steps (concat
+               (for [i (range 20)]
+                 [(str "the show clock's stats, " i) #(assoc-in % [:backend :streaming :frame-stats] {:avg-latency-us i}) nil 1])
+               [["the grid's selection" #(assoc-in % [:grid :selected-cell] [1 0]) nil 1]
+                ["A1 started again" #(assoc-in % [:playback :active-cues [0 0]] {:run #uuid "00000000-0000-0000-0000-000000000004"}) nil 1]
+                ["A1 paused" #(assoc-in % [:playback :active-cues [0 0] :paused?] true) nil 1]
+                ["A1 renamed" #(assoc-in % [:chains :cue-chains [0 0] :name] "Opener") [opener a2 b1] 1]
+                ["a preset more in A2" #(update-in % [:chains :cue-chains [1 0] :items] conj {:type :preset :preset-id :square})
+                 [opener (assoc a2 :preset-count 2) b1] 1]
+                ["B1 a timeline" #(assoc-in % [:chains :cue-chains [0 1] :editor-type] :timeline)
+                 [opener (assoc a2 :preset-count 2) (assoc b1 :timeline? true)] 1]
+                ["A3 starts" #(-> %
+                                  (assoc-in [:chains :cue-chains [2 0]] {:items [{:type :preset :preset-id :wave}]})
+                                  (assoc-in [:playback :active-cues [2 0]] {:run #uuid "00000000-0000-0000-0000-000000000005"}))
+                 [opener (assoc a2 :preset-count 2) a3 (assoc b1 :timeline? true)] 2]
+                ["A2 stops" #(update-in % [:playback :active-cues] dissoc [1 0]) [opener a3 (assoc b1 :timeline? true)] 3]
+                ["Stop holds them" #(after % :transport/stop) [] 3]
+                ["Play" #(after % :transport/play) [opener a3 (assoc b1 :timeline? true)] 3]])
+        shown (fn [ctx] {:cues (fx/sub-ctx ctx subs/playing-cues) :sorts @sorts})]
+    (with-redefs [subs/cue-cells-in-grid-order counted]
+      (let [walk (edit-steps playing-state shown (map second steps))
+            [_ _ start] (first walk)]
+        (is (= [a1 a2 b1] (:cues start)) "row by row: A1, A2, then B1")
+        (is (= 1 (:sorts start)))
+        (doseq [[[what _ cues sorts] [_ _ before] [_ _ after]] (map vector steps walk (rest walk))]
+          (if cues
+            (is (= cues (:cues after)) what)
+            (is (identical? (:cues before) (:cues after)) what))
+          (is (= sorts (:sorts after)) (str what ": sorted again only when the cells in play change")))))))
+
+(defn- fold-state
+  "37 §7's fold: one laser, Laser 1, on; Left / Right; and A1's Alternate
+   pattern, over A and B. No Graphics group yet."
+  []
+  (-> (domains/build-initial-state)
+      (assoc :projectors {:p1 {:name "Laser 1" :host "10.0.0.1" :enabled? true :zone-groups [] :scan-rate 25000}})
+      (update :zone-groups dissoc :graphics)
+      (assoc-in [:zone-map :active] :map/left-right)
+      (assoc-in [:chains :cue-chains [0 0]] {:items [{:type :preset :preset-id :circle}]
+                                             :zone-patterns [(zone-patterns/preset-instance :alternate :cue)]})))
+
+(deftest pattern-fold-keys-on-lane-and-display-routing-test
+  (let [fold-text zone-patterns/fold-text
+        expected (fn [s zones] (fold-text s {:zones zones} (targets/names (rig/target-groups s) (get-in s [:zones :labels]))))
+        [folds counted] (counted-calls #'zone-patterns/fold-text)
+        pattern [:chains :cue-chains [0 0] :zone-patterns 0 :params]
+        others [[:lane/lasers] [:auto.laser/p1 :graphics]]
+        shown (fn [ctx]
+                (let [lane (get-in (fx/sub-ctx ctx subs/cue-zone-pattern 0 0) [:params :zones])]
+                  {:lane lane
+                   :texts (mapv #(fx/sub-ctx ctx subs/pattern-fold %) (cons lane others))
+                   :folds @folds}))
+        all (inc (count others))
+        ;; [what, the edit, the folds it takes]
+        steps (concat
+               (for [i (range 1 65)]
+                 [(str "a rate of " (* 0.125 i)) #(assoc-in % (conj pattern :rate) (* 0.125 i)) 0])
+               [["a key learned for Zone step" #(assoc-in % [:config :input :trigger-map {:source :midi :channel 0 :note 50}] {:type :zone-step}) 0]
+                ["a zone's label" #(assoc-in % [:zones :labels :zone/a] "Beams") 0]
+                ["the pattern's steps" #(assoc-in % (conj pattern :steps) [[:zone/a] [] [:zone/b]]) 0]
+                ["the laser's scan rate" #(assoc-in % [:projectors :p1 :scan-rate] 30000) 0]
+                ["a switch to Unison waiting for beat 4" #(assoc-in % [:zone-map :pending] {:map :map/unison :at-beat 4.0}) 0]
+                ["no switch waiting" #(assoc-in % [:zone-map :pending] nil) 0]
+                ["a Map cycle on" #(assoc-in % [:chains :effect-chains [0 3]] {:active? true :items [(zone-patterns/cycle-instance)]}) 0]
+                ["the show clock's stats and the grid's selection"
+                 #(-> % (assoc-in [:backend :streaming :frame-stats] {:avg-latency-us 9}) (assoc-in [:grid :selected-cell] [0 0])) 0]
+                ["the lane reversed" #(assoc-in % (conj pattern :zones) [:zone/b :zone/a]) 1]
+                ["the laser renamed" #(assoc-in % [:projectors :p1 :name] "Front") all]
+                ["a second laser" #(assoc-in % [:projectors :p2] {:name "Laser 2" :host "10.0.0.2" :enabled? true :zone-groups []}) all]
+                ["the rig's order" #(assoc-in % [:rig :order] [:p2 :p1]) all]
+                ["a group defined" #(assoc-in % [:zone-groups :graphics] {:name "Graphics"}) all]
+                ["a laser in it" #(assoc-in % [:projectors :p2 :zone-groups] [:graphics]) all]
+                ["the group renamed" #(assoc-in % [:zone-groups :graphics :name] "Gfx") all]
+                ["the group's colour" #(assoc-in % [:zone-groups :graphics :color] "#123456") 0]
+                ["a map of yours, not in use" #(assoc-in % [:zone-maps :map/custom-1] {:name "Mine" :lanes [:auto/right :auto/left] :overrides {}}) 0]
+                ["that map in use" #(assoc-in % [:zone-map :active] :map/custom-1) all]
+                ["its lanes" #(assoc-in % [:zone-maps :map/custom-1 :lanes] [:auto/left :graphics]) all]
+                ["its overrides" #(assoc-in % [:zone-maps :map/custom-1 :overrides] {:zone/b :auto/right}) all]
+                ["another map of yours" #(assoc-in % [:zone-maps :map/custom-2] {:name "Other" :lanes [:all] :overrides {}}) 0]
+                ["Unison due at beat 0" #(assoc-in % [:zone-map :pending] {:map :map/unison :at-beat 0.0}) all]
+                ["Unison in use" #(assoc % :zone-map {:active :map/unison :pending nil}) 0]
+                ["back to Left / Right" #(assoc-in % [:zone-map :active] :map/left-right) all]
+                ["no laser on" #(-> % (assoc-in [:projectors :p1 :enabled?] false) (assoc-in [:projectors :p2 :enabled?] false)) all]])]
+    (with-redefs [zone-patterns/fold-text counted]
+      (testing "37 §1: 64 rates over the same lane, asked on one context: one fold"
+        (let [ctx (context (fold-state))
+              params (get-in (fold-state) pattern)
+              texts (mapv #(fx/sub-ctx ctx subs/pattern-fold (:zones (assoc params :rate (* 0.125 %)))) (range 1 65))]
+          (is (= 1 @folds))
+          (is (= #{"This rig (1 laser, Left / Right): A is its left half, B its right half."} (set texts)))))
+      (reset! folds 0)
+      (testing "successive states: one fold for each lane and each change to what the line reads, the full state's text"
+        (let [walk (edit-steps (fold-state) shown (map second steps))
+              [_ _ start] (first walk)
+              text-after (fn [what] (some (fn [[[w] [_ _ {:keys [texts]}]]] (when (= w what) (first texts))) (map vector steps (rest walk))))]
+          (is (= all (:folds start)) "one a lane")
+          (is (= (mapv #(expected (fold-state) %) (cons [:zone/a :zone/b] others)) (:texts start)))
+          (is (= "This rig (1 laser, Left / Right): A is its left half, B its right half." (first (:texts start))))
+          (doseq [[[what _ cost] [_ _ before] [s _ after]] (map vector steps walk (rest walk))]
+            (is (= cost (- (:folds after) (:folds before))) what)
+            (is (= (mapv #(expected s %) (cons (:lane after) others)) (:texts after)) what))
+          (is (= "This rig (1 laser, Left / Right): B is its right half, A its left half." (text-after "the lane reversed")))
+          (is (= "Under Unison every zone is All, so this pattern doesn't move." (text-after "Unison due at beat 0")))
+          (is (= "No laser is on, so this pattern has nowhere to send anything." (text-after "no laser on"))))))))
 
 (deftest target-groups-order-test
   (let [s (-> base-state
