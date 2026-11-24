@@ -29,8 +29,9 @@
      :project/mark-clean and its :on-saved, ...) runs the follow-up inline
      through run-inline, in the same turn
    - Effects that work later on another thread (futures: scan, learn,
-     :dispatch-later; the FX thread: file chooser; the output runtime's status
-     thread; the rig writer) only do their side effect there. Their result goes through the
+     :dispatch-later, :rig/flush's wait; the FX thread: file chooser; the
+     output runtime's status thread; the rig writer) only do their side
+     effect there. Their result goes through the
      dispatch fn the effect was given, which queues it on the agent behind the
      current event
    - The streaming lifecycle effects only queue a command on the output
@@ -229,6 +230,23 @@
                                    (cond-> {:event/type :rig/written :path path :seq seq :at at}
                                      then (assoc :then then)))))
                      (if now? 0 rig-store/write-delay-ms)))
+
+(defn- effect-rig-flush
+  "Effect that waits, off the event thread (in a future), for the rig writer
+   to finish the rigs it was given (state.rig-store/flush!: the pending one
+   written at once, after the one it may be writing), at most
+   rig-store/flush-ms, then dispatches :then. Those writes' results
+   (:rig/written, :rig/write-failed) are dispatched before it, unless the
+   wait ran out.
+   Args: {:then event}"
+  [{:keys [then]} dispatch]
+  (future
+    (try
+      (rig-store/flush! rig-store/flush-ms)
+      (catch Throwable t
+        (log/warn "Could not wait for the rig file:" (.getMessage t))))
+    (when then
+      (dispatch then))))
 
 ;; The OS clipboard. JavaFX's Clipboard works only on the FX thread, so both
 ;; effects hand their call to it with Platform/runLater and never wait: the
@@ -703,6 +721,8 @@
    - :project/load - read project zip from disk, then :on-loaded (inline)
    - :rig/write - hand the rig file's contents to the rig writer; :rig/written
      or :rig/write-failed comes back (later, rig-writer thread)
+   - :rig/flush - wait for the rig writer to finish what it was given (at
+     most rig-store/flush-ms), then dispatch :then (later, future)
    - :addons/install - check an add-on jar and copy it into the add-ons
      folder as <name>.jar.new; :addons/installed or :addons/install-failed
      comes back (later, future)
@@ -738,6 +758,7 @@
    :project/load effect-load-project
    ;; The rig file
    :rig/write effect-rig-write
+   :rig/flush effect-rig-flush
    ;; Add-ons
    :addons/install effect-addons-install
    ;; File chooser dialog

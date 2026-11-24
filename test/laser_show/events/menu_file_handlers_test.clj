@@ -685,10 +685,14 @@
 
 (deftest exit-after-a-failed-rig-write-asks-first-test
   (let [result (menu/handle {:event/type :file/exit :state rig-not-saved})
-        asked (:state result)]
+        asked (:state result)
+        ;; the show had no unsaved changes when it asked: what Exit may
+        ;; throw away when it comes back (reactivity plan 21)
+        parked-exit {:event/type :file/exit :force? true :rig-force? true
+                     :authorized {:document-id nil :dirty? false}}]
     (is (not (contains? result :system/exit)) "it doesn't quit yet")
     (is (= {:open? true :reason :rig :error "No space left on device"
-            :pending {:event/type :file/exit :force? true :rig-force? true}}
+            :pending parked-exit}
            (confirm-dialog asked))
         "it asks, with its own text")
     (testing "Quit anyway quits"
@@ -699,10 +703,10 @@
       (let [retried (menu/handle {:event/type :file/confirm-retry :state asked})]
         (is (false? (:open? (confirm-dialog (:state retried)))))
         (is (nil? (:reason (confirm-dialog (:state retried)))))
-        (is (= {:event/type :rig/retry-write :then {:event/type :file/exit :force? true :rig-force? true}}
+        (is (= {:event/type :rig/retry-write :then parked-exit}
                (:dispatch retried)))
         (let [written (events/handle-event-pipeline (assoc (:dispatch retried) :state (:state retried)))]
-          (is (= {:event/type :file/exit :force? true :rig-force? true}
+          (is (= parked-exit
                  (get-in written [:rig/write :then]))
               "the write carries the exit, for :rig/written to dispatch"))))
     (testing "Cancel stays"

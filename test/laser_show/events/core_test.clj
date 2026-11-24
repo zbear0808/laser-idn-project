@@ -53,7 +53,8 @@
                :output/write-status
                :project/save :project/load :fx/show-file-chooser :system/exit :system/open-url
                :dev/reload :dev/deliver :dev/swap-state :clipboard/write :clipboard/read
-               :projectors/scan :addons/install :system/open-folder :window/set-fullscreen]))
+               :projectors/scan :addons/install :system/open-folder :window/set-fullscreen
+               :rig/write :rig/flush]))
   (is (not-any? #(contains? events/effects %) [:clipboard/copy-effects :clipboard/paste-effects])
       "no effect copies or pastes behind the clipboard's handlers (keyboard plan Step 4a)")
   (is (not (contains? events/effects :clipboard/paste-projector-effects))

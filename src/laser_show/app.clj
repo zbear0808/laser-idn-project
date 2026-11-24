@@ -298,21 +298,28 @@
         (log/warn "Error disconnecting from Carabiner:" (.getMessage e))))))
 
 (defn- stop-rig-file!
-  "Write the rig change still pending (within 2 s), then let go of the rig
-   file's lock, so the next window can write it."
+  "Write the rig change still pending, and wait for the write running (at
+   most rig-store/flush-ms), then let go of the rig file's lock, so the next
+   window can write it: after that write, never during it, unless the wait
+   ran out (logged; shutdown doesn't wait any longer). A write's result,
+   reported meanwhile, is queued as an event, behind this one."
   []
-  (try
-    (rig-store/flush! 2000)
-    (catch Exception e
-      (log/warn "Error writing the rig file:" (.getMessage e))))
-  (rig-store/unlock!))
+  (let [done? (try
+                (rig-store/flush! rig-store/flush-ms)
+                (catch Exception e
+                  (log/warn "Error writing the rig file:" (.getMessage e))
+                  false))]
+    (when-not done?
+      (log/warn "Letting go of the rig file's lock with its last write unfinished"))
+    (rig-store/unlock!)))
 
 (defn stop!
   "Stop the mounted cljfx application and release application-owned services:
    the UI, the show clock, the input mapper, the gamepad poller, the
    streaming engines (the output runtime is drained), the add-ons' drivers
    (unregistered, their jars closed), input devices, the Carabiner link and
-   the rig file (its pending change written, its lock let go). dispatch!
+   the rig file (its pending change written and the write running finished,
+   then its lock let go: stop-rig-file!). dispatch!
    falls back to the synchronous handler afterwards, and the write guard
    start! or start-test! installed is removed.
 
