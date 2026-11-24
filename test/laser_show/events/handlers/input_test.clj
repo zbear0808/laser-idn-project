@@ -284,14 +284,12 @@
 ;; Learn all (Phase 3)
 
 (defn- piped
-  "state after event through the pipeline, then each event it dispatches,
-   as the agent runs them."
+  "state after event through the pipeline, then each event it dispatches
+   (:dispatch, :dispatch-n), as the agent runs them."
   [state event]
   (let [effects (events/handle-event-pipeline (merge {:time 0} event {:state state}))
         s (or (:state effects) state)]
-    (if-let [next-event (:dispatch effects)]
-      (piped s next-event)
-      s)))
+    (reduce piped s (cond-> [] (:dispatch effects) (conj (:dispatch effects)) (:dispatch-n effects) (into (:dispatch-n effects))))))
 
 (defn- learning-target [state] (get-in state [:backend :input :learning-target]))
 (defn- wizard [state] (get-in state [:ui :vibes :wizard]))
@@ -614,11 +612,16 @@
       (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)))
 
 (deftest midi-disconnect-releases-input-holds-only-test
-  (let [s0 (assoc-in (vibe-world) [:backend :input :midi :connected-devices] #{"Pad"})
+  (let [s0 (-> (vibe-world)
+               (assoc-in [:backend :input :midi :connected-devices] #{"Pad"})
+               (assoc-in [:config :input :trigger-map] {(note-key 36) {:type :vibe :role :hit}
+                                                       {:source :keyboard :id :j} {:type :vibe :role :flash}}))
+        key-down (fn [input-event] {:event/type :trigger/input :input-event (assoc input-event :timestamp 1000) :time 1000})
         held (-> s0
-                 (piped {:event/type :vibe/press :role :hit :input-time 1000 :time 1000})
+                 (piped (key-down (note 36)))
+                 (piped (key-down (input-events/trigger :keyboard :j :pressed)))
                  (piped {:event/type :vibe/press :role :accent :src :pad :time 1000}))]
-    (is (= {:hit :input :accent :pad} (update-vals (get-in held [:vibe-runtime :held]) :src)))
+    (is (= {:hit :input :flash :input :accent :pad} (update-vals (get-in held [:vibe-runtime :held]) :src)))
     (doseq [event [{:event/type :input/midi-disconnect-device :device-name "Pad"}
                    {:event/type :input/midi-disconnect-all}]]
       (testing (str (:event/type event))
@@ -631,7 +634,9 @@
               (is (not (contains? (get-in s [:backend :input :midi :connected-devices]) "Pad")))
               (is (nil? (get-in s [:vibe-runtime :held :hit])) "beyond-vibe disconnect_releases_held_keys: the key's hold ends")
               (is (false? (get-in s [:playback :pulses :hit :held?])))
-              (is (= :pad (get-in s [:vibe-runtime :held :accent :src])) "a pad's hold stays: its release still comes"))))))))
+              (is (= :pad (get-in s [:vibe-runtime :held :accent :src])) "a pad's hold stays: its release still comes")
+              (is (= :input (get-in s [:vibe-runtime :held :flash :src]))
+                  "so does a keyboard key's: only MIDI's keys can't let go (reactivity plan 26)"))))))))
 
 (deftest a-key-that-loses-its-role-lets-go-test
   (try

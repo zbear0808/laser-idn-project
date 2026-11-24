@@ -27,9 +27,9 @@
    - UI callbacks (inline fns) run briefly on FX thread, then delegate to agent
    - Co-effects, handlers and effects run on the agent, on the one event
      thread (laser-show-events, event-executor), one event at a time
-   - An effect that continues the event (:dispatch, :project/save's
-     :project/mark-clean and its :on-saved, ...) runs the follow-up inline
-     through run-inline, in the same turn
+   - An effect that continues the event (:dispatch, :dispatch-n,
+     :project/save's :project/mark-clean and its :on-saved, ...) runs the
+     follow-up inline through run-inline, in the same turn
    - Effects that work later on another thread (futures: scan, learn,
      :dispatch-later, :rig/flush's wait; the FX thread: file chooser; the
      output runtime's status thread; the rig writer; the input device
@@ -255,6 +255,12 @@
   "Effect that continues with another event, inline in the current turn."
   [event dispatch]
   (run-inline event dispatch))
+
+(defn- effect-dispatch-n
+  "Effect that continues with several events, inline in the current turn,
+   one after the other: each sees what the one before it wrote."
+  [events dispatch]
+  (run! #(run-inline % dispatch) events))
 
 (defn- effect-dispatch-later
   "Effect that dispatches an event after a delay (from a future).
@@ -816,6 +822,7 @@
    :dev/deliver (guard-all).
    - :state - update application state
    - :dispatch - continue with another event (inline)
+   - :dispatch-n - continue with several events, in order (inline)
    - :dispatch-later - dispatch event after delay (later, future)
    - :link/sync-to-downbeat - align phase to Link's downbeat (inline)
    - :show-clock/read - continue :on-read with the show clock's beats (inline)
@@ -858,6 +865,7 @@
   (guard-all
    {:state effect-state
     :dispatch effect-dispatch
+    :dispatch-n effect-dispatch-n
     :dispatch-later effect-dispatch-later
     :link/sync-to-downbeat effect-link-sync-to-downbeat
     :show-clock/read effect-show-clock-read

@@ -3,7 +3,12 @@
             [laser-show.events.core :as events]
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.triggers :as triggers]
+            [laser-show.input.devices :as devices]
             [laser-show.input.events :as input-events]
+            [laser-show.input.fixtures :as fixtures]
+            [laser-show.input.gamepad :as gamepad]
+            [laser-show.input.midi :as midi]
+            [laser-show.input.osc :as osc]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.state.persistent :as persistent]
@@ -74,7 +79,7 @@
                             :input-event (assoc (input-events/trigger :keyboard id edge) :timestamp at)})))
 
 (defn- no-trigger-holds? [{:keys [trigger-runtime]}]
-  (every? empty? ((juxt :keyboard-activations :held-inputs :active-triggers) trigger-runtime)))
+  (every? empty? ((juxt :activations :held-inputs :active-triggers) trigger-runtime)))
 
 (deftest keyboard-release-balances-press-only-definition-test
   (let [state {:chains {:cue-chains {[0 0] {:items []}}}
@@ -134,17 +139,18 @@
     (is (= (persistent/project-files show) files) "holds don't change the saved show")
     (doseq [next-show [(persistent/new-project-state both-held)
                        (persistent/apply-loaded-project both-held files "held.zip")]]
-      (is (= (select-keys (:trigger-runtime midi-held) [:held-inputs :active-triggers :keyboard-activations])
-             (select-keys (:trigger-runtime next-show) [:held-inputs :active-triggers :keyboard-activations]))
-          "only the keyboard holds were dropped")
-      (is (nil? (:dispatch (keyboard-edge next-show :a :released)))))))
+      (is (no-trigger-holds? next-show) "every source's holds were dropped (reactivity plan 26)")
+      (is (nil? (:dispatch (keyboard-edge next-show :a :released))))
+      (is (nil? (:dispatch (input next-show :note-off)))))))
 
 (deftest momentary-cue-press-and-release
   (let [state (momentary-state :trigger-cue)
-        press (:dispatch (input state :note-on))
-        release (:dispatch (input state :note-off))]
+        pressed (input state :note-on)
+        press (:dispatch pressed)
+        release (:dispatch (input (:state pressed) :note-off))]
     (is (= :grid/activate-cell (:event/type press)))
     (is (= :grid/release-cell (:event/type release)))
+    (is (nil? (:dispatch (input state :note-off))) "a release whose press nobody saw ends nothing")
     (testing "press then release through the routed grid handler starts then stops the cue"
       (let [started (:state (handlers/handle-event (assoc press :state state)))
             stopped (:state (handlers/handle-event (assoc release :state started)))]
@@ -157,8 +163,9 @@
 
 (deftest momentary-effect-press-and-release
   (let [state (momentary-state :trigger-effect)
-        press (:dispatch (input state :note-on))
-        release (:dispatch (input state :note-off))]
+        pressed (input state :note-on)
+        press (:dispatch pressed)
+        release (:dispatch (input (:state pressed) :note-off))]
     (is (= [:effects/toggle-cell true] [(:event/type press) (:fx/event press)]))
     (is (= [:effects/toggle-cell false] [(:event/type release) (:fx/event release)]))))
 
@@ -199,22 +206,35 @@
 
 (deftest vibe-action-maps-press-and-release-test
   (let [state (pad-state {:type :vibe :role :hit})
-        press (:dispatch (pad state :note-on 1000))
-        release (:dispatch (pad state :note-off 1090))]
+        pressed (pad state :note-on 1000)
+        press (:dispatch pressed)
+        release (:dispatch (pad (:state pressed) :note-off 1090))]
     (is (= {:event/type :vibe/press :role :hit :input-time 1000} (select-keys press [:event/type :role :input-time])))
     (is (= {:event/type :vibe/release :role :hit :input-time 1090} (select-keys release [:event/type :role :input-time]))
         "every role hears its release")
     (is (= {:type :vibe :role :hit} (:source-trigger press)) "so history skips it"))
   (testing "a binding that selects a vibe does so on its press"
-    (let [state (pad-state {:type :vibe-select :vibe :vibe-2})]
+    (let [state (pad-state {:type :vibe-select :vibe :vibe-2})
+          pressed (pad state :note-on 1000)]
       (is (= {:event/type :vibe/select :vibe :vibe-2 :input-time 1000}
-             (select-keys (:dispatch (pad state :note-on 1000)) [:event/type :vibe :input-time])))
-      (is (nil? (:dispatch (pad state :note-off 1090)))))))
+             (select-keys (:dispatch pressed) [:event/type :vibe :input-time])))
+      (is (nil? (:dispatch (pad (:state pressed) :note-off 1090)))))))
+
+(defn- bookkeeping
+  "The trigger runtime but the keys' activations: the held inputs, active
+   triggers and the last input time."
+  [state]
+  (dissoc (:trigger-runtime state) :activations))
 
 (deftest vibe-action-skips-runtime-bookkeeping-test
-  (let [state (pad-state {:type :vibe :role :hit})]
-    (is (identical? state (:state (pad state :note-on 1000))) "probe v8: no held input, tap or active trigger")
-    (is (identical? state (:state (pad state :note-off 1090)))))
+  (let [state (pad-state {:type :vibe :role :hit})
+        pressed (:state (pad state :note-on 1000))
+        released (:state (pad pressed :note-off 1090))]
+    (is (= (bookkeeping state) (bookkeeping pressed)) "probe v8: no held input, tap or active trigger")
+    (is (= {pad-key {:type :vibe :role :hit}} (get-in pressed [:trigger-runtime :activations]))
+        "only what the key holds, for its release")
+    (is (= (bookkeeping state) (bookkeeping released)))
+    (is (empty? (get-in released [:trigger-runtime :activations]))))
   (testing "other bindings keep it"
     (is (= #{pad-key} (get-in (pad (pad-state {:type :tap-tempo}) :note-on 1000) [:state :trigger-runtime :held-inputs])))))
 
@@ -238,13 +258,14 @@
 
 (deftest zone-map-action-presses-the-map-test
   (let [state (pad-state {:type :zone-map :target :map/odd-even})
-        press (pad state :note-on 1000)]
+        press (pad state :note-on 1000)
+        release (pad (:state press) :note-off 1090)]
     (is (= {:event/type :zone-map/press :map :map/odd-even :src :input}
            (select-keys (:dispatch press) [:event/type :map :src]))
         "zones plan Z4: a learned key presses the map's pad")
-    (is (nil? (:dispatch (pad state :note-off 1090))) "its release does nothing")
-    (is (identical? state (:state press)) "no bookkeeping, as for a vibe key")
-    (is (identical? state (:state (pad state :note-off 1090))))))
+    (is (nil? (:dispatch release)) "its release does nothing")
+    (is (= (bookkeeping state) (bookkeeping (:state press)) (bookkeeping (:state release)))
+        "no bookkeeping, as for a vibe key")))
 
 (deftest zone-map-action-carries-the-input-time-test
   (is (= 1000 (get-in (pad (pad-state {:type :zone-map :target :map/unison}) :note-on 1000) [:dispatch :input-time]))
@@ -255,7 +276,7 @@
         tap (:dispatch (pad state :note-on 1000))]
     (is (= {:event/type :timing/tap-tempo :input-time 1000} (select-keys tap [:event/type :input-time]))
         "handled at 99999: a bound key taps at its input's time, as HIT does (06 §4)")
-    (is (nil? (:dispatch (pad state :note-off 1090))) "its release taps nothing")
+    (is (nil? (:dispatch (pad (:state (pad state :note-on 1000)) :note-off 1090))) "its release taps nothing")
     (is (not (contains? (:trigger-runtime (:state (pad state :note-on 1000))) :tap-history))
         "the trigger runtime keeps no taps of its own")))
 
@@ -265,8 +286,8 @@
     (is (= {:event/type :pattern-pads/press :pad :chase :src :input :input-time 1000}
            (select-keys (:dispatch press) [:event/type :pad :src :input-time]))
         "zones plan Z5: a learned key presses the pattern pad, timed by the input")
-    (is (nil? (:dispatch (pad state :note-off 1090))) "its release does nothing")
-    (is (identical? state (:state press)) "no bookkeeping, as for a vibe key")
+    (is (nil? (:dispatch (pad (:state press) :note-off 1090))) "its release does nothing")
+    (is (= (bookkeeping state) (bookkeeping (:state press))) "no bookkeeping, as for a vibe key")
     (is (= :as-set (get-in (pad (pad-state {:type :pattern-pad :target :as-set}) :note-on 1000) [:dispatch :pad])))))
 
 (deftest zone-step-action-steps-test
@@ -275,7 +296,229 @@
     (is (= {:event/type :pattern-pads/step :src :input :input-time 1000}
            (select-keys (:dispatch press) [:event/type :src :input-time]))
         "the Zone step key steps the patterns that step on it")
-    (is (nil? (:dispatch (pad state :note-off 1090))))
-    (is (identical? state (:state press)))
+    (is (nil? (:dispatch (pad (:state press) :note-off 1090))))
+    (is (= (bookkeeping state) (bookkeeping (:state press))))
     (testing "the CYCLE pad's key presses CYCLE"
       (is (= :cycle (get-in (pad (pad-state {:type :zone-map :target :cycle}) :note-on 1000) [:dispatch :map]))))))
+
+
+;; A key's release ends what its press played, whatever its source and
+;; whatever it is bound to by then (reactivity plan 26)
+
+(def ^:private a1 {:type :trigger-cue :target [0 0] :behavior :momentary})
+(def ^:private b1 {:type :trigger-cue :target [1 0] :behavior :momentary})
+(def ^:private note-60 {:source :midi :channel 0 :note 60})
+(def ^:private push {:source :osc :id "/1/push1"})
+
+(defn- world
+  "The starter show (cues A1-H1, the vibes; HIT taps no tempo and plays D1
+   only, so a role never plays a cell a binding below does) with effect
+   cells at B4 and C4, and bindings."
+  [bindings]
+  (let [fx-cell (fn [effect-id] {:items [{:type :effect :effect-id effect-id :id (random-uuid) :enabled? true}]})]
+    (-> (domains/build-initial-state)
+        (templates/apply-starter-cue-chains)
+        (templates/apply-starter-vibes)
+        (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)
+        (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [[3 0]])
+        (assoc-in [:chains :effect-chains [1 3]] (fx-cell :scale))
+        (assoc-in [:chains :effect-chains [2 3]] (fx-cell :rotation))
+        (assoc-in [:config :input :trigger-map] bindings))))
+
+(defn- played
+  "App state after events, in turn, through the wired pipeline, each with
+   what it continues with (events/event-handler). The device worker is
+   stood in for: nothing opens or closes."
+  [state & events]
+  (state/init-state! state)
+  (with-redefs [devices/submit! (constantly true)]
+    (run! events/event-handler events))
+  (state/get-raw-state))
+
+(defn- key-event
+  "What the input mapper sends the app for a router event: :trigger/input."
+  [input-event]
+  {:event/type :trigger/input :input-event input-event :time (:timestamp input-event)})
+
+(defn- note
+  "MIDI note n on channel 1 (0 inside) at velocity, as the device delivers
+   it (midi-clj's message through midi/midi-msg->event): velocity 0 is a
+   note-off."
+  [n velocity]
+  (key-event (midi/midi-msg->event (fixtures/note-on 0 n velocity))))
+
+(defn- osc-button
+  "An OSC button at address at v (1.0 down, 0.0 up), as the server delivers it."
+  [address v]
+  (key-event (first (osc/osc-msg->events (fixtures/osc-msg address (float v)) {}))))
+
+(defn- pad-button
+  "Gamepad 0's button going down or up, as the poll thread sends it."
+  [button down?]
+  (key-event (first (gamepad/diff-controller-states {0 {:buttons {button (not down?)} :axes {}}}
+                                                    {0 {:buttons {button down?} :axes {}}}))))
+
+(defn- keyboard [id edge] (key-event (input-events/trigger :keyboard id edge)))
+
+(defn- playing [s cell] (get-in s [:playback :active-cues cell]))
+(defn- effect-on? [s cell] (true? (get-in s [:chains :effect-chains cell :active?])))
+(defn- held-role [s role] (get-in s [:vibe-runtime :held role :src]))
+(defn- activations [s] (get-in s [:trigger-runtime :activations]))
+
+(deftest midi-release-after-its-binding-is-cleared-ends-what-it-played-test
+  (let [pressed (played (world {note-60 a1}) (note 60 100))
+        cleared (played pressed {:event/type :input/remove-trigger :trigger-key note-60})
+        released (played cleared (note 60 0))]
+    (is (some? (playing pressed [0 0])))
+    (is (= {note-60 a1} (activations pressed)) "the press keeps what it played, by the key")
+    (is (empty? (get-in cleared [:config :input :trigger-map])))
+    (is (some? (playing cleared [0 0])) "held still")
+    (is (nil? (playing released [0 0])) "the note-off (a note-on at velocity 0) lets go of A1, though the note is bound to nothing now")
+    (is (empty? (activations released)))))
+
+(deftest midi-release-after-rebinding-ends-the-original-not-the-new-binding-test
+  (let [s0 (played (world {note-60 a1}) {:event/type :grid/activate-cell :col 1 :row 0})
+        b1-run (playing s0 [1 0])
+        pressed (played s0 (note 60 100))
+        released (played (assoc-in pressed [:config :input :trigger-map note-60] b1) (note 60 0))]
+    (is (some? b1-run) "B1 plays, from a click")
+    (is (some? (playing pressed [0 0])))
+    (is (nil? (playing released [0 0])) "A1, which the press played, lets go")
+    (is (= b1-run (playing released [1 0])) "B1, the note's binding now, plays on")
+    (testing "the next press plays the new binding"
+      (let [again (played released (note 60 100))]
+        (is (not= b1-run (playing again [1 0])) "B1 started again")
+        (is (= {note-60 b1} (activations again)))))))
+
+(deftest osc-release-after-rebinding-ends-the-original-test
+  (let [fx-b4 {:type :trigger-effect :target [1 3] :behavior :momentary}
+        fx-c4 {:type :trigger-effect :target [2 3] :behavior :momentary}
+        s0 (played (world {push fx-b4}) {:event/type :effects/toggle-cell :col 2 :row 3})
+        pressed (played s0 (osc-button "/1/push1" 1.0))
+        released (played (assoc-in pressed [:config :input :trigger-map push] fx-c4) (osc-button "/1/push1" 0.0))]
+    (is (effect-on? s0 [2 3]) "C4 on, from a click")
+    (is (effect-on? pressed [1 3]))
+    (is (not (effect-on? released [1 3])) "B4, which the press switched on, goes off")
+    (is (effect-on? released [2 3]) "C4, the button's binding now, stays on")
+    (testing "cleared instead: B4 goes off all the same"
+      (let [cleared (played pressed {:event/type :input/remove-trigger :trigger-key push})]
+        (is (not (effect-on? (played cleared (osc-button "/1/push1" 0.0)) [1 3])))))))
+
+(deftest gamepad-release-after-rebinding-ends-the-original-role-test
+  (let [button {:source :gamepad :id [0 :a]}
+        pressed (played (world {button {:type :vibe :role :hit}}) (pad-button :a true))
+        rebound (assoc-in pressed [:config :input :trigger-map button] {:type :vibe :role :accent})
+        released (played rebound (pad-button :a false))]
+    (is (= :input (held-role pressed :hit)))
+    (is (nil? (held-role released :hit)) "HIT, which the press held, lets go")
+    (is (nil? (held-role released :accent)) "ACCENT, the button's binding now, was never pressed")
+    (testing "the gamepad switched off, or its controller gone: the poll thread sends the held button's release (input/gamepad.clj), which ends HIT too"
+      (let [[release] (gamepad/diff-controller-states {0 {:buttons {:a true} :axes {}}} {})
+            off (played rebound {:event/type :input/gamepad-disable} (key-event release))]
+        (is (= {:type :trigger-release :source :gamepad :id [0 :a]} (select-keys release [:type :source :id])))
+        (is (nil? (held-role off :hit)))
+        (is (nil? (held-role off :accent)))
+        (is (empty? (activations off)))))))
+
+(deftest a-repeated-press-while-held-keeps-the-first-activation-test
+  (let [pressed (played (world {note-60 a1}) (note 60 100))
+        a1-run (playing pressed [0 0])
+        again (played (assoc-in pressed [:config :input :trigger-map note-60] b1) (note 60 100))
+        released (played again (note 60 0))]
+    (is (= a1-run (playing again [0 0])) "a second note-on, no note-off between, starts A1 again no more")
+    (is (nil? (playing again [1 0])) "nor plays the new binding")
+    (is (= {note-60 a1} (activations again)) "one activation, the first press's")
+    (is (nil? (playing released [0 0])) "the release lets go of A1")
+    (is (nil? (playing released [1 0])))
+    (is (empty? (activations released))))
+  (testing "a press that holds nothing (a toggled cue; an OSC address that never sends a release) plays each time"
+    (let [bang (key-event (first (osc/osc-msg->events (fixtures/osc-msg "/go") {})))
+          on (played (world {{:source :osc :id "/go"} {:type :trigger-cue :target [2 0]}}) bang)
+          off (played on bang)]
+      (is (some? (playing on [2 0])))
+      (is (nil? (playing off [2 0])) "the second bang toggles C1 off"))))
+
+(defn- disconnected
+  "state after the device worker said the MIDI inputs it was asked to
+   disconnect are: the answer to its latest request, else (stale? true) to
+   an earlier one (input.devices)."
+  [state stale?]
+  (let [latest (random-uuid)]
+    (played (assoc-in state [:backend :input :midi :requests :connections] latest)
+            {:event/type :input/midi-disconnected :request-id (if stale? (random-uuid) latest) :connected-devices #{}})))
+
+(deftest a-source-that-cannot-send-its-releases-retires-its-holds-test
+  (let [hit-key {:source :midi :channel 0 :note 36}
+        toggle-key {:source :midi :channel 0 :note 62}
+        h {:source :keyboard :id :h}
+        j {:source :keyboard :id :j}
+        held (played (world {note-60 a1                                   ; MIDI: A1 while held
+                             hit-key {:type :vibe :role :hit}             ; MIDI: HIT
+                             toggle-key {:type :trigger-cue :target [2 0]} ; MIDI: C1 toggled on
+                             push {:type :trigger-effect :target [1 3] :behavior :momentary} ; OSC: B4 while held
+                             h b1                                         ; keyboard: B1 while held
+                             j {:type :vibe :role :accent}})              ; keyboard: ACCENT
+                     (note 60 100) (note 36 100) (note 62 100) (osc-button "/1/push1" 1.0)
+                     (keyboard :h :pressed) (keyboard :j :pressed))
+        midi-gone? (fn [s]
+                     (is (nil? (playing s [0 0])) "A1 lets go, as its note-off would have")
+                     (is (nil? (held-role s :hit)) "so does HIT")
+                     (is (some? (playing s [2 0])) "C1, toggled on, isn't toggled off: nothing is played")
+                     (is (some? (playing s [1 0])) "the keyboard's B1 holds on: its release still comes")
+                     (is (= :input (held-role s :accent)) "and its ACCENT")
+                     (is (effect-on? s [1 3]) "OSC's B4 too")
+                     (is (= #{push h j} (set (keys (activations s)))) "MIDI's activations are gone"))]
+    (is (every? #(some? (playing held %)) [[0 0] [1 0] [2 0]]))
+    (is (= [:input :input] [(held-role held :hit) (held-role held :accent)]))
+    (is (effect-on? held [1 3]))
+    (is (= 6 (count (activations held))))
+    (testing "the MIDI inputs disconnected (the device worker's answer to the latest request)"
+      (let [s (disconnected held false)]
+        (midi-gone? s)
+        (testing "and a note-off that comes later ends nothing, whatever the note is bound to now"
+          (let [later (played (assoc-in s [:config :input :trigger-map note-60] {:type :trigger-cue :target [5 0] :behavior :momentary})
+                              {:event/type :grid/activate-cell :col 5 :row 0}
+                              (note 60 0) (note 36 0))]
+            (is (some? (playing later [5 0])))
+            (is (= :input (held-role later :accent)))))))
+    (testing "an earlier disconnect's answer, superseded: nothing lets go"
+      (let [s (disconnected held true)]
+        (is (some? (playing s [0 0])))
+        (is (= :input (held-role s :hit)))
+        (is (= 6 (count (activations s))))))
+    (testing "MIDI switched off: its note-offs can't come in"
+      (midi-gone? (played held {:event/type :input/midi-disable})))
+    (doseq [event [{:event/type :input/osc-stop-server} {:event/type :input/osc-disable}]]
+      (testing (str (:event/type event) ": OSC's holds only")
+        (let [s (played held event)]
+          (is (not (effect-on? s [1 3])) "B4 goes off")
+          (is (some? (playing s [0 0])) "MIDI's A1 holds on")
+          (is (= [:input :input] [(held-role s :hit) (held-role s :accent)]))
+          (is (= #{note-60 hit-key toggle-key h j} (set (keys (activations s))))))))
+    (testing "nothing of the source held: no commit"
+      (let [none (played (world {}) (note 60 100))]
+        (is (= {} (events/handle-event-pipeline {:event/type :trigger/retire :source :osc :state none :time 0})))))))
+
+(deftest new-or-open-retires-every-hold-test
+  (let [bindings {note-60 a1
+                  push {:type :trigger-effect :target [1 3] :behavior :momentary}
+                  {:source :gamepad :id [0 :a]} {:type :vibe :role :hit}
+                  {:source :keyboard :id :h} b1}
+        held (played (world bindings) (note 60 100) (osc-button "/1/push1" 1.0) (pad-button :a true) (keyboard :h :pressed))
+        files (persistent/project-files held)]
+    (is (= 4 (count (activations held))))
+    (doseq [[label next-show] [["New" (persistent/new-project-state held)]
+                               ["Open" (persistent/apply-loaded-project held files "held.zip")]]]
+      (testing label
+        (is (every? empty? ((juxt :activations :held-inputs :active-triggers) (:trigger-runtime next-show)))
+            "no key holds anything in the new show")
+        (testing "and the old show's keys' releases play nothing in it"
+          (let [s (played (world {note-60 b1
+                                  push {:type :trigger-effect :target [2 3] :behavior :momentary}
+                                  {:source :keyboard :id :h} b1})
+                          {:event/type :grid/activate-cell :col 1 :row 0}
+                          {:event/type :effects/toggle-cell :col 2 :row 3})
+                s (played (merge s (select-keys next-show [:trigger-runtime]))
+                          (note 60 0) (osc-button "/1/push1" 0.0) (pad-button :a false) (keyboard :h :released))]
+            (is (some? (playing s [1 0])) "B1 plays on")
+            (is (effect-on? s [2 3]) "C4 stays on")))))))
