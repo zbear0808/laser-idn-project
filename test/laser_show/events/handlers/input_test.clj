@@ -75,6 +75,8 @@
         (is (nil? (get-in started [:state :ui :notice]))))
       (testing "Stop Server does both the other way: the messages stop at once, then the server"
         (is (= {:request-id (get-in stop [:state :backend :input :osc :requests :server])} (:input/osc-stop stop)))
+        (is (= {:event/type :trigger/retire :source :osc} (:dispatch stop))
+            "and what OSC keys hold lets go, as their releases can't come in (reactivity plan 26)")
         (is (= {:server-running? true :enabled? false} (select-keys (osc-of (:state stop)) [:server-running? :enabled?])))
         (is (= {:server-running? false :enabled? false}
                (select-keys (osc-of (:state stopped)) [:server-running? :enabled?])))))
@@ -88,6 +90,13 @@
         (is (= {:text "Could not listen for OSC on port 9100" :level :error} (dissoc notice :id)))
         (is (= {:event {:event/type :ui/clear-notice :id id} :delay-ms 6000}
                (:dispatch-later result)))))))
+
+(deftest osc-set-port-takes-only-a-port-test
+  (let [handle #(input/handle {:event/type :input/osc-set-port :port % :state (initial-state)})]
+    (doseq [port [1 9100 65535]]
+      (is (= port (get-in (handle port) [:state :backend :input :osc :port]))))
+    (doseq [bad [0 65536 70000 -1 nil "9100" 9100.5]]
+      (is (= {} (handle bad)) (str (pr-str bad) ": no port, so nothing changes (no commit)")))))
 
 (deftest stale-device-completion-is-ignored-test
   (let [pipe (fn [state event] (events/handle-event-pipeline (merge {:time 0} event {:state state})))

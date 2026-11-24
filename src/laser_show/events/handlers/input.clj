@@ -258,9 +258,14 @@
     {}))
 
 (defn- handle-osc-set-port
-  "Set the OSC server port (requires restart to take effect)."
+  "Set the port Start Server listens on: an integer from 1 to 65535 (else
+   nothing changes). It takes effect at the next Start: the Port field
+   applies it on Enter or when it loses focus, so a click on Start applies
+   what the field shows first."
   [{:keys [state port]}]
-  {:state (assoc-in state (osc-path :port) port)})
+  (if (and (int? port) (<= 1 port 65535))
+    {:state (assoc-in state (osc-path :port) port)}
+    {}))
 
 (defn- handle-osc-remove-address-mapping
   "Remove an OSC address mapping."
