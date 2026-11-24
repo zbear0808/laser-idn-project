@@ -47,7 +47,7 @@
 (defn- parameter-editor
   "Parameter editor for the selected effect using the shared component.
    Supports keyframe modulation and custom renderers."
-  [{:keys [fx/context col row selected-effect-path effect-chain dialog-data]}]
+  [{:keys [col row selected-effect-path effect-chain dialog-data]}]
   (let [selected-effect (when selected-effect-path
                           (get-in effect-chain (vec selected-effect-path)))
         effect-def (when selected-effect
@@ -55,7 +55,6 @@
     (if selected-effect
       ;; Use shared effect parameter editor component
       {:fx/type param-editor/effect-parameter-editor
-       :fx/context context
        :domain :effect-chains
        :entity-key [col row]
        :effect-path selected-effect-path
@@ -127,7 +126,6 @@
                 :children [;; Left sidebar - chain list with drag-and-drop
                            ;; Using list-editor with built-in keyboard handling
                            {:fx/type list/list-editor
-                            :fx/context context
                             :h-box/hgrow :always
                             :items effect-chain
                             :component-id [:effect-chain col row]
@@ -153,7 +151,6 @@
 
                                         ;; Parameter editor (bottom)
                                         {:fx/type parameter-editor
-                                         :fx/context context
                                          :col col :row row
                                          :selected-effect-path first-selected-path
                                          :effect-chain effect-chain

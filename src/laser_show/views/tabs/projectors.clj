@@ -529,8 +529,9 @@
 
 (defn- projector-effects-sidebar
   "Effect chain sidebar using list-editor with built-in keyboard handling.
+   It reads the chain through the context cljfx gives it, and its list
+   editor gets one of its own the same way.
    Props:
-   - :fx/context - Context for subscriptions
    - :projector-id - ID of the projector
    - :selected-ids - Set of selected item IDs"
   [{:keys [fx/context projector-id]}]
@@ -539,7 +540,6 @@
         ;; Build label map from calibration effects
         labels (calibration-effect-labels)]
     {:fx/type list/list-editor
-     :fx/context context  ;; Required for list-sidebar to subscribe to list-ui-state
      :items (or effects [])
      :component-id [:projector-effects projector-id]
      :items-path [:chains :projector-effects projector-id :items]
@@ -729,7 +729,6 @@
                    :width 316
                    :spacing 8
                    :children [{:fx/type calibration-controls
-                               :fx/context context
                                :projector-id projector-id}
                               {:fx/type :separator}
                               {:fx/type :h-box
@@ -742,7 +741,6 @@
                                            :projector-id projector-id}]}
                               {:fx/type projector-effects-sidebar
                                :fx/key projector-id  ;; Force recreation when projector changes to avoid stale closures
-                               :fx/context context
                                :projector-id projector-id
                                :selected-ids selected-ids}
                               {:fx/type :separator}
@@ -768,7 +766,6 @@
                                    :effect selected-effect
                                    :ui-state effect-ui-state}])
                                [{:fx/type safety-editor/safety-section
-                                 :fx/context context
                                  :projector-id projector-id}]))}]}
       ;; No projector selected
       {:fx/type :v-box

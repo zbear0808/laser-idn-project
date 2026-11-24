@@ -73,7 +73,7 @@
    - :rgb-domain - Domain for RGB curves (:effect-chains, :item-effects, etc.)
    - :rgb-entity-key - Entity key for RGB curves
    - :rgb-effect-path - Effect path for RGB curves"
-  [{:keys [fx/context effect-def current-params ui-mode params-map dialog-data
+  [{:keys [effect-def current-params ui-mode params-map dialog-data
            spatial-event-template spatial-event-keys
            on-change-event on-text-event on-mode-change-event modulator-event-base
            rgb-domain rgb-entity-key rgb-effect-path
@@ -126,7 +126,6 @@
       (= renderer-type :zone-selector)
       {:fx/type custom-renderers/zone-selector-visual-editor
        :fx/key canvas-fx-key
-       :fx/context context
        :current-params current-params
        :event-template {:domain (get spatial-event-keys :domain)
                         :entity-key (get spatial-event-keys :entity-key)
