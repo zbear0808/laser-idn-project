@@ -7,19 +7,21 @@
       timecode (show-time/step);
    2. works out the zone map in use at the tick's beats (a pending switch
       once its beat is reached, else the Map cycle's pick while one runs
-      and isn't paused, routing.zone-maps/effective-map-id), then the
-      routing (routing.rig/cached-routing: which lasers each group and
-      zone reaches, and each laser's halves, scan rate and fit settings),
-      from the tick's state and before the render (spec 01 §5), the cached
-      one while nothing it reads changed;
+      and isn't paused, routing.zone-maps/effective-map-id; the cycle's
+      parameters see the tick's input values and presses, as the render's
+      do), then the routing (routing.rig/cached-routing: which lasers each
+      group and zone reaches, and each laser's halves, scan rate and fit
+      settings), from the tick's state and before the render (spec 01 §5),
+      the cached one while nothing it reads changed;
    3. renders every playing cue once (frame-service/generate-frames-by-zone),
       each in its own try, at its timing context and with one render context
       for the whole tick: the tick's one read of app state and of the input
       store (every tick, playing or not), the faders as their bindings now
-      give them (vibes.faders), the presses tap reactions follow
+      give them (vibes.faders/tick-inputs, looked up once for the cycle, the
+      render and the meters), the presses tap reactions follow
       (show-time/pulse-view; calibration gets none), the global effects and
-      what the zone stage reads (frame-service/render-context, zone-ctx: the
-      routing's lasers, the pattern pads' style);
+      what the zone stage reads (frame-service/render-context-with-inputs,
+      zone-ctx: the routing's lasers, the pattern pads' style);
    4. publishes the result (show-time/publish!), which wakes every projector's
       engine: each composes its laser's frame from the tick's cues and
       routing and sends it on its own thread (backend/multi_engine.clj,
@@ -115,8 +117,9 @@
 (defn- render
   "The snapshot fields for runs (show-time/active-runs), or none while not
    playing: {:cues [{:cell :run :zone-frames}] :projector-ctx :render-us}.
-   Every cue shares one render context (frame-service/render-context): the
-   tick's input values with the faders' slots derived from their bindings,
+   Every cue shares one render context (frame-service/
+   render-context-with-inputs): input-values, the tick's with the faders'
+   slots already derived from their bindings (vibes.faders/tick-inputs),
    its presses (pulses, show-time/pulse-view), its global effects,
    global-clock's timing, and what the zone stage reads of the tick
    (zone-ctx: the routing's refs and lasers, the pattern pads' style); a cue
@@ -127,7 +130,7 @@
     {:cues [] :projector-ctx nil :render-us 0.0}
     (let [bpm (double (or (ex/bpm state) 120.0))
           t0 (System/nanoTime)
-          render-ctx (frame-service/render-context state input-values global-clock pulses zone-ctx)
+          render-ctx (frame-service/render-context-with-inputs state input-values global-clock pulses zone-ctx)
           edited (edited-cells state)
           cues (mapv (fn [run]
                        {:cell (:cell run) :run (:run run)
@@ -239,13 +242,16 @@
 (defn- cycle-step
   "What the Map cycle that runs (zones plan Z5, 07 §8.6: the last in
    reading order, routing.zone-patterns/active-cycle) shows at this tick:
-   {:cell :map :paused?}, its parameters at the global clock with the tick's
-   presses; nil when none runs. One that throws is reported under
-   [:zone-map-cycle], and picks nothing."
-  [state global-clock pulses beats]
+   {:cell :map :paused?}, its parameters at the global clock with the
+   tick's input values (vibes.faders/tick-inputs: a Fader on its Offset
+   follows the fader in the tick that moves its meter) and presses; nil
+   when none runs. One that throws is reported under [:zone-map-cycle], and
+   picks nothing."
+  [state global-clock input-values pulses beats]
   (when-let [{:keys [cell effect]} (zone-patterns/active-cycle state)]
     (try
       (let [ctx (assoc (cue-timing/get-global-timing-context global-clock (double (or (ex/bpm state) 120.0)))
+                       :input-values input-values
                        :pulses pulses)
             pick (zone-patterns/cycle-pick (effects/resolve-effect-params effect ctx) pulses beats
                                            (mapv :id (zone-maps/all-maps state)))]
@@ -265,7 +271,13 @@
    reset. Returns the snapshot."
   [now-ns]
   (let [state (state/get-raw-state)
-        input-values (input-store/get-all-continuous-values)
+        ;; The tick's one read of the input store, each fader where the
+        ;; control learned for it now puts it (vibes.faders/tick-inputs):
+        ;; the Map cycle, every cue and calibration read these input values,
+        ;; the meters these faders
+        inputs (faders/tick-inputs (input-store/get-all-continuous-values)
+                                   (get-in state [:config :input :macro-map]))
+        input-values (:input-values inputs)
         mtc-pos (mtc/current)
         before @show-time/!runtime
         t0 (or (:t0-ns before) now-ns)
@@ -277,7 +289,7 @@
         ;; The Map cycle's pick (zones plan Z5), then the map in use at this
         ;; tick's beats (spec §4): a pending switch from the tick that
         ;; reaches its beat, else the pick unless paused, else the active map
-        cycle (cycle-step state (:global runtime) pulses beats)
+        cycle (cycle-step state (:global runtime) input-values pulses beats)
         map-id (zone-maps/effective-map-id state beats (:map cycle))
         [routing-cache routing] (routing-step (:routing-cache runtime) state map-id)
         ;; What the zone stage reads (zones plan Z5): the routing's rig, the
@@ -293,7 +305,7 @@
                                             :playing? playing?
                                             :positions (show-time/positions runtime)
                                             :pulses pulses
-                                            :faders (faders/fader-values input-values (get-in state [:config :input :macro-map]))
+                                            :faders (:faders inputs)
                                             :routing (cond-> routing cycle (assoc :cycle cycle))
                                             :zone-steps (into {} (keep (comp :zone-steps meta :zone-frames)) cues)
                                             :engine-inputs (multi-engine/engine-inputs state (System/currentTimeMillis))

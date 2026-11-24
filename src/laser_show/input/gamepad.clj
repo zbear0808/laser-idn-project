@@ -3,8 +3,10 @@
 
    A single daemon thread polls the controllers at ~60 Hz and sends the
    differences to the input router: button presses/releases as :trigger /
-   :trigger-release events, axis moves as :control-change events (which the
-   input mapper writes to the fast input store, not the cljfx context)."
+   :trigger-release events, axis moves as :control-change events, each once
+   the axis is past a small threshold from the value last sent for it
+   (which the input mapper writes to the fast input store, not the cljfx
+   context)."
   (:require [clojure.tools.logging :as log]
             [laser-show.input.events :as events])
   (:import [com.studiohartman.jamepad ControllerManager ControllerIndex ControllerButton ControllerAxis]))
@@ -53,10 +55,13 @@
 (defn diff-controller-states
   "Returns the input events needed to go from prev to next.
 
-   Both are maps of controller-id -> {:buttons {kw bool} :axes {kw 0..1}}.
-   Buttons emit a trigger on press and a release on release. Held buttons on
-   a controller that disappeared from next are released. Axes emit a
-   control-change when they move more than a small threshold."
+   Both are maps of controller-id -> {:buttons {kw bool} :axes {kw 0..1}}:
+   next a sample, prev what the poll loop compares it with
+   (next-poll-baseline): each button as last sampled, each axis at the
+   value last sent for it, an axis never sent being taken as 0.5. Buttons
+   emit a trigger on press and a release on release. Held buttons on a
+   controller that disappeared from next are released. Axes emit a
+   control-change when they are more than a small threshold from prev's."
   [prev next]
   (let [button-event (fn [ctrl-id btn-kw pressed?]
                        (events/trigger :gamepad [ctrl-id btn-kw]
@@ -81,6 +86,27 @@
             :when pressed?]
         (button-event ctrl-id btn-kw false))))))
 
+(defn- next-poll-baseline
+  "What the next sample is compared with (diff-controller-states' prev),
+   once sample's events, emitted, are sent: each controller still in
+   sample, with its sampled buttons and, for its axes still in it, the
+   value each was last sent at: emitted's control changes, else prev's.
+   An axis not past the threshold keeps its last sent value, so a slow
+   sweep is sent once it has moved that far in all, and jitter round a
+   value isn't. A controller gone from sample is forgotten: back, it
+   starts afresh."
+  [prev sample emitted]
+  (reduce (fn [baseline {:keys [channel control value] :as event}]
+            (if (events/control-change? event)
+              (assoc-in baseline [channel :axes control] value)
+              baseline))
+          (reduce-kv (fn [baseline ctrl-id {:keys [buttons axes]}]
+                       (assoc baseline ctrl-id {:buttons buttons
+                                                :axes (select-keys (get-in prev [ctrl-id :axes]) (keys axes))}))
+                     {}
+                     sample)
+          emitted))
+
 
 ;; Polling
 
@@ -98,17 +124,24 @@
    {}
    (range (.getNumControllers manager))))
 
-(defn- poll-loop [manager dispatch-fn enabled-fn running]
-  (loop [prev-state {}]
+(defn- poll-loop
+  "Every poll-interval-ms (disabled-poll-interval-ms, reading no
+   controllers, while enabled-fn says no) sends dispatch-fn the events
+   from the baseline to the sample (diff-controller-states), then moves the
+   baseline on by them (next-poll-baseline), until running is false or the
+   thread is interrupted. After an error it waits a second and goes on from
+   the baseline it had."
+  [manager dispatch-fn enabled-fn running]
+  (loop [baseline {}]
     (when @running
-      (let [next-state
+      (let [next-baseline
             (try
               (let [enabled? (enabled-fn)
-                    new-state (if enabled? (read-controllers manager) {})]
-                (doseq [event (diff-controller-states prev-state new-state)]
-                  (dispatch-fn event))
+                    sample (if enabled? (read-controllers manager) {})
+                    emitted (diff-controller-states baseline sample)]
+                (run! dispatch-fn emitted)
                 (Thread/sleep (long (if enabled? poll-interval-ms disabled-poll-interval-ms)))
-                new-state)
+                (next-poll-baseline baseline sample emitted))
               (catch InterruptedException _
                 (log/info "Gamepad polling loop interrupted")
                 ::stop)
@@ -116,11 +149,11 @@
                 (log/error "Error in gamepad polling loop:" (.getMessage e))
                 (try
                   (Thread/sleep 1000)
-                  prev-state
+                  baseline
                   (catch InterruptedException _
                     ::stop))))]
-        (when-not (= ::stop next-state)
-          (recur next-state))))))
+        (when-not (= ::stop next-baseline)
+          (recur next-baseline))))))
 
 
 ;; Lifecycle
