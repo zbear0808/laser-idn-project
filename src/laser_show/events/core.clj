@@ -25,8 +25,9 @@
    - UI callbacks (inline fns) run briefly on FX thread, then delegate to agent
    - Co-effects, handlers and effects run on the agent, on the one event
      thread (laser-show-events, event-executor), one event at a time
-   - An effect that continues the event (:dispatch, :project/save's :on-saved,
-     ...) runs the follow-up inline through run-inline, in the same turn
+   - An effect that continues the event (:dispatch, :project/save's
+     :project/mark-clean and its :on-saved, ...) runs the follow-up inline
+     through run-inline, in the same turn
    - Effects that work later on another thread (futures: scan, learn,
      :dispatch-later; the FX thread: file chooser; the output runtime's status
      thread; the rig writer) only do their side effect there. Their result goes through the
@@ -186,22 +187,27 @@
     (dispatch event)))
 
 (defn- effect-save-project
-  "Effect that writes a project zip.
+  "Effect that writes a project zip (persistent/write-project!: staged
+   beside the file, read back, then moved onto it).
    Args: {:file-path path :files {filename data} :on-saved event :on-failed event}
-   The handler has already marked the project saved. After a successful write,
-   continues with :on-saved (if given). On failure, continues with :on-failed
-   with :file-path so the handler can revert the saved status."
+   The handler changed nothing yet. Only once the file is written and
+   checked does it continue with :project/mark-clean, with :file-path and
+   :on-saved as its :then (if given), so what waited for the save runs
+   after the file and the saved status are there. On failure, it continues
+   with :on-failed with :file-path."
   [{:keys [file-path files on-saved on-failed]} dispatch]
   (if (persistent/write-project! file-path files)
-    (when on-saved
-      (run-inline on-saved dispatch))
+    (run-inline (cond-> {:event/type :project/mark-clean :file-path file-path}
+                  on-saved (assoc :then on-saved))
+                dispatch)
     (when on-failed
       (run-inline (assoc on-failed :file-path file-path) dispatch))))
 
 (defn- effect-load-project
   "Effect that reads a project zip.
    Args: {:file-path path :on-loaded event :on-failed event}
-   Continues with :on-loaded with :file-path and :contents, or :on-failed."
+   Continues with :on-loaded with :file-path and :contents (read-project's:
+   read strictly and checked), or :on-failed when there is no show to open."
   [{:keys [file-path on-loaded on-failed]} dispatch]
   (if-let [contents (persistent/read-project file-path)]
     (run-inline (assoc on-loaded :file-path file-path :contents contents) dispatch)
@@ -693,7 +699,7 @@
      later through dispatch (later, output-status thread)
    - :multi-engine/stop - queue a stop of every engine on the output thread
    - :output/write-status - store the output status at its path only
-   - :project/save - write project zip to disk, then :on-saved (inline)
+   - :project/save - write project zip to disk, then :project/mark-clean (inline)
    - :project/load - read project zip from disk, then :on-loaded (inline)
    - :rig/write - hand the rig file's contents to the rig writer; :rig/written
      or :rig/write-failed comes back (later, rig-writer thread)

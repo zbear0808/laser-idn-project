@@ -9,10 +9,15 @@
    [clojure.test :refer [deftest is testing use-fixtures]]
    [laser-show.events.core :as events]
    [laser-show.events.handlers.menu :as menu]
+   [laser-show.output.jar-builder :as jar]
    [laser-show.state.core :as state]
    [laser-show.state.domains :as domains]
+   [laser-show.state.history :as history]
    [laser-show.state.persistent :as persistent]
-   [laser-show.state.serialization :as ser]))
+   [laser-show.state.serialization :as ser])
+  (:import [java.io File]
+           [java.nio.file AtomicMoveNotSupportedException Files]
+           [javafx.event ActionEvent]))
 
 (def test-file "test-output/menu-file-handlers-test.zip")
 
@@ -57,29 +62,35 @@
 ;; Save / Save As
 
 
-(deftest save-as-result-returns-saved-state-test
+(deftest save-as-result-requests-the-write-test
   (let [result (menu/handle {:event/type :file/save-as-result
                              :file-path test-file
                              :time 1234
-                             :state document-state})
-        new-state (:state result)]
-    (testing "state remembers the file and is clean"
-      (is (= test-file (get-in new-state [:project :current-file])))
-      (is (false? (get-in new-state [:project :dirty?])))
-      (is (= 1234 (get-in new-state [:project :last-saved]))))
+                             :state document-state})]
+    (testing "the project status stays as it was until the file is written"
+      (is (= document-state (:state result))))
     (testing "the zip write is requested as an effect built from the state"
       (is (= test-file (get-in result [:project/save :file-path])))
       (is (= 140.0 (get-in result [:project/save :files "project-metadata.edn" :timing :bpm])))
       (is (= {:items [{:type :preset :preset-id :circle}]}
-             (get-in result [:project/save :files "content.edn" :chains :cue-chains [0 0]]))))
+             (get-in result [:project/save :files "content.edn" :chains :cue-chains [0 0]])))
+      (is (= {:event/type :file/save-failed} (get-in result [:project/save :on-failed]))))
     (testing "nothing was written by the handler itself"
-      (is (not (.exists (io/file test-file)))))))
+      (is (not (.exists (io/file test-file)))))
+    (testing "the write's success event brings the file, the time and the clean flag"
+      (let [saved (:state (events/handle-event-pipeline {:event/type :project/mark-clean
+                                                         :file-path test-file
+                                                         :time 1234
+                                                         :state document-state}))]
+        (is (= test-file (get-in saved [:project :current-file])))
+        (is (false? (get-in saved [:project :dirty?])))
+        (is (= 1234 (get-in saved [:project :last-saved])))
+        (is (= (history/extract-document-state document-state) (get-in saved [:project :saved-document])))))))
 
 (deftest save-with-current-file-test
   (let [state (assoc-in document-state [:project :current-file] test-file)
         result (menu/handle {:event/type :file/save :time 99 :state state})]
-    (is (false? (get-in result [:state :project :dirty?])))
-    (is (= test-file (get-in result [:state :project :current-file])))
+    (is (= state (:state result)) "still unsaved until the write succeeds")
     (is (= test-file (get-in result [:project/save :file-path])))
     (is (not (contains? result :fx/show-file-chooser)))))
 
@@ -95,23 +106,22 @@
     (is (= document-state (:state result)))
     (is (not (contains? result :project/save)))))
 
-(deftest save-failed-restores-project-status-test
+(deftest save-failed-keeps-project-status-test
   (let [pipeline events/handle-event-pipeline
-        saved (:state (pipeline {:event/type :file/save-as-result
-                                 :file-path test-file
-                                 :state document-state}))
+        requested (pipeline {:event/type :file/save-as-result
+                             :file-path test-file
+                             :state document-state})
         result (pipeline {:event/type :file/save-failed
                           :file-path test-file
-                          :previous-project (:project document-state)
-                          :state saved})]
-    (is (false? (get-in saved [:project :dirty?])))
+                          :state (:state requested)})]
+    (is (= (:project document-state) (get-in requested [:state :project])) "the request changed nothing")
+    (is (= (:project document-state) (get-in result [:state :project])) "so the failure has nothing to restore")
     (is (nil? (get-in result [:state :project :current-file])))
     (is (true? (get-in result [:state :project :dirty?])))))
 
 (deftest failed-save-sets-a-notice-test
   (let [result (menu/handle {:event/type :file/save-failed
                              :file-path "test-output/shows/friday.zip"
-                             :previous-project (:project document-state)
                              :state document-state})
         {:keys [id] :as notice} (get-in result [:state :ui :notice])]
     (is (= {:text "Could not save friday.zip" :level :error} (dissoc notice :id)))
@@ -119,8 +129,8 @@
     (testing "it goes after 6 s, and only that notice"
       (is (= {:event {:event/type :ui/clear-notice :id id} :delay-ms 6000}
              (:dispatch-later result))))
-    (testing "the project status is still restored"
-      (is (true? (get-in result [:state :project :dirty?]))))))
+    (testing "nothing else changes: the project status never left what it was"
+      (is (= document-state (assoc-in (:state result) [:ui :notice] nil))))))
 
 (deftest save-as-pipeline-test
   (testing "Save As through the wired pipeline writes the zip and keeps the file/clean flag"
@@ -192,7 +202,8 @@
                                                                        :state current})))))))
 
 (deftest project-loaded-fills-missing-config-defaults-test
-  (let [contents {"project-metadata.edn" {:config {:cue {:trigger-mode :toggle}}}}
+  (let [contents {"project-metadata.edn" {:config {:cue {:trigger-mode :toggle}}}
+                  "content.edn" {:chains {:cue-chains {} :effect-chains {}}}}
         new-state (:state (menu/handle {:event/type :file/project-loaded
                                         :file-path test-file
                                         :contents contents
@@ -234,6 +245,83 @@
     (events/event-handler {:event/type :file/open-result :file-path "test-output/does-not-exist.zip"})
     (is (= "Could not open does-not-exist.zip"
            (get-in (state/get-raw-state) [:ui :notice :text])))))
+
+(def ^:private png-bytes
+  "A thumbnail's first bytes: binary, and not UTF-8."
+  (byte-array (map unchecked-byte [0x89 0x50 0x4E 0x47 0x0D 0x0A 0x1A 0x0A 0xFF 0xFE 0x00])))
+
+(defn- names-in [^File dir]
+  (set (.list dir)))
+
+(defn- file-bytes [path]
+  (vec (Files/readAllBytes (.toPath (io/file path)))))
+
+(deftest corrupt-open-keeps-current-show-test
+  (let [^File dir (jar/temp-dir! "corrupt-open")
+        a-path (str (io/file dir "A.zip"))
+        b-path (str (io/file dir "B.zip"))
+        companions {"project-metadata.edn" (pr-str {:timing {:bpm 90.0} :grid {:size [4 2]}})
+                    "hardware.edn" (pr-str {:zone-groups {:group-b {:id :group-b :name "B's"}}})}
+        b-zip! (fn [entries] (str (jar/write-jar! (io/file b-path) entries)))]
+    (try
+      ;; Editing A: saved to A.zip, then a cue named twice and one name undone,
+      ;; a cell selected and the report of A's rig kept
+      (state/reset-state! (with-runtime document-state))
+      (events/event-handler {:event/type :file/save-as-result :file-path a-path})
+      (events/event-handler {:event/type :cue-chain/set-name :col 2 :row 0 :name "Unsaved"})
+      (events/event-handler {:event/type :cue-chain/set-name :col 2 :row 0 :name "Unsaved again"})
+      (events/event-handler {:event/type :edit/undo})
+      (state/swap-state! #(-> %
+                              (assoc-in [:grid :selected-cell] [2 0])
+                              (assoc-in [:ui :dialogs :rig-report] {:open? false :mode :report :file "A.zip"
+                                                                    :hardware {} :chains {} :pins {}})))
+      (let [editing (state/get-raw-state)
+            open! (fn [path]
+                    (state/reset-state! editing)
+                    (events/event-handler {:event/type :file/open-result :file-path path})
+                    (state/get-raw-state))
+            kept? (fn [label after]
+                    (is (= "Could not open B.zip" (get-in after [:ui :notice :text])) label)
+                    (is (= editing (assoc-in after [:ui :notice] (get-in editing [:ui :notice])))
+                        (str label ": the rest of the state as it was")))]
+        (testing "A has a saved baseline, an unsaved cue and both Undo and Redo"
+          (is (= a-path (get-in editing [:project :current-file])))
+          (is (true? (get-in editing [:project :dirty?])))
+          (is (= "Unsaved" (get-in editing [:chains :cue-chains [2 0] :name])))
+          (is (= [1 1] (map #(count (get-in editing [:history %])) [:undo-stack :redo-stack]))))
+        (testing "B.zip with readable companions, but no show in content.edn"
+          (doseq [[label content] [["a Java object, as it prints" "{:chains #object[java.lang.Object 1 \"x\"]}"]
+                                   ["nil" "nil"]
+                                   ["a vector" "[]"]
+                                   ["cues in a vector" "{:chains {:cue-chains [] :effect-chains {}}}"]
+                                   ["a second form" "{:chains {:cue-chains {} :effect-chains {}}} {:chains {}}"]]]
+            (kept? label (open! (b-zip! (assoc companions "content.edn" content))))))
+        (testing "B.zip with no content.edn"
+          (kept? "companions only" (open! (b-zip! companions))))
+        (testing "B.zip's content is a show, but its hardware.edn is broken: the whole Open is refused"
+          (kept? "broken hardware" (open! (b-zip! {"content.edn" "{:chains {:cue-chains {} :effect-chains {}}}"
+                                                   "hardware.edn" "{:zone-groups {:group-b"}))))
+        (testing "contents that aren't a show, handed to :file/project-loaded"
+          (let [contents {"project-metadata.edn" {:timing {:bpm 90.0}}}]
+            (is (= {:dispatch {:event/type :file/project-load-failed :file-path b-path}}
+                   (menu/handle {:event/type :file/project-loaded :file-path b-path :contents contents :state editing})))
+            (state/reset-state! editing)
+            (events/event-handler {:event/type :file/project-loaded :file-path b-path :contents contents})
+            (kept? "handed in" (state/get-raw-state))))
+        (testing "content.edn alone, both grids empty, beside a thumbnail: B opens, empty and clean"
+          (let [opened (open! (b-zip! {"content.edn" "{:chains {:cue-chains {} :effect-chains {}}}"
+                                       "thumbnail.png" png-bytes}))]
+            (is (= {} (get-in opened [:chains :cue-chains])))
+            (is (= {} (get-in opened [:chains :effect-chains])))
+            (is (= 120.0 (get-in opened [:timing :bpm])) "A's 140 BPM went with A: B has none")
+            (is (= b-path (get-in opened [:project :current-file])))
+            (is (false? (get-in opened [:project :dirty?])))
+            (is (= [[] []] (map #(get-in opened [:history %]) [:undo-stack :redo-stack])))
+            (is (nil? (get-in opened [:grid :selected-cell])))
+            (is (nil? (get-in opened [:ui :notice])))
+            (assert-runtime-kept opened))))
+      (finally
+        (jar/delete-tree! dir)))))
 
 
 ;; New Project
@@ -490,6 +578,91 @@
         (is (= 140.0 (get-in s [:timing :bpm])) "the document is still there")
         (is (true? (get-in s [:project :dirty?])) "and still unsaved")
         (is (false? (:open? (confirm-dialog s))))))))
+
+(deftest exit-waits-for-verified-show-test
+  (let [^File dir (jar/temp-dir! "exit-waits")
+        a-path (str (io/file dir "A.zip"))
+        b-path (str (io/file dir "B.zip"))
+        amount [:chains :effect-chains [1 1] :items 0 :params :amount]
+        exits (atom [])
+        during-write (atom ::not-written)
+        save-to-zip! ser/save-to-zip!
+        publish! @#'persistent/publish-project!
+        exit-with-save! (fn []
+                          (events/event-handler {:event/type :file/exit})
+                          (events/event-handler {:event/type :file/confirm-save}))]
+    (events/set-exit-fn! #(swap! exits conj {:state (state/get-raw-state) :file (persistent/read-project a-path)}))
+    (try
+      ;; A.zip saved; then a cue named "#object", unsaved
+      (state/reset-state! (assoc-in document-state amount {:type :sine :active? false :value 0.2 :min 0.0 :max 1.0}))
+      (events/event-handler {:event/type :file/save-as-result :file-path a-path})
+      (events/event-handler {:event/type :cue-chain/set-name :col 2 :row 0 :name "#object"})
+      (let [a-bytes (file-bytes a-path)
+            dirty (state/get-raw-state)
+            refused? (fn [label before]
+                       (let [after (state/get-raw-state)]
+                         (is (empty? @exits) (str label ": no exit"))
+                         (is (= a-bytes (file-bytes a-path)) (str label ": A.zip's bytes as they were"))
+                         (is (= "Could not save A.zip" (get-in after [:ui :notice :text])) label)
+                         (is (= (:project before) (:project after)) (str label ": the file, time, baseline and unsaved flag as they were"))
+                         (is (= (:history before) (:history after)) (str label ": the history too"))
+                         (is (= (:chains before) (:chains after)) (str label ": and the edit is still there"))))]
+        (is (= a-path (get-in dirty [:project :current-file])))
+        (is (true? (get-in dirty [:project :dirty?])))
+        (testing "an ActionEvent where the amount's value goes: the write is refused, and Exit with it"
+          (state/reset-state! (assoc-in dirty (conj amount :value) (ActionEvent.)))
+          (let [before (state/get-raw-state)]
+            (with-redefs [ser/save-to-zip! (fn [& args]
+                                             (reset! during-write (:project (state/get-raw-state)))
+                                             (apply save-to-zip! args))]
+              (exit-with-save!))
+            (is (= (:project before) @during-write) "while it was written, the project was still the unsaved one")
+            (refused? "an object" before)
+            (is (= #{"A.zip"} (names-in dir)) "no temporary file left")))
+        (testing "a cue with :tracks 42 (readable, but this build can't open it): nothing is written"
+          (reset! during-write ::not-written)
+          (state/reset-state! (assoc-in dirty [:chains :cue-chains [3 0]] {:tracks 42 :items []}))
+          (let [before (state/get-raw-state)]
+            (with-redefs [ser/save-to-zip! (fn [& args]
+                                             (reset! during-write (:project (state/get-raw-state)))
+                                             (apply save-to-zip! args))]
+              (exit-with-save!))
+            (is (= ::not-written @during-write))
+            (refused? ":tracks 42" before)))
+        (testing "Save As onto a good B.zip, read back, but the move fails: B.zip, A and Exit stay as they were"
+          (is (persistent/write-project! b-path (persistent/project-files (assoc-in document-state [:timing :bpm] 77.0))))
+          (let [b-bytes (file-bytes b-path)
+                moves (atom 0)]
+            (state/reset-state! dirty)
+            (with-redefs-fn {#'persistent/publish-project! (fn [& _]
+                                                             (swap! moves inc)
+                                                             (throw (AtomicMoveNotSupportedException. "B.zip.tmp" "B.zip" "can't replace it in one step")))}
+              #(events/event-handler {:event/type :file/save-as-result :file-path b-path
+                                      :then {:event/type :file/exit :force? true}}))
+            (is (= 1 @moves) "written and read back: it got as far as the move")
+            (is (= b-bytes (file-bytes b-path)))
+            (is (= #{"A.zip" "B.zip"} (names-in dir)) "no temporary file left")
+            (is (= (:project dirty) (:project (state/get-raw-state))) "A is still the file, and unsaved")
+            (is (empty? @exits))))
+        (testing "0.42 and the cue named \"#object\": A.zip is replaced, then marked saved, then Exit, once"
+          (state/reset-state! (assoc-in dirty (conj amount :value) 0.42))
+          (with-redefs-fn {#'persistent/publish-project! (fn [staged target]
+                                                           (reset! during-write (:project (state/get-raw-state)))
+                                                           (publish! staged target))}
+            exit-with-save!)
+          (is (= (:project dirty) @during-write) "still unsaved while it was moved into place")
+          (is (= 1 (count @exits)))
+          (let [{:keys [state file]} (first @exits)]
+            (is (= (persistent/project-files state) file) "at the exit, A.zip reads back as the show")
+            (is (= 0.42 (get-in file ["content.edn" :chains :effect-chains [1 1] :items 0 :params :amount :value])))
+            (is (= "#object" (get-in file ["content.edn" :chains :cue-chains [2 0] :name])))
+            (is (= a-path (get-in state [:project :current-file])))
+            (is (false? (get-in state [:project :dirty?])))
+            (is (= (history/extract-document-state state) (get-in state [:project :saved-document])))
+            (is (= #{"A.zip" "B.zip"} (names-in dir))))))
+      (finally
+        (events/set-exit-fn! nil)
+        (jar/delete-tree! dir)))))
 
 (deftest discard-pipeline-test
   (state/reset-state! document-state)

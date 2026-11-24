@@ -111,28 +111,46 @@
   [file-path]
   (or (some-> file-path java.io.File. .getName) "the project"))
 
-(defn- handle-file-project-loaded
-  "Replace the show with the loaded project contents. This machine's rig,
-   its safety zones and calibration with it, stays as it is (D-30): the
-   show's copy of a rig is only read, to match the show onto this one. It is
-   kept in [:ui :dialogs :rig-report] while the show is open (rig-file):
-   on a rig with no laser on, and a show made with lasers, it opens the
-   set-up question (Q-ZR-3); on a rig that is set up, the report, when
-   something doesn't fit (a ⚠ row: rig-file/warning-count)."
-  [{:keys [state file-path contents]}]
-  (log/info "Project loaded:" file-path)
+(defn prepare-open
+  "The state File > Open of contents (read-project's {filename data}) from
+   file-path gives: the show replaced by the loaded project contents
+   (persistent/apply-loaded-project, which checks them first). This
+   machine's rig, its safety zones and calibration with it, stays as it is
+   (D-30): the show's copy of a rig is only read, to match the show onto
+   this one. It is kept in [:ui :dialogs :rig-report] while the show is open
+   (rig-file): on a rig with no laser on, and a show made with lasers, it
+   opens the set-up question (Q-ZR-3); on a rig that is set up, the report,
+   when something doesn't fit (a ⚠ row: rig-file/warning-count).
+   Pure. Throws when contents can't be opened: no show in them, or data this
+   build can't convert or report on. Save runs it on what it is about to
+   write, and discards the result."
+  [state contents file-path]
   (let [loaded (persistent/apply-loaded-project state contents file-path)
         hardware (get contents (:hardware persistent/zip-filenames))
         chains (get-in contents [(:content persistent/zip-filenames) :chains :projector-effects])
         set-up? (boolean (and (not (rig-file/set-up? loaded)) (rig-file/set-up-question loaded hardware)))
         warnings? (and (not set-up?) (pos? (rig-file/warning-count (rig-file/match-report loaded hardware chains))))]
-    {:state (assoc-in loaded [:ui :dialogs :rig-report]
-                      {:open? (or set-up? warnings?)
-                       :mode (if set-up? :set-up :report)
-                       :file (file-name file-path)
-                       :hardware hardware
-                       :chains chains
-                       :pins (rig-file/pin-map state hardware)})}))
+    (assoc-in loaded [:ui :dialogs :rig-report]
+              {:open? (or set-up? warnings?)
+               :mode (if set-up? :set-up :report)
+               :file (file-name file-path)
+               :hardware hardware
+               :chains chains
+               :pins (rig-file/pin-map state hardware)})))
+
+(defn- handle-file-project-loaded
+  "Replace the show with the loaded project contents (prepare-open). When
+   they can't be opened, nothing is replaced: :file/project-load-failed
+   says so, and the show, its selection and its history stay."
+  [{:keys [state file-path contents]}]
+  (if-let [opened (try
+                    (prepare-open state contents file-path)
+                    (catch Exception e
+                      (log/error "Project can't be opened:" file-path "-" (ex-message e))
+                      nil))]
+    (do (log/info "Project loaded:" file-path)
+        {:state opened})
+    {:dispatch {:event/type :file/project-load-failed :file-path file-path}}))
 
 (defn- handle-file-project-load-failed
   "The project couldn't be read: the document stays, and a notice says so."
@@ -141,30 +159,39 @@
   (h/show-notice state (str "Could not open " (file-name file-path)) :error))
 
 (defn- save-to
-  "Mark the project saved to file-path and request the zip write.
-   If the write fails, :file/save-failed restores the previous project status.
-   An optional :then event on the event is dispatched only after the write
-   succeeded (the unsaved-changes dialog uses it to continue New/Open/Exit)."
-  [{:keys [state then] :as event} file-path]
+  "Request the zip write of the project to file-path. The project status
+   (its file, the time, the saved baseline, the unsaved flag) changes only
+   once the file is written and reads back: the :project/save effect then
+   runs :project/mark-clean. The write is first opened as a dry run
+   (prepare-open on the files and this rig, discarded): a show this build
+   couldn't open again isn't written, and :file/save-failed says so, as it
+   does when the write fails. An optional :then event on the event is
+   dispatched only after the write succeeded (the unsaved-changes dialog
+   uses it to continue New/Open/Exit)."
+  [{:keys [state then]} file-path]
   (log/info "Saving project to:" file-path)
-  {:state (persistent/mark-saved state file-path (h/current-time-ms event))
-   :project/save (cond-> {:file-path file-path
-                          :files (persistent/project-files state)
-                          :on-failed {:event/type :file/save-failed
-                                      :previous-project (:project state)}}
-                   then (assoc :on-saved then))})
+  (if-let [files (try
+                   (let [files (persistent/project-files state)]
+                     (prepare-open state files file-path)
+                     files)
+                   (catch Exception e
+                     (log/error "Not saving" file-path "- this build couldn't open it again:" (ex-message e))
+                     nil))]
+    {:state state
+     :project/save (cond-> {:file-path file-path
+                            :files files
+                            :on-failed {:event/type :file/save-failed}}
+                     then (assoc :on-saved then))}
+    {:state state
+     :dispatch {:event/type :file/save-failed :file-path file-path}}))
 
 (defn- handle-file-save-failed
-  "Restore the project status from before the failed save, including the
-   previous saved baseline; the pipeline then re-derives :dirty?. A notice
-   says the save failed."
-  [{:keys [state file-path previous-project]}]
+  "The project couldn't be saved: a notice says so. Nothing else changes,
+   as nothing changed before the write: the file there, the project's file,
+   its saved baseline and unsaved flag are as they were."
+  [{:keys [state file-path]}]
   (log/error "Failed to save project:" file-path)
-  (h/show-notice (update state :project merge
-                         (into {} (map (fn [k] [k (get previous-project k)]))
-                               [:current-file :last-saved :saved-document :dirty?]))
-                 (str "Could not save " (file-name file-path))
-                 :error))
+  (h/show-notice state (str "Could not save " (file-name file-path)) :error))
 
 (defn- handle-file-save-as
   "Save the project to a new location using file chooser dialog.
