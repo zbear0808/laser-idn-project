@@ -1,6 +1,7 @@
 (ns laser-show.ui-test.settings-test
-  "The Settings tab: its cards, the MIDI card's buttons and fields, and the
-   OSC and keyboard switches. Nothing here opens a device or a socket:
+  "The Settings tab: its cards, the MIDI card's buttons and fields, the OSC
+   and keyboard switches, and each card's Identify (reactivity plan 24).
+   Nothing here opens a device or a socket:
    the connected and listening states are put in the state by hand, or the
    device worker (input.devices) finds a fake MIDI input or opens a stand-in
    OSC server."
@@ -10,6 +11,7 @@
             [laser-show.input.fixtures :as input-fixtures]
             [laser-show.input.midi :as midi]
             [laser-show.input.osc :as osc-input]
+            [laser-show.input.router :as router]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
@@ -227,3 +229,100 @@
         (is (events/flush!))
         (is (= 9300 (:port (osc))))
         (is (nil? (get-in (state/get-raw-state) [:ui :notice])))))))
+
+
+;; Identify MIDI input / Identify OSC input (reactivity plan 24, case 1)
+
+(defn- identify-text [source] (ui/node-text (str "#" (name source) "-identify-button")))
+(defn- waiting? [source] (ui/visible? (str "#" (name source) "-identify-waiting")))
+(defn- result-text [source] (ui/node-text (str "#" (name source) "-identify-result")))
+
+(defn- identify! [source]
+  ;; Fired, not clicked: the card can be below the tab's scrolled view
+  (ui/on-fx-thread #(.fire ^Button (ui/query (str "#" (name source) "-identify-button")))))
+
+(defn- probe [] (get-in (state/get-raw-state) [:ui :input-learn :active]))
+
+(defn- devices-up!
+  "MIDI with an input connected and OSC listening, as the device worker
+   reports them (no device or socket)."
+  []
+  (events/write-state! #(-> %
+                            (assoc-in [:backend :input :midi :connected-devices] #{"Pad"})
+                            (update-in [:backend :input :osc] assoc :enabled? true :server-running? true))))
+
+(deftest identify-input-finishes-on-the-matching-source-test
+  (open-settings!)
+  (testing "nothing to identify from: MIDI with no input, OSC not listening"
+    (is (= "Identify MIDI input" (identify-text :midi)))
+    (is (not (ui/enabled? "#midi-identify-button")))
+    (is (not (ui/enabled? "#osc-identify-button"))))
+  (devices-up!)
+  (ui/assert-enabled! "#midi-identify-button")
+  (ui/assert-enabled! "#osc-identify-button")
+  (let [bindings (get-in (state/get-raw-state) [:config :input])
+        history (get-in (state/get-raw-state) [:history])
+        osc-mappings (get-in (state/get-raw-state) [:backend :input :osc :address-mappings])
+        push (fn [] (run! router/dispatch! (osc-input/osc-msg->events (input-fixtures/osc-msg "/1/push1" (float 1.0)) {})))
+        note-60 (fn [] (router/dispatch! (midi/midi-msg->event (input-fixtures/note-on 1 60 127))))]
+    (testing "MIDI: an OSC message doesn't finish it; MIDI channel 2's note 60 does"
+      (identify! :midi)
+      (ui/wait-for! #(= "Cancel" (identify-text :midi)))
+      (is (waiting? :midi))
+      (ui/assert-text! "#midi-identify-waiting .label" "Waiting for MIDI input...")
+      (push)
+      (is (events/flush!))
+      (is (= :midi (:source (probe))) "the other source's message: still waiting")
+      (is (waiting? :midi))
+      (note-60)
+      (ui/wait-for! #(= "Detected MIDI Ch 2 Note 60" (result-text :midi)))
+      (is (= "Identify MIDI input" (identify-text :midi)))
+      (is (not (waiting? :midi)))
+      (is (nil? (probe))))
+    (testing "OSC: the unmapped /1/push1"
+      (identify! :osc)
+      (ui/wait-for! #(= "Cancel" (identify-text :osc)))
+      (is (waiting? :osc))
+      (push)
+      (ui/wait-for! #(= "Detected OSC /1/push1" (result-text :osc)))
+      (is (= "Identify OSC input" (identify-text :osc)))
+      (is (not (waiting? :osc))))
+    (testing "later inputs, and an unrelated change, change neither card"
+      (note-60)
+      (router/dispatch! (midi/midi-msg->event (input-fixtures/note-on 0 61 127)))
+      (push)
+      (events/write-state! assoc-in [:timing :bpm] 133.0)
+      (is (events/flush!))
+      (is (= "Detected MIDI Ch 2 Note 60" (result-text :midi)))
+      (is (= "Detected OSC /1/push1" (result-text :osc)))
+      (is (= ["Identify MIDI input" "Identify OSC input"] [(identify-text :midi) (identify-text :osc)])))
+    (testing "identifying bound, mapped and saved nothing"
+      (is (= bindings (get-in (state/get-raw-state) [:config :input])) "no trigger or fader binding")
+      (is (= osc-mappings (get-in (state/get-raw-state) [:backend :input :osc :address-mappings])) "no OSC address mapping")
+      (is (= history (get-in (state/get-raw-state) [:history])) "no undo step")
+      (is (false? (get-in (state/get-raw-state) [:project :dirty?]))))
+    (testing "OSC's identify started while MIDI's waits: MIDI's card is ready again"
+      (identify! :midi)
+      (ui/wait-for! #(waiting? :midi))
+      (is (nil? (result-text :midi)) "a new identify starts with nothing on its card")
+      (identify! :osc)
+      (ui/wait-for! #(and (waiting? :osc) (not (waiting? :midi))))
+      (is (= "Identify MIDI input" (identify-text :midi))))
+    (testing "MIDI going leaves OSC's identify waiting; OSC stopping ends it"
+      (events/dispatch! {:event/type :input/midi-disable})
+      (is (events/flush!))
+      (is (waiting? :osc))
+      (is (not (ui/enabled? "#midi-identify-button")) "no MIDI to identify from")
+      (events/dispatch! {:event/type :input/osc-stop-server})
+      (ui/wait-for! #(not (waiting? :osc)))
+      (is (nil? (probe))))
+    (testing "leaving Settings ends the identify waiting"
+      (events/dispatch! {:event/type :input/midi-enable})
+      (ui/wait-for! #(ui/enabled? "#midi-identify-button"))
+      (identify! :midi)
+      (ui/wait-for! #(waiting? :midi))
+      (ui/click! (ui/robot) "#grid-tab")
+      (ui/wait-for! #(nil? (probe)))
+      (open-settings!)
+      (ui/wait-for! #(= "Identify MIDI input" (identify-text :midi)))
+      (is (not (waiting? :midi))))))

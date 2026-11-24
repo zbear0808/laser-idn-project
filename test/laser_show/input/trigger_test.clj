@@ -58,18 +58,25 @@
 (deftest input-handler-state-test
   (testing "Start and cancel learning state transformations"
     (let [initial-state {:config {:input {:trigger-map {}}}
-                         :backend {:input {}}}
+                         :backend {:input {}}
+                         :project {:document-id #uuid "00000000-0000-0000-0000-0000000024d1"}}
           target-action {:type :trigger-cue :target [1 2]}
-          started (input-handlers/handle {:event/type :input/start-learn
-                                          :state initial-state
-                                          :target-action target-action})
-          started-state (:state started)]
-      (is (= target-action (get-in started-state [:backend :input :learning-target])))
+          start {:event/type :input/start-learn
+                 :state initial-state
+                 :target-action target-action
+                 :document-id #uuid "00000000-0000-0000-0000-0000000024d1"
+                 :fresh-learn-id #uuid "00000000-0000-0000-0000-0000000024e1"}
+          started-state (:state (input-handlers/handle start))]
+      (is (= target-action (input-handlers/learning-target started-state)))
+      (is (= {} (input-handlers/handle (dissoc start :document-id))) "a Start that names no show starts nothing")
+      (is (= {} (input-handlers/handle (dissoc start :fresh-learn-id))) "nor one the pipeline gave no id")
 
       (let [canceled (input-handlers/handle {:event/type :input/cancel-learn
+                                             :learn-id #uuid "00000000-0000-0000-0000-0000000024e1"
+                                             :document-id #uuid "00000000-0000-0000-0000-0000000024d1"
                                              :state started-state})
             canceled-state (:state canceled)]
-        (is (nil? (get-in canceled-state [:backend :input :learning-target]))))))
+        (is (nil? (input-handlers/active-learn canceled-state))))))
 
   (testing "Remove trigger removes entry from trigger-map"
     (let [key1 {:source :midi :channel 0 :note 60}
@@ -100,13 +107,24 @@
 
 (deftest trigger-behavior-update-test
   (let [key {:source :keyboard :id :space}
+        doc #uuid "00000000-0000-0000-0000-0000000024d2"
         initial-state {:config {:input {:trigger-map
                                         {key {:type :trigger-cue
-                                              :target [0 0]}}}}}
-        result (input-handlers/handle
-                {:event/type :input/update-cell-trigger-action
-                 :state initial-state
-                 :target-action {:type :trigger-cue :target [0 0]}
-                 :fx/event :momentary})
+                                              :target [0 0]}}}}
+                       :project {:document-id doc}
+                       :ui {:dialogs {:trigger-editor {:open? true :col 0 :row 0 :cell-mode :cue}}}}
+        update {:event/type :input/update-cell-trigger-action
+                :state initial-state
+                :target-action {:type :trigger-cue :target [0 0]}
+                :document-id doc
+                :fx/event :momentary}
+        result (input-handlers/handle update)
         action (get-in (:state result) [:config :input :trigger-map key])]
-    (is (= :momentary (:behavior action)))))
+    (is (= :momentary (:behavior action)))
+    (is (= :momentary (get-in (:state result) [:ui :dialogs :trigger-editor :behavior])) "the editor's choice, in the same state")
+    (is (not (contains? result :dispatch)) "no follow-up to merge into the dialog")
+    (testing "only a choice the editor has, for the cell it is open on, in the show open now"
+      (is (= {} (input-handlers/handle (assoc update :fx/event :retrigger))))
+      (is (= {} (input-handlers/handle (assoc update :target-action {:type :trigger-cue :target [1 0]}))))
+      (is (= {} (input-handlers/handle (assoc update :document-id #uuid "00000000-0000-0000-0000-0000000024d3"))))
+      (is (= {} (input-handlers/handle (assoc-in update [:state :ui :dialogs :trigger-editor :open?] false)))))))

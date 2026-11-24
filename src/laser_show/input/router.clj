@@ -1,6 +1,14 @@
 (ns laser-show.input.router
   "Event router for dispatching input events to registered handlers.
-   Supports pattern-based subscriptions and multiple handlers per event type."
+   Supports pattern-based subscriptions and multiple handlers per event type.
+
+   It also has one slot for the learn attempt listening now (:learn-listener,
+   reactivity plan 24): laser-show.input.learn fills and empties it,
+   replace-learn-listener!, only for the attempt that has it. An input is
+   offered to that listener first, from the same snapshot as the handlers
+   it goes to next; while the attempt binds a control (anything but
+   Settings' identify), a press reaches those handlers marked :learn-only?,
+   so the input mapper doesn't play the key's old binding."
   (:require [clojure.tools.logging :as log]
             [laser-show.input.events :as events]
             [laser-show.input.store :as store]))
@@ -37,6 +45,7 @@
 (defonce !router-state
   (atom {:handlers {}           ; Map of handler-id -> {:pattern handler-fn}
          :global-handlers {}    ; Handlers that receive all events
+         :learn-listener nil    ; The learn attempt listening now: {:learn-id :binding? :offer}, input.learn's
          :enabled? true          ; Global enable/disable
          :event-log []          ; Recent events for debugging
          :log-enabled false     ; Whether to log events
@@ -79,9 +88,31 @@
                (update :global-handlers dissoc handler-id)))))
 
 (defn clear-handlers!
-  "Removes all registered handlers."
+  "Removes all registered handlers. The learn slot is its attempt's
+   (replace-learn-listener!)."
   []
   (swap! !router-state assoc :handlers {} :global-handlers {}))
+
+
+;; The learn slot (reactivity plan 24)
+
+
+(defn replace-learn-listener!
+  "Put next-listener ({:learn-id :binding? :offer}, or nil for none) in the
+   learn slot, only if the attempt in it now is expected-id's (nil: the
+   slot is empty). {:displaced listener} (the one taken out, or nil) when
+   it did; nil, changing nothing, when another attempt has the slot. The
+   other handlers stay as they are."
+  [expected-id next-listener]
+  (let [owns? #(= expected-id (:learn-id (:learn-listener %)))
+        [old _] (swap-vals! !router-state #(if (owns? %) (assoc % :learn-listener next-listener) %))]
+    (when (owns? old)
+      {:displaced (:learn-listener old)})))
+
+(defn learn-listener-id
+  "The :learn-id of the learn attempt in the slot, or nil."
+  []
+  (:learn-id (:learn-listener @!router-state)))
 
 
 ;; Event Dispatch
@@ -100,31 +131,49 @@
                         (vec (take-last max-size new-log))
                         new-log)))))))
 
+(defn- offered
+  "event, after the learn listener of the snapshot (if any) was offered it:
+   a press marked :learn-only? while that listener's attempt binds a
+   control, whether or not it took the press, and whatever happens to the
+   attempt meanwhile."
+  [{:keys [learn-listener log-errors]} event]
+  (if-let [{:keys [offer binding?]} learn-listener]
+    (do (try
+          (offer event)
+          (catch Exception e
+            (when log-errors
+              (log/error "Error in the learn listener:" (.getMessage e)))))
+        (cond-> event
+          (and binding? (or (events/note-on? event) (events/trigger? event)))
+          (assoc :learn-only? true)))
+    event))
+
 (defn dispatch!
-  "Dispatches an event to all matching handlers.
+  "Dispatches an event to all matching handlers, after the learn listener
+   (offered). Every one of them is the one registered when it was called.
    Returns the event (useful for chaining)."
   [event]
   (let [state @!router-state
         log-errors? (:log-errors state)]
     (when (and event (:enabled? state))
       (log-event! event)
-      
-      ;; Call global handlers first
-      (doseq [[_id handler-fn] (:global-handlers state)]
-        (try
-          (handler-fn event)
-          (catch Exception e
-            (when log-errors?
-              (log/error "Error in global handler:" (.getMessage e))))))
-      
-      ;; Call pattern-matched handlers
-      (doseq [[_id {:keys [pattern handler]}] (:handlers state)]
-        (when (events/matches? event pattern)
+      (let [routed (offered state event)]
+        ;; Call global handlers first
+        (doseq [[_id handler-fn] (:global-handlers state)]
           (try
-            (handler event)
+            (handler-fn routed)
             (catch Exception e
               (when log-errors?
-                (log/error "Error in handler:" (.getMessage e)))))))))
+                (log/error "Error in global handler:" (.getMessage e))))))
+
+        ;; Call pattern-matched handlers
+        (doseq [[_id {:keys [pattern handler]}] (:handlers state)]
+          (when (events/matches? routed pattern)
+            (try
+              (handler routed)
+              (catch Exception e
+                (when log-errors?
+                  (log/error "Error in handler:" (.getMessage e))))))))))
   event)
 
 (defn dispatch-many!

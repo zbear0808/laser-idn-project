@@ -5,7 +5,10 @@
    - MIDI device discovery, connection, and configuration
    - OSC server management and address mappings
    - Gamepad and keyboard input switches
-   - Input learning and bindings
+   - Input learning and bindings: one learn attempt at a time, its
+     identity (:learn-id) and data in [:ui :input-learn] (begin-learn,
+     end-learn, wrap-learn-lifetime; laser-show.input.learn runs its
+     listener and waiter)
    
    The MIDI inputs and the OSC server belong to the device worker
    (laser-show.input.devices): a Refresh, Connect, Disconnect, Start Server
@@ -19,7 +22,6 @@
             [laser-show.events.helpers :as h]
             [laser-show.input.midi :as midi]
             [laser-show.input.osc :as osc]
-            [laser-show.input.router :as router]
             [laser-show.input.events :as input-events]
             [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.routing.zone-patterns :as zone-patterns]
@@ -171,33 +173,6 @@
     {:state (assoc-in state (midi-path) updated-midi)}))
 
 
-(defn- handle-midi-start-learn
-  "Start MIDI learn mode."
-  [{:keys [state]}]
-  (let [midi-state (get-midi-state state)
-        _ (some-> (midi/get-learn-promise midi-state) (deliver nil))
-        updated-midi (midi/start-learn midi-state)
-        learn-promise (midi/get-learn-promise updated-midi)]
-    ;; Register a global handler to catch the next MIDI event
-    (when learn-promise
-      (router/register-global-handler! ::midi-learn
-                                       (fn [event]
-                                         (when (and learn-promise
-                                                    (= :midi (:source event)))
-                                           (deliver learn-promise event)
-                                           (router/unregister-handler! ::midi-learn)))))
-    {:state (assoc-in state (midi-path) updated-midi)}))
-
-(defn- handle-midi-cancel-learn
-  "Cancel MIDI learn mode."
-  [{:keys [state]}]
-  (router/unregister-handler! ::midi-learn)
-  (let [midi-state (get-midi-state state)
-        _ (some-> (midi/get-learn-promise midi-state) (deliver nil))
-        updated-midi (midi/cancel-learn midi-state)]
-    {:state (assoc-in state (midi-path) updated-midi)}))
-
-
 ;; OSC Event Handlers
 
 
@@ -281,32 +256,6 @@
         updated-osc (osc/load-default-mappings osc-state)]
     {:state (assoc-in state (osc-path) updated-osc)}))
 
-(defn- handle-osc-start-learn
-  "Start OSC learn mode."
-  [{:keys [state]}]
-  (let [osc-state (get-osc-state state)
-        _ (some-> (osc/get-learn-promise osc-state) (deliver nil))
-        updated-osc (osc/start-learn osc-state)
-        learn-promise (osc/get-learn-promise updated-osc)]
-    ;; Register a global handler to catch the next OSC event
-    (when learn-promise
-      (router/register-global-handler! ::osc-learn
-                                       (fn [event]
-                                         (when (and learn-promise
-                                                    (= :osc (:source event)))
-                                           (deliver learn-promise event)
-                                           (router/unregister-handler! ::osc-learn)))))
-    {:state (assoc-in state (osc-path) updated-osc)}))
-
-(defn- handle-osc-cancel-learn
-  "Cancel OSC learn mode."
-  [{:keys [state]}]
-  (router/unregister-handler! ::osc-learn)
-  (let [osc-state (get-osc-state state)
-        _ (some-> (osc/get-learn-promise osc-state) (deliver nil))
-        updated-osc (osc/cancel-learn osc-state)]
-    {:state (assoc-in state (osc-path) updated-osc)}))
-
 
 ;; Session input switches
 
@@ -317,94 +266,203 @@
   {:state (assoc-in state [:backend :input device :enabled?] enabled?)})
 
 
-;; Generalized Trigger Handlers
+;; Learning (reactivity plan 24): one attempt at a time
+;;
+;; [:ui :input-learn :active] is the attempt waiting for an input, or nil:
+;; {:learn-id :owner :capture ...}. Its :learn-id is new each time (the
+;; pipeline puts a :fresh-learn-id on the events that can begin one,
+;; events/core.clj), so a capture, a timeout or a Cancel of an attempt
+;; before it, for the very same target too, names another id and does
+;; nothing ({}). An attempt that binds a control into the show (:owner
+;; :binding, a cell's, a pad's, a role's or a fader's; :trigger-editor, the
+;; editor's for its cell; :learn-all) also has the :document-id of the show
+;; it was started in, and only what comes back for that show, while it is
+;; open, binds. Settings' identify (:owner :settings) binds nothing: it says
+;; on its card what came in ([:ui :input-learn :settings source]).
+;; wrap-learn-lifetime ends an attempt whose owner went (the show, the
+;; editor, Settings, its source), and has the router's learn slot follow
+;; the active attempt (:input/sync-learn, laser-show.input.learn).
 
-;; The promise the current learn future is waiting on. Delivering nil to it
-;; lets that future exit when learn is cancelled or restarted.
-(defonce ^:private !pending-learn (atom nil))
+(def ^:private binding-owners
+  "The owners of an attempt that binds a control into the show."
+  #{:binding :trigger-editor :learn-all})
 
-(defn- release-pending-learn! []
-  (when-let [p (first (reset-vals! !pending-learn nil))]
-    (deliver p nil)))
+(defn active-learn
+  "The learn attempt waiting for an input, or nil."
+  [state]
+  (get-in state [:ui :input-learn :active]))
 
-(defn- learn-target
+(defn- binds?
+  "Does attempt bind a control into the show (not Settings' identify)?"
+  [attempt]
+  (contains? binding-owners (:owner attempt)))
+
+(defn learn-target
   "What a learn is for: the target action's :type and :target (a cell),
    :role (a vibe role) or :slot (a fader). The binding it learns is the
    whole action, its :behavior included."
   [target-action]
   (select-keys target-action [:type :target :role :slot]))
 
-(defn- clear-learning [state]
-  (update-in state [:backend :input] dissoc :learning-target :learning-capture))
-
-(defn- wizard-target
-  "The learn Learn all waits on ([:ui :vibes :wizard], handlers/vibes.clj):
-   its next role's, or nil."
+(defn learning-target
+  "The target of the attempt waiting to bind a control (learn-target), or
+   nil."
   [state]
-  (when-let [role (first (get-in state [:ui :vibes :wizard :queue]))]
-    {:type :vibe :role role}))
+  (let [attempt (active-learn state)]
+    (when (binds? attempt)
+      (learn-target (:target-action attempt)))))
 
-(defn- end-other-wizard
-  "state without Learn all, when the learn for target isn't the one it
-   waits on: any other learn (or a cancel) ends it."
+(defn binding-attempt
+  "The attempt waiting to bind a control, as a view shows and cancels it:
+   {:target (learn-target) :learn-id :document-id}, or nil."
+  [state]
+  (let [attempt (active-learn state)]
+    (when (binds? attempt)
+      {:target (learn-target (:target-action attempt))
+       :learn-id (:learn-id attempt)
+       :document-id (:document-id attempt)})))
+
+(defn source-available?
+  "Can Settings identify an input of source (:midi, :osc) now, by the
+   status the device worker reports (reactivity plan 25): MIDI on with an
+   input connected, OSC on with its server listening?"
+  [state source]
+  (case source
+    :midi (let [m (get-midi-state state)]
+            (and (midi/enabled? m) (boolean (seq (:connected-devices m)))))
+    :osc (let [o (get-osc-state state)]
+           (and (true? (:enabled? o)) (true? (:server-running? o))))
+    false))
+
+(defn identify-id
+  "The :learn-id of Settings' identify of source while it waits, or nil."
+  [state source]
+  (let [attempt (active-learn state)]
+    (when (and (= :settings (:owner attempt)) (= source (:source attempt)))
+      (:learn-id attempt))))
+
+(defn- editor-cell
+  "The cell the trigger editor is open on, as a target ({:type
+   :trigger-cue|:trigger-effect :target [col row]}), or nil."
+  [state]
+  (let [{:keys [open? col row cell-mode]} (get-in state [:ui :dialogs :trigger-editor])]
+    (when (and open? (some? col) (some? row))
+      {:type (if (= :effects cell-mode) :trigger-effect :trigger-cue) :target [col row]})))
+
+(defn cell-behavior
+  "The behaviour the trigger editor shows for the cell target, which a
+   learn it starts binds with: the one of the learn waiting for that cell
+   (the last choice made while it waits), else the one of the cell's first
+   binding, else the editor's choice. :momentary or :follow: a
+   :retrigger, :toggle, :quantized-decay or :one-shot binding from an older
+   project follows the cue's mode, so it is :follow."
   [state target]
+  (let [attempt (active-learn state)
+        pending (when (and (binds? attempt) (= target (learn-target (:target-action attempt))))
+                  (:target-action attempt))
+        bound (some (fn [[_ action]] (when (= target (learn-target action)) action))
+                    (get-in state [:config :input :trigger-map]))
+        behavior (cond
+                   pending (:behavior pending)
+                   bound (:behavior bound)
+                   :else (get-in state [:ui :dialogs :trigger-editor :behavior]))]
+    (if (= :momentary behavior) :momentary :follow)))
+
+(defn- current?
+  "Does event name the active attempt: its non-nil :learn-id, and for one
+   that binds into the show, the :document-id of that attempt, which is the
+   show open now?"
+  [state {:keys [learn-id document-id]}]
+  (let [attempt (active-learn state)]
+    (and (some? learn-id)
+         (= learn-id (:learn-id attempt))
+         (or (not (binds? attempt))
+             (and (some? document-id)
+                  (= document-id (:document-id attempt))
+                  (= document-id (h/document-id state)))))))
+
+(defn- over
+  "state with no attempt waiting."
+  [state]
+  (assoc-in state [:ui :input-learn :active] nil))
+
+(defn begin-learn
+  "state with request ({:owner :capture ...}) the active attempt, fresh-id
+   its :learn-id: the attempt before it, whatever it was (Learn all too),
+   is over. Settings' identify of a source starts with nothing on its card."
+  [state request fresh-id]
+  (cond-> (assoc-in state [:ui :input-learn :active] (assoc request :learn-id fresh-id))
+    (= :settings (:owner request)) (update-in [:ui :input-learn :settings] dissoc (:source request))))
+
+(defn end-learn
+  "state with no attempt waiting, when identity (an event's :learn-id, and
+   :document-id for one that binds) names the active attempt; state as it
+   is otherwise."
+  [state identity]
   (cond-> state
-    (and (get-in state [:ui :vibes :wizard]) (not= target (wizard-target state)))
-    (assoc-in [:ui :vibes :wizard] nil)))
+    (current? state identity) over))
 
-(def ^:private fader-travel
-  "How far (0..1) a control must move for a fader's learn to take it: about
-   10 of a MIDI CC's 127 steps, more than a fader's noise."
-  0.08)
+(defn start
+  "Effects of a view's Start of request ({:owner :capture :target-action
+   ...}), sent with the show it was in (:document-id) and given a
+   :fresh-learn-id: the attempt it begins supersedes whatever waited. {}
+   for a Start that names no show, or one that isn't open now: it
+   supersedes nothing."
+  [{:keys [state fresh-learn-id document-id]} request]
+  (if (and (some? fresh-learn-id) (some? document-id) (= document-id (h/document-id state)))
+    {:state (begin-learn state (assoc request :document-id document-id) fresh-learn-id)}
+    {}))
 
-(defn- fader-catcher
-  "The router handler of a fader's learn: it keeps the first value it sees
-   for each input store key an event writes (input-mapper/store-keys: a
-   CC, an axis, an OSC value; a note or a button writes none), and delivers
-   to p the first event whose key has moved fader-travel or more from it,
-   with that key as :store-key."
-  [p]
-  (let [!first (atom {})]
-    (fn [event]
-      (let [v (max 0.0 (min 1.0 (double (or (:value event) 0.0))))
-            ks (input-mapper/store-keys event)
-            seen (swap! !first (fn [m] (reduce #(cond-> %1 (not (contains? %1 %2)) (assoc %2 v)) m ks)))]
-        (when-let [k (some #(when (>= (Math/abs (- v (double (get seen %)))) fader-travel) %) ks)]
-          (deliver p (assoc event :store-key k))
-          (router/unregister-handler! ::generalized-input-learn))))))
+(defn cancel
+  "Effects of a Cancel of the attempt it names (:learn-id, and
+   :document-id for one that binds, as its view showed them): {} for an
+   attempt that isn't the active one."
+  [{:keys [state] :as event}]
+  (if (current? state event)
+    {:state (over state)}
+    {}))
+
+(defn- handle-identify
+  "Settings' Identify MIDI input / Identify OSC input: wait for the next
+   input of source, to say on its card what it was. It binds nothing and
+   lets every input go where it goes. Only for a source that can send one
+   now (source-available?); else {}, superseding nothing."
+  [{:keys [state fresh-learn-id]} source]
+  (if (and (some? fresh-learn-id) (source-available? state source))
+    {:state (begin-learn state {:owner :settings :capture :observe :source source} fresh-learn-id)}
+    {}))
+
+(defn- handle-identify-cancel
+  "Cancel of Settings' identify of source, with the :learn-id its card
+   showed: the card is ready again. {} for another attempt's."
+  [{:keys [state learn-id]} source]
+  (if (and (some? learn-id) (= learn-id (identify-id state source)))
+    {:state (over state)}
+    {}))
 
 (defn- handle-input-start-learn
-  "Start generic input learn mode for a target action.
-   Registers a temporary global handler to capture the next input event
-   and bind it to the target action: a press (a note or a button), or with
-   :capture :continuous, as a fader's learn ({:type :macro :slot}) always
-   is, a control that moves (fader-catcher)."
-  [{:keys [state target-action capture]}]
-  (release-pending-learn!)
-  (let [learn-promise (promise)
-        target (learn-target target-action)
-        mode (if (or (= :continuous capture) (= :macro (:type target))) :continuous :press)]
-    (reset! !pending-learn learn-promise)
-    ;; Register a global handler to catch the next trigger event
-    (router/register-global-handler! ::generalized-input-learn
-                                     (if (= :continuous mode)
-                                       (fader-catcher learn-promise)
-                                       (fn [event]
-                                         ;; Only capture discrete triggers (NoteOn or Trigger type)
-                                         (when (or (input-events/note-on? event)
-                                                   (input-events/trigger? event))
-                                           (deliver learn-promise event)
-                                           (router/unregister-handler! ::generalized-input-learn)))))
+  "Start a learn for a target action: a press (a note or a button), or
+   with :capture :continuous, as a fader's learn ({:type :macro :slot})
+   always is, a control that moves. The trigger editor's (:owner
+   :trigger-editor, the cell as :target-action) is for the cell it is open
+   on, with the behaviour it shows then (cell-behavior); a choice made
+   while it waits goes into the attempt (:input/update-cell-trigger-action).
+   A Start supersedes any other attempt, Learn all's for the same role too."
+  [{:keys [state target-action capture owner] :as event}]
+  (let [target (learn-target target-action)]
+    (cond
+      (empty? target) {}
 
-    ;; The :input/await-learn effect waits for the captured input off the event
-    ;; thread, then dispatches :input/learn-captured, which writes the binding
-    ;; through the normal pipeline (undoable, marks the project unsaved).
-    {:state (-> state
-                (update-in [:backend :input] assoc :learning-target target :learning-capture mode)
-                (end-other-wizard target))
-     :input/await-learn {:promise learn-promise
-                         :on-captured {:event/type :input/learn-captured
-                                       :target-action target-action}}}))
+      (= :trigger-editor owner)
+      (if (= target (editor-cell state))
+        (start event {:owner :trigger-editor :capture :press
+                      :target-action (assoc target :behavior (cell-behavior state target))})
+        {})
+
+      :else
+      (start event {:owner :binding
+                    :capture (if (or (= :continuous capture) (= :macro (:type target))) :continuous :press)
+                    :target-action target-action}))))
 
 (defn- learn-lookup-key
   "Trigger-map key for a captured input event, or nil."
@@ -439,81 +497,165 @@
    and the Zone step key (Z5). A cell keeps every key it is given."
   #{:vibe :zone-map :pattern-pad :zone-step})
 
-(defn- handle-input-learn-captured
-  "Bind the captured input to the target action, :behavior included (ignored
-   if learn was cancelled or restarted for another target in the meantime).
-   A vibe role and a zone map pad keep one control (one-key-types): its other
-   bindings go, so learning it again moves it. The undo label names what the input did before, if anything.
+(defn- ended
+  "Effects of attempt (the active one in state) ending with nothing
+   learned, for reason (:timeout, :failed): Settings' card says so, a
+   learn's is a notice. What Learn all bound before stays."
+  [state attempt reason]
+  (let [state (over state)]
+    (if (= :settings (:owner attempt))
+      {:state (assoc-in state [:ui :input-learn :settings (:source attempt)] {:status reason})}
+      (if (= :timeout reason)
+        (h/show-notice state "Learn stopped: no input came in" :info)
+        (h/show-notice state "Learn stopped: that input can't be learned" :warning)))))
+
+(def ^:private shown-fields
+  "What Settings' card keeps of the input it identified: what it says, not
+   its value or its time."
+  [:type :source :channel :note :control :program :id :path])
+
+(defn- identified
+  "Settings' identify caught input-event: its card shows it (:captured), if
+   it is of the source it waits for; else it ends as failed."
+  [state attempt input-event]
+  (if (= (:source attempt) (:source input-event))
+    {:state (assoc-in (over state) [:ui :input-learn :settings (:source attempt)]
+                      {:status :captured
+                       :input-event (into {} (filter (comp some? val)) (select-keys input-event shown-fields))})}
+    (ended state attempt :failed)))
+
+(defn- press-captured
+  "Bind the press the attempt caught to its target action (read from the
+   attempt, :behavior included). A vibe role and a zone map pad keep one
+   control (one-key-types): its other bindings go, so learning it again
+   moves it. The undo label names what the input did before, if anything.
    A role whose key lost its binding so lets go now, if that key holds it
    (engine/release-unbound): its release would reach nothing.
-   During Learn all the next role's learn follows, and a key already learned
-   for an earlier role of it is refused: the same learn starts again, and
-   the wizard says whose the key is (:refused)."
-  [{:keys [state input-event target-action] :as event}]
-  (let [target (learn-target target-action)
-        learning? (= (get-in state [:backend :input :learning-target]) target)
+   During Learn all the next role's attempt begins in the same state, and a
+   key already learned for an earlier role of it is refused: the same step
+   waits again, as a new attempt, and the wizard says whose the key is
+   (:refused). Input that isn't a press ends the attempt as failed."
+  [{:keys [state input-event fresh-learn-id] :as event} attempt]
+  (let [target-action (:target-action attempt)
+        target (learn-target target-action)
         lookup-key (learn-lookup-key input-event)
         replaced (get-in state [:config :input :trigger-map lookup-key])
         role (when (= :vibe (:type target-action)) (:role target-action))
         one-key? (contains? one-key-types (:type target))
-        {:keys [queue done] :as wizard} (when (= target (wizard-target state))
-                                          (get-in state [:ui :vibes :wizard]))
-        taken (some #(when (library/binds-role? replaced %) %) done)]
+        {:keys [queue done] :as wizard} (:wizard attempt)
+        taken (when lookup-key (some #(when (library/binds-role? replaced %) %) done))]
     (cond
-      (not (and lookup-key learning?))
-      {:state (cond-> state
-                learning? (clear-learning))}
+      (or (nil? lookup-key) (not= :press (:capture attempt)))
+      (ended state attempt :failed)
 
       taken
-      {:state (assoc-in state [:ui :vibes :wizard :refused] taken)
-       :dispatch {:event/type :input/start-learn :target-action target-action}}
+      {:state (if fresh-learn-id
+                (begin-learn state (assoc-in attempt [:wizard :refused] taken) fresh-learn-id)
+                (over state))}
 
       :else
-      (let [queue (vec (rest queue))]
-        (cond-> {:state (-> state
-                            (update-in [:config :input :trigger-map]
-                                       #(cond->> % one-key? (into {} (remove (fn [[_ action]] (= target (learn-target action)))))))
-                            (assoc-in [:config :input :trigger-map lookup-key] target-action)
-                            (clear-learning)
-                            (cond-> wizard (assoc-in [:ui :vibes :wizard]
-                                                     (when (seq queue) {:queue queue :done (conj (vec done) role)})))
-                            (engine/release-unbound (get-in state [:config :input :trigger-map]) (h/current-time-ms event)))
-                 :history/description (if (and replaced (not= (learn-target replaced) target))
-                                        (str "Learn Trigger (replaces " (action-name state replaced) ")")
-                                        "Learn Trigger")}
-          (and wizard (seq queue))
-          (assoc :dispatch {:event/type :input/start-learn :target-action {:type :vibe :role (first queue)}}))))))
+      (let [queue (vec (rest queue))
+            bound (-> state
+                      (update-in [:config :input :trigger-map]
+                                 #(cond->> % one-key? (into {} (remove (fn [[_ action]] (= target (learn-target action)))))))
+                      (assoc-in [:config :input :trigger-map lookup-key] target-action)
+                      (engine/release-unbound (get-in state [:config :input :trigger-map]) (h/current-time-ms event)))]
+        {:state (if (and wizard (seq queue) fresh-learn-id)
+                  (begin-learn bound {:owner :learn-all :capture :press :document-id (:document-id attempt)
+                                      :target-action {:type :vibe :role (first queue)}
+                                      :wizard {:queue queue :done (conj (vec done) role)}}
+                               fresh-learn-id)
+                  (over bound))
+         :history/description (if (and replaced (not= (learn-target replaced) target))
+                                (str "Learn Trigger (replaces " (action-name state replaced) ")")
+                                "Learn Trigger")}))))
 
-(defn- handle-fader-captured
-  "Bind the control a fader's learn caught (its input store key, :store-key)
-   to the fader's slot in [:config :input :macro-map], where the render
-   looks it up each tick: the slot's other control goes (one control a slot),
-   and the key's other slot with it (one slot a key). Ignored if the learn
-   was cancelled or restarted for another target, and for an input that
-   writes no such key: a note or a button never binds a fader."
-  [{:keys [state input-event target-action]}]
-  (let [target (learn-target target-action)
-        learning? (= (get-in state [:backend :input :learning-target]) target)
-        k (some #{(:store-key input-event)} (input-mapper/store-keys input-event))
-        slot (:slot target-action)]
-    (if (and learning? k slot)
+(defn- fader-captured
+  "Bind the control a fader's learn caught (its input store key, :store-key,
+   one the input really writes) to the fader's slot in [:config :input
+   :macro-map], where the render looks it up each tick: the slot's other
+   control goes (one control a slot), and the key's other slot with it (one
+   slot a key). An input that writes no such key (a note or a button never
+   binds a fader) ends the attempt as failed."
+  [{:keys [state input-event]} attempt]
+  (let [k (some #{(:store-key input-event)} (input-mapper/store-keys input-event))
+        slot (get-in attempt [:target-action :slot])]
+    (if (and k slot (= :continuous (:capture attempt)))
       {:state (-> state
                   (update-in [:config :input :macro-map] #(into {} (remove (fn [[_ s]] (= slot s))) %))
                   (assoc-in [:config :input :macro-map k] slot)
-                  (clear-learning))
+                  (over))
        :history/description "Learn Fader"}
-      {:state (cond-> state
-                learning? (clear-learning))})))
+      (ended state attempt :failed))))
+
+(defn- handle-learn-captured
+  "What the active attempt's waiter caught (laser-show.input.learn), with
+   the attempt's :learn-id (and :document-id): Settings' card shows it, or
+   it binds, the action read from the attempt in state, never from the
+   event. {} for anything else: another attempt's, the same target's
+   before it, one without an id, one for a show that isn't open any more."
+  [{:keys [state] :as event}]
+  (let [attempt (active-learn state)]
+    (cond
+      (not (current? state event)) {}
+      (= :settings (:owner attempt)) (identified state attempt (:input-event event))
+      (= :macro (get-in attempt [:target-action :type])) (fader-captured event attempt)
+      :else (press-captured event attempt))))
+
+(defn- handle-learn-ended
+  "The active attempt's waiter ended with nothing (:reason :timeout after
+   its deadline, or :failed): it is over, and says so (ended). {} for any
+   other attempt's."
+  [{:keys [state reason] :as event}]
+  (if (current? state event)
+    (ended state (active-learn state) (if (= :timeout reason) :timeout :failed))
+    {}))
+
+(defn- invalidated?
+  "Has attempt, active in after, lost what it belongs to: the show it binds
+   into (another one is open), its trigger editor (closed, or on another
+   cell), Settings (left: before was on its tab, after isn't) or the source
+   it identifies (it can't send now)?"
+  [before after attempt]
+  (case (:owner attempt)
+    :settings (or (and (= :settings (get-in before [:ui :active-tab]))
+                       (not= :settings (get-in after [:ui :active-tab])))
+                  (not (source-available? after (:source attempt))))
+    :trigger-editor (or (not= (:document-id attempt) (h/document-id after))
+                        (not= (learn-target (:target-action attempt)) (editor-cell after)))
+    (not= (:document-id attempt) (h/document-id after))))
+
+(defn wrap-learn-lifetime
+  "Middleware (events/core.clj's pipeline): after the handler, an attempt
+   whose owner went (invalidated?: New and Open, closing or retargeting its
+   editor, leaving Settings, its source off) is over in the same state.
+   Then, when the active attempt isn't the one before (another :learn-id,
+   or none), the effects get :input/sync-learn {:retire (the id before)
+   :arm (the active one's :learn-id :document-id :capture :source, or
+   nil)}, which runs right after :state (events/core.clj): the router's
+   learn slot follows. An attempt whose id stays (a behaviour chosen while
+   it waits) keeps its listener, its deadline and its fader's first values."
+  [handler]
+  (fn [{before :state :as event}]
+    (let [effects (handler event)
+          after (:state effects)]
+      (if (nil? after)
+        effects
+        (let [attempt (active-learn after)
+              after (cond-> after
+                      (and attempt (invalidated? before after attempt)) over)
+              was (:learn-id (active-learn before))
+              now (active-learn after)]
+          (cond-> (assoc effects :state after)
+            (not= was (:learn-id now))
+            (assoc :input/sync-learn {:retire was
+                                      :arm (some-> now (select-keys [:learn-id :document-id :capture :source]))})))))))
 
 (defn- handle-input-cancel-learn
-  "Cancel generic input learn mode, and Learn all with it."
-  [{:keys [state]}]
-  (router/unregister-handler! ::generalized-input-learn)
-  (release-pending-learn!)
-  ;; Remove learning indicator
-  {:state (-> state
-              (clear-learning)
-              (end-other-wizard nil))})
+  "A learn's Cancel (a cell's, a pad's, a role's, a fader's, the trigger
+   editor's, Escape's), for the attempt it names (cancel)."
+  [event]
+  (cancel event))
 
 (defn- handle-input-remove-trigger
   "Removes a generic trigger from the mapping."
@@ -532,30 +674,42 @@
                                               (= (:target v) target))))
                                m)))}))
 
+(defn- with-behavior
+  "Trigger map m with behavior on each binding of target that has another."
+  [m target behavior]
+  (reduce-kv (fn [acc k action]
+               (if (and (= target (learn-target action)) (not= behavior (:behavior action)))
+                 (assoc acc k (assoc action :behavior behavior))
+                 acc))
+             m
+             m))
+
 (defn- handle-input-update-cell-trigger-action
-  "Updates behavior metadata for all bindings targeting a cell. The behavior
-   also becomes the trigger editor's choice, which its Learn button passes on,
-   so a binding learned next gets it too."
-  [{:keys [state target-action updates] :as event}]
-  (let [{:keys [type target]} target-action]
-    (let [selected (or (:fx/event event) (:event event))
-          behavior (cond
-                     (keyword? selected) selected
-                     (map? selected) (or (:behavior selected) (:id selected))
-                     :else nil)
-          updates (merge updates (when behavior {:behavior behavior}))]
-      (cond-> {:state (update-in state [:config :input :trigger-map]
-                                 (fn [m]
-                                   (into {}
-                                         (map (fn [[k action]]
-                                                [k (if (and (= (:type action) type)
-                                                            (= (:target action) target))
-                                                     (merge action updates)
-                                                     action)]))
-                                         m)))}
-        behavior (assoc :dispatch {:event/type :ui/update-dialog-data
-                                   :dialog-id :trigger-editor
-                                   :updates {:behavior behavior}})))))
+  "The trigger editor's behaviour choice (:fx/event: an option of its list,
+   or a keyword) for the cell of target-action, sent with the show it was
+   made in (:document-id): the cell's bindings get it, and so do the
+   editor's choice and the learn waiting for the cell, if any, all in one
+   state, so the binding learned next gets the choice shown, while it waits
+   too. Only :follow or :momentary, for the cell the editor is open on, in
+   the show open now; else {}."
+  [{:keys [state target-action document-id] :as event}]
+  (let [selected (or (:fx/event event) (:event event))
+        behavior (cond
+                   (keyword? selected) selected
+                   (map? selected) (or (:behavior selected) (:id selected))
+                   :else nil)
+        target (learn-target target-action)
+        attempt (active-learn state)]
+    (if (and (#{:follow :momentary} behavior)
+             (some? document-id)
+             (= document-id (h/document-id state))
+             (= target (editor-cell state)))
+      {:state (cond-> (-> state
+                          (update-in [:config :input :trigger-map] with-behavior target behavior)
+                          (assoc-in [:ui :dialogs :trigger-editor :behavior] behavior))
+                (and (binds? attempt) (= target (learn-target (:target-action attempt))))
+                (assoc-in [:ui :input-learn :active :target-action :behavior] behavior))}
+      {})))
 
 
 ;; Public API
@@ -575,8 +729,8 @@
     :input/midi-disconnect-device (handle-midi-disconnect-device event)
     :input/midi-disconnect-all (handle-midi-disconnect-all event)
     :input/midi-set-channel-filter (handle-midi-set-channel-filter event)
-    :input/midi-start-learn (handle-midi-start-learn event)
-    :input/midi-cancel-learn (handle-midi-cancel-learn event)
+    :input/midi-start-learn (handle-identify event :midi)
+    :input/midi-cancel-learn (handle-identify-cancel event :midi)
     :input/midi-auto-connect (handle-midi-auto-connect event)
     ;; What the device worker reports back
     :input/midi-listed (handle-midi-listed event)
@@ -591,8 +745,8 @@
     :input/osc-set-port (handle-osc-set-port event)
     :input/osc-remove-address-mapping (handle-osc-remove-address-mapping event)
     :input/osc-load-default-mappings (handle-osc-load-default-mappings event)
-    :input/osc-start-learn (handle-osc-start-learn event)
-    :input/osc-cancel-learn (handle-osc-cancel-learn event)
+    :input/osc-start-learn (handle-identify event :osc)
+    :input/osc-cancel-learn (handle-identify-cancel event :osc)
     ;; What the device worker reports back
     :input/osc-started (handle-osc-started event)
     :input/osc-stopped (handle-osc-stopped event)
@@ -605,9 +759,8 @@
 
     ;; Generalized triggers
     :input/start-learn (handle-input-start-learn event)
-    :input/learn-captured (if (= :macro (get-in event [:target-action :type]))
-                            (handle-fader-captured event)
-                            (handle-input-learn-captured event))
+    :input/learn-captured (handle-learn-captured event)
+    :input/learn-ended (handle-learn-ended event)
     :input/cancel-learn (handle-input-cancel-learn event)
     :input/remove-trigger (handle-input-remove-trigger event)
     :input/clear-cell-triggers (handle-input-clear-cell-triggers event)

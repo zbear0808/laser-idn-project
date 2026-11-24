@@ -8,6 +8,7 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.animation.show-time :as show-time]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.input :as input]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.router :as input-router]
             [laser-show.routing.zone-patterns :as zone-patterns]
@@ -350,7 +351,7 @@
         (ui/assert-text! "#pattern-pad-chase-keys" "Right-click to learn")
         (ui/right-click-node! robot (ui/query "#pattern-pad-chase"))
         (ui/click! robot "#pattern-pad-chase-learn")
-        (ui/wait-for! #(= {:type :pattern-pad :target :chase} (get-in (app-state) [:backend :input :learning-target])))
+        (ui/wait-for! #(= {:type :pattern-pad :target :chase} (input/learning-target (app-state))))
         (is (has-class? "#pattern-pad-chase" "pattern-pad-learning"))
         (is (nil? (pads-style)) "the menu pressed nothing")
         (input-router/dispatch! (note :note-on 40))
@@ -365,7 +366,7 @@
         (testing "learning it again for another pad moves it"
           (ui/right-click-node! robot (ui/query "#pattern-pad-swap"))
           (ui/click! robot "#pattern-pad-swap-learn")
-          (ui/wait-for! #(= {:type :pattern-pad :target :swap} (get-in (app-state) [:backend :input :learning-target])))
+          (ui/wait-for! #(= {:type :pattern-pad :target :swap} (input/learning-target (app-state))))
           (input-router/dispatch! (note :note-on 40))
           (ui/wait-for! #(= {:type :pattern-pad :target :swap} (bound)))
           (input-router/dispatch! (note :note-off 40))

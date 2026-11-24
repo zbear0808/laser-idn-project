@@ -42,7 +42,7 @@
     {:fx/type effect-bank/effect-bank
      :active-tab (or active-effect-tab :shape)
      :on-tab-change {:event/type :cue-chain/set-effect-tab}
-     ;; Data-driven event template - handler will receive :item-id and :item
+     ;; Data-driven event template - the handler receives :item-id, the effect's id
      :item-event-template {:event/type :cue-chain/add-effect-from-bank
                            :col col
                            :row row

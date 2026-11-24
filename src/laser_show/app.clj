@@ -24,6 +24,7 @@
             [laser-show.state.templates :as templates]
             [laser-show.events.core :as events]
             [laser-show.views.root :as root]
+            [laser-show.animation.registries :as registries]
             [laser-show.animation.show-time :as show-time]
             [laser-show.services.show-clock :as show-clock]
             [laser-show.backend.output-runtime :as output-runtime]
@@ -31,6 +32,7 @@
             [laser-show.output.driver :as driver]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.devices :as devices]
+            [laser-show.input.learn :as learn]
             [laser-show.input.link :as link]
             [laser-show.input.gamepad :as gamepad]
             [laser-show.input.router :as router]
@@ -153,6 +155,13 @@
                      :drivers (driver/descriptors)
                      :dir dir}))
 
+(defn- dispatch-registries-published!
+  "Put the effect and modulator registries' descriptors into app state,
+   through :registries/published (animation.registries), for the effect
+   banks and the tap reactions."
+  []
+  (events/dispatch! (registries/published-event)))
+
 (defn- starter-state
   "A fresh starter document: the starter cues, vibes and the Master, with
    an identity of its own (persistent/begin-document)."
@@ -259,7 +268,9 @@
 
     ;; The output drivers and add-ons, as data for the views; before the
     ;; startup scan, so it sees every driver
-    (dispatch-drivers-loaded! loaded-addons))
+    (dispatch-drivers-loaded! loaded-addons)
+    ;; The effects and modulators, as data for the banks and the reactions
+    (dispatch-registries-published!))
 
   ;; After dispatch! reaches the agent, so the clock's reports queue there
   (show-clock/start!)
@@ -328,8 +339,9 @@
    the UI, the show clock, the input mapper, the gamepad poller, the
    streaming engines (the output runtime is drained), the add-ons' drivers
    (unregistered, their jars closed), input devices, the Carabiner link,
-   the rig file (its pending change written and the write running finished,
-   then its lock let go: stop-rig-file!) and the open press's deadline
+   a learn attempt's listener and waiter (input.learn/retire!), the rig
+   file (its pending change written and the write running finished, then
+   its lock let go: stop-rig-file!) and the open press's deadline
    wake-up (events/dispose-gesture-alarm!). dispatch!
    falls back to the synchronous handler afterwards, and the write guard
    start! or start-test! installed is removed.
@@ -361,6 +373,9 @@
       (events/flush! 1000)
       (release-devices! (state/get-raw-state)))
     (events/retire!)
+    ;; A learn attempt's listener and waiter go with the app: whatever it
+    ;; caught is dropped with the app's late events, never sent elsewhere
+    (learn/retire!)
     (stop-rig-file!)
     (events/dispose-gesture-alarm!)
     (events/set-exit-fn! nil)
@@ -401,7 +416,8 @@
    machine's) and without classpath descriptors. Either way :addons/loaded
    says which folder Settings → Add-ons shows and installs into: that one,
    else output.addons/addons-dir (a temp folder in tests, test_runner.clj).
-   initial-state nil is the starter state."
+   :registries/published puts the effects and modulators in app state, as
+   app/start! does. initial-state nil is the starter state."
   ([]
    (start-test! (starter-state)))
   ([initial-state]
@@ -423,6 +439,7 @@
        (events/set-dispatch-fn! (:handler app))
        (state/guard-writes! {:allowed? events/on-event-thread? :strict? true})
        (dispatch-drivers-loaded! loaded-addons)
+       (dispatch-registries-published!)
        (after-rig-loaded! rig)
        app))))
 

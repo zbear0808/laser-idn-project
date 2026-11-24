@@ -13,8 +13,11 @@
   [{:keys [fx/context]}]
   (let [dialog-data (fx/sub-ctx context subs/dialog-data :trigger-editor)
         {:keys [col row cell-mode] :or {cell-mode :cue}} dialog-data
+        target {:type (if (= cell-mode :effects) :trigger-effect :trigger-cue) :target [col row]}
         trigger-map (fx/sub-ctx context subs/input-trigger-map)
-        learning-target (fx/sub-ctx context subs/input-learning-target)
+        learn (fx/sub-ctx context subs/learn-for-target target)
+        behavior (fx/sub-ctx context subs/trigger-editor-behavior target)
+        document-id (fx/sub-ctx context subs/document-id)
         cell-label (if (= cell-mode :effects)
                      (let [display-data (fx/sub-ctx context subs/effect-cell-display-data col row)]
                        (or (:name display-data) "Effect Chain"))
@@ -50,8 +53,9 @@
          :row row
          :cell-mode cell-mode
          :trigger-map trigger-map
-         :learning-target learning-target
-         :chosen-behavior (:behavior dialog-data)}]}
+         :learn learn
+         :behavior behavior
+         :document-id document-id}]}
 
       ;; Footer
       {:fx/type :h-box

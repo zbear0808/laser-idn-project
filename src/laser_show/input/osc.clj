@@ -223,38 +223,6 @@
   (:address-mappings osc-state {}))
 
 
-;; OSC Learn (pure functions for state)
-
-
-(defn start-learn
-  "Starts OSC learn mode.
-   Returns updated state with promise in :learn-mode.
-   
-   The caller should:
-   1. Store the returned state  
-   2. Register a global handler to listen for OSC events
-   3. When event received, deliver to the promise and call cancel-learn"
-  [osc-state]
-  (let [p (promise)]
-    (assoc osc-state :learn-mode p)))
-
-(defn cancel-learn
-  "Cancels OSC learn mode.
-   Returns updated state with :learn-mode set to nil."
-  [osc-state]
-  (assoc osc-state :learn-mode nil))
-
-(defn learning?
-  "Returns true if OSC learn mode is active."
-  [osc-state]
-  (boolean (:learn-mode osc-state)))
-
-(defn get-learn-promise
-  "Returns the learn mode promise, or nil if not learning."
-  [osc-state]
-  (:learn-mode osc-state))
-
-
 ;; Enable/Disable (pure functions)
 
 
@@ -281,13 +249,13 @@
 
 (def initial-state
   "Default OSC state structure: plain data (the server is the device
-   worker's, input.devices)."
+   worker's, input.devices). Settings' identify of an input is a learn
+   attempt (handlers/input.clj), not OSC state."
   {:enabled? false
    :server-running? false
    :port 9000
    :requests {}
-   :address-mappings {}
-   :learn-mode nil})
+   :address-mappings {}})
 
 
 ;; Utility Functions

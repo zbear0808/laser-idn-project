@@ -266,23 +266,18 @@
   [state]
   (assoc-in state [:project :document-id] (random-uuid)))
 
-(defn- end-learn
-  "state without the learn waiting for an input (handlers/input.clj): what
-   it learns goes into the show ([:config :input]), so its capture, should
-   one still come, finds no learn and binds nothing into the next show."
-  [state]
-  (cond-> state
-    (get-in state [:backend :input])
-    (update-in [:backend :input] dissoc :learning-target :learning-capture)))
-
 (defn- reset-session
   "Reset state that refers to the previous document (playback, what vibe
    mode is doing, what the keys hold, selection, list UI, dialogs, the
    status bar's notice, the Vibes tab's selection, a pending zone map
-   switch and the Map cycle's pause, the pattern pads' style, a learn in
-   progress, undo history, project metadata), and give the new document its
-   own identity (begin-document). Backend/runtime state (streaming, Link,
-   MIDI/OSC, discovered devices) is kept."
+   switch and the Map cycle's pause, the pattern pads' style, learning an
+   input, undo history, project metadata), and give the new document its
+   own identity (begin-document). Learning starts afresh ([:ui
+   :input-learn]): what a learn binds goes into the show, so its capture,
+   should one still come, finds no attempt and binds nothing into the next
+   show, and the pipeline retires its listener in the same turn
+   (handlers.input/wrap-learn-lifetime). Backend/runtime state (streaming,
+   Link, MIDI/OSC, discovered devices) is kept."
   [state initial]
   (-> state
       (assoc :playback (:playback initial))
@@ -292,7 +287,7 @@
       (assoc :history (:history initial))
       (assoc :project (:project initial))
       (begin-document)
-      (end-learn)
+      (assoc-in [:ui :input-learn] (get-in initial [:ui :input-learn]))
       (assoc :zone-group-ui (:zone-group-ui initial))
       (assoc-in [:ui :dialogs] (get-in initial [:ui :dialogs]))
       (assoc-in [:ui :notice] (get-in initial [:ui :notice]))

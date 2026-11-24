@@ -3,7 +3,9 @@
    the input router and mapper, and the actions the musician actually plays."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.input :as input]
             [laser-show.events.handlers.input-mapper :as input-mapper]
+            [laser-show.events.helpers :as h]
             [laser-show.input.router :as router]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
@@ -17,7 +19,15 @@
            [org.testfx.api FxRobot]))
 
 (defn- at [& path] (get-in (state/get-raw-state) path))
-(defn- learning-target [] (at :backend :input :learning-target))
+(defn- learning-target [] (input/learning-target (state/get-raw-state)))
+
+(defn- start-learn!
+  "A learn's Start for target-action, from the show open now, as a view
+   sends it."
+  [target-action & {:as opts}]
+  (events/dispatch! (merge {:event/type :input/start-learn :target-action target-action
+                            :document-id (h/document-id (state/get-raw-state))}
+                           opts)))
 
 (def ^:dynamic ^:private *key-edges* nil)
 
@@ -33,8 +43,9 @@
       (binding [*key-edges* edges] (test))
       (finally
         (when (learning-target)
-          ;; Release the waiting learn future, including when a test failed.
-          (events/dispatch! {:event/type :input/cancel-learn})
+          ;; End the waiting learn, including when a test failed.
+          (events/dispatch! (merge {:event/type :input/cancel-learn}
+                                   (select-keys (input/active-learn (state/get-raw-state)) [:learn-id :document-id])))
           (events/flush!))
         (router/unregister-handler! ::key-edges)
         (input-mapper/stop-mapper!)
@@ -223,7 +234,7 @@
   (let [robot (main-robot!)
         target {:type :trigger-cue :target [0 0]}]
     (events/dispatch! {:event/type :transport/play})
-    (events/dispatch! {:event/type :input/start-learn :target-action target})
+    (start-learn! target)
     (ui/wait-for! #(and (playing?) (= target (learning-target))))
     (ui/press! robot KeyCode/ESCAPE)
     (ui/wait-for! #(and (nil? (learning-target)) (not (playing?))))
@@ -233,7 +244,7 @@
 (deftest learn-captures-unbound-space-instead-of-play-test
   (let [robot (main-robot!)
         target {:type :vibe :role :hit}]
-    (events/dispatch! {:event/type :input/start-learn :target-action target})
+    (start-learn! target)
     (ui/wait-for! #(= target (learning-target)))
     (ui/press! robot KeyCode/SPACE)
     (ui/wait-for! #(= target (binding-for :space)))
@@ -245,7 +256,7 @@
   (let [robot (main-robot!)
         fader {:type :macro :slot :slider-1}]
     (bind! :space {:type :trigger-cue :target [0 0]})
-    (events/dispatch! {:event/type :input/start-learn :target-action fader :capture :continuous})
+    (start-learn! fader :capture :continuous)
     (ui/wait-for! #(= fader (learning-target)))
     (ui/press! robot KeyCode/SPACE)
     (ui/wait-for! playing?)
@@ -258,7 +269,7 @@
   (let [robot (main-robot!)
         target {:type :trigger-cue :target [0 0]}]
     (bind! :space target)
-    (events/dispatch! {:event/type :input/start-learn :target-action target :capture :continuous})
+    (start-learn! target :capture :continuous)
     (ui/wait-for! #(= target (learning-target)))
     (ui/press! robot KeyCode/SPACE)
     (ui/wait-for! playing?)
