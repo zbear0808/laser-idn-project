@@ -104,8 +104,8 @@
                      :doc "Map of trigger ID to runtime timing state"}
    :held-inputs {:default #{}
                  :doc "Input identities currently held"}
-   :keyboard-activations {:default {}
-                          :doc "Key id -> action resolved on key-down, until key-up or a new show"}
+   :activations {:default {}
+                 :doc "Key -> the action its press played, until the key's release ends it (events/handlers/triggers.clj), whatever the key is bound to by then. A key as lookup-key names it, for every source: {:source :midi :channel :note} (channels 0-15), {:source :osc|:gamepad|:keyboard :id}. Retired, without its release, when its source can't send releases any more (:trigger/retire: a MIDI input disconnected or MIDI off, the OSC server stopped or OSC off), and with every other on New and Open"}
    :last-input-time {:default nil
                      :doc "Timestamp of the most recent discrete input"}})
 

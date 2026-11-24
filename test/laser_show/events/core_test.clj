@@ -51,7 +51,7 @@
 (deftest effects-and-co-effects-are-shared-maps-test
   (is (= #{:state :time} (set (keys events/co-effects))))
   (is (every? #(contains? events/effects %)
-              [:state :dispatch :dispatch-later :link/sync-to-downbeat
+              [:state :dispatch :dispatch-n :dispatch-later :link/sync-to-downbeat
                :input/await-learn :multi-engine/start :multi-engine/stop :multi-engine/refresh
                :input/midi-list :input/midi-connect :input/midi-disconnect :input/osc-start :input/osc-stop
                :output/write-status
@@ -116,6 +116,18 @@
       (is (= 1 @exits))
       (is (= [] @later))
       (is (false? (get-in (state/get-raw-state) [:ui :dialogs :unsaved-confirm :open?]))))))
+
+(deftest dispatch-n-continues-with-each-event-in-order-test
+  (let [later (atom [])
+        handle timing/handle]
+    (with-redefs [timing/handle (fn [event]
+                                  (if (= :timing/probe (:event/type event))
+                                    {:dispatch-n [{:event/type :timing/set-bpm :bpm 99.0}
+                                                  {:event/type :timing/set-bpm :bpm 100.0}]}
+                                    (handle event)))]
+      (events/event-handler {:event/type :timing/probe} #(swap! later conj %)))
+    (is (= 100.0 (get-in (state/get-raw-state) [:timing :bpm])) "both ran, the second after the first")
+    (is (= [] @later) "now, in the same call, not through the dispatcher")))
 
 (deftest tap-tempo-sets-bpm-in-one-state-test
   (let [later (atom [])]
