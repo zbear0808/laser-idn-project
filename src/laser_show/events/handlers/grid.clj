@@ -176,15 +176,16 @@
                                  (comp chains/fresh-ids migration/cue-z4)))
 
 (defn- handle-grid-clear-cell
-  "Clear a cell's cue chain, and the triggers and vibes that named it."
+  "Clear a cell's cue chain, and the triggers and vibes that named it. A cue
+   playing there stops as any cue stops (cue-timing/deactivate-cue): the
+   last one stops the transport, another leaves it as it is."
   [{:keys [col row state]}]
   {:state (-> state
               (update-in [:chains :cue-chains] dissoc [col row])
               (update-in [:config :input :trigger-map] refs/remove-trigger-targets [col row] :trigger-cue)
               (refs/remove-cue [col row])
-              (cond-> (= (get-in state [:playback :active-cell]) [col row])
-                (assoc-in [:playback :active-cell] nil))
-              (update-in [:playback :active-cues] dissoc [col row]))})
+              (cond-> (contains? (get-in state [:playback :active-cues]) [col row])
+                (update :playback cue-timing/deactivate-cue [col row])))})
 
 (defn- handle-grid-set-column-target
   "Set or clear (nil) column col's default target (zones plan Z4), in normal

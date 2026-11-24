@@ -463,12 +463,17 @@
   "Effect that continues :on-read with :clock, what the show clock has now:
    {:beats (the global clock's) :running? (a clock thread runs) :now-ms
    (the wall clock, the one an input's :timestamp is on)}, so a handler that
-   times something on the beat stays pure (zones plan Z4 SQ-3)."
-  [{:keys [on-read]} dispatch]
+   times something on the beat stays pure (zones plan Z4 SQ-3). With
+   :chase-cell, :clock is {:chase-id k} instead, the timecode episode the
+   clock chases at that cell now, nil for none (one read of its runtime,
+   show-time/chase-id), for :show-clock/apply-chase (reactivity plan 15)."
+  [{:keys [on-read] :as request} dispatch]
   (when on-read
-    (run-inline (assoc on-read :clock {:beats (show-time/global-beats)
-                                       :running? ((:running? show-time/frame-signal))
-                                       :now-ms (System/currentTimeMillis)})
+    (run-inline (assoc on-read :clock (if (contains? request :chase-cell)
+                                        {:chase-id (show-time/chase-id (:chase-cell request))}
+                                        {:beats (show-time/global-beats)
+                                         :running? ((:running? show-time/frame-signal))
+                                         :now-ms (System/currentTimeMillis)}))
                 dispatch)))
 
 ;; Input Learn Effects
@@ -873,7 +878,8 @@
      its, arm the next; it dispatches :history/gesture-timeout (later,
      wake-up thread)
    - :link/sync-to-downbeat - align phase to Link's downbeat (inline)
-   - :show-clock/read - continue :on-read with the show clock's beats (inline)
+   - :show-clock/read - continue :on-read with the show clock's beats, or
+     with :chase-cell its timecode episode there (inline)
    - :input/await-learn - wait for a learn capture, then dispatch the binding (later, future)
    - :multi-engine/start, :multi-engine/refresh - queue a sync of the engines
      with {:projectors …} on the output thread; :output/status comes back

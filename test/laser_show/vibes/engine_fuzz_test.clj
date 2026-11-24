@@ -84,6 +84,8 @@
       (templates/apply-starter-cue-chains)
       (templates/apply-starter-vibes)
       (assoc-in [:timing :bpm] 120.0)
+      ;; A show of its own, so the clock's timecode reports apply (reactivity plan 15)
+      (assoc-in [:project :document-id] #uuid "00000000-0000-0000-0000-0000000f022d")
       (update-in [:chains :cue-chains] update-vals #(assoc % :target :center))
       (update-in [:chains :cue-chains] merge extra-cues)
       (assoc-in [:projectors :crowd-beam] {:name "Crowd beam" :host "10.0.0.9" :port 7255 :enabled? false
@@ -121,13 +123,18 @@
 
 (defn- run
   "state after event through the real pipeline and each event it dispatches,
-   as the agent runs them (no effect beyond :state and :dispatch)."
-  [state event t]
-  (let [effects (events/handle-event-pipeline (assoc event :state state :time t))
-        s (or (:state effects) state)]
-    (if-let [next-event (:dispatch effects)]
-      (run s next-event t)
-      s)))
+   as the agent runs them (no effect beyond :state and :dispatch, and, given
+   the clock's runtime, :show-clock/read of its timecode episode at a cell)."
+  ([state event t] (run state event t nil))
+  ([state event t runtime]
+   (let [effects (events/handle-event-pipeline (assoc event :state state :time t))
+         s (or (:state effects) state)
+         {:keys [on-read chase-cell] :as read} (:show-clock/read effects)]
+     (cond
+       (:dispatch effects) (run s (:dispatch effects) t runtime)
+       (and runtime on-read (contains? read :chase-cell))
+       (run s (assoc on-read :clock {:chase-id (show-time/chase-id runtime chase-cell)}) t runtime)
+       :else s))))
 
 (defn- handled
   "The pipeline's effects for event alone: what invariant 11 compares, since
@@ -164,7 +171,7 @@
                                                      (conj (bad "06: the clock's " (pr-str report) " changed nothing"))
                                                      (not= s' (run s' report t))
                                                      (conj (bad "06 inv 2: " (pr-str report) " again changed the state")))]))
-                                           [(reduce #(run %1 %2 t) state reports) []]
+                                           [(reduce #(run %1 %2 t runtime) state reports) []]
                                            vibe-reports)]
               (-> w
                   (assoc :rt (assoc runtime :vibe-sent vibe-sent) :now now :state state)

@@ -142,6 +142,156 @@
       (is (= state (update (:state result) :playback dissoc :requests))))))
 
 
+(deftest end-requires-a-current-run-and-position-test
+  (let [a [0 0]
+        b [1 0]
+        r #uuid "00000000-0000-0000-0000-000000000001"
+        rb #uuid "00000000-0000-0000-0000-000000000002"
+        k #uuid "00000000-0000-0000-0000-00000000000a"
+        s #uuid "00000000-0000-0000-0000-00000000000b"
+        intent {:run r :timeline? true :start-beat 0.0 :seek {:id s :beat 2.0}}
+        state {:chains {:cue-chains {a {:editor-type :timeline :items []} b {:items []}}}
+               :playback {:playing? true
+                          :active-cell a
+                          :active-cues {a intent b {:run rb}}
+                          :requests {:restart {:id k}}}}
+        end {:event/type :show-clock/cue-ended :cell a :run r :position-ids {:restart k :seek s}}
+        handle (fn [state event] (timing/handle (assoc event :state state)))]
+    (testing "the end of the run where it is now removes it, once"
+      (let [{after :state} (handle state end)]
+        (is (= {:playing? true :active-cell b :active-cues {b {:run rb}} :requests {:restart {:id k}}}
+               (:playback after)))
+        (is (= {:state after} (handle after end)) "a duplicate")))
+    (testing "an initial position's end, its ids nil"
+      (let [fresh (-> state
+                      (update :playback dissoc :requests)
+                      (update-in [:playback :active-cues a] dissoc :seek))]
+        (is (= {b {:run rb}} (get-in (handle fresh (assoc end :position-ids {:restart nil :seek nil}))
+                                     [:state :playback :active-cues])))))
+    (testing "another cell's seek and the tap's align are no part of the position"
+      (let [st (-> state
+                   (assoc-in [:playback :active-cues b :seek] {:id #uuid "00000000-0000-0000-0000-00000000000c" :beat 1.0})
+                   (assoc-in [:playback :requests :align] {:id #uuid "00000000-0000-0000-0000-00000000000d"}))]
+        (is (= {b (get-in st [:playback :active-cues b])} (get-in (handle st end) [:state :playback :active-cues])))))
+    (testing "after Stop the gate stays closed"
+      (let [stopped (:state (timing/handle {:event/type :transport/stop :state state}))
+            restarted (assoc-in end [:position-ids :restart] (get-in stopped [:playback :requests :restart :id]))]
+        (is (= {:state stopped} (handle stopped end)) "an end from before Stop: both cues stay held")
+        (is (= [false {b {:run rb}}]
+               ((juxt :playing? :active-cues) (get-in (handle stopped restarted) [:state :playback])))
+            "the restarted run's end: the other cue stays held")))
+    (testing "anything else leaves state as it was"
+      (doseq [[why st event]
+              [["moved to another cell" (-> state
+                                             (update-in [:playback :active-cues] dissoc a)
+                                             (assoc-in [:playback :active-cues [2 0]] intent))
+                end]
+               ["removed" (update-in state [:playback :active-cues] dissoc a) end]
+               ["started again: another run at the cell"
+                (assoc-in state [:playback :active-cues a :run] #uuid "00000000-0000-0000-0000-000000000003") end]
+               ["its timeline follows timecode now" (assoc-in state [:chains :cue-chains a :timeline/chase] :mtc) end]
+               ["a chasing intent: no run on either side"
+                (assoc-in state [:playback :active-cues a] {:chasing? true :timeline? true}) (assoc end :run nil)]
+               ["no run" state (assoc end :run nil)]
+               ["restarted since" (assoc-in state [:playback :requests :restart :id] #uuid "00000000-0000-0000-0000-00000000000e")
+                end]
+               ["seeked since" (assoc-in state [:playback :active-cues a :seek :id] #uuid "00000000-0000-0000-0000-00000000000f")
+                end]
+               ["no position ids" state (dissoc end :position-ids)]
+               ["only the restart's" state (assoc end :position-ids {:restart k})]
+               ["only the seek's" state (assoc end :position-ids {:seek s})]
+               ["no cell" state (dissoc end :cell)]]]
+        (let [result (handle st event)]
+          (is (= {:state st} result) why)
+          (is (identical? st (:state result)) why))))))
+
+
+(deftest chase-transition-requires-show-version-owner-and-clock-test
+  (let [c [2 0]
+        b [1 0]
+        d #uuid "00000000-0000-0000-0000-0000000000d1"
+        rb #uuid "00000000-0000-0000-0000-000000000002"
+        r #uuid "00000000-0000-0000-0000-000000000003"
+        k-restart #uuid "00000000-0000-0000-0000-00000000000a"
+        k [d c 3 1000 7]
+        k2 [d c 3 1000 9]
+        marker {:chasing? true :timeline? true :chase-id k}
+        state {:project {:document-id d}
+               :chains {:cue-chains {c {:editor-type :timeline :timeline/chase :mtc :items []} b {:items []}}}
+               :playback {:playing? true
+                          :active-cell b
+                          :active-cues {b {:run rb}}
+                          :chase-sources {:next 4 :cells {c 3}}
+                          :requests {:restart {:id k-restart}}}}
+        on {:event/type :show-clock/apply-chase :cell c :active? true :document-id d :source-version 3
+            :expected-owner :none :chase-id k :start {:restart k-restart :allowed? true} :clock {:chase-id k}}
+        off (-> on (assoc :active? false :expected-owner [:chase k] :clock {:chase-id nil}) (dissoc :chase-id :start))
+        handle (fn [state event] (timing/handle (assoc event :state state)))
+        playback-after (fn [state event] (:playback (:state (handle state event))))]
+    (testing "the clock's report goes on with what the clock chases at the cell now; another show's is dropped"
+      (is (= {:show-clock/read {:chase-cell c :on-read (dissoc on :clock)}}
+             (handle state (-> on (assoc :event/type :show-clock/chase) (dissoc :clock)))))
+      (is (= {} (handle (assoc-in state [:project :document-id] #uuid "00000000-0000-0000-0000-0000000000d2")
+                        (-> on (assoc :event/type :show-clock/chase) (dissoc :clock))))))
+    (testing "an On for the episode the clock is on, with the owner it found still there, installs its marker"
+      (is (= (-> (:playback state) (assoc-in [:active-cues c] marker) (assoc :active-cell c))
+             (playback-after state on))))
+    (testing "a closed transport opens only by the authority timecode entered with, with nothing held now"
+      (let [idle (update state :playback assoc :playing? false :active-cues {} :active-cell nil)]
+        (is (= [true marker] ((juxt :playing? #(get-in % [:active-cues c])) (playback-after idle on))))
+        (doseq [[why st event] [["a Stop or Retrigger since" (assoc-in idle [:playback :requests :restart :id] r) on]
+                                ["entered while Stop held cues" idle (assoc-in on [:start :allowed?] false)]
+                                ["no start authority" idle (dissoc on :start)]
+                                ["no restart id in it" idle (update on :start dissoc :restart)]
+                                ["a cue held now" (assoc-in idle [:playback :active-cues b] {:run rb}) on]]]
+          (is (= [false marker] ((juxt :playing? #(get-in % [:active-cues c])) (playback-after st event)))
+              (str why ": held, as Stop holds")))))
+    (testing "a rebound marker keeps the focus and the transport"
+      (let [st (update state :playback assoc :playing? false :active-cell b
+                       :active-cues {c (assoc marker :chase-id k2) b {:run rb}})]
+        (is (= (assoc-in (:playback st) [:active-cues c] marker)
+               (playback-after st (assoc on :expected-owner [:chase k2]))))))
+    (testing "an Off the clock confirms takes a chase marker out, its cue there or not"
+      (let [st (assoc-in state [:playback :active-cues c] marker)]
+        (is (= [true {b {:run rb}}] ((juxt :playing? :active-cues) (playback-after st off))) "the other cue plays on")
+        (is (= {b {:run rb}} (:active-cues (playback-after (update-in st [:chains :cue-chains] dissoc c)
+                                                           (assoc off :source-version nil))))
+            "no cue left")
+        (is (= [false {} nil] ((juxt :playing? :active-cues :active-cell)
+                               (playback-after (update st :playback assoc :active-cues {c marker} :active-cell c) off)))
+            "the last: the transport stops")))
+    (testing "an Off takes a run out only while its cue follows timecode"
+      (let [st (assoc-in state [:playback :active-cues c] {:run r :timeline? true})
+            run-off (assoc off :expected-owner [:run r])]
+        (is (= {b {:run rb}} (:active-cues (playback-after st run-off))))
+        (is (= {} (handle (update-in st [:chains :cue-chains c] dissoc :timeline/chase) (assoc run-off :source-version nil)))
+            "an ordinary cue's run isn't timecode's")))
+    (testing "anything else changes nothing, and commits nothing; a missing field matches nothing"
+      (doseq [[why st event]
+              [["another show" (assoc-in state [:project :document-id] #uuid "00000000-0000-0000-0000-0000000000d2") on]
+               ["no show named" state (dissoc on :document-id)]
+               ["a bare state: no show on either side" (update state :project dissoc :document-id) (dissoc on :document-id)]
+               ["another version of the cue" (assoc-in state [:playback :chase-sources :cells c] 4) on]
+               ["no version named" state (dissoc on :source-version)]
+               ["the cue doesn't follow now" (update-in state [:chains :cue-chains c] dissoc :timeline/chase) on]
+               ["the cue is gone" (update-in state [:chains :cue-chains] dissoc c) on]
+               ["another owner there now" (assoc-in state [:playback :active-cues c] {:run r}) on]
+               ["no owner named" state (dissoc on :expected-owner)]
+               ["a duplicate On" (assoc-in state [:playback :active-cues c] marker) on]
+               ["the clock on another episode" state (assoc on :clock {:chase-id k2})]
+               ["the clock on none: timecode stopped" state (assoc on :clock {:chase-id nil})]
+               ["no clock read" state (dissoc on :clock)]
+               ["no episode named" state (dissoc on :chase-id)]
+               ["neither On nor Off" state (dissoc on :active?)]
+               ["an Off while the clock chases there" (assoc-in state [:playback :active-cues c] marker)
+                (assoc off :clock {:chase-id k2})]
+               ["an Off with no clock read" (assoc-in state [:playback :active-cues c] marker) (dissoc off :clock)]
+               ["an Off for another marker" (assoc-in state [:playback :active-cues c] (assoc marker :chase-id k2)) off]
+               ["a duplicate Off: the cell empty" state off]
+               ["an Off with no owner named" (assoc-in state [:playback :active-cues c] marker) (dissoc off :expected-owner)]]]
+        (is (= {} (handle st event)) why)))))
+
+
 (deftest timing-tap-tempo-phase-alignment-test
   (testing "Tap tempo asks the show clock to align to the nearest beat (its numbers: show-time-test)"
     (let [state {:timing {:tap (tap-tempo/make)} :playback {:active-cues {[0 0] {:run (random-uuid)}}}}
