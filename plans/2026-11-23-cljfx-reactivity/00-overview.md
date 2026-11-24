@@ -55,7 +55,7 @@ Each package landed as one commit (09 and 13 as two). Each has regression tests 
 | 37 | `8315b073` | — |
 | 38 | `7f3849ca` | The windowed real-drag test (`grid-test/native-cell-drag-clears-on-drop-and-escape-test`) needs a display and wasn't run. |
 
-The decisions below were implemented with their proposed defaults: 02 fails instead of risking the last good file, 13 keeps controls interactive and restores the applied value, and 36's capacity came from measurements. Each is still open for confirmation.
+The decisions below were implemented with their proposed defaults: 02 fails instead of risking the last good file, 13 keeps controls interactive and restores the applied value, and 36's capacity came from measurements. You confirmed three of them on 2026-11-24: 02's behaviour on a filesystem that can't replace a file atomically, 09's default port for an out-of-range IDN port, and 36's 4096 entries. 13 is still open; see the [follow-up list](../2026-11-24-reactivity-follow-ups.md).
 
 ## Start here
 
@@ -157,9 +157,11 @@ The findings were **planned** in parallel. Implement by outcome rather than open
 
 ### Decisions to confirm before release
 
-- **02 — Save on a filesystem that cannot replace a file atomically.** The proposed default is to report failure and keep the previous file, rather than risk truncating someone's last good show. Its reader accepts documented legacy omissions, but an unreadable required content member is never an empty show. Confirm the destination/failure behavior for supported removable or network storage using a temporary-file fixture.
+Three of these were confirmed on 2026-11-24: 02, 36, and 09's port default. 13 is still open.
+
+- **02 — Save on a filesystem that cannot replace a file atomically.** Confirmed: report failure and keep the previous file, rather than risk truncating someone's last good show. Its reader accepts documented legacy omissions, but an unreadable required content member is never an empty show.
 - **13 — What a locked control displays.** The proposed default keeps otherwise available controls interactive: dispatch the edit once, explain a refusal, then restore the applied value without sending a second edit. Already-disabled controls stay disabled. The settled native control **and** model must agree; the notice alone is insufficient.
-- **36 — Production cache capacity.** This is an implementation measurement, not a value to approve in advance. A comparison cache fixed call counts but says nothing by itself about acceptable retention. Ship the new value only after the cross-view measurements and retention checks in page 36.
+- **36 — Production cache capacity.** Confirmed: 4096 entries, chosen from the cross-view measurements and retention checks in page 36.
 
 ## How to verify and retire an item
 
