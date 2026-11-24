@@ -1040,12 +1040,28 @@
   [context]
   (fx/sub-val context get-in [:config :default-target]))
 
-(defn zones-in-use
-  "Every zone the show draws into (Z4-Q1): those a cue names anywhere, a
-   column's default and the show's, sorted."
+(defn effect-ref-inputs
+  "The effect cells' chains as their stored references read them
+   (routing.refs/chain-ref-usage: the zone catalogue, the rig report):
+   {cell {:items items}} for each cell with items, so switching a cell on or
+   off leaves it equal."
   [context]
-  (let [cues (fx/sub-val context get-in [:chains :cue-chains])
-        refs (concat (mapcat refs/cue-refs (remove nil? (vals cues)))
+  (into {}
+        (keep (fn [[cell chain]]
+                (when (and (map? chain) (seq (:items chain)))
+                  [cell {:items (:items chain)}])))
+        (fx/sub-val context get-in [:chains :effect-chains])))
+
+(defn zones-in-use
+  "Every zone the show names (Z4-Q1): in a cue (routing.refs/cue-refs, its
+   zone patterns too), in an effect cell's zone patterns (a place, a source
+   or a lit step, a keyframe's too, the pattern on or off), a column's
+   default and the show's, sorted. Not a zone a label, a map's override or
+   the preview alone names."
+  [context]
+  (let [usage (refs/chain-ref-usage (fx/sub-val context get-in [:chains :cue-chains])
+                                    (fx/sub-ctx context effect-ref-inputs))
+        refs (concat (keys usage)
                      (mapcat targets/target-refs (vals (fx/sub-val context get-in [:grid :column-targets])))
                      (targets/target-refs (fx/sub-ctx context default-target)))]
     (vec (sort-by targets/zone-index (into #{} (filter targets/zone-ref?) refs)))))

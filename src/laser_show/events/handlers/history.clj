@@ -187,7 +187,7 @@
    :rig/import-new-lasers "Import Lasers"
    :rig/use-show-setup "Use Show's Setup"
    :rig/adopt-group "Use Rig's Group"
-   :rig/repin "Re-pin Cues"
+   :rig/repin "Re-pin References"
    :rig/add-groups-to-show "Add Rig's Groups"
    :rig/forget-projector "Forget Laser"
    :zone-groups/create-new "Add Zone Group"

@@ -186,3 +186,172 @@
     (testing "a column default goes, and the show's is All again"
       (is (= {3 :zone/d 4 :zone/a} (get-in state [:grid :column-targets])))
       (is (nil? (get-in state [:config :default-target]))))))
+
+
+;; Zone patterns' own fields (plans/2026-11-23-cljfx-reactivity/28): the
+;; places, the source and the lit steps of every stored parameter map, on a
+;; cue and in an effect cell
+
+(def ^:private pattern-sites #'refs/pattern-ref-sites)
+(def ^:private pattern-refs #'refs/pattern-refs)
+(def ^:private map-pattern-refs #'refs/map-pattern-refs)
+
+(def ^:private cue-grid
+  "28 §7.1's cue pattern: a step grid that is off, from Laser A, its rows a
+   zone and Laser A, a rest first."
+  {:effect-id :zone-pattern :enabled? false
+   :params {:style :steps :from :auto.laser/a
+            :zones [:zone/c :auto.laser/a]
+            :steps [[] [:zone/c :auto.laser/a]]}})
+
+(def ^:private cue-chase
+  "A second pattern on the same cue: Every laser, then Laser A, from what
+   the cue draws."
+  {:effect-id :zone-pattern :params {:style :chase :zones [:lane/lasers :auto.laser/a] :from :any}})
+
+(def ^:private cell-items
+  "28 §7.1's effect cell: its pattern in an effect group that is off, a
+   source and two sparse keyframes that are off; then Laser A's literal
+   where nothing stores a place (a point effect's metadata, a Map cycle's
+   maps, an instance id), and a pattern whose only reference to it is a
+   source in a keyframe that is off."
+  [{:type :group :enabled? false
+    :items [{:effect-id :zone-pattern :params {:from :auto.laser/a}
+             :keyframe-modulator {:enabled? false
+                                  :keyframes [{:position 0.0 :params {:zones [:auto.laser/a]}}
+                                              {:position 1.0 :params {:steps [[:auto.laser/a] []]}}]}}]}
+   {:effect-id :scale :params {:x-scale 1.0} :vendor/note :auto.laser/a}
+   {:effect-id :zone-map-cycle :params {:maps [:auto.laser/a :map/odd-even]}}
+   {:effect-id :zone-pattern :id :auto.laser/a :params {:style :alternate :step-on :hit :zones [:zone/d]}
+    :keyframe-modulator {:enabled? false :keyframes [{:position 0.0 :params {:from :auto.laser/a}}]}}])
+
+(deftest stored-pattern-refs-have-the-same-read-and-write-sites-test
+  (let [cue-patterns [cue-grid cue-chase]]
+    (testing "every stored place, source and lit step, by its path from the chain's root"
+      (is (= #{{:path [0 :params :zones 0] :role :lane :ref :zone/c}
+               {:path [0 :params :zones 1] :role :lane :ref :auto.laser/a}
+               {:path [0 :params :from] :role :source :ref :auto.laser/a}
+               {:path [0 :params :steps 1 0] :role :lit :ref :zone/c}
+               {:path [0 :params :steps 1 1] :role :lit :ref :auto.laser/a}
+               {:path [1 :params :zones 1] :role :lane :ref :auto.laser/a}}
+             (set (pattern-sites cue-patterns)))
+          "a pattern that is off counts; Every laser and Everything the cue draws are no refs")
+      (is (= #{{:path [0 :items 0 :params :from] :role :source :ref :auto.laser/a}
+               {:path [0 :items 0 :keyframe-modulator :keyframes 0 :params :zones 0] :role :lane :ref :auto.laser/a}
+               {:path [0 :items 0 :keyframe-modulator :keyframes 1 :params :steps 0 0] :role :lit :ref :auto.laser/a}
+               {:path [3 :params :zones 0] :role :lane :ref :zone/d}
+               {:path [3 :keyframe-modulator :keyframes 0 :params :from] :role :source :ref :auto.laser/a}}
+             (set (pattern-sites cell-items)))
+          "through a group that is off, and every keyframe, on or off"))
+    (testing "the literal elsewhere is no site"
+      (is (= #{} (pattern-refs (subvec cell-items 1 3))) "a point effect's metadata, a Map cycle's maps")
+      (is (= #{:zone/d} (pattern-refs [(dissoc (cell-items 3) :keyframe-modulator)])) "an instance id, a style, a step source")
+      (is (= #{} (pattern-refs [{:effect-id :scale :params {:zones [:auto.laser/a] :from :auto.laser/a}}]))
+          "another effect's params with a pattern's keys")
+      (is (= #{} (pattern-refs [{:type :preset :preset-id :circle :effects [cue-grid]}])) "a cue item's point effects"))
+    (testing "the rewrite touches the same sites, and only them"
+      (let [cue' (map-pattern-refs cue-patterns {:auto.laser/a :auto.laser/b})
+            cells' (map-pattern-refs cell-items {:auto.laser/a :auto.laser/b})
+            moved (fn [sites] (set (map #(update % :ref {:auto.laser/a :auto.laser/b} (:ref %)) sites)))]
+        (is (= (moved (pattern-sites cue-patterns)) (set (pattern-sites cue'))))
+        (is (= (moved (pattern-sites cell-items)) (set (pattern-sites cells'))))
+        (is (= [{:position 0.0 :params {:zones [:auto.laser/b]}} {:position 1.0 :params {:steps [[:auto.laser/b] []]}}]
+               (get-in cells' [0 :items 0 :keyframe-modulator :keyframes])))
+        (is (= {:from :auto.laser/b} (get-in cells' [0 :items 0 :params])))
+        (is (= [(cell-items 1) (cell-items 2)] (subvec cells' 1 3)))
+        (is (every? true? (map identical? (subvec cell-items 1 3) (subvec cells' 1 3)))
+            "the point effect and the Map cycle keep their identity, the literal in them too")
+        (is (= :auto.laser/a (get-in cells' [3 :id])))))
+    (testing "the owners: a cue's patterns are the cue's, an effect cell's pattern its cell's"
+      (let [cues {[2 0] {:items [] :zone-patterns cue-patterns}
+                  [5 5] {:target :graphics :items []}}
+            cells {[2 0] {:active? false :items cell-items}
+                   [0 3] {:active? true :items [{:effect-id :scale :params {}}]}}]
+        (is (= {:all {:cues #{[2 0]} :effect-cells #{}}
+                :graphics {:cues #{[5 5]} :effect-cells #{}}
+                :zone/c {:cues #{[2 0]} :effect-cells #{}}
+                :auto.laser/a {:cues #{[2 0]} :effect-cells #{[2 0]}}
+                :zone/d {:cues #{} :effect-cells #{[2 0]}}}
+               (refs/chain-ref-usage cues cells))
+            "a cue with no target of its own still names All, as cue-refs says")
+        (is (= #{[2 0]} (refs/cues-using cues :auto.laser/a)) "cues-using: cues only")
+        (is (= #{[2 0]} (refs/effect-cells-using cells :auto.laser/a)))
+        (is (= #{} (refs/effect-cells-using cells :graphics)))
+        (is (contains? (refs/cue-refs (get cues [2 0])) :auto.laser/a))))
+    (testing "a show: re-pointed in both grids, everything else as it was"
+      (let [state {:chains {:cue-chains {[2 0] {:items [] :zone-patterns cue-patterns}
+                                         [5 5] {:target :graphics :items []}}
+                            :effect-chains {[2 0] {:active? false :items cell-items}
+                                            [0 3] {:active? true :items [{:effect-id :scale :params {}}]}}}}
+            after (refs/replace-refs state {:auto.laser/a :auto.laser/b})]
+        (is (not (names? (get-in after [:chains :cue-chains [2 0] :zone-patterns]) :auto.laser/a)))
+        (is (= [:zone/c :auto.laser/b] (get-in after [:chains :cue-chains [2 0] :zone-patterns 0 :params :zones])))
+        (is (= :auto.laser/b (get-in after [:chains :effect-chains [2 0] :items 3 :keyframe-modulator :keyframes 0 :params :from])))
+        (is (identical? (get-in state [:chains :cue-chains [5 5]]) (get-in after [:chains :cue-chains [5 5]])))
+        (is (identical? (get-in state [:chains :effect-chains [0 3]]) (get-in after [:chains :effect-chains [0 3]])))
+        (is (identical? (get-in state [:chains :cue-chains [2 0] :items]) (get-in after [:chains :cue-chains [2 0] :items])))
+        (is (false? (get-in after [:chains :effect-chains [2 0] :active?])) "nothing is switched on")
+        (is (identical? state (refs/replace-refs state {:auto.laser/zz :auto.laser/b})) "nothing names it: the same state")))))
+
+(defn- pattern [params] {:effect-id :zone-pattern :params params})
+
+(defn- params-after
+  "params as map-pattern-refs leaves them under replacements."
+  [params replacements]
+  (:params (first (map-pattern-refs [(pattern params)] replacements))))
+
+(deftest pattern-replacements-preserve-order-rests-and-sparse-params-test
+  (testing "28 §7.2: a swap, one lookup per original ref"
+    (let [swap {:auto.laser/a :auto.laser/b :auto.laser/b :auto.laser/a}
+          grid {:style :steps :zones [:auto.laser/a :auto.laser/b] :steps [[:auto.laser/b] [] [:auto.laser/a]]}]
+      (is (= {:style :steps :zones [:auto.laser/b :auto.laser/a] :steps [[:auto.laser/a] [] [:auto.laser/b]]}
+             (params-after grid swap)))
+      (is (= grid (params-after (params-after grid swap) swap)) "applied twice, it swaps back: not idempotent")))
+  (testing "28 §7.3: merged and cleared, the rhythm kept"
+    (let [after (params-after {:zones [:group-old :zone/c :group-kept :group-gone] :from :group-gone
+                               :steps [[:zone/c :group-kept] [:group-old :group-gone] [:group-gone] []]}
+                              {:group-old :group-kept :group-gone nil})]
+      (is (= {:zones [:group-kept :zone/c] :steps [[:group-kept :zone/c] [:group-kept] [] []]} after)
+          "the merged row at the first place it had, its lights once a step, in the rows' new order; rests and length kept")
+      (is (not (contains? after :from)) "a cleared source goes: the default, All")))
+  (testing "many refs onto one"
+    (is (= {:zones [:k :zone/c] :steps [[:k] [:k :zone/c] []]}
+           (params-after {:zones [:x :zone/c :y] :steps [[:y :x] [:zone/c :y] []]} {:x :k :y :k}))))
+  (testing "a style that isn't Steps keeps its grid, and its other params"
+    (is (= {:style :chase :rate 2.0 :zones [:group-new :zone/c] :steps [[:group-new :zone/c] []]}
+           (params-after {:style :chase :rate 2.0 :zones [:group-old :zone/c] :steps [[:group-old :zone/c] []]}
+                         {:group-old :group-new}))))
+  (testing "the last row cleared: an empty lane, not none, and every step a rest"
+    (let [after (params-after {:zones [:a] :from :a :steps [[:a] []]} {:a nil})]
+      (is (= {:zones [] :steps [[] []]} after))
+      (is (contains? after :zones))))
+  (testing "a sparse keyframe: no lane to put its steps in order by, none added"
+    (is (= {:steps [[:zone/c] [] []]}
+           (params-after {:steps [[:zone/c] [:auto.laser/gone] []]} {:auto.laser/gone nil})))
+    (is (= {:steps [[:b :c]]} (params-after {:steps [[:b :a]]} {:a :c})) "its steps' order as it was"))
+  (testing "what isn't a ref stays as it is"
+    (let [wave {:type :sine :min 0.0 :max 1.0}
+          after (params-after {:from wave :zones [:a {:not :a}] :steps [{:a 1} [:a]]} {:a :b})]
+      (is (= {:from wave :zones [:b {:not :a}] :steps [{:a 1} [:b]]} after))
+      (is (identical? wave (:from after)) "a map standing for a value"))
+    (is (= {:zones [:lane/lasers :b] :from :any}
+           (params-after {:zones [:lane/lasers :a] :from :any} {:a :b :lane/lasers :x :any :y}))
+        "Every laser and Everything the cue draws are tokens, never re-pointed"))
+  (testing "a list stays a list"
+    (let [after (params-after {:zones '(:a :zone/c) :steps '((:a) ())} {:a :b})]
+      (is (= '(:b :zone/c) (:zones after)))
+      (is (list? (:zones after)))
+      (is (list? (:steps after)))
+      (is (list? (first (:steps after))))))
+  (testing "nothing to do: the same items"
+    (let [items [(pattern {:zones [:a :a] :steps [[:a] []] :from :a})]]
+      (is (identical? items (map-pattern-refs items {})))
+      (is (identical? items (map-pattern-refs items {:nothing :b})))
+      (is (identical? items (map-pattern-refs items {:a :a})) "a ref onto itself")))
+  (testing "no invented refs"
+    (is (= #{} (pattern-refs [(pattern {:style :swap})])))
+    (is (= #{} (pattern-refs [(pattern {:zones [:lane/lasers] :from :any})])))
+    (is (= #{:all} (pattern-refs [(pattern {:from :all})])) "an explicit All is one")
+    (let [state {:chains {:cue-chains {[0 0] {:items [] :zone-patterns [(pattern {:style :swap})]}}}}]
+      (is (identical? state (refs/replace-refs state {:all :zone/a}))
+          "the cue's implicit All is read only: no target, and no source, is put in"))))

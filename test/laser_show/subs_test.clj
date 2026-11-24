@@ -1419,6 +1419,46 @@
       (is (true? (fx/sub-ctx (context (assoc-in s [:chains :effect-chains [1 1]] {:active? false :items [(zone-patterns/cycle-instance)]}))
                              subs/zone-map-pads-shown?))))))
 
+(deftest pattern-only-zone-catalogue-follows-edits-in-either-grid-test
+  ;; plans/2026-11-23-cljfx-reactivity/28 §7.5: no cue, column or show target;
+  ;; a cue pattern's source, an inactive effect cell's lane and a sparse
+  ;; keyframe's steps name the zones
+  (let [s (-> (domains/build-initial-state)
+              (assoc-in [:chains :cue-chains [0 0]] {:items [{:id "i" :type :preset :preset-id :circle}]
+                                                     :zone-patterns [{:effect-id :zone-pattern :enabled? true
+                                                                      :params {:style :chase :zones [:lane/lasers] :from :zone/aa}}]})
+              (assoc-in [:chains :effect-chains [2 1]] {:active? false
+                                                        :items [{:effect-id :zone-pattern :enabled? true
+                                                                 :params {:zones [:zone/f :auto.laser/gone]}
+                                                                 :keyframe-modulator {:enabled? true
+                                                                                      :keyframes [{:position 0.0 :params {:steps [[:zone/c] [:auto.laser/gone] []]}}]}}]})
+              (assoc-in [:chains :effect-chains [3 1]] {:active? true :items [{:effect-id :scale :params {:x-scale 1.0} :note :zone/g}]})
+              (assoc-in [:zones :labels :zone/q] "Unused")
+              (assoc-in [:zone-maps :map/custom-1] {:name "Mine" :lanes [:auto/left] :overrides {:zone/r :graphics}}))
+        ctx (context s)
+        zones #(fx/sub-ctx % subs/zones-in-use)
+        map-zones #(fx/sub-ctx % subs/map-zones)]
+    (is (= [:zone/c :zone/f :zone/aa] (zones ctx))
+        "a source, a place and a lit step, in index order; not a label, an override, nor an unrelated effect's keyword")
+    (is (= [:zone/a :zone/b :zone/c :zone/f :zone/aa] (map-zones ctx)) "the map editor adds A and B")
+    (testing "the effect cell's keyframe alone"
+      (let [ctx' (fx/swap-context ctx assoc-in [:chains :effect-chains [2 1] :items 0 :keyframe-modulator :keyframes 0 :params :steps]
+                                  [[:zone/d] [:auto.laser/gone] []])]
+        (is (= [:zone/d :zone/f :zone/aa] (zones ctx')) "C goes, D comes in its place")
+        (testing "then the cue's source alone"
+          (let [ctx'' (fx/swap-context ctx' assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :params :from] :zone/b)]
+            (is (= [:zone/b :zone/d :zone/f] (zones ctx'')) "AA goes; B is named now")
+            (is (= [:zone/a :zone/b :zone/d :zone/f] (map-zones ctx'')))))))
+    (testing "switching the cell on or off isn't a structural edit"
+      (let [inputs (fx/sub-ctx ctx subs/effect-ref-inputs)
+            listed (zones ctx)
+            ctx' (fx/swap-context ctx assoc-in [:chains :effect-chains [2 1] :active?] true)]
+        (is (= {[2 1] {:items (get-in s [:chains :effect-chains [2 1] :items])}
+                [3 1] {:items (get-in s [:chains :effect-chains [3 1] :items])}}
+               inputs))
+        (is (= inputs (fx/sub-ctx ctx' subs/effect-ref-inputs)))
+        (is (identical? listed (zones ctx')) "so the zones aren't worked out again")))))
+
 (deftest map-cycle-state-sub-test
   (let [s (domains/build-initial-state)
         cell {:active? true :items [(zone-patterns/cycle-instance)]}

@@ -581,29 +581,28 @@
 
 (defn- handle-projectors-request-remove
   "Ask before removing a projector (the shared confirm dialog). When cues are
-   pinned to it (they name its own group, :auto.laser/<id>), it says how
-   many, and asks where they go, All by default, as deleting a group does
-   (04 S-13)."
+   pinned to it (they name its own group, :auto.laser/<id>), or an effect
+   cell's zone pattern names it, it says how many, and asks what replaces
+   the references, All by default, as deleting a group does (04 S-13). The
+   details list the cues only."
   [{:keys [projector-id state]}]
   (if-not (contains? (:projectors state) projector-id)
     {:state state}
     (let [pin (rig/laser-ref projector-id)
-          cues (refs/cues-using (get-in state [:chains :cue-chains]) pin)]
+          cues (refs/cues-using (get-in state [:chains :cue-chains]) pin)
+          cells (refs/effect-cells-using (get-in state [:chains :effect-chains]) pin)
+          pinned (zone-groups/pinned-text (count cues) (count cells))]
       {:state (assoc-in state [:ui :dialogs :confirm]
                         (cond-> {:open? true
                                  :title (str "Remove " (projector-label state projector-id) "?")
                                  :message (str "Its calibration goes too. If it's still on the network, the next scan finds it again, turned off."
-                                               (when (seq cues)
-                                                 (str " " (zone-groups/plural (count cues) "cue" "cues")
-                                                      (if (= 1 (count cues)) " is" " are") " pinned to it.")))
+                                               (when pinned (str " " pinned)))
                                  :confirm-label "Remove"
                                  :danger? true
                                  :confirm-event {:event/type :projectors/remove :projector-id projector-id}}
-                          (seq cues) (assoc :details (zone-groups/cue-list-text state cues)
-                                            :choice {:key :retarget-to
-                                                     :label "Send its cues to:"
-                                                     :options (zone-groups/retarget-options state pin)}
-                                            :choice-value :all)))})))
+                          (seq cues) (assoc :details (zone-groups/cue-list-text state cues))
+                          pinned (assoc :choice (zone-groups/retarget-choice state pin)
+                                        :choice-value :all)))})))
 
 (defn- drop-discovered-output
   "The scan's device list without projector p's output: an IDN host's
@@ -625,16 +624,17 @@
 (defn- handle-projectors-remove
   "Remove a projector, its calibration chain, its editor and list state, its
    virtual projectors and its place in the rig order, and clear the selection
-   and calibration mode that point at it. Cues pinned to it go to
-   :retarget-to (zone-groups/retarget-value: All by default, nil or :inherit
-   for Nothing), with a notice, so nothing names it any more. While
-   streaming, the output-sync middleware stops its engine. An unknown id
-   changes nothing."
+   and calibration mode that point at it. Its references (cues pinned to it,
+   effect cells' zone patterns naming it) go to :retarget-to
+   (zone-groups/retarget-value: All by default, nil or :inherit to clear
+   them), with a notice, so nothing names it any more. While streaming, the
+   output-sync middleware stops its engine. An unknown id changes nothing."
   [{:keys [projector-id state] :as event}]
   (if-let [p (get-in state [:projectors projector-id])]
     (let [clear-if (fn [s path] (if (= projector-id (get-in s path)) (assoc-in s path nil) s))
           pin (rig/laser-ref projector-id)
-          pinned (count (refs/cues-using (get-in state [:chains :cue-chains]) pin))
+          owners (zone-groups/owners-text (count (refs/cues-using (get-in state [:chains :cue-chains]) pin))
+                                          (count (refs/effect-cells-using (get-in state [:chains :effect-chains]) pin)))
           target (zone-groups/retarget-value state pin event)
           removed (-> state
                       (refs/replace-refs {pin target})
@@ -649,11 +649,10 @@
                       (clear-if [:projector-ui :calibrating-projector-id])
                       (update-in [:projector-ui :identify] dissoc projector-id)
                       (update-in [:projector-ui :discovered-devices] drop-discovered-output p))]
-      (if (pos? pinned)
+      (if owners
         (h/show-notice removed
                        (str "Removed " (projector-label state projector-id) " · "
-                            (zone-groups/plural pinned "cue" "cues") " now "
-                            (if target (str "go to " (rig/ref-name state target)) "inherit"))
+                            (zone-groups/replaced-text state owners target))
                        :info)
         {:state removed}))
     {:state state}))

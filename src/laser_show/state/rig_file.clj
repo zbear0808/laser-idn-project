@@ -113,10 +113,13 @@
 (defn rename-pins
   "state with every pin to one of a show's lasers (:auto.laser/<show id>)
    naming that laser's id here (pin-map), wherever it is stored
-   (routing.refs: cues, items, tracks, clips, Zone Selectors, the preview's
-   cells), so a show's pins follow the units, not the addresses (S-ZR-5).
-   hardware is the show's hardware.edn. state comes back identical? when
-   nothing is renamed."
+   (routing.refs/replace-refs: the targets of cues, items, tracks and clips,
+   the preview's cells, the defaults, the zone maps, and the places,
+   sources and steps of the zone patterns in cues and effect cells, their
+   keyframes' too; an old show's Zone Selectors were converted on load), so
+   a show's pins follow the units, not the addresses (S-ZR-5). hardware is
+   the show's hardware.edn. state comes back identical? when nothing is
+   renamed."
   [state hardware]
   (refs/replace-refs state (into {}
                                  (keep (fn [[s r]] (when (not= s r) [(rig/laser-ref s) (rig/laser-ref r)])))
@@ -256,46 +259,53 @@
   [state group]
   (into [] (comp (filter #(some #{group} (rig/custom-refs (val %)))) (map key)) (:projectors state)))
 
-(defn- cue-count [state ref]
-  (count (refs/cues-using (get-in state [:chains :cue-chains]) ref)))
-
-(defn- used-refs
-  "Every ref the show's cues name (routing.refs/cue-refs)."
+(defn- ref-owners
+  "Who stores each ref in the show: its cues and effect cells
+   (routing.refs/chain-ref-usage)."
   [state]
-  (into #{} (mapcat refs/cue-refs) (remove nil? (vals (get-in state [:chains :cue-chains])))))
+  (refs/chain-ref-usage (get-in state [:chains :cue-chains]) (get-in state [:chains :effect-chains])))
+
+(defn- owner-counts
+  "A report row's counts of the owners of ref in usage (ref-owners): how
+   many cues, 0 too, and how many effect cells, only when there are some."
+  [usage ref]
+  (let [{:keys [cues effect-cells]} (get usage ref)]
+    (cond-> {:cues (count cues)}
+      (seq effect-cells) (assoc :effect-cells (count effect-cells)))))
 
 (defn- by-name [k]
   (fn [row] [(or (name-key (:name row)) "") (str (get row k))]))
 
 (defn- groups-without-lasers
-  "The show's groups its cues use that no projector or virtual projector
-   here is in, with this rig's group of the same name, if there is one."
-  [state]
+  "The show's groups its cues or effect cells name (usage, ref-owners) that
+   no projector or virtual projector here is in, with this rig's group of
+   the same name, if there is one."
+  [state usage]
   (let [listed (listed-groups state)
-        used (used-refs state)
         rig-groups (sort-by (comp str key) (group-copy state))]
     (->> (:zone-groups state)
          (remove (comp rig/derived-ref? key))
-         (filter (fn [[id _]] (and (contains? used id) (not (contains? listed id)))))
+         (filter (fn [[id _]] (and (contains? usage id) (not (contains? listed id)))))
          (map (fn [[id g]]
                 (let [k (name-key (:name g))
                       same (when k (some (fn [[rid rg]] (when (and (not= rid id) (= k (name-key (:name rg)))) [rid rg])) rig-groups))]
-                  (cond-> {:group-id id :name (:name g) :cues (cue-count state id)}
+                  (cond-> (merge {:group-id id :name (:name g)} (owner-counts usage id))
                     same (assoc :same-name {:group-id (first same) :name (:name (second same))
                                             :lasers (count (listing state (first same)))})))))
          (sort-by (by-name :group-id))
          vec)))
 
 (defn- missing-pins
-  "The lasers the show's cues are pinned to that aren't on this rig, named
-   as in the show (hardware), with how many cues."
-  [state hardware]
+  "The lasers the show's cues or effect cells are pinned to (usage,
+   ref-owners) that aren't on this rig, named as in the show (hardware),
+   with how many of each."
+  [state hardware usage]
   (let [show-id (into {} (map (fn [[s r]] [r s])) (pin-map state hardware))]
-    (->> (used-refs state)
+    (->> (keys usage)
          (keep (fn [ref]
                  (when-let [id (rig/laser-of ref)]
                    (when-not (contains? (:projectors state) id)
-                     {:ref ref :name (rig/projector-name hardware (get show-id id id)) :cues (cue-count state ref)}))))
+                     (merge {:ref ref :name (rig/projector-name hardware (get show-id id id))} (owner-counts usage ref))))))
          (sort-by (by-name :ref))
          vec)))
 
@@ -328,22 +338,25 @@
 (defn match-report
   "What doesn't fit when a show (its hardware.edn and calibration chains) is
    open on this rig (09 §8): {:file :show-lasers :rig-lasers (the lasers
-   on) :groups-without-lasers [{:group-id :name :cues :same-name {:group-id
-   :name :lasers}}]
-   :missing-pins [{:ref :name :cues}] :rig-groups-not-in-show [{:group-id
-   :name :lasers}] :setup-differs [{:projector-id :name :what :unreadable?}]
-   :matched-by-ip [{:name :host}] :new-lasers [show id …]}. The first two
-   are its ⚠ rows (warning-count)."
+   on) :groups-without-lasers [{:group-id :name :cues :effect-cells
+   :same-name {:group-id :name :lasers}}]
+   :missing-pins [{:ref :name :cues :effect-cells}] :rig-groups-not-in-show
+   [{:group-id :name :lasers}] :setup-differs [{:projector-id :name :what
+   :unreadable?}] :matched-by-ip [{:name :host}] :new-lasers [show id …]}.
+   The first two are its ⚠ rows (warning-count), one per ref, counting the
+   cues and the effect cells that store it (:effect-cells only when there
+   are some); state's [:chains :effect-chains] need only the cells' :items."
   [state hardware chains]
   (let [pins (pin-map state hardware)
-        without (groups-without-lasers state)
+        usage (ref-owners state)
+        without (groups-without-lasers state usage)
         offered (into #{} (keep #(get-in % [:same-name :group-id])) without)
         file (get-in state [:project :current-file])]
     {:file (when file (last (str/split (str file) #"[/\\]")))
      :show-lasers (count (show-lasers hardware))
      :rig-lasers (count (filter rig/enabled? (vals (:projectors state))))
      :groups-without-lasers without
-     :missing-pins (missing-pins state hardware)
+     :missing-pins (missing-pins state hardware usage)
      :rig-groups-not-in-show (->> (group-copy state)
                                   (remove (fn [[id _]] (or (contains? (:zone-groups state) id) (contains? offered id))))
                                   (map (fn [[id g]] {:group-id id :name (:name g) :lasers (count (listing state id))}))
@@ -425,9 +438,11 @@
             group-ids)))
 
 (defn repin
-  "state with the cues pinned to from, a laser that isn't here, pinned to
+  "state with every reference to from, a laser that isn't here, pinned to
    to instead: one of this rig's lasers (Pin them to…), or :all (Send them
-   to All)."
+   to All). Each stored site: a cue's or an item's target, a zone pattern's
+   places, source and steps, in cues and effect cells, keyframes too
+   (routing.refs/replace-refs)."
   [state from to]
   (if (and (rig/laser-of from)
            (not= from to)

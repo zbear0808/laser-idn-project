@@ -28,6 +28,26 @@
     (ui/wait-for! #(= {:target :zone/a} (get-in (state/get-raw-state) [:config :preview :grid-cells 0])))
     (ui/assert-text! "#preview-zone-label-0 .label" "A · Beams")))
 
+(deftest picker-selects-a-zone-named-only-in-a-pattern-test
+  ;; plans/2026-11-23-cljfx-reactivity/28 §7.5: no cue, column or show target
+  ;; names a zone; an inactive effect cell's pattern does, in its lane and a
+  ;; sparse keyframe's steps
+  (let [robot (ui/robot)]
+    (events/write-state! assoc-in [:chains :effect-chains [2 1]]
+                         {:active? false
+                          :items [{:id (random-uuid) :effect-id :zone-pattern :enabled? true
+                                   :params {:zones [:zone/f :auto.laser/gone]}
+                                   :keyframe-modulator {:enabled? true
+                                                        :keyframes [{:position 0.0 :params {:steps [[:zone/c] [:auto.laser/gone] []]}}]}}]})
+    (ui/click! robot "#preview-zone-label-0")
+    (ui/wait-for! #(= 0 (get-in (state/get-raw-state) [:ui :preview-zone-selector-open])))
+    (ui/assert-text! "#preview-zone-option-0-zone-c .label" "C")
+    (ui/assert-text! "#preview-zone-option-0-zone-f .label" "F")
+    (is (nil? (ui/query "#preview-zone-option-0-zone-a")) "only the zones the show names")
+    (ui/click! robot "#preview-zone-option-0-zone-f")
+    (ui/wait-for! #(= {:target :zone/f} (get-in (state/get-raw-state) [:config :preview :grid-cells 0])))
+    (ui/assert-text! "#preview-zone-label-0 .label" "F")))
+
 (deftest preview-layout-selector-and-zone-picker-are-clickable
   (let [robot (ui/robot)]
     (ui/select! robot "#preview-layout-selector" "2x2")
