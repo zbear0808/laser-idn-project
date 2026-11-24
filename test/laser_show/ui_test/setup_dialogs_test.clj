@@ -10,7 +10,9 @@
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
-  (:import [javafx.stage WindowEvent]))
+  (:import [javafx.scene Node Parent Scene]
+           [javafx.scene.control Button TextField]
+           [javafx.stage WindowEvent]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -73,6 +75,32 @@
       (ui/wait-for! #(window-showing? "Add Projector"))
       (ui/assert-text! "#add-projector-host-field" "")
       (ui/assert-disabled! "#add-projector-confirm-button"))))
+
+(deftest add-twice-before-a-render-adds-the-host-typed-last-once-test
+  ;; Reactivity plan 09 (Add): Add sends no values, so a host typed after the
+  ;; button last rendered counts, and a second click finds the dialog closed
+  (let [robot (ui/robot)
+        hosts #(map :host (vals (:projectors (app-state))))]
+    (ui/click! robot "#projectors-tab")
+    (ui/click! robot "#projectors-add-manual-button")
+    (ui/wait-for! #(window-showing? "Add Projector"))
+    (ui/fill! robot "#add-projector-host-field" "10.0.0.5")
+    (ui/assert-enabled! "#add-projector-confirm-button")
+    (let [before (count (hosts))
+          field (ui/query "#add-projector-host-field")
+          ^Scene scene (ui/on-fx-thread #(.getScene ^Node field))]
+      ;; no render between the typing and the two clicks
+      (ui/on-fx-thread #(let [^Parent root (.getRoot scene)
+                              ^Button add (.lookup root "#add-projector-confirm-button")]
+                          (.setText ^TextField (.lookup root "#add-projector-host-field") "10.0.0.6")
+                          (.fire add)
+                          (.fire add)))
+      (ui/wait-for! #(not (window-showing? "Add Projector")))
+      (ui/wait-for! #(some #{"10.0.0.6"} (hosts)))
+      (is (events/flush!))
+      (is (= 1 (count (filter #{"10.0.0.6"} (hosts)))) "one projector, with the host typed last")
+      (is (not-any? #{"10.0.0.5"} (hosts)) "none with the host the button showed")
+      (is (= (inc before) (count (hosts)))))))
 
 (deftest add-projector-cancel-clears-the-form-test
   (let [robot (ui/robot)

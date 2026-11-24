@@ -47,7 +47,8 @@
     :vibe/toggle-cell :vibe/toggle-fx :vibe/set-option :vibe/make-from-rows :vibe/clear-control
     :vibe/add-reaction :vibe/add-master :vibe/add-morph
     ;; They rebuild or re-route the engines
-    :projectors/add-manual :projectors/update-settings :projectors/update-driver-config :projectors/toggle-enabled
+    :projectors/add-manual :projectors/submit-manual-form :projectors/update-settings
+    :projectors/update-driver-config :projectors/toggle-enabled
     :projectors/toggle-zone-group :projectors/vp-toggle-zone-group :projectors/set-service-enabled
     :projectors/enable-all-by-ip :projectors/enable-device :projectors/request-remove :projectors/remove
     :zone-groups/request-remove :zone-groups/remove

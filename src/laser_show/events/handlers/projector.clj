@@ -310,9 +310,11 @@
       (assoc-in [:ui :dialogs :add-projector-manual] {:open? false})))
 
 (defn- handle-projectors-add-manual
-  "Add a projector manually (not from discovery).
-   Manual projectors are enabled by default. The Add Projector dialog
-   closes, and opens blank next time: a second click can't add it twice.
+  "Add a projector manually (not from discovery), from the event's own
+   :name, :host, :port, :driver and :driver-config (programmatic callers and
+   tests; the dialog's Add is :projectors/submit-manual-form, which reads
+   its form). Manual projectors are enabled by default. The Add Projector
+   dialog closes, and opens blank next time.
    
    With :driver other than :idn (plans/2026-11-19-output-drivers/01 §5.1),
    :driver-config is the typed field values, checked by driver/coerce-config
@@ -364,6 +366,45 @@
    :value), kept as typed: Add checks it (driver/coerce-config)."
   [{:keys [key value state]}]
   {:state (assoc-in state (into manual-dialog-path [:driver-config key]) value)})
+
+(defn- manual-port
+  "The IDN port the dialog's Port text gives: the number typed when it is a
+   port (1-65535), else 7255, the one the field shows when empty."
+  [text]
+  (let [n (some-> text str str/trim parse-long)]
+    (if (and n (<= 1 n 65535)) n 7255)))
+
+(defn- manual-form-add
+  "The :projectors/add-manual payload for the Add Projector dialog's form as
+   it is (manual-dialog-path), as its Add button built it from what it
+   showed: an IDN projector's name (its host without one), host and port
+   (manual-port), or another driver's name and typed fields, which
+   handle-projectors-add-manual checks. nil for an IDN form without a host,
+   which subs/add-manual-form doesn't let Add send either."
+  [{:keys [driver name host port driver-config]}]
+  (let [driver (or driver :idn)]
+    (if (= :idn driver)
+      (when-not (str/blank? (str host))
+        {:name (if (str/blank? (str name)) host name)
+         :host host
+         :port (manual-port port)})
+      {:driver driver
+       :name (when-not (str/blank? (str name)) name)
+       :driver-config (or driver-config {})})))
+
+(defn- handle-projectors-submit-manual-form
+  "The Add Projector dialog's Add: add what its form holds when this is
+   handled (manual-form-add), as :projectors/add-manual does, which closes
+   and clears the dialog. Add sends no values, so a field typed after it
+   last rendered counts, and with the dialog closed (a second click, or a
+   second submit queued behind the first) nothing is added. A form that
+   can't be added (no host; a driver field that doesn't coerce, or a driver
+   that isn't installed) adds nothing, and the dialog stays open as typed."
+  [{:keys [state]}]
+  (let [form (get-in state manual-dialog-path)]
+    (if-let [add (and (:open? form) (manual-form-add form))]
+      (handle-projectors-add-manual (assoc add :state state))
+      {:state state})))
 
 
 ;; Projector Management
@@ -882,6 +923,7 @@
     :projectors/enable-device (handle-projectors-enable-device event)
     :projectors/set-service-enabled (handle-projectors-set-service-enabled event)
     :projectors/add-manual (handle-projectors-add-manual event)
+    :projectors/submit-manual-form (handle-projectors-submit-manual-form event)
     :projectors/set-manual-driver (handle-projectors-set-manual-driver event)
     :projectors/set-manual-field (handle-projectors-set-manual-field event)
     

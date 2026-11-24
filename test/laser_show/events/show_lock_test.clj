@@ -544,6 +544,20 @@
       (is (= {:text "Change Output Settings refused" :event :projectors/update-driver-config}
              (get-in s [:ui :show-lock-notice]))))))
 
+(deftest add-projectors-submit-is-refused-while-locked-test
+  ;; Reactivity plan 09 (Add): the dialog's Add, as :projectors/add-manual
+  (let [s0 (-> (starter)
+               (assoc-in [:ui :dialogs :add-projector-manual] {:open? true :name "Late" :host "10.0.0.9"})
+               (history/mark-clean))
+        event {:event/type :projectors/submit-manual-form}
+        late #(some (fn [p] (= "10.0.0.9" (:host p))) (vals (:projectors %)))]
+    (is (contains? show-lock/blocked-events :projectors/submit-manual-form) "next to :projectors/add-manual")
+    (is (late (run s0 event)) "unlocked, it adds")
+    (let [s (:state (handle (lock s0) event))]
+      (is (= (lock s0) (without-notices s)) "locked, only the notice: the form stays open as typed")
+      (is (= {:text "Add Projector refused" :event :projectors/submit-manual-form}
+             (get-in s [:ui :show-lock-notice]))))))
+
 (deftest refused-rig-setter-is-not-a-no-op-test
   ;; Reactivity plan 13: a setter the lock refuses changes nothing, not even
   ;; where the same edit unlocked writes the rig file and refreshes the
