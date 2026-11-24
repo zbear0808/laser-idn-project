@@ -15,8 +15,10 @@
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
-  (:import [javafx.scene.control Control Labeled]
-           [javafx.scene.input ClipboardContent KeyCode TransferMode]))
+  (:import [javafx.event Event]
+           [javafx.scene Node]
+           [javafx.scene.control Control Labeled]
+           [javafx.scene.input ClipboardContent KeyCode MouseButton MouseEvent TransferMode]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -51,21 +53,55 @@
     (is (seq (get-in (state/get-raw-state)
                      [:list-ui [:cue-chain 0 0] :selected-ids])))))
 
+(defn- cue-list-rows [] (ui/query-all "#list-editor-cue-chain-0-0 .chain-item"))
+
+(defn- selected-rows
+  "Which of the cue list's rows show as selected (chain-item-selected),
+   queried again now: their indices."
+  []
+  (let [rows (cue-list-rows)]
+    (set (keep-indexed (fn [i ^javafx.scene.Node row]
+                         (when (ui/on-fx-thread #(.contains (.getStyleClass row) "chain-item-selected")) i))
+                       rows))))
+
+(defn- right-click-row!
+  "A secondary-button click fired at row, the node its click handler is on.
+   Headless, the robot's right-click opens the row's context menu on the
+   press and the menu's window gets the release, so the row never gets a
+   click."
+  [^Node row]
+  (ui/on-fx-thread
+   #(let [bounds (.getBoundsInLocal row)
+          screen (.localToScreen row bounds)
+          x (/ (.getWidth bounds) 2)
+          y (/ (.getHeight bounds) 2)]
+      (Event/fireEvent row (MouseEvent. MouseEvent/MOUSE_CLICKED x y (+ (.getMinX screen) x) (+ (.getMinY screen) y)
+                                        MouseButton/SECONDARY 1
+                                        false false false false false false false
+                                        false false true nil))))
+  (ui/sync-fx!))
+
 (deftest grouped-list-right-click-keeps-multi-selection
   (let [robot (ui/robot)
-        component-id [:cue-chain 0 0]]
+        component-id [:cue-chain 0 0]
+        selection #(get-in (state/get-raw-state) [:list-ui component-id :selected-ids])]
     (open-cue-chain-editor!)
     (add-cue-chain-items! [:square :triangle])
-    (ui/click-node! robot (nth (ui/query-all ".chain-item") 0))
-    (ui/modifier-click-node! robot (nth (ui/query-all ".chain-item") 1) javafx.scene.input.KeyCode/SHORTCUT)
-    (ui/wait-for! #(= 2 (count (get-in (state/get-raw-state)
-                                        [:list-ui component-id :selected-ids]))))
-    (let [selected (get-in (state/get-raw-state) [:list-ui component-id :selected-ids])]
-      (ui/right-click-node! robot (nth (ui/query-all ".chain-item") 1))
-      (is (events/flush!))
-      (is (= selected (get-in (state/get-raw-state)
-                              [:list-ui component-id :selected-ids])))
-      (ui/press! robot javafx.scene.input.KeyCode/ESCAPE))))
+    (let [[a b c] (mapv :id (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :items]))]
+      (ui/click-node! robot (nth (cue-list-rows) 0))
+      (ui/modifier-click-node! robot (nth (cue-list-rows) 1) javafx.scene.input.KeyCode/SHORTCUT)
+      (ui/wait-for! #(= #{a b} (selection)))
+      (testing "a right-click on a selected row keeps the selection"
+        (right-click-row! (nth (cue-list-rows) 1))
+        (is (events/flush!))
+        (is (= #{a b} (selection)))
+        (ui/wait-for! #(= #{0 1} (selected-rows)))
+        (is (= #{0 1} (selected-rows))))
+      (testing "on an unselected row it selects that row alone, as the click finds the selection then"
+        (right-click-row! (nth (cue-list-rows) 2))
+        (ui/wait-for! #(= #{c} (selection)))
+        (ui/wait-for! #(= #{2} (selected-rows)))
+        (is (= #{2} (selected-rows)))))))
 
 (deftest grouped-list-supports-ctrl-and-shift-selection
   (let [robot (ui/robot)]

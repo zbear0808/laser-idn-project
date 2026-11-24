@@ -32,9 +32,11 @@
 ;; State Access
 
 (defn- get-ui-state
-  "Get the list-ui state for a component."
+  "The list-ui state of component-id in the app map as it is now
+   (state/get-raw-state): for a drag handler, read when its event comes. A
+   snapshot, no subscription."
   [component-id]
-  (state/get-in-state [:list-ui component-id]))
+  (get-in (state/get-raw-state) [:list-ui component-id]))
 
 
 ;; Event Dispatch Functions
@@ -54,9 +56,11 @@
 
 (defn- handle-drop!
   "Handle drop operation by dispatching to async handler, in the list whose
-   command address this is. Handler reads items from state via items-path."
-  [{:keys [component-id on-change-event on-change-params items-path]} target-id drop-position]
-  (when-let [dragging-ids (seq (:dragging-ids (get-ui-state component-id)))]
+   command address this is, for dragging-ids: the drag's items from the
+   drop's one read of app state, the read its other checks used too.
+   Nothing for none. Handler reads items from state via items-path."
+  [{:keys [component-id on-change-event on-change-params items-path]} dragging-ids target-id drop-position]
+  (when-let [dragging-ids (seq dragging-ids)]
     (events/dispatch!
      (u/->map& component-id dragging-ids target-id drop-position
                on-change-event on-change-params items-path
@@ -230,7 +234,7 @@
                                   (let [drop-pos @drop-position-atom]
                                     (clear-drop-indicator-classes! node)
                                     (reset! current-drop-target-node nil)
-                                    (handle-drop! addr target-id drop-pos)
+                                    (handle-drop! addr dragging-ids target-id drop-pos)
                                     (clear-drag-state! component-id)
                                     (.setDropCompleted event true)
                                     (.consume event)))))))))))
@@ -261,7 +265,7 @@
                             (when-let [old-target @current-drop-target-node]
                               (clear-drop-indicator-classes! old-target)
                               (reset! current-drop-target-node nil))
-                            (handle-drop! addr :root-end :append)
+                            (handle-drop! addr (:dragging-ids (get-ui-state component-id)) :root-end :append)
                             (clear-drag-state! component-id)
                             (.setDropCompleted event true)
                             (.consume event))))))

@@ -107,12 +107,9 @@
 ;; Co-effect functions take NO arguments and return data to inject.
 
 (defn- co-effect-state
-  "Co-effect that injects current state into event.
-   
-   Uses get-raw-state (not get-state) because:
-   - This runs on agent thread, not FX thread
-   - fx/sub-val subscription tracking is not needed for events
-   - Direct state access is thread-safe via swap!"
+  "Co-effect that injects current state into event: one app map read when
+   the event is handled (state/get-raw-state), a snapshot, no subscription.
+   The handler works on that map, and its :state effect writes the result."
   []
   (state/get-raw-state))
 
