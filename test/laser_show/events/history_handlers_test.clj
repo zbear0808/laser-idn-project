@@ -3,10 +3,12 @@
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
             [laser-show.state.persistent :as persistent]
+            [laser-show.state.templates :as templates]
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.history :as history-handlers]
             [laser-show.events.core :as events]
             [laser-show.routing.zone-patterns :as zp]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.timeline.model :as model]))
 
 (def item-id #uuid "11111111-1111-1111-1111-111111111111")
@@ -457,6 +459,54 @@
     (is (some? (get-in s [:chains :effect-chains [1 0]])))
     (is (true? (get-in s [:chains :effect-chains [1 0] :active?])))))
 
+(deftest stored-effect-actions-use-the-current-cell-test
+  (let [tree {:active? true
+              :items [{:id #uuid "77777777-0000-0000-0000-000000000001" :type :group :name "Outer"
+                       :items [{:id #uuid "77777777-0000-0000-0000-000000000002" :type :group :name "Off" :enabled? false
+                                :items [(assoc (zone-patterns/preset-instance :chase :cell)
+                                               :id #uuid "77777777-0000-0000-0000-000000000003")
+                                        {:id #uuid "77777777-0000-0000-0000-000000000004" :effect-id :scale}]}]}]}
+        cell #(get-in %1 [:chains :effect-chains %2])
+        kept (fn [s] {:cells (get-in s [:chains :effect-chains])
+                      :selected (get-in s [:effects :selected-cell])
+                      :editor (get-in s [:ui :dialogs :effect-chain-editor])
+                      :history (select-keys (:history s) [:undo-stack :redo-stack])
+                      :dirty? (get-in s [:project :dirty?])})
+        reaction {:event/type :effects/new-reaction :col 2 :row 1 :kind :step-colour}
+        pattern {:event/type :zone-patterns/new-cell :col 2 :row 1 :style :chase}
+        seeded #(history/mark-clean (assoc-in (clean-state) [:chains :effect-chains [2 1]] %))]
+    (testing "both New menus, chosen while [2 1] was empty, find a disabled tree there: nothing happens"
+      (let [s0 (seeded tree)]
+        (doseq [intent [reaction pattern]]
+          (is (= (kept s0) (kept (run s0 intent))) (str (:event/type intent))))))
+    (testing "a named cell with no items is empty: each creates, in one step, and only the pattern opens its editor"
+      (let [s0 (seeded {:name "Old" :items []})
+            reacted (run s0 reaction)
+            patterned (run s0 pattern)]
+        (is (= ["Step colour" 1] [(:name (cell reacted [2 1])) (undo-count reacted)]))
+        (is (not (get-in reacted [:ui :dialogs :effect-chain-editor :open?])))
+        (is (= [:zone-pattern 1] [(get-in (cell patterned [2 1]) [:items 0 :effect-id]) (undo-count patterned)]))
+        (is (true? (get-in patterned [:ui :dialogs :effect-chain-editor :open?])))))
+    (testing "a move takes the whole stored tree, its ids and the vibe that names it, in one step"
+      (let [fx #(get-in % [:config :vibes :library :vibe-1 :fx])
+            s0 (-> (clean-state)
+                   (templates/apply-starter-vibes)
+                   (assoc-in [:chains :effect-chains [2 1]] tree)
+                   (assoc-in [:config :vibes :library :vibe-1 :fx] [[2 1]])
+                   (history/mark-clean))
+            move {:event/type :effects/move-cell :from-col 2 :from-row 1 :to-col 3 :to-row 1}
+            moved (run s0 move)
+            undone (run moved {:event/type :edit/undo})]
+        (is (= [nil tree [[3 1]] 1] [(cell moved [2 1]) (cell moved [3 1]) (fx moved) (undo-count moved)]))
+        (is (= [tree nil [[2 1]]] [(cell undone [2 1]) (cell undone [3 1]) (fx undone)]) "Undo puts both back")
+        (is (false? (get-in undone [:project :dirty?])) "the saved show again")
+        (testing "; its source emptied before the drop, it moves nothing"
+          (let [emptied (run s0 {:event/type :chain/set-items :domain :effect-chains :entity-key [2 1] :items []})
+                dropped (run emptied move)]
+            (is (= [] (:items (cell emptied [2 1]))))
+            (is (= (kept emptied) (kept dropped)))
+            (is (= (fx emptied) (fx dropped)) "the vibe still names [2 1]")))))))
+
 (deftest modulator-toggle-is-one-undoable-edit-test
   (let [before {:id item-id :effect-id :intensity :enabled? true
                 :params {:amount {:type :triangle :period 7.0 :min 0.2 :max 0.8 :value 0.6 :active? false}}
@@ -591,6 +641,33 @@
     (is (true? (get-in (run dirty {:event/type :timing/set-bpm :bpm 90.0}) [:project :dirty?])))
     (is (true? (get-in (run dirty {:event/type :effects/toggle-cell :col 1 :row 0}) [:project :dirty?])))
     (is (false? (get-in (run (clean-state) {:event/type :effects/toggle-cell :col 1 :row 0}) [:project :dirty?])))))
+
+(deftest grid-press-keeps-document-history-test
+  (let [kept (fn [s0 s]
+               (is (= (get-in s0 [:chains :cue-chains]) (get-in s [:chains :cue-chains])) "the cues")
+               (is (= (select-keys (:history s0) [:undo-stack :redo-stack])
+                      (select-keys (:history s) [:undo-stack :redo-stack]))
+                   "undo and redo")
+               (is (= (get-in s0 [:project :dirty?]) (get-in s [:project :dirty?])) "unsaved or not"))]
+    (doseq [[label s0] [["clean" (clean-state)]
+                        ["unsaved, after an edit" (run (clean-state) edit-size)]]]
+      (testing label
+        (let [started (run s0 {:event/type :grid/trigger-cell :col 0 :row 0})
+              stopped (run started {:event/type :grid/trigger-cell :col 0 :row 0})
+              selected (run stopped {:event/type :grid/trigger-cell :col 1 :row 0})]
+          (is (some? (get-in started [:playback :active-cues [0 0]])))
+          (is (nil? (get-in stopped [:playback :active-cues [0 0]])))
+          (is (= [1 0] (get-in selected [:grid :selected-cell])) "an empty neighbour, selected")
+          (doseq [s [started stopped selected]]
+            (kept s0 s)))))
+    (testing "a press after Clear, by the click shown before it: nothing starts, nothing is recorded"
+      (let [cleared (run (clean-state) {:event/type :grid/clear-cell :col 0 :row 0})
+            pressed (run cleared {:event/type :grid/cell-clicked :col 0 :row 0 :has-content? true})]
+        (is (= 1 (undo-count cleared)))
+        (is (true? (get-in cleared [:project :dirty?])))
+        (is (= [0 0] (get-in pressed [:grid :selected-cell])))
+        (is (= (:playback cleared) (:playback pressed)))
+        (kept cleared pressed)))))
 (defn- timeline-state []
   (-> (test-state)
       (assoc-in [:chains :cue-chains [0 0]]

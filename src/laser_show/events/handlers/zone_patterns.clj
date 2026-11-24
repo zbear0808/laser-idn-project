@@ -18,7 +18,8 @@
    (handlers/timing.clj). STEP presses the Zone step key, one more pulse
    source ([:playback :pulses :zone-step]), which the clock stamps at its
    next tick."
-  (:require [laser-show.events.handlers.vibes :as vibes]
+  (:require [laser-show.animation.chains :as chains]
+            [laser-show.events.handlers.vibes :as vibes]
             [laser-show.events.helpers :as h]
             [laser-show.routing.zone-patterns :as zone-patterns])
   (:import [javafx.scene.input MouseEvent]))
@@ -46,13 +47,15 @@
                               [(h/ensure-item-fields (zone-patterns/preset-instance style :cue))])})))
 
 (defn- handle-new-cell
-  "An empty effects cell becomes a zone pattern of style (counting the
-   show's beats), or a Map cycle (:map-cycle), and its editor opens. It
-   starts off: a pattern moves pictures at once, unlike a tap reaction,
-   which is identity at rest (:effects/new-reaction)."
+  "An empty effects cell (none, or one with no items left: a group or a
+   disabled effect is content, chains/stored-effect-content) becomes a zone
+   pattern of style (counting the show's beats), or a Map cycle
+   (:map-cycle), and its editor opens. It starts off: a pattern moves
+   pictures at once, unlike a tap reaction, which is identity at rest
+   (:effects/new-reaction)."
   [{:keys [col row style state]}]
   (if (and (some? col) (some? row)
-           (empty? (get-in state [:chains :effect-chains [col row] :items]))
+           (not (:has-content? (chains/stored-effect-content (get-in state [:chains :effect-chains [col row] :items]))))
            (or (= :map-cycle style) (style? style)))
     (let [fx (h/ensure-item-fields (if (= :map-cycle style)
                                      (zone-patterns/cycle-instance)

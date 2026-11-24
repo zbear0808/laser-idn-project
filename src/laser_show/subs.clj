@@ -265,31 +265,18 @@
    - :active? - is this cell playing?
    - :selected? - is this cell currently selected?
    - :timeline? - is this a timeline cue?
-   - :has-content? - does cell have any presets or timeline configuration?"
+   - :has-content? - does cell have any presets or timeline configuration?
+   The presets, :timeline? and :has-content? are cue-chains/grid-content's,
+   the rule a press of the cell follows too."
   [context col row]
-  (let [cue-chain-data (fx/sub-ctx context cue-cell-chain col row)
-        items (:items cue-chain-data [])
-        active? (fx/sub-ctx context cue-cell-active? col row)
-        selected? (= (fx/sub-ctx context selected-grid-cell) [col row])
-        ;; Flatten to get all presets (excluding groups)
-        flat-items (filterv #(= :preset (:type %))
-                            (tree-seq #(= :group (:type %))
-                                      #(:items % [])
-                                      {:type :group :items items}))
-        first-preset (first flat-items)
-        preset-count (count flat-items)
-        timeline? (cue-chains/timeline-cue? cue-chain-data)
-        has-content? (or (pos? preset-count) timeline?)]
-    {:col col
-     :row row
-     :name (:name cue-chain-data)
-     :cue-chain cue-chain-data
-     :preset-count preset-count
-     :first-preset-id (:preset-id first-preset)
-     :active? active?
-     :selected? selected?
-     :timeline? timeline?
-     :has-content? has-content?}))
+  (let [cue-chain-data (fx/sub-ctx context cue-cell-chain col row)]
+    (merge {:col col
+            :row row
+            :name (:name cue-chain-data)
+            :cue-chain cue-chain-data
+            :active? (fx/sub-ctx context cue-cell-active? col row)
+            :selected? (= (fx/sub-ctx context selected-grid-cell) [col row])}
+           (cue-chains/grid-content cue-chain-data))))
 
 (defn- held-count [state]
   (if (ex/playing? state) 0 (count (ex/active-cues state))))
@@ -335,52 +322,64 @@
   [context col row]
   (fx/sub-val context get-in [:chains :effect-chains [col row]]))
 
+(defn stored-effect-cell
+  "What the effects cell at [col row] stores, on or off
+   (chains/stored-effect-content of its saved :items): {:has-content?
+   :leaves}. Only depends on that cell's items."
+  [context col row]
+  (chains/stored-effect-content (fx/sub-val context get-in [:chains :effect-chains [col row] :items])))
+
 (defn effect-cell-display-data
   "Computed display data for an effects grid cell.
    
-   Depends on: effect-cell-chain (this cell's effect chain)
+   Depends on: effect-cell-chain (this cell's effect chain) and
+   stored-effect-cell (what it stores)
    
    Returns map with:
    - :col, :row - position
    - :name - custom name for the effect chain (nil if not set)
-   - :effect-count - number of actual effects in chain (flattened, excludes groups)
+   - :effect-count - number of effects it stores (in groups too, enabled or not)
    - :first-effect-id - id of first effect (not group)
-   - :effect-ids - ids of the effects, in chain order (flattened)
+   - :effect-ids - ids of the effects, in chain order
    - :active? - is effect chain active?
    - :selected? - is effect chain cell selected?
-   - :has-effects? - does cell have any effects?
+   - :has-effects? - does cell store any effects?
+   - :has-content? - does cell hold anything, effects or groups? A cell
+     that doesn't is empty: New offers to fill it, and it can't be dragged
    - :display-text - text to display in the cell"
   [context col row]
   (let [cell-data (fx/sub-ctx context effect-cell-chain col row)
-        ;; Effect chain items are stored under :items key
-        effect-chain (:items cell-data [])
-        ;; Flatten the chain to get actual effects (not groups)
-        flattened-effects (chains/flatten-chain effect-chain)
-        first-effect (first flattened-effects)
-        effect-count (count flattened-effects)
+        {:keys [has-content? leaves]} (fx/sub-ctx context stored-effect-cell col row)
+        first-effect (first leaves)
+        effect-count (count leaves)
         selected? (= (fx/sub-ctx context selected-effects-cell) [col row])]
     {:col col
      :row row
      :name (:name cell-data)
      :effect-count effect-count
      :first-effect-id (:effect-id first-effect)
-     :effect-ids (mapv :effect-id flattened-effects)
+     :effect-ids (mapv :effect-id leaves)
      :active? (:active? cell-data false)
      :selected? selected?
      :has-effects? (pos? effect-count)
+     :has-content? has-content?
      :display-text (when first-effect
                      (str (name (:effect-id first-effect))
                           (when (> effect-count 1)
                             (str " +" (dec effect-count)))))}))
 
 (defn effects-grid-empty?
-  "True while no effects cell has an effect in it (groups don't count), as
-   effect-cell-display-data's :has-effects? would say for every cell; but
-   for Masters, by the Master rule: a cell that is a Master and nothing more
+  "True while no effects cell stores an effect, on or off (groups don't
+   count), but for Masters: a cell whose one stored effect is a Master
    (vibes.faders/master-only?) doesn't count, so a new project's grid, which
-   has one, still says what effect cells are for."
+   has one, still says what effect cells are for. A Master with a disabled
+   effect beside it, or disabled itself, counts. Only the Effects tab's
+   hint follows it."
   [context]
-  (not-any? #(and (seq (chains/flatten-chain (:items % []))) (not (faders/master-only? %)))
+  (not-any? (fn [cell]
+              (let [leaves (:leaves (chains/stored-effect-content (:items cell)))]
+                (and (seq leaves)
+                     (not (and (= 1 (count leaves)) (faders/master-only? cell))))))
             (vals (fx/sub-val context get-in [:chains :effect-chains]))))
 
 
@@ -1193,9 +1192,10 @@
   (zone-patterns/fold-text (fx/sub-ctx context pattern-world) params (fx/sub-ctx context names-ctx)))
 
 (defn- holds-effect?
-  "Does an effects cell's chain hold an effect-id, on or off?"
+  "Does an effects cell's chain store an effect-id, on or off, in a
+   disabled group or not (chains/stored-effect-content)?"
   [effect-id chain]
-  (boolean (some #(= effect-id (:effect-id %)) (chains/flatten-chain (:items chain)))))
+  (boolean (some #(= effect-id (:effect-id %)) (:leaves (chains/stored-effect-content (:items chain))))))
 
 (defn zone-patterns-in-use?
   "Does the show have a zone pattern anywhere, on or off: on a cue, or in
@@ -2063,12 +2063,11 @@
   (fx/sub-ctx context pick-label col row))
 
 (defn- pick-fx-label [context col row]
-  (let [data (fx/sub-ctx context effect-cell-display-data col row)]
-    (assoc (select-keys data [:name :first-effect-id :effect-count :effect-ids])
-           :has-content? (:has-effects? data))))
+  (select-keys (fx/sub-ctx context effect-cell-display-data col row)
+               [:name :first-effect-id :effect-count :effect-ids :has-content?]))
 
 (defn vibe-pick-fx-label
-  "What an effect cell of the picker shows of its effects (grid_cell.clj
+  "What an effect cell of the picker shows of what it stores (grid_cell.clj
    effects-label's keys, and :has-content?): not whether it is on."
   [context col row]
   (fx/sub-ctx context pick-fx-label col row))

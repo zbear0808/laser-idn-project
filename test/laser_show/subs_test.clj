@@ -12,6 +12,7 @@
    [laser-show.routing.zone-patterns :as zone-patterns]
    [laser-show.state.templates :as templates]
    [laser-show.vibes.engine :as engine]
+   [laser-show.vibes.faders :as faders]
    [laser-show.vibes.library :as library]
    [laser-show.vibes.reactions :as reactions]))
 
@@ -65,7 +66,30 @@
               :selected? false
               :timeline? false
               :has-content? false}
-             (fx/sub-ctx ctx subs/cell-display-data 3 2))))))
+             (fx/sub-ctx ctx subs/cell-display-data 3 2))))
+    (testing "what a cell holds: a timeline, or a preset at the top or in a group, enabled or not"
+      (let [P {:type :preset :preset-id :circle}
+            holds (fn [cue]
+                    (-> (update-in base-state [:chains :cue-chains] #(if cue (assoc % [2 1] cue) (dissoc % [2 1])))
+                        context
+                        (fx/sub-ctx subs/cell-display-data 2 1)
+                        (select-keys [:first-preset-id :preset-count :timeline? :has-content?])))
+            nothing {:first-preset-id nil :preset-count 0 :timeline? false :has-content? false}
+            a-timeline {:first-preset-id nil :preset-count 0 :timeline? true :has-content? true}]
+        (is (= nothing (holds nil)) "no cue")
+        (is (= nothing (holds {:items []})) "the same as no cue")
+        (is (= nothing (holds {:name "Draft" :trigger-mode :retrigger})) "a name and a mode alone")
+        (is (= nothing (holds {:name "Draft" :items [{:type :group :items []}]})) "an empty group")
+        (is (= nothing (holds {:items [{:preset-id :circle} {:type :effect :effect-id :scale}]}))
+            "an untyped item and an effect")
+        (is (= {:first-preset-id :circle :preset-count 1 :timeline? false :has-content? true}
+               (holds {:items [{:type :group :enabled? false :items [(assoc P :enabled? false)]}]}))
+            "a disabled preset in a disabled group")
+        (is (= a-timeline (holds {:editor-type :timeline :items []})) "a timeline, without clips")
+        (is (= a-timeline (holds {:tracks [{:id :t :type :track}] :items []})) "tracks make it a timeline")
+        (is (= a-timeline (holds {:items [{:track-id :t}]})) "so does a clip's track")
+        (is (= nothing (holds {:editor-type :cue-chain :tracks [{:id :t :type :track}]}))
+            "a cue chain by choice: tracks alone don't make it a timeline")))))
 
 (deftest cell-display-data-ignores-unrelated-changes-test
   (let [ctx (context base-state)
@@ -97,13 +121,49 @@
             :active? true
             :selected? false
             :has-effects? true
+            :has-content? true
             :display-text "scale +1"}
            before))
     (testing "unaffected by cue-chain edits and the show clock's status"
       (let [ctx' (-> ctx
                      (fx/swap-context assoc-in [:chains :cue-chains [0 0] :name] "Renamed")
                      (status-write))]
-        (is (identical? before (fx/sub-ctx ctx' subs/effect-cell-display-data 0 0)))))))
+        (is (identical? before (fx/sub-ctx ctx' subs/effect-cell-display-data 0 0)))))
+    (testing "what a cell stores, on or off, and whether it holds anything (plan 11 §7)"
+      (let [P (zone-patterns/preset-instance :chase :cell)
+            cells {[1 0] {:name "Old" :items []}
+                   [2 0] {:items [{:type :group :items []}]}
+                   [3 0] {:active? true :items [{:effect-id :zone-map-cycle :enabled? false}]}
+                   [4 0] {:active? true :items [{:type :group :items [{:type :group :enabled? false
+                                                                         :items [P {:effect-id :scale}]}]}]}
+                   [0 3] (faders/master-cell)}
+            ctx (context (update-in base-state [:chains :effect-chains] merge cells))
+            stored (fn [col row]
+                     (select-keys (fx/sub-ctx ctx subs/effect-cell-display-data col row)
+                                  [:effect-count :first-effect-id :effect-ids :has-effects? :has-content? :display-text]))
+            nothing {:effect-count 0 :first-effect-id nil :effect-ids [] :has-effects? false :has-content? false
+                     :display-text nil}]
+        (is (= nothing (stored 7 3)) "no cell")
+        (is (= nothing (stored 1 0)) "a name, and no items")
+        (is (= (assoc nothing :has-content? true) (stored 2 0)) "a group: occupied, no effect")
+        (is (= {:effect-count 1 :first-effect-id :zone-map-cycle :effect-ids [:zone-map-cycle] :has-effects? true
+                :has-content? true :display-text "zone-map-cycle"}
+               (stored 3 0))
+            "a disabled Map cycle")
+        (is (= {:effect-count 2 :first-effect-id :zone-pattern :effect-ids [:zone-pattern :scale] :has-effects? true
+                :has-content? true :display-text "zone-pattern +1"}
+               (stored 4 0))
+            "a pattern and a scale in a disabled group")
+        (is (= {:effect-count 1 :first-effect-id :intensity :effect-ids [:intensity] :has-effects? true
+                :has-content? true :display-text "intensity"}
+               (stored 0 3))
+            "the Master")
+        (testing "the picker shows the same"
+          (doseq [[col row] (conj (keys cells) [7 3])]
+            (is (= (merge (select-keys (stored col row) [:effect-count :first-effect-id :effect-ids :has-content?])
+                          {:name (get-in cells [[col row] :name])})
+                   (fx/sub-ctx ctx subs/vibe-pick-fx-label col row))
+                (str [col row]))))))))
 
 (deftest effects-grid-empty-sub-test
   (testing "no effects cell, or none with an effect in it"
@@ -130,7 +190,24 @@
       (is (false? (empty? (update-in mastered [:chains :effect-chains [0 3] :items] conj {:effect-id :scale :enabled? true})))
           "with another effect in its own chain")
       (is (false? (empty? (assoc-in mastered [:chains :effect-chains [0 3] :items 0 :params :amount] 0.5)))
-          "its Intensity on a fixed amount: an effect cell like any"))))
+          "its Intensity on a fixed amount: an effect cell like any")
+      (testing "a disabled effect is a stored one (plan 11 §7)"
+        (is (false? (empty? (update-in mastered [:chains :effect-chains [0 3] :items] conj {:effect-id :scale :enabled? false})))
+            "a disabled effect beside the Master")
+        (is (false? (empty? (assoc-in mastered [:chains :effect-chains [0 3] :items 0 :enabled?] false)))
+            "the Master's Intensity disabled")
+        (is (false? (empty? (update-in mastered [:chains :effect-chains [0 3] :items] #(vector {:type :group :enabled? false :items %}))))
+            "or in a disabled group")
+        (is (false? (empty? (assoc-in mastered [:chains :effect-chains [3 0]]
+                                      {:active? true :items [{:effect-id :zone-map-cycle :enabled? false}]})))
+            "a disabled Map cycle")
+        (is (false? (empty? (assoc-in mastered [:chains :effect-chains [4 0]]
+                                      {:active? true :items [{:type :group :items [{:type :group :enabled? false
+                                                                                    :items [(zone-patterns/preset-instance :chase :cell)
+                                                                                            {:effect-id :scale}]}]}]})))
+            "a pattern and a scale in a disabled group")
+        (is (true? (empty? (assoc-in mastered [:chains :effect-chains [2 0]] {:items [{:type :group :items []}]})))
+            "a group alone: no effect yet")))))
 
 (deftest beat-index-sub-test
   (let [ctx (context base-state)]
@@ -1440,7 +1517,19 @@
       (is (false? (fx/sub-ctx (context s) subs/zone-map-pads-shown?)))
       (is (true? (fx/sub-ctx (context cue-pattern) subs/zone-map-pads-shown?)))
       (is (true? (fx/sub-ctx (context (assoc-in s [:chains :effect-chains [1 1]] {:active? false :items [(zone-patterns/cycle-instance)]}))
-                             subs/zone-map-pads-shown?))))))
+                             subs/zone-map-pads-shown?))))
+    (testing "stored, though disabled: the pads show for what can be switched back on (plan 11 §7)"
+      (let [nested (assoc-in s [:chains :effect-chains [1 1]]
+                             {:active? true :items [{:type :group :items [{:type :group :enabled? false
+                                                                           :items [(zone-patterns/preset-instance :chase :cell)
+                                                                                   {:effect-id :scale}]}]}]})
+            cycle (assoc-in s [:chains :effect-chains [1 1]] {:active? true :items [{:effect-id :zone-map-cycle :enabled? false}]})
+            gone (update-in cycle [:chains :effect-chains] dissoc [1 1])
+            pads (fn [s] {:pattern-pads? (in-use? s) :map-pads? (fx/sub-ctx (context s) subs/zone-map-pads-shown?)})]
+        (is (= {:pattern-pads? true :map-pads? true} (pads nested)) "a pattern in a disabled group")
+        (is (= {:pattern-pads? false :map-pads? true} (pads cycle)) "a disabled Map cycle instead: the map pads only")
+        (is (false? (:on? (fx/sub-ctx (context cycle) subs/map-cycle-state))) "and CYCLE stays off: it doesn't run")
+        (is (= {:pattern-pads? false :map-pads? false} (pads gone)) "the last one gone: neither")))))
 
 (deftest map-cycle-state-sub-test
   (let [s (domains/build-initial-state)

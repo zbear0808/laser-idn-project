@@ -358,3 +358,49 @@
     (is (not= e1 (get-in in-group [:items 0 :effects 0 :id])) "in a group too")
     (is (uuid? (:id (chains/deep-copy-item {:effect-id :scale}))) "an item without an id gets one")
     (is (uuid? (:id (chains/deep-copy-item {:id :a :preset-id :circle}))) "and one with a keyword id a uuid, as before")))
+
+
+;; What an effects cell stores, on or off (plans/2026-11-23-cljfx-reactivity/11)
+
+(def ^:private stored-pattern
+  {:id #uuid "00000000-0000-0000-0000-000000000032"
+   :effect-id :zone-pattern
+   :enabled? true
+   :params {:style :chase}})
+
+(def ^:private disabled-tree
+  "A zone pattern and a scale in a disabled group, inside a group (plan 11
+   §7's fourth cell)."
+  [{:id #uuid "00000000-0000-0000-0000-000000000030"
+    :type :group
+    :name "Outer"
+    :items [{:id #uuid "00000000-0000-0000-0000-000000000031"
+             :type :group
+             :name "Off"
+             :enabled? false
+             :items [stored-pattern sample-item-1]}]}])
+
+(deftest stored-effect-content-keeps-disabled-descendants-test
+  (testing "a disabled group's effects are stored, in order and as they are; none of them plays"
+    (let [{:keys [has-content? leaves]} (chains/stored-effect-content disabled-tree)]
+      (is (true? has-content?))
+      (is (= [stored-pattern sample-item-1] leaves))
+      (is (= [#uuid "00000000-0000-0000-0000-000000000032" #uuid "00000000-0000-0000-0000-000000000001"]
+             (mapv :id leaves)))
+      (is (empty? (chains/flatten-chain disabled-tree)) "the playback walk skips the whole subtree")))
+  (testing "disabled leaves, and a kind twice, in document order"
+    (let [{:keys [leaves]} (chains/stored-effect-content sample-chain)]
+      (is (= [sample-item-1 sample-item-4 sample-item-5 sample-item-3] leaves))
+      (is (= [:scale :scale :translate :rotate] (mapv :effect-id leaves)))
+      (is (= [true true true false] (mapv :enabled? leaves))))
+    (is (= [sample-item-3 sample-item-1] (:leaves (chains/stored-effect-content [nested-group])))
+        "a disabled leaf in a nested group"))
+  (testing "groups only: occupied, with no effect"
+    (is (= {:has-content? true :leaves []}
+           (chains/stored-effect-content [{:type :group :items [{:type :group :enabled? false :items []}]}]))))
+  (testing "nothing stored"
+    (is (= {:has-content? false :leaves []} (chains/stored-effect-content [])))
+    (is (= {:has-content? false :leaves []} (chains/stored-effect-content nil))))
+  (testing "only groups' items are looked in: an effect-shaped map in a leaf's params is no effect"
+    (let [leaf (assoc sample-item-2 :params {:x 0.5 :inner {:effect-id :scale :enabled? true}})]
+      (is (= [leaf] (:leaves (chains/stored-effect-content [leaf])))))))
