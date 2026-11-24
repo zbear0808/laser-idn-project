@@ -57,7 +57,7 @@
 (defn- item-effect-parameter-editor
   "Parameter editor for the selected effect within an item.
    Uses the shared effect-parameter-editor component with keyframe support."
-  [{:keys [fx/context col row item-path item selected-effect-ids dialog-data]}]
+  [{:keys [col row item-path item selected-effect-ids dialog-data]}]
   (let [item-effects (:effects item [])
         first-selected-id (first selected-effect-ids)
         ;; Use hierarchical path finding for nested effects
@@ -71,11 +71,11 @@
     (if selected-effect
       ;; Use shared effect parameter editor component with item-path for cue chains
       {:fx/type effect-param-editor/effect-parameter-editor
-       :fx/context context
        :domain :cue-chains
        :entity-key [col row]
        :effect-path effect-path
        :item-path item-path  ;; Important: pass item-path for cue chains domain
+       :owner-id (:id item)
        :effect selected-effect
        :effect-def effect-def
        :dialog-data dialog-data}
@@ -305,7 +305,6 @@
                                         {:fx/type :v-box
                                          :pref-height 300
                                          :children [{:fx/type list/list-editor
-                                                     :fx/context context
                                                      :v-box/vgrow :always
                                                      :items (:items cue-chain)
                                                      :component-id [:cue-chain col row]
@@ -328,7 +327,6 @@
                                          :style-class "dialog-separator"
                                          :children (if has-item?
                                                      [{:fx/type list/list-editor
-                                                       :fx/context context
                                                        :v-box/vgrow :always
                                                        :items item-effects
                                                        ;; Use stable component-id without the path to avoid state fragmentation
@@ -361,7 +359,6 @@
                              :children (filterv some?
                                                 [;; Preset bank + params
                                                  {:fx/type middle-section
-                                                  :fx/context context
                                                   :col col :row row
                                                   :active-preset-tab active-preset-tab
                                                   :selected-item-path first-selected-path
@@ -377,7 +374,6 @@
                                                  ;; Effect parameter editor (when effect selected)
                                                  (when (and has-item? (seq selected-effect-ids))
                                                    {:fx/type item-effect-parameter-editor
-                                                    :fx/context context
                                                     :v-box/vgrow :always
                                                     :col col :row row
                                                     :item-path first-selected-path

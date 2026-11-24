@@ -27,6 +27,7 @@
             [laser-show.views.components.transform-advanced :as transform-advanced]
             [laser-show.views.components.safety-editor :as safety-editor]
             [laser-show.views.components.list :as list]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.commit-field :as commit-field]
             [laser-show.views.components.driver-fields :as driver-fields]
             [laser-show.views.components.rig-file-status :as rig-file-status]
@@ -192,17 +193,22 @@
      :hgap 8
      :vgap 4
      :children (-> [(field-label 0 "Name:")
-                    {:fx/type :text-field
+                    ;; Each keystroke renames it; once typing stops, a name
+                    ;; the app refused (the show lock) is put back
+                    {:fx/type applied-value/applied-control
                      :fx/key :name
                      :grid-pane/row 0
                      :grid-pane/column 1
-                     :id "projector-name-field"
-                     :text (or name "")
-                     :pref-width 200
-                     :style-class ["text-field-dark"]
-                     :on-text-changed {:event/type :projectors/update-settings
-                                       :projector-id id
-                                       :updates {:name :fx/event}}}
+                     :property :text
+                     :address [:projector id :name]
+                     :value (or name "")
+                     :on-change (fn [typed] {:event/type :projectors/update-settings
+                                             :projector-id id
+                                             :updates {:name typed}})
+                     :desc {:fx/type :text-field
+                            :id "projector-name-field"
+                            :pref-width 200
+                            :style-class ["text-field-dark"]}}
                     ;; Its driver: fixed when it was added
                     (field-label 2 "Type:")
                     {:fx/type :label
@@ -257,18 +263,22 @@
   "How the rig knows the selected projector (its identity), its tags
    (Graphics; Scans the audience, which vibes read) and Exclude from All,
    with an offer to exclude an audience laser that's still in All (Q-Z2-2:
-   nothing happens by itself)."
+   nothing happens by itself). A box shows what applies after a refused
+   click too (applied-value)."
   [{:keys [projector]}]
   (let [{:keys [id tags]} projector
         tags (set tags)
         excluded? (true? (:exclude-from-all? projector))
         tag-box (fn [tag text tip]
-                  {:fx/type :check-box
-                   :id (str "projector-tag-" (name tag))
-                   :text text
-                   :selected (contains? tags tag)
-                   :tooltip {:fx/type :tooltip :text tip :wrap-text true :max-width 320}
-                   :on-selected-changed {:event/type :projectors/set-tag :projector-id id :tag tag :on? :fx/event}})]
+                  {:fx/type applied-value/applied-control
+                   :property :selected
+                   :address [:projector id :tags tag]
+                   :value (contains? tags tag)
+                   :on-change (fn [on?] {:event/type :projectors/set-tag :projector-id id :tag tag :on? on?})
+                   :desc {:fx/type :check-box
+                          :id (str "projector-tag-" (name tag))
+                          :text text
+                          :tooltip {:fx/type :tooltip :text tip :wrap-text true :max-width 320}}})]
     {:fx/type :v-box
      :spacing 6
      :children (cond-> [{:fx/type :label
@@ -301,15 +311,19 @@
                                     :style-class ["button-secondary"]
                                     :on-action {:event/type :projectors/set-exclude-from-all :projector-id id :exclude? true}}]})
                  true
-                 (conj {:fx/type :check-box
-                        :id "projector-exclude-from-all"
-                        :text "Exclude from All"
-                        :selected excluded?
-                        :tooltip {:fx/type :tooltip
-                                  :text "Cues that go to All won't play here, and neither will Left, Right, Center, Odd or Even. It still plays its own group and your groups."
-                                  :wrap-text true
-                                  :max-width 320}
-                        :on-selected-changed {:event/type :projectors/set-exclude-from-all :projector-id id :exclude? :fx/event}}))}))
+                 (conj {:fx/type applied-value/applied-control
+                        :property :selected
+                        :address [:projector id :exclude-from-all?]
+                        :value excluded?
+                        :on-change (fn [exclude?] {:event/type :projectors/set-exclude-from-all
+                                                   :projector-id id :exclude? exclude?})
+                        :desc {:fx/type :check-box
+                               :id "projector-exclude-from-all"
+                               :text "Exclude from All"
+                               :tooltip {:fx/type :tooltip
+                                         :text "Cues that go to All won't play here, and neither will Left, Right, Center, Odd or Even. It still plays its own group and your groups."
+                                         :wrap-text true
+                                         :max-width 320}}}))}))
 
 
 ;; The fit guard (plans/2026-11-19-zones/05 §7)
@@ -515,8 +529,9 @@
 
 (defn- projector-effects-sidebar
   "Effect chain sidebar using list-editor with built-in keyboard handling.
+   It reads the chain through the context cljfx gives it, and its list
+   editor gets one of its own the same way.
    Props:
-   - :fx/context - Context for subscriptions
    - :projector-id - ID of the projector
    - :selected-ids - Set of selected item IDs"
   [{:keys [fx/context projector-id]}]
@@ -525,7 +540,6 @@
         ;; Build label map from calibration effects
         labels (calibration-effect-labels)]
     {:fx/type list/list-editor
-     :fx/context context  ;; Required for list-sidebar to subscribe to list-ui-state
      :items (or effects [])
      :component-id [:projector-effects projector-id]
      :items-path [:chains :projector-effects projector-id :items]
@@ -715,7 +729,6 @@
                    :width 316
                    :spacing 8
                    :children [{:fx/type calibration-controls
-                               :fx/context context
                                :projector-id projector-id}
                               {:fx/type :separator}
                               {:fx/type :h-box
@@ -728,7 +741,6 @@
                                            :projector-id projector-id}]}
                               {:fx/type projector-effects-sidebar
                                :fx/key projector-id  ;; Force recreation when projector changes to avoid stale closures
-                               :fx/context context
                                :projector-id projector-id
                                :selected-ids selected-ids}
                               {:fx/type :separator}
@@ -754,7 +766,6 @@
                                    :effect selected-effect
                                    :ui-state effect-ui-state}])
                                [{:fx/type safety-editor/safety-section
-                                 :fx/context context
                                  :projector-id projector-id}]))}]}
       ;; No projector selected
       {:fx/type :v-box

@@ -14,6 +14,9 @@
      its :status (streaming-engine/poll-driver-status!), then publishes
      pure-data status as :output/status at most every STATUS_INTERVAL_MS,
      when it differs from what app state holds.
+   - A rig card's thumbnail reads its projector's engine's last driver
+     return itself, as pure data (thumbnail-observation), never through
+     app state.
    - drain! closes the runtime: every engine is stopped and later submits are
      dropped until open! (app/start!). Before the first open!/drain! the runtime
      opens on the first submit, so tests without an app can stream."
@@ -96,6 +99,24 @@
    exists (for status and tests)."
   []
   @!registry)
+
+(defn thumbnail-observation
+  "What projector-id's rig card thumbnail may show (the painter samples it
+   on the FX thread, preview/output-thumbnail): its current engine's
+   observation of the last driver call that returned normally
+   (streaming-engine/thumbnail, pure data); :unknown while it has an engine
+   with no such record (opening, failed, closing, being replaced), is
+   wanted or a command is still pending; :off once all of that is settled.
+   Stop intent alone isn't :off while the engine is still there. Reads this
+   id's registry entry and the intent; never calls a driver, builds status
+   or hands out an engine."
+  [projector-id]
+  (let [entry (get @!registry projector-id)
+        {:keys [wanted busy?]} @!intent]
+    (or (some-> (:engine entry) engine/thumbnail)
+        (if (or entry (contains? wanted projector-id) busy? (seq @!queue))
+          :unknown
+          :off))))
 
 
 ;; Engines (lifecycle thread, and drain!)

@@ -39,8 +39,7 @@
             [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.state.extractors :as ex]
             [laser-show.timeline.playback :as playback])
-  (:import [java.util.concurrent ConcurrentHashMap]
-           [java.util.concurrent.atomic AtomicLong]))
+  (:import [java.util.concurrent.atomic AtomicLong]))
 
 
 ;; Runtime
@@ -461,23 +460,6 @@
 
 (defonce ^:private !clock-running? (atom false))
 
-(defonce ^{:private true
-           :doc "{projector-id {:frame :at-ns}}: what each engine's provider produced last
-                 (record-output!), for the rig cards' thumbnails."}
-  ^ConcurrentHashMap outputs
-  (ConcurrentHashMap.))
-
-(defn record-output!
-  "Keep frame (nil for none) as what projector-id's provider produced last,
-   stamped now (multi-engine's provider, on its engine's thread)."
-  [projector-id frame]
-  (.put outputs projector-id {:frame frame :at-ns (System/nanoTime)}))
-
-(defn output-frame
-  "{:frame :at-ns} of what projector-id's provider produced last, or nil."
-  [projector-id]
-  (.get outputs projector-id))
-
 (defn publish!
   "Make snapshot the newest tick, numbered with the next :tick (never reset,
    so a tick an engine has seen stays older than every later one), and wake
@@ -495,17 +477,15 @@
   @!snapshot)
 
 (defn reset-runtime!
-  "Forget show time, the newest tick and what the engines produced (tests,
-   app/start-test!). Given app state (show-clock/start!), the requests
-   already in it count as applied and its presses as stamped, so restarting
-   the clock replays neither."
+  "Forget show time and the newest tick (tests, app/start-test!). Given app
+   state (show-clock/start!), the requests already in it count as applied
+   and its presses as stamped, so restarting the clock replays neither."
   ([] (reset-runtime! nil))
   ([state]
    (reset! !runtime (assoc initial-runtime
                            :applied (request-ids state)
                            :pulses (pulses/seed (get-in state [:playback :pulses]))))
    (reset! !snapshot nil)
-   (.clear outputs)
    nil))
 
 (defn stale?

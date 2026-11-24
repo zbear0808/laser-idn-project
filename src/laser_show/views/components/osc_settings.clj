@@ -3,14 +3,17 @@
    
    Provides:
    - Server start/stop: one switch, as OSC input needs the server and its
-     messages let in (:input/osc-start-server does both)
-   - Port configuration
+     messages let in (:input/osc-start-server does both, on the port set
+     when it is handled)
+   - Port configuration: the field applies a port on Enter or when it loses
+     focus (commit-field)
    - Address mappings display
    - OSC learn mode"
   (:require [cljfx.api :as fx]
-            [laser-show.events.core :as events]
+            [clojure.string :as str]
             [laser-show.subs :as subs]
-            [laser-show.css.core :as css]))
+            [laser-show.css.core :as css]
+            [laser-show.views.components.commit-field :as commit-field]))
 
 
 ;; Status Indicator
@@ -28,6 +31,17 @@
     {:fx/type :circle
      :radius (/ size 2)
      :fill color}))
+
+
+;; The Port field
+
+
+(defn- parse-port
+  "The port typed into the Port field, or nil unless it is 1-65535."
+  [text]
+  (let [port (parse-long (str/trim text))]
+    (when (and port (<= 1 port 65535))
+      port)))
 
 
 ;; Address Mapping Row
@@ -116,18 +130,16 @@
                    :children [{:fx/type :label
                                :text "Port:"
                                :style (str "-fx-text-fill: " (css/text-secondary) ";")}
-                              {:fx/type :text-field
+                              {:fx/type commit-field/commit-field
                                :id "osc-port-field"
                                :text (str port)
                                :pref-width 80
-                               :style-class ["text-field-dark"]
+                               ;; Listening, the port is the server's
                                :disable server-running?
-                               :on-action (fn [evt]
-                                            (let [text (.getText (.getSource evt))]
-                                              (when-let [new-port (try (Integer/parseInt text)
-                                                                       (catch Exception _ nil))]
-                                                (events/dispatch! {:event/type :input/osc-set-port
-                                                                   :port new-port}))))}
+                               :on-commit (fn [typed]
+                                            (when-let [new-port (parse-port typed)]
+                                              {:event/type :input/osc-set-port
+                                               :port new-port}))}
                               {:fx/type :button
                                :id "osc-server-button"
                                :text (if server-running? "Stop Server" "Start Server")
@@ -136,10 +148,12 @@
                                          :text (if server-running?
                                                  "Stop listening for OSC messages"
                                                  "Listen for OSC messages on this port")}
+                               ;; No port: Start listens on the one set when
+                               ;; it is handled, which a click applies first
+                               ;; (the field loses focus)
                                :on-action {:event/type (if server-running?
                                                          :input/osc-stop-server
-                                                         :input/osc-start-server)
-                                           :port port}}
+                                                         :input/osc-start-server)}}
                               {:fx/type :h-box
                                :spacing 4
                                :alignment :center-left

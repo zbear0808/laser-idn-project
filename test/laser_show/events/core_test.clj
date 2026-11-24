@@ -3,6 +3,8 @@
    the current event inline, which call back through the dispatcher they are
    given, the no-app dispatch! fallback, and the dev-mode lost-update detector."
   (:require
+   [cljfx.api :as fx]
+   [cljfx.event-handler :as event-handler]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing use-fixtures]]
@@ -18,6 +20,7 @@
    [laser-show.output.recording-driver :as rd]
    [laser-show.state.core :as state]
    [laser-show.state.domains :as domains]
+   [laser-show.state.persistent :as persistent]
    [laser-show.state.rig-store :as rig-store])
   (:import [java.io File]
            [java.util.concurrent CountDownLatch TimeUnit]))
@@ -48,17 +51,59 @@
 (deftest effects-and-co-effects-are-shared-maps-test
   (is (= #{:state :time} (set (keys events/co-effects))))
   (is (every? #(contains? events/effects %)
-              [:state :dispatch :dispatch-later :link/sync-to-downbeat
+              [:state :dispatch :dispatch-n :dispatch-later :link/sync-to-downbeat
                :input/await-learn :multi-engine/start :multi-engine/stop :multi-engine/refresh
+               :input/midi-list :input/midi-connect :input/midi-disconnect :input/osc-start :input/osc-stop
                :output/write-status
                :project/save :project/load :fx/show-file-chooser :system/exit :system/open-url
                :dev/reload :dev/deliver :dev/swap-state :clipboard/write :clipboard/read
-               :projectors/scan :addons/install :system/open-folder :window/set-fullscreen]))
+               :projectors/scan :addons/install :system/open-folder :window/set-fullscreen
+               :rig/write :rig/flush :history/gesture-alarm]))
   (is (not-any? #(contains? events/effects %) [:clipboard/copy-effects :clipboard/paste-effects])
       "no effect copies or pastes behind the clipboard's handlers (keyboard plan Step 4a)")
   (is (not (contains? events/effects :clipboard/paste-projector-effects))
       "a projector chain pastes through the list editor's own clipboard (zones Z0)")
   (is (not (contains? events/effects :timing/calculate-bpm)) "a tap sets the BPM in its own handler's state"))
+
+(deftest gesture-alarm-replacement-and-retirement-test
+  ;; Reactivity plan 16 §6: one wake-up for the open press, through the
+  ;; dispatcher the effect was given; a cancelled or replaced one that fires
+  ;; anyway sends nothing, and a stale cancel can't cancel its successor
+  (let [tasks (atom [])
+        sent (atom [])
+        alarm (get events/effects :history/gesture-alarm)
+        g #uuid "00000000-0000-0000-0000-0000000016e1"
+        h #uuid "00000000-0000-0000-0000-0000000016e2"
+        k #uuid "00000000-0000-0000-0000-0000000016e3"
+        state-before (state/get-raw-state)]
+    (events/dispose-gesture-alarm!)
+    (with-redefs [events/schedule-gesture-wake! (fn [delay-ms task]
+                                                  (let [cancelled (atom false)]
+                                                    (swap! tasks conj {:delay delay-ms :task task :cancelled cancelled})
+                                                    #(reset! cancelled true)))]
+      (let [dispatch #(swap! sent conj %)]
+        (alarm {:arm {:gesture-id g :delay-ms 60000}} dispatch)
+        (alarm {:cancel-id g :arm {:gesture-id h :delay-ms 60000}} dispatch)
+        (let [[tg th] @tasks]
+          (is (= [60000 60000] (mapv :delay @tasks)))
+          (is (true? @(:cancelled tg)) "G's wake-up was cancelled when H's took its place")
+          (is (false? @(:cancelled th)))
+          ((:task tg))
+          (is (= [] @sent) "G's, delivered after all, sends nothing")
+          (alarm {:cancel-id g} dispatch)
+          (is (false? @(:cancelled th)) "a late cancel for G leaves H's alone")
+          ((:task th))
+          (is (= [{:event/type :history/gesture-timeout :history/gesture-id h}] @sent) "one live wake-up, H's")
+          ((:task th))
+          (is (= 1 (count @sent)) "and only once"))
+        (testing "retired with its app, a wake-up sends nothing"
+          (alarm {:arm {:gesture-id k :delay-ms 1000}} dispatch)
+          (let [tk (last @tasks)]
+            (events/dispose-gesture-alarm!)
+            (is (true? @(:cancelled tk)))
+            ((:task tk))
+            (is (= 1 (count @sent)))))))
+    (is (identical? state-before (state/get-raw-state)) "it never writes app state")))
 
 (deftest dispatch-continues-inline-test
   (testing "a :dispatch follow-up runs now, in the same call, not through the dispatcher"
@@ -71,6 +116,18 @@
       (is (= 1 @exits))
       (is (= [] @later))
       (is (false? (get-in (state/get-raw-state) [:ui :dialogs :unsaved-confirm :open?]))))))
+
+(deftest dispatch-n-continues-with-each-event-in-order-test
+  (let [later (atom [])
+        handle timing/handle]
+    (with-redefs [timing/handle (fn [event]
+                                  (if (= :timing/probe (:event/type event))
+                                    {:dispatch-n [{:event/type :timing/set-bpm :bpm 99.0}
+                                                  {:event/type :timing/set-bpm :bpm 100.0}]}
+                                    (handle event)))]
+      (events/event-handler {:event/type :timing/probe} #(swap! later conj %)))
+    (is (= 100.0 (get-in (state/get-raw-state) [:timing :bpm])) "both ran, the second after the first")
+    (is (= [] @later) "now, in the same call, not through the dispatcher")))
 
 (deftest tap-tempo-sets-bpm-in-one-state-test
   (let [later (atom [])]
@@ -185,6 +242,137 @@
     (is (= (:history before) (:history (state/get-raw-state))) "no undo step")
     (is (false? (get-in (state/get-raw-state) [:project :dirty?])) "the unsaved flag untouched")
     (is (= [] @submitted) "nothing reaches the output runtime or the rig writer")))
+
+
+;; App instances (reactivity plan 19)
+
+
+(defn- dispatcher-of
+  "instance's dispatcher as app/create-app has cljfx make it, without a
+   renderer: an agent of its own, its events on the event thread."
+  [instance]
+  (-> (events/instance-handler instance)
+      (fx/wrap-co-effects events/co-effects)
+      (fx/wrap-effects events/effects)
+      (event-handler/wrap-async {:fx/executor events/event-executor})))
+
+(defn- handled?
+  "Has dispatch's queue handled what it was given before, within 5 s?"
+  [dispatch]
+  (let [p (promise)]
+    (dispatch {:event/type :dev/flush :promise p})
+    (deref p 5000 false)))
+
+(defn- with-instance
+  "(f dispatch) with dispatch the dispatcher of a new app instance, live for
+   the context now; none is live after."
+  [f]
+  (try
+    (f (dispatcher-of (events/new-instance!)))
+    (finally (events/retire!))))
+
+(defn- held-probe
+  "(f entered gate) while :timing/probe's handler, once it has its state,
+   waits for gate (5 s at most), then returns effects. entered is delivered
+   then; the gate opens after f in any case."
+  [effects f]
+  (let [entered (promise)
+        gate (promise)
+        handle timing/handle]
+    (with-redefs [timing/handle (fn [{:keys [state] :as event}]
+                                  (if (= :timing/probe (:event/type event))
+                                    (do (deliver entered true)
+                                        (deref gate 5000 nil)
+                                        (effects state))
+                                    (handle event)))]
+      (try (f entered gate) (finally (deliver gate true))))))
+
+(defn- bpm [] (get-in (state/get-raw-state) [:timing :bpm]))
+
+(deftest a-retired-instance-does-nothing-test
+  (log-test/with-log
+    (with-instance
+      (fn [dispatch]
+        (let [exits (atom 0)]
+          (events/set-exit-fn! #(swap! exits inc))
+          (dispatch {:event/type :timing/set-bpm :bpm 99.0})
+          (is (handled? dispatch))
+          (is (= 99.0 (bpm)) "while it is live, as any app's")
+          (events/retire!)
+          (dispatch {:event/type :timing/set-bpm :bpm 100.0})
+          (dispatch {:event/type :file/exit})
+          (is (handled? dispatch) "once retired, its queue still says when it is through")
+          (is (= 99.0 (bpm)) "but what it is sent changes nothing")
+          (is (zero? @exits) "and does nothing")
+          (is (log-test/logged? 'laser-show.events.core :info #"dropped :timing/set-bpm"))
+          (testing "a new instance retires the one before"
+            (let [first-one (dispatcher-of (events/new-instance!))
+                  second-one (dispatcher-of (events/new-instance!))]
+              (first-one {:event/type :timing/set-bpm :bpm 101.0})
+              (second-one {:event/type :timing/set-bpm :bpm 102.0})
+              (is (handled? first-one))
+              (is (handled? second-one))
+              (is (= 102.0 (bpm))))))))))
+
+(deftest an-event-running-as-its-instance-retires-does-nothing-test
+  (with-instance
+    (fn [dispatch]
+      (let [exits (atom 0)]
+        (events/set-exit-fn! #(swap! exits inc))
+        (held-probe (fn [state] {:state (assoc-in state [:ui :probe] 1)
+                                 :dispatch {:event/type :timing/set-bpm :bpm 99.0}
+                                 :system/exit true})
+                    (fn [entered gate]
+                      (dispatch {:event/type :timing/probe})
+                      (is (deref entered 2000 false))
+                      (events/retire!)
+                      (deliver gate true)
+                      (is (handled? dispatch))))
+        (is (nil? (get-in (state/get-raw-state) [:ui :probe])) "not its write")
+        (is (not= 99.0 (bpm)) "nor the event it continues with")
+        (is (zero? @exits) "nor any other of its effects")))))
+
+(deftest what-a-retired-instance-continues-inline-does-nothing-test
+  (with-instance
+    (fn [dispatch]
+      (let [exits (atom 0)
+            writing (promise)
+            gate (promise)
+            handle timing/handle]
+        (events/set-exit-fn! #(swap! exits inc))
+        (with-redefs [persistent/write-project! (fn [& _] (deliver writing true) (deref gate 5000 nil) true)
+                      timing/handle (fn [event]
+                                      (if (= :timing/probe (:event/type event))
+                                        {:project/save {:file-path "/nowhere/show.zip" :files {}
+                                                        :on-saved {:event/type :file/exit :force? true}}}
+                                        (handle event)))]
+          ;; A save, then Exit once it is saved; the app goes while it writes
+          (dispatch {:event/type :timing/probe})
+          (is (deref writing 2000 false))
+          (events/retire!)
+          (deliver gate true)
+          (is (handled? dispatch)))
+        (is (nil? (get-in (state/get-raw-state) [:project :current-file])) "the save's follow-up wrote nothing")
+        (is (zero? @exits) "and the Exit after it didn't run")))))
+
+(deftest an-instance-writes-only-into-its-own-context-test
+  (log-test/with-log
+    (with-instance
+      (fn [dispatch]
+        (held-probe (fn [state] {:state (assoc-in state [:ui :probe] 1)
+                                 :output/write-status {:engines 3}})
+                    (fn [entered gate]
+                      (dispatch {:event/type :timing/probe})
+                      (is (deref entered 2000 false))
+                      ;; The context is made again under it, the instance still live
+                      (state/init-state! (assoc (domains/build-initial-state) :marker :new))
+                      (deliver gate true)
+                      (is (handled? dispatch))))
+        (let [s (state/get-raw-state)]
+          (is (= :new (:marker s)) "the new context is untouched")
+          (is (nil? (get-in s [:ui :probe])) "by the write computed from the one before")
+          (is (nil? (get-in s output-runtime/status-path)) "and by a path write of that event"))
+        (is (log-test/logged? 'laser-show.events.core :info #"not written"))))))
 
 (deftest dev-events-are-routed-test
   (log-test/with-log
@@ -490,7 +678,7 @@
   "Run the :projectors/scan effect as Scan does, with IDN's discovery
    replaced by idn, the interfaces by fake-interfaces and drivers
    registered: the event it dispatched."
-  [{:keys [idn drivers timeout-ms interfaces broadcast-address]
+  [{:keys [idn drivers timeout-ms interfaces broadcast-address scan-id]
     :or {idn (fn [& _] []) interfaces (constantly fake-interfaces) broadcast-address "255.255.255.255"}}]
   (assert (not-any? :discover (driver/registered)) "no real :discover is registered")
   (let [got (promise)]
@@ -499,7 +687,8 @@
       (run! driver/register! drivers)
       (try
         ((get events/effects :projectors/scan) (cond-> {:broadcast-address broadcast-address}
-                                                 timeout-ms (assoc :timeout-ms timeout-ms))
+                                                 timeout-ms (assoc :timeout-ms timeout-ms)
+                                                 scan-id (assoc :scan-id scan-id))
                                                #(deliver got %))
         (deref got 10000 ::timeout)
         (finally
@@ -651,3 +840,15 @@
            (scan! {:idn idn})))
     (is (= [["255.255.255.255" 3000 1000]] @calls) "IDN's discovery is asked as before, once")
     (is (= {:event/type :projectors/scan-complete :devices [] :warnings []} (scan! {})) "nothing found")))
+
+(deftest scan-sends-its-id-back-test
+  (let [id (random-uuid)
+        seen (atom [])]
+    (is (= {:event/type :projectors/scan-complete :devices [idn-found] :warnings [] :scan-id id}
+           (scan! {:idn (fn [& _] [idn-raw]) :scan-id id
+                   :drivers [(discoverer :acme/nova "Acme Nova" (fn [opts] (swap! seen conj opts) []))]}))
+        "the completion says which Scan it answers")
+    (is (not-any? :scan-id @seen) "a discoverer isn't given it")
+    (is (= {:event/type :projectors/scan-failed :error "Network is unreachable" :scan-id id}
+           (scan! {:idn (fn [& _] (throw (java.net.SocketException. "Network is unreachable"))) :scan-id id}))
+        "and so does a failure")))

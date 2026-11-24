@@ -10,13 +10,15 @@
    under the cards in the same scroll pane (views/components/group_matrix).
 
    A card is built from a vector of sections. Its load section (zones plan
-   Z3) shows what the laser really sent (preview/output-thumbnail), a load
-   meter and what the fit guard did; below its minimum fps the card turns
-   amber."
+   Z3) shows the frame its laser's driver was passed in its last call that
+   returned normally (preview/output-thumbnail, with a caption saying what
+   it is; no device reports what it drew), a load meter and what the fit
+   guard did; below its minimum fps the card turns amber."
   (:require [cljfx.api :as fx]
             [laser-show.css.core :as css]
             [laser-show.events.core :as events]
             [laser-show.subs :as subs]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.drag-drop-cell :as dnd]
             [laser-show.views.components.group-matrix :as group-matrix]
             [laser-show.views.components.load-warning :as load-warning]
@@ -35,7 +37,7 @@
   136)
 
 (def ^:private thumbnail-size
-  "A card's thumbnail is this square, beside its meter and note."
+  "A card's thumbnail is this square, beside its caption and meter."
   44)
 
 (defn- id-text
@@ -166,7 +168,9 @@
 (defn- card-host
   "The address (driver/summary-parts: \"10.0.0.7 #1\"; for another driver
    its name, \"LSPS\", with its settings, \"127.0.0.1:7266\", on a line of
-   their own under it, the card's full width), and the On box at the right."
+   their own under it, the card's full width), and the On box at the right,
+   which shows whether the output is on, after a refused click too
+   (applied-value)."
   [{:keys [id host-label address-lines enabled?]}]
   (let [[line detail] address-lines]
     {:fx/type :v-box
@@ -180,14 +184,17 @@
                                      :tooltip {:fx/type :tooltip :text (str host-label)}
                                      :style-class ["text-small" "label-secondary"]}
                                     {:fx/type :region :h-box/hgrow :always}
-                                    {:fx/type :check-box
-                                     :id (str "rig-card-enable-" (id-text id))
-                                     :text "On"
-                                     :min-width :use-pref-size
-                                     :selected (boolean enabled?)
-                                     :on-selected-changed {:event/type :projectors/set-enabled
+                                    {:fx/type applied-value/applied-control
+                                     :property :selected
+                                     :address [:projector id :enabled?]
+                                     :value enabled?
+                                     :on-change (fn [on?] {:event/type :projectors/set-enabled
                                                            :projector-id id
-                                                           :enabled? :fx/event}}]}]
+                                                           :enabled? on?})
+                                     :desc {:fx/type :check-box
+                                            :id (str "rig-card-enable-" (id-text id))
+                                            :text "On"
+                                            :min-width :use-pref-size}}]}]
                  detail (conj {:fx/type :label
                                :id (str "rig-card-address-detail-" (id-text id))
                                :text detail
@@ -273,44 +280,34 @@
                            :style-class ["text-small" "label-secondary"]}]}}))
 
 (defn- card-load
-  "What the laser really sent, after calibration and safety (the
-   thumbnail), and beside it its load meter and what the fit guard did
-   (load-warning/load-note-text); while it isn't streaming, \"Not
-   streaming\" and no meter (Q-Z3-2 A)."
+  "The laser's thumbnail row (preview/output-thumbnail): the frame its
+   driver was passed in its last call that returned normally, after
+   calibration and safety, with a caption saying what that is, and under
+   the caption its load meter, which the thumbnail hides while the output
+   is off (Q-Z3-2 A); and under the row what the fit guard did
+   (load-warning/load-note-text)."
   [{:keys [fx/context id limit]}]
   (let [{:keys [load] :as l} (fx/sub-ctx context subs/projector-load id)
-        streaming? (= :streaming (:state (fx/sub-ctx context subs/projector-output-status id)))
         pct (when load (load-warning/load-percent load))
         note (load-warning/load-note-text l)]
     {:fx/type :v-box
      :spacing 2
-     :children (cond-> [{:fx/type :h-box
-                         :spacing 6
-                         :alignment :top-left
-                         :children [{:fx/type preview/output-thumbnail
-                                     :projector-id id
-                                     :limit limit
-                                     :size thumbnail-size}
-                                    {:fx/type :v-box
-                                     :spacing 3
-                                     :children (cond-> []
-                                                 (not streaming?)
-                                                 (conj {:fx/type :label
-                                                        :id (str "rig-card-not-streaming-" (id-text id))
-                                                        :text "Not streaming"
-                                                        :style-class ["text-small" "label-hint"]})
-                                                 pct (conj {:fx/type load-meter :id id :load load :pct pct}))}]}]
-                 ;; One line under the thumbnail, there even when empty so the card
-                 ;; keeps its height; the tooltip has all of it
-                 true (conj (cond-> {:fx/type :label
-                                     :id (str "rig-card-load-note-" (id-text id))
-                                     :text (or note "")
-                                     :min-height 13
-                                     :pref-height 13
-                                     :max-width (- card-width 12)
-                                     :style "-fx-font-size: 10;"
-                                     :style-class ["label-secondary"]}
-                              (seq note) (assoc :tooltip {:fx/type :tooltip :text note}))))}))
+     :children [{:fx/type preview/output-thumbnail
+                 :projector-id id
+                 :limit limit
+                 :size thumbnail-size
+                 :meter (when pct {:fx/type load-meter :id id :load load :pct pct})}
+                ;; One line under the thumbnail, there even when empty so the card
+                ;; keeps its height; the tooltip has all of it
+                (cond-> {:fx/type :label
+                         :id (str "rig-card-load-note-" (id-text id))
+                         :text (or note "")
+                         :min-height 13
+                         :pref-height 13
+                         :max-width (- card-width 12)
+                         :style "-fx-font-size: 10;"
+                         :style-class ["label-secondary"]}
+                  (seq note) (assoc :tooltip {:fx/type :tooltip :text note}))]}))
 
 (defn- card-driver-info
   "What the output driver says of itself (its :status :info, output

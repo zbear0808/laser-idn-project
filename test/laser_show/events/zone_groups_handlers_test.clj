@@ -314,8 +314,8 @@
     (is (= {:target :graphics} (get-in state [:config :preview :grid-cells 1])))
     (is (= #{} (refs/cues-using (get-in state [:chains :cue-chains]) :group-balcony)))
     (is (nil? (get-in state [:zone-group-ui :selected-group])))
-    (is (= "Deleted Balcony · 2 cues now go to Graphics" (get-in state [:ui :notice :text])))
-    (is (= "Deleted Balcony · 2 cues now go to All"
+    (is (= "Deleted Balcony · references in 2 cues now name Graphics" (get-in state [:ui :notice :text])))
+    (is (= "Deleted Balcony · references in 2 cues now name All"
            (get-in (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony :state balcony-state})
                    [:state :ui :notice :text]))
         "All by its name, though no group stores it")))
@@ -326,7 +326,7 @@
                                              :retarget-to target :state balcony-state}))]
       (is (= target (get-in state [:chains :cue-chains [0 0] :items 0 :target])) (str target))
       (is (= target (get-in state [:chains :cue-chains [1 2] :target])))
-      (is (= (str "Deleted Balcony · 2 cues now go to " text) (get-in state [:ui :notice :text]))
+      (is (= (str "Deleted Balcony · references in 2 cues now name " text) (get-in state [:ui :notice :text]))
           "named as the pickers name it")))
   (testing "a laser that isn't there is no target: All"
     (is (= :all (get-in (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
@@ -338,11 +338,46 @@
                                            :retarget-to :inherit :state balcony-state}))]
     (is (not (contains? (get-in state [:chains :cue-chains [0 0] :items 0]) :target)))
     (is (not (contains? (get-in state [:chains :cue-chains [1 2]]) :target)))
-    (is (= "Deleted Balcony · 2 cues now inherit" (get-in state [:ui :notice :text]))))
+    (is (= "Deleted Balcony · references in 2 cues cleared: targets inherit, patterns drop it" (get-in state [:ui :notice :text]))))
   (testing "nil means Nothing too"
     (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
                                              :retarget-to nil :state balcony-state}))]
       (is (not (contains? (get-in state [:chains :cue-chains [0 0] :items 0]) :target))))))
+
+(deftest effect-only-group-use-offers-and-applies-clear-test
+  ;; plans/2026-11-23-cljfx-reactivity/28: only a pattern nested in an effect
+  ;; group names the group, in a place, its source, a step and a keyframe
+  (let [nested {:id "zp" :effect-id :zone-pattern :enabled? true
+                :params {:style :steps :zones [:zone/a :group-balcony] :from :group-balcony
+                         :steps [[:group-balcony] [:zone/a] []]}
+                :keyframe-modulator {:enabled? false :keyframes [{:position 0.0 :params {:steps [[:group-balcony] []]}}]}}
+        state (-> base-state
+                  (assoc-in [:zone-groups :group-balcony] {:id :group-balcony :name "Balcony" :description "" :color "#FF0000"})
+                  (assoc-in [:chains :effect-chains [1 1]] {:active? false :items [{:id "g" :type :group :items [nested]}]}))
+        dialog (get-in (zone-groups/handle {:event/type :zone-groups/request-remove :group-id :group-balcony :state state})
+                       [:state :ui :dialogs :confirm])
+        removed (fn [target] (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
+                                                          :retarget-to target :state state})))
+        pattern-of (fn [s] (get-in s [:chains :effect-chains [1 1] :items 0 :items 0]))]
+    (testing "the question counts the effect cell, offers where its references go, and lists no cue"
+      (is (= "1 effect cell uses it." (:message dialog)))
+      (is (nil? (:details dialog)))
+      (is (= {:key :retarget-to :label "Replace references with:"} (select-keys (:choice dialog) [:key :label])))
+      (is (= :all (:choice-value dialog)))
+      (is (= {:value :inherit :text "Clear references"} (peek (get-in dialog [:choice :options])))))
+    (testing "cleared: the pattern drops the place, its lights and its source"
+      (let [s (removed :inherit)]
+        (is (= {:style :steps :zones [:zone/a] :steps [[] [:zone/a] []]} (:params (pattern-of s))))
+        (is (= [{:position 0.0 :params {:steps [[] []]}}] (get-in (pattern-of s) [:keyframe-modulator :keyframes])))
+        (is (= "Deleted Balcony · references in 1 effect cell cleared: targets inherit, patterns drop it"
+               (get-in s [:ui :notice :text])))
+        (is (identical? (get-in state [:chains :cue-chains]) (get-in s [:chains :cue-chains])) "no cue changes")))
+    (testing "replaced: the same fields name the other group"
+      (let [s (removed :graphics)]
+        (is (= {:style :steps :zones [:zone/a :graphics] :from :graphics :steps [[:graphics] [:zone/a] []]}
+               (:params (pattern-of s))))
+        (is (= [{:position 0.0 :params {:steps [[:graphics] []]}}] (get-in (pattern-of s) [:keyframe-modulator :keyframes])))
+        (is (= "Deleted Balcony · references in 1 effect cell now name Graphics" (get-in s [:ui :notice :text])))))))
 
 (deftest retarget-to-a-missing-group-is-all-test
   (doseq [target [:no-such-group :group-balcony]]

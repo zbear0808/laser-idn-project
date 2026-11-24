@@ -1,15 +1,24 @@
 (ns laser-show.ui-test.cue-chain-list-test
   "Grouped list behaviour (click, Ctrl/Shift and right-click selection,
    grouping, drag and drop), exercised through the cue chain editor for
-   cell [0 0]."
-  (:require [clojure.string :as str]
+   cell [0 0]. And a list's keys, clicks and drops go to the list it shows
+   now: after the Effects editor shows another cell in its window, after it
+   reopens, and after the item effects list shows another preset's
+   (reactivity plan 04)."
+  (:require [clojure.core.cache :as cache]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.animation.cue-chains :as cue-chains]
+            [laser-show.animation.presets :as presets]
+            [laser-show.app :as app]
             [laser-show.events.core :as events]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
-  (:import [javafx.scene.control Control Labeled]
-           [javafx.scene.input KeyCode]))
+  (:import [javafx.event Event]
+           [javafx.scene Node]
+           [javafx.scene.control Control Labeled]
+           [javafx.scene.input ClipboardContent KeyCode MouseButton MouseEvent TransferMode]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -44,21 +53,55 @@
     (is (seq (get-in (state/get-raw-state)
                      [:list-ui [:cue-chain 0 0] :selected-ids])))))
 
+(defn- cue-list-rows [] (ui/query-all "#list-editor-cue-chain-0-0 .chain-item"))
+
+(defn- selected-rows
+  "Which of the cue list's rows show as selected (chain-item-selected),
+   queried again now: their indices."
+  []
+  (let [rows (cue-list-rows)]
+    (set (keep-indexed (fn [i ^javafx.scene.Node row]
+                         (when (ui/on-fx-thread #(.contains (.getStyleClass row) "chain-item-selected")) i))
+                       rows))))
+
+(defn- right-click-row!
+  "A secondary-button click fired at row, the node its click handler is on.
+   Headless, the robot's right-click opens the row's context menu on the
+   press and the menu's window gets the release, so the row never gets a
+   click."
+  [^Node row]
+  (ui/on-fx-thread
+   #(let [bounds (.getBoundsInLocal row)
+          screen (.localToScreen row bounds)
+          x (/ (.getWidth bounds) 2)
+          y (/ (.getHeight bounds) 2)]
+      (Event/fireEvent row (MouseEvent. MouseEvent/MOUSE_CLICKED x y (+ (.getMinX screen) x) (+ (.getMinY screen) y)
+                                        MouseButton/SECONDARY 1
+                                        false false false false false false false
+                                        false false true nil))))
+  (ui/sync-fx!))
+
 (deftest grouped-list-right-click-keeps-multi-selection
   (let [robot (ui/robot)
-        component-id [:cue-chain 0 0]]
+        component-id [:cue-chain 0 0]
+        selection #(get-in (state/get-raw-state) [:list-ui component-id :selected-ids])]
     (open-cue-chain-editor!)
     (add-cue-chain-items! [:square :triangle])
-    (ui/click-node! robot (nth (ui/query-all ".chain-item") 0))
-    (ui/modifier-click-node! robot (nth (ui/query-all ".chain-item") 1) javafx.scene.input.KeyCode/SHORTCUT)
-    (ui/wait-for! #(= 2 (count (get-in (state/get-raw-state)
-                                        [:list-ui component-id :selected-ids]))))
-    (let [selected (get-in (state/get-raw-state) [:list-ui component-id :selected-ids])]
-      (ui/right-click-node! robot (nth (ui/query-all ".chain-item") 1))
-      (is (events/flush!))
-      (is (= selected (get-in (state/get-raw-state)
-                              [:list-ui component-id :selected-ids])))
-      (ui/press! robot javafx.scene.input.KeyCode/ESCAPE))))
+    (let [[a b c] (mapv :id (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :items]))]
+      (ui/click-node! robot (nth (cue-list-rows) 0))
+      (ui/modifier-click-node! robot (nth (cue-list-rows) 1) javafx.scene.input.KeyCode/SHORTCUT)
+      (ui/wait-for! #(= #{a b} (selection)))
+      (testing "a right-click on a selected row keeps the selection"
+        (right-click-row! (nth (cue-list-rows) 1))
+        (is (events/flush!))
+        (is (= #{a b} (selection)))
+        (ui/wait-for! #(= #{0 1} (selected-rows)))
+        (is (= #{0 1} (selected-rows))))
+      (testing "on an unselected row it selects that row alone, as the click finds the selection then"
+        (right-click-row! (nth (cue-list-rows) 2))
+        (ui/wait-for! #(= #{c} (selection)))
+        (ui/wait-for! #(= #{2} (selected-rows)))
+        (is (= #{2} (selected-rows)))))))
 
 (deftest grouped-list-supports-ctrl-and-shift-selection
   (let [robot (ui/robot)]
@@ -251,3 +294,163 @@
                            #(conj (vec (rest %)) (first %)))
       (is (= 3 (count (get-in (state/get-raw-state)
                               [:chains :cue-chains [0 0] :items])))))))
+
+;; A list's keys, clicks and drops go to the list it shows when they come
+;; (reactivity plan 04). The Effects editor shows another cell in the same
+;; list; the item effects list shows another preset's effects, or the same
+;; preset's once it has moved, in the same nodes.
+
+(defn- effect [effect-id] {:id (random-uuid) :effect-id effect-id :enabled? true :params {}})
+
+(defn- effect-cells!
+  "Effects cells: [col row] -> its items."
+  [cells]
+  (events/write-state! (fn [s] (reduce-kv #(assoc-in %1 [:chains :effect-chains %2] {:items %3}) s cells))))
+
+(defn- cell-effects [col row] (get-in (state/get-raw-state) [:chains :effect-chains [col row] :items]))
+
+(defn- list-selection [component-id] (get-in (state/get-raw-state) [:list-ui component-id :selected-ids]))
+
+(defn- effects-list [col row] (str "#list-editor-effect-chain-" col "-" row))
+
+(defn- show-effects-cell!
+  "The Effects editor on [col row]: it opens, or the open one shows that
+   cell. Returns its list's node."
+  [col row]
+  (events/dispatch! {:event/type :effect-chain/open-editor :col col :row row})
+  (ui/wait-for! #(some? (ui/query (effects-list col row))))
+  (ui/query (effects-list col row)))
+
+(deftest delete-acts-on-the-cell-the-editor-shows-test
+  ;; The audit's reproduction: with B's list focused, Delete deleted A's
+  ;; item, the counts [A B] going [1 1] -> [0 1]
+  (let [robot (ui/robot)
+        counts #(mapv (fn [col] (count (cell-effects col 0))) [0 1])]
+    (effect-cells! {[0 0] [(effect :scale)] [1 0] [(effect :scale)]})
+    (let [a (show-effects-cell! 0 0)
+          b (show-effects-cell! 1 0)]
+      (is (identical? a b) "the window shows B in the list that showed A")
+      ;; Each opened with its one item selected (:list/auto-select-single-item)
+      (ui/wait-for! #(seq (list-selection [:effect-chain 1 0])))
+      (is (seq (list-selection [:effect-chain 0 0])))
+      (ui/focus! robot (effects-list 1 0))
+      (push! robot KeyCode/DELETE)
+      (ui/wait-for! #(not= [1 1] (counts)))
+      (is (= [1 0] (counts)) "B's item went, A's stayed"))))
+
+(deftest list-keys-work-after-the-editor-reopens-test
+  ;; Closing the window took the list's props, which only the list's render
+  ;; put back, and reopening it on the same cell can reuse that render from
+  ;; the cache: its keys did nothing. The app's cache has dropped it by then
+  ;; (a Grid render outgrows it, reactivity plan 36); one that keeps
+  ;; everything keeps it
+  (with-redefs [state/cache-factory cache/basic-cache-factory]
+    (app/start-test!))
+  (ui/sync-fx!)
+  (let [robot (ui/robot)]
+    (effect-cells! {[0 0] [(effect :scale)]})
+    (show-effects-cell! 0 0)
+    (ui/wait-for! #(seq (list-selection [:effect-chain 0 0])))
+    (events/dispatch! {:event/type :ui/close-dialog :dialog-id :effect-chain-editor})
+    (ui/wait-for! #(nil? (ui/query (effects-list 0 0))))
+    (show-effects-cell! 0 0)
+    (ui/focus! robot (effects-list 0 0))
+    (push! robot KeyCode/DELETE)
+    (ui/wait-for! #(empty? (cell-effects 0 0)))
+    (is (empty? (cell-effects 0 0)))))
+
+(deftest select-all-and-ranges-act-on-the-cell-the-editor-shows-test
+  (let [robot (ui/robot)
+        b [(effect :scale) (effect :intensity) (effect :rotation)]
+        b-ids (set (map :id b))]
+    (effect-cells! {[0 0] [(effect :scale) (effect :intensity)] [1 0] b})
+    (show-effects-cell! 0 0)
+    (show-effects-cell! 1 0)
+    (ui/focus! robot (effects-list 1 0))
+    (testing "Ctrl+A selects all of B's items"
+      (push! robot KeyCode/SHORTCUT KeyCode/A)
+      (ui/wait-for! #(= b-ids (list-selection [:effect-chain 1 0])))
+      (is (empty? (list-selection [:effect-chain 0 0])) "and none of A's"))
+    (testing "Escape clears B's selection"
+      (push! robot KeyCode/ESCAPE)
+      (ui/wait-for! #(empty? (list-selection [:effect-chain 1 0]))))
+    (testing "a Shift-click range is in B"
+      (let [rows (ui/query-all (str (effects-list 1 0) " .chain-item"))]
+        (ui/click-node! robot (first rows))
+        (ui/modifier-click-node! robot (nth rows 2) KeyCode/SHIFT)
+        (ui/wait-for! #(= b-ids (list-selection [:effect-chain 1 0])))
+        (is (empty? (list-selection [:effect-chain 0 0])))))))
+
+(def ^:private item-effects-list "#list-editor-item-effects-0-0")
+
+(defn- item-effect-rows [] (ui/query-all (str item-effects-list " .chain-item")))
+
+(defn- preset-effects
+  "The ids of the effects of the preset at index idx in [0 0]."
+  [idx]
+  (mapv :id (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :items idx :effects])))
+
+(defn- select-cue-item! [item]
+  (events/dispatch! {:event/type :list/select-item :component-id [:cue-chain 0 0]
+                     :item-id (:id item) :mode :single}))
+
+(defn- start-effect-drag!
+  "Start a list drag of effect, of the preset at index idx, as a row's
+   drag-detected does (the headless platform can't start a native one)."
+  [effect idx]
+  (events/dispatch! {:event/type :list/start-drag :component-id [:item-effects 0 0]
+                     :item-id (:id effect)
+                     :items-path [:chains :cue-chains [0 0] :items idx :effects]})
+  (ui/wait-for! #(seq (get-in (state/get-raw-state) [:list-ui [:item-effects 0 0] :dragging-ids]))))
+
+(defn- drag-content [item] (doto (ClipboardContent.) (.putString (pr-str (:id item)))))
+
+(deftest item-effects-background-drop-lands-in-the-selected-preset-test
+  ;; Selecting another preset keeps the item effects list's nodes, and its
+  ;; background drop kept the first preset's path: dropping the second
+  ;; preset's effect on empty space did nothing. The list starts on a preset
+  ;; with no effects, so its background is the new node that replaced the
+  ;; empty text, which took no drops at all
+  (let [[f1 f2] [(effect :scale) (effect :intensity)]
+        [g1 g2 g3] [(effect :rotation) (effect :translate) (effect :hue-shift)]
+        p0 (cue-chains/create-preset-instance :star)
+        p1 (cue-chains/create-preset-instance :circle {:effects [f1 f2]})
+        p2 (cue-chains/create-preset-instance :square {:effects [g1 g2 g3]})
+        background #(ui/query (str item-effects-list " .scroll-pane-base"))]
+    (events/write-state! assoc-in [:chains :cue-chains [0 0] :items] [p0 p1 p2])
+    (open-cue-chain-editor!)
+    (select-cue-item! p0)
+    (ui/wait-for! #(some? (ui/query (str item-effects-list " .chain-empty-text"))))
+    (select-cue-item! p1)
+    (ui/wait-for! #(= 2 (count (item-effect-rows))))
+    (let [pane (background)]
+      (select-cue-item! p2)
+      (ui/wait-for! #(= 3 (count (item-effect-rows))))
+      (is (identical? pane (background)) "the same list shows the second preset's effects")
+      (start-effect-drag! g1 2)
+      (is (:completed? (ui/fire-drop! pane (drag-content g1) 20 5 :mode TransferMode/MOVE)))
+      (ui/wait-for! #(= (mapv :id [g2 g3 g1]) (preset-effects 2)))
+      (is (= (mapv :id [f1 f2]) (preset-effects 1)) "the first preset's are as they were"))))
+
+(deftest item-effect-rows-follow-their-preset-when-it-moves-test
+  ;; Moving the selected preset keeps its effects' rows, which kept its old
+  ;; place in the cue: a drop on one changed the preset now there, which
+  ;; doesn't have the dragged effect, so nothing moved
+  (let [[f1 f2 f3] [(effect :scale) (effect :intensity) (effect :rotation)]
+        p1 (cue-chains/create-preset-instance :circle {:effects [f1 f2 f3]})
+        p2 (cue-chains/create-preset-instance :square {:effects [(effect :translate)]})
+        first-cue-item #(ui/node-text "#list-editor-cue-chain-0-0 .chain-item-name")]
+    (events/write-state! assoc-in [:chains :cue-chains [0 0] :items] [p1 p2])
+    (open-cue-chain-editor!)
+    (select-cue-item! p1)
+    (ui/wait-for! #(= 3 (count (item-effect-rows))))
+    (let [rows (item-effect-rows)]
+      (events/write-state! assoc-in [:chains :cue-chains [0 0] :items] [p2 p1])
+      (ui/wait-for! #(str/starts-with? (first-cue-item) (:name (presets/presets-by-id :square))))
+      (is (= rows (item-effect-rows)) "the same rows show the preset's effects")
+      (start-effect-drag! f1 1)
+      (let [^javafx.scene.Node target (nth rows 2)
+            h (ui/on-fx-thread #(.getHeight (.getBoundsInLocal target)))]
+        (is (:completed? (ui/fire-drop! target (drag-content f1) 20 (- h 2) :mode TransferMode/MOVE))))
+      (ui/wait-for! #(= (mapv :id [f2 f3 f1]) (preset-effects 1)))
+      (is (= 1 (count (preset-effects 0))) "the other preset's are as they were"))))

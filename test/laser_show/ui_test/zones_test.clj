@@ -7,13 +7,14 @@
             [laser-show.events.core :as events]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.router :as input-router]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
             [laser-show.state.history :as history]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.css PseudoClass]
            [javafx.scene Node]
-           [javafx.scene.control CheckBox Control CustomMenuItem Labeled Menu MenuButton MenuItem]
+           [javafx.scene.control CheckBox ComboBox Control CustomMenuItem Labeled Menu MenuButton MenuItem]
            [javafx.stage Window]))
 
 (use-fixtures :once fixtures/with-toolkit)
@@ -481,25 +482,85 @@
         asking? #(boolean (some #{title} (ui/window-titles)))]
     (events/write-state! #(-> %
                               (assoc-in [:zone-maps :map/custom-1] {:name "Crowd sweep" :lanes [:auto/left :graphics] :overrides {}})
+                              (assoc-in [:zone-maps :map/custom-2] {:name "Balcony" :lanes [:all] :overrides {}})
+                              (assoc-in [:chains :effect-chains [1 1]]
+                                        {:active? true :items [(-> (zone-patterns/cycle-instance)
+                                                                   (assoc :id #uuid "00000000-0000-0000-0000-0000000000d2")
+                                                                   (assoc-in [:params :maps] [:map/left-right :map/custom-2]))]})
                               (assoc-in [:zone-map :active] :map/custom-1)
                               (assoc-in [:ui :zone-maps :selected] :map/custom-1)))
     (open-zones-tab!)
     (ui/wait-for! #(ui/visible? "#zone-map-delete"))
     (ui/click! robot "#zone-map-delete")
     (ui/wait-for! asking?)
-    (ui/assert-text! "#confirm-message" "It's the zone map in use: the show switches to Left / Right.")
+    (ui/assert-text! "#confirm-message" "If this is still the manual map, deleting it selects Left / Right and pauses a running Map cycle.")
     (is (some? (get-in (app-state) [:zone-maps :map/custom-1])) "nothing goes before you say yes")
     (testing "Cancel keeps it"
       (ui/click! robot "#confirm-cancel")
       (ui/wait-for! #(not (asking?)))
       (is (some? (get-in (app-state) [:zone-maps :map/custom-1]))))
-    (testing "yes deletes it, and the show goes back to Left / Right"
+    (testing "yes deletes it: the show goes back to Left / Right, and the running Map cycle pauses"
       (ui/click! robot "#zone-map-delete")
       (ui/wait-for! asking?)
       (ui/click! robot "#confirm-ok")
       (ui/wait-for! #(nil? (get-in (app-state) [:zone-maps :map/custom-1])))
       (is (= :map/left-right (active-map)))
-      (ui/wait-for! #(nil? (ui/query "#zone-map-item-custom-1"))))))
+      (is (true? (get-in (app-state) [:zone-map :cycle-paused?])))
+      (ui/wait-for! #(nil? (ui/query "#zone-map-item-custom-1"))))
+    (testing "a map the Map cycle lists, with no key or pad setting: the prompt never calls it unused"
+      (let [title "Delete \"Balcony\"?"
+            asking? #(boolean (some #{title} (ui/window-titles)))]
+        (ui/click! robot "#zone-map-item-custom-2")
+        (ui/wait-for! #(= :map/custom-2 (get-in (app-state) [:ui :zone-maps :selected])))
+        (ui/click! robot "#zone-map-delete")
+        (ui/wait-for! asking?)
+        (ui/assert-text! "#confirm-message" "Delete this map from the show?")
+        (ui/click! robot "#confirm-cancel")
+        (ui/wait-for! #(not (asking?)))
+        (is (some? (get-in (app-state) [:zone-maps :map/custom-2])))))))
+
+(defn- manual-badges
+  "The texts of the Manual badges the maps' list shows."
+  []
+  (ui/on-fx-thread #(into [] (keep (fn [n] (when (and (instance? Labeled n) (.isVisible ^Labeled n)) (.getText ^Labeled n))))
+                          (ui/query-all ".zone-map-item-manual"))))
+
+(deftest map-editor-can-take-over-on-the-manual-map-test
+  ;; plans/2026-11-23-cljfx-reactivity/29 §7: while a Map cycle runs, the
+  ;; manual map, edited, isn't called in use, and Use now on it takes over
+  (let [robot (ui/robot)
+        paused? #(true? (get-in (app-state) [:zone-map :cycle-paused?]))]
+    (events/write-state! #(-> %
+                              (assoc-in [:chains :effect-chains [1 1]]
+                                        {:active? true :items [(assoc (zone-patterns/cycle-instance) :id #uuid "00000000-0000-0000-0000-0000000000d3")]})
+                              (assoc-in [:zone-map :active] :map/unison)
+                              (assoc-in [:ui :zone-maps :selected] :map/unison)))
+    (open-zones-tab!)
+    (testing "cycle mode, with no clock: no Manual badge, and Use now can take over"
+      (ui/assert-text! "#zone-map-title" "Unison")
+      (ui/assert-enabled! "#zone-map-use-now")
+      (ui/wait-for! #(and (ui/visible? "#zone-map-mode")
+                          (= "Cycle mode · Manual fallback: Unison" (ui/node-text "#zone-map-mode"))))
+      (is (= [] (manual-badges)))
+      (is (= "Choose this map now, pause any running Map cycle, and clear any queued switch." (tooltip-of "#zone-map-use-now"))))
+    (testing "Use now: Unison, the cycle paused, and the editor says so"
+      (ui/click! robot "#zone-map-use-now")
+      (ui/wait-for! paused?)
+      (is (= {:active :map/unison :pending nil} (select-keys (:zone-map (app-state)) [:active :pending])))
+      (ui/assert-text! "#zone-map-mode" "Manual map: Unison")
+      (ui/assert-text! "#zone-map-item-unison .zone-map-item-manual" "Manual")
+      (is (ui/visible? "#zone-map-item-unison .zone-map-item-manual"))
+      (is (= ["Manual"] (manual-badges)) "one Manual badge")
+      (ui/assert-disabled! "#zone-map-use-now"))
+    (testing "another row: its title, the badge stays on Unison, and Use now can choose it"
+      (ui/click! robot "#zone-map-item-odd-even")
+      (ui/assert-text! "#zone-map-title" "Odd / Even")
+      (ui/assert-text! "#zone-map-item-unison .zone-map-item-manual" "Manual")
+      (is (= ["Manual"] (manual-badges)))
+      (ui/assert-text! "#zone-map-mode" "Manual map: Unison")
+      (ui/assert-enabled! "#zone-map-use-now")
+      (is (= :map/unison (active-map)) "browsing chooses nothing")
+      (is (paused?)))))
 
 
 ;; The Zone Selector leaves the bank (06 §4.5, invariant 13)
@@ -525,3 +586,71 @@
     (events/dispatch! {:event/type :timeline/select-items :col 0 :row 0 :ids #{:c1} :mode :replace})
     (ui/wait-for! #(seq (ui/query-all "#timeline-browser-effects #shape-tab")))
     (is (empty? (ui/query-all "#zone-tab")))))
+
+
+;; A refused edit (plans/2026-11-23-cljfx-reactivity/13): the controls show
+;; the targets that apply
+
+(defn- notice-id [] (get-in (app-state) [:ui :notice :id]))
+
+(defn- attempt!
+  "(act!), then wait for the show lock's new refusal of an event of type."
+  [type act!]
+  (let [before (notice-id)]
+    (act!)
+    (ui/wait-for! #(and (some? (notice-id)) (not= before (notice-id))
+                        (= type (get-in (app-state) [:ui :show-lock-notice :event]))))))
+
+(defn- lock! [locked?]
+  (events/dispatch! {:event/type :vibe/set-show-lock :locked? locked?})
+  (ui/wait-for! #(= locked? (true? (get-in (app-state) [:ui :show-lock?])))))
+
+(defn- box-ticked [selector text]
+  (when-let [^CheckBox box (get (combine-boxes selector) text)]
+    (ui/on-fx-thread #(.isSelected box))))
+
+(defn- combo-value [selector]
+  (when-let [^ComboBox combo (ui/query selector)]
+    (ui/on-fx-thread #(.getValue combo))))
+
+(deftest locked-combine-and-override-show-applied-targets-test
+  (let [robot (ui/robot)
+        undo-depth #(count (get-in (app-state) [:history :undo-stack]))]
+    (open-editor! 0 0)
+    (tick! "#target-chip-item" "A → Left")
+    (ui/wait-for! #(= :zone/a (item-target)))
+    (ui/wait-for! #(true? (box-ticked "#target-chip-item" "A → Left")))
+    (lock! true)
+    (let [depth (undo-depth)]
+      (testing "Combine, open: a second ref refused isn't left ticked"
+        ;; Found before the menus open: ui/query looks in the topmost window
+        (let [^MenuButton chip (ui/query "#target-chip-item")
+              ^Menu combine (ui/on-fx-thread #(some (fn [i] (when (and (instance? Menu i) (= "Combine" (.getText ^Menu i))) i))
+                                                     (.getItems chip)))
+              box (fn [text] (some (fn [^CustomMenuItem i] (let [^CheckBox b (.getContent i)] (when (= text (.getText b)) b)))
+                                   (.getItems combine)))
+              ^CheckBox a (ui/on-fx-thread #(box "A → Left"))
+              ^CheckBox b (ui/on-fx-thread #(box "B → Right"))]
+          (ui/on-fx-thread #(do (.show chip) (.show combine)))
+          (ui/wait-for! #(ui/on-fx-thread (fn [] (.isShowing combine))))
+          (attempt! :cue-chain/set-item-target #(do (ui/on-fx-thread (fn [] (.fire b))) (ui/sync-fx!)))
+          (is (= :zone/a (item-target)))
+          (ui/wait-for! #(false? (ui/on-fx-thread (fn [] (.isSelected b)))))
+          (is (true? (ui/on-fx-thread #(.isSelected a))))
+          (is (ui/on-fx-thread #(.isShowing combine)) "still open")
+          (ui/on-fx-thread #(.hide chip))
+          (ui/sync-fx!))
+        (events/dispatch! {:event/type :ui/close-dialog :dialog-id :cue-chain-editor})
+        (ui/wait-for! #(nil? (ui/query "#target-chip-item"))))
+      (testing "an override's zone"
+        (events/write-state! #(-> %
+                                  (assoc-in [:zone-maps :map/custom-1] {:name "Sweep" :lanes [:auto/left :auto/right]
+                                                                        :overrides {:zone/a :all}})
+                                  (assoc-in [:ui :zone-maps :selected] :map/custom-1)))
+        (open-zones-tab!)
+        (ui/wait-for! #(some? (ui/query "#zone-map-override-zone-a")))
+        (attempt! :zone-maps/set-override #(ui/select! robot "#zone-map-override-zone-a" ":zone/b"))
+        (is (= {:zone/a :all} (get-in (app-state) [:zone-maps :map/custom-1 :overrides])))
+        (ui/wait-for! #(= :zone/a (combo-value "#zone-map-override-zone-a")))
+        (is (nil? (ui/query "#zone-map-override-zone-b")) "no override for B"))
+      (is (= depth (undo-depth)) "no undo step"))))

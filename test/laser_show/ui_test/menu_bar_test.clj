@@ -1,7 +1,10 @@
 (ns laser-show.ui-test.menu-bar-test
   "Menu bar in the title bar."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.app :as app]
+            [laser-show.dev-config :as dev-config]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.menu :as menu]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
@@ -9,7 +12,7 @@
            [javafx.scene Node]
            [javafx.scene.control CheckMenuItem ContextMenu MenuButton MenuItem]
            [javafx.scene.input KeyCode KeyEvent]
-           [javafx.stage Stage Window]))
+           [javafx.stage Popup Stage Window]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -143,6 +146,49 @@
         (is (nil? (ui/query "#preview-panel")))
         (pick-view-item! "Show Preview")
         (ui/wait-for! #(some? (ui/query "#preview-panel")))))))
+
+
+;; The renderer's dev tools (reactivity plan 31): run with and without :dev
+
+(defn- inspector
+  "cljfx.dev's inspector popup's root node while it shows, else nil."
+  ^Node []
+  (first (ui/query-all ".inspector-root")))
+
+(defn- showing-popups
+  "The javafx.stage.Popup windows that show (the inspector is one; menus aren't)."
+  []
+  (ui/on-fx-thread #(into [] (filter (fn [^Window w] (and (instance? Popup w) (.isShowing w)))) (Window/getWindows))))
+
+(deftest renderer-inspector-is-dev-only-test
+  (is (some? (first (ui/query-all "#main-layout"))) "the starter main window shows")
+  (testing "a real menu item's map event: handled once, on the event thread, then the model and the view change"
+    (let [handled (atom [])
+          handle menu/handle
+          visible? #(get-in (state/get-raw-state) [:ui :preview-visible?] true)]
+      (ui/assert-visible! "#preview-panel")
+      (with-redefs [menu/handle (fn [event]
+                                  (when (= :view/toggle-preview (:event/type event))
+                                    (swap! handled conj (events/on-event-thread?)))
+                                  (handle event))]
+        (pick-view-item! "Show Preview")
+        (ui/wait-for! #(false? (visible?)))
+        (ui/wait-for! #(nil? (ui/query "#preview-panel"))))
+      (is (= [true] @handled))))
+  (testing "F12 on the main window"
+    (press-in-main-window! KeyCode/F12)
+    (if (dev-config/dev-mode?)
+      (testing "dev mode: cljfx.dev's inspector, with the component tree, until the app is unmounted"
+        (ui/wait-for! #(some? (inspector)))
+        (let [root (inspector)]
+          (is (ui/on-fx-thread #(some? (.lookup root ".tree-view")))))
+        (app/stop!)
+        (ui/wait-for! #(nil? (inspector)))
+        (is (empty? (showing-popups))))
+      (testing "out of dev mode: no inspector"
+        (ui/sync-fx!)
+        (is (nil? (inspector)))
+        (is (empty? (showing-popups)))))))
 
 (deftest fullscreen-follows-the-main-window-test
   (let [flag #(get-in (state/get-raw-state) [:ui :fullscreen?])

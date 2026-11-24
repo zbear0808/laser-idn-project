@@ -7,14 +7,21 @@
    1. Canvas node is reused across renders, using :draw prop for declarative redraws.
    2. Does NOT maintain internal value state — renders whatever :value is in props
       (or the :preview-value of a drag in progress).
-   3. Interaction state (drag, hover, preview, open undo transaction) is
+   3. Interaction state (drag, hover, preview, the press of the drag) is
       view-local: an atom in the Canvas userData, read and written
       synchronously on the FX thread. It never goes through the event queue,
       so the next mouse event always sees the previous one's state.
    4. Mouse handlers dispatch the callbacks' events and call render!
-      immediately with the new interaction state."
+      immediately with the new interaction state.
+   5. A drag with an undo transaction is one press (reactivity plan 16,
+      gesture/capture!): its id goes on the begin, on every event its press,
+      moves and release send, and on its commit, so they are one undo step
+      and nothing else joins it. Escape aborts that press only; the canvas's
+      blur, its window's, or the canvas going commit what was already sent and
+      drop the preview, sending nothing more."
   (:require [cljfx.api :as fx]
             [laser-show.events.core :as events]
+            [laser-show.views.components.gesture :as gesture]
             [laser-show.views.keys :as keys])
   (:import [javafx.scene.canvas Canvas]
            [javafx.scene.input DragEvent KeyEvent KeyCode MouseEvent ScrollEvent TransferMode]))
@@ -22,13 +29,15 @@
 (defn- dispatch-result!
   "Dispatch event maps from a callback result.
    Supports single map or vector of maps.
-   Tags each event with :interaction/type when provided."
-  ([dispatch-value] (dispatch-result! dispatch-value nil))
-  ([dispatch-value interaction-type]
+   Tags each event with :interaction/type when provided, and with the
+   drag's press (:history/gesture-id) when it has one."
+  ([dispatch-value] (dispatch-result! dispatch-value nil nil))
+  ([dispatch-value interaction-type] (dispatch-result! dispatch-value interaction-type nil))
+  ([dispatch-value interaction-type gesture-id]
    (when dispatch-value
-     (let [tag-fn (if interaction-type
-                    #(assoc % :interaction/type interaction-type)
-                    identity)]
+     (let [tag-fn (cond-> identity
+                    interaction-type (comp #(assoc % :interaction/type interaction-type))
+                    gesture-id (comp #(assoc % :history/gesture-id gesture-id)))]
        (if (sequential? dispatch-value)
          (run! (comp events/dispatch! tag-fn) dispatch-value)
          (events/dispatch! (tag-fn dispatch-value)))))))
@@ -115,11 +124,32 @@
 (defn- draw-interactive-canvas!
   "Called on every render cycle via cljfx Canvas :draw prop. Triggers render! callback."
   [^Canvas canvas props]
+  (.put (.getProperties canvas) ::props props)
   (let [{:keys [render! value]} props
         drag-state (get-drag-state canvas)]
     (when render!
       (let [render-value (or (:preview-value drag-state) value)]
         (render! canvas render-value drag-state)))))
+
+(def ^:private no-drag
+  {:dragging? false :drag-id nil :preview-value nil :gesture-id nil})
+
+(defn- press-ended!
+  "The canvas's press ended (gesture/finish!): released, it commits (after
+   the release's edits); aborted (Escape), it aborts; interrupted (the
+   canvas's blur, its window's, its leaving or going), it commits what was
+   sent, drops the drag and its preview, and draws the canvas again from
+   its last props, sending nothing more."
+  [^Canvas canvas {:keys [gesture-id address]} reason]
+  (let [{:keys [source-id]} address]
+    (if (= :abort reason)
+      (events/dispatch! {:event/type :history/abort-transaction :source-id source-id :history/gesture-id gesture-id})
+      (do
+        (when-not (= :release reason)
+          (update-drag-state! canvas no-drag)
+          (when-let [props (.get (.getProperties canvas) ::props)]
+            (draw-interactive-canvas! canvas props)))
+        (events/dispatch! {:event/type :history/commit-transaction :source-id source-id :history/gesture-id gesture-id})))))
 
 (defn interactive-canvas
   "Creates an interactive canvas with standardized mouse/keyboard handling.
@@ -166,7 +196,7 @@
                            :drag-updates - extra keys merge
                            :cancel-drag? - end the drag without committing:
                                            clears the preview and aborts the
-                                           undo transaction, if one is open
+                                           drag's press (its undo transaction)
 
    Drag-and-drop target opts (drops from other nodes, not mouse drags on the
    canvas; attached only when given). Each receives the Dragboard; the
@@ -186,19 +216,21 @@
      :cursor                 - default cursor CSS value (default \"crosshair\")
      :focus-traversable?     - enable focus traversal
      :managed                - JavaFX managed flag (default true); false keeps
-                               the canvas out of its parent's layout     :history-transaction?   - wrap each drag in an undo transaction
-                               (:history/begin-transaction on press, commit
-                               on release). Default true. Pass false when the
-                               canvas commits one edit on release itself."
+                               the canvas out of its parent's layout
+     :history-transaction?   - make each drag one press, one undo step
+                               (:history/begin-transaction on press, every
+                               event of the drag tagged with the press's
+                               :history/gesture-id, commit on release).
+                               Default true. Pass false when the canvas
+                               commits one edit on release itself."
   [{:keys [width height value render!
            on-press on-drag on-release on-hover on-key on-exit on-scroll
            on-drag-over on-drag-exited on-drag-dropped
-           initial-drag-state history-transaction?
+           initial-drag-state history-transaction? claimed-keys
            cursor focus-traversable? id style-class managed]
     :or {cursor "crosshair"
          value nil
-         history-transaction? true}
-    :as props}]
+         history-transaction? true}}]
   {:fx/type fx/ext-on-instance-lifecycle
    :on-created (fn [^Canvas canvas]
                  (let [canvas-id (keyword (gensym "canvas-"))]
@@ -208,9 +240,11 @@
                                                                     :mouse-over?   false
                                                                     :drag-id       nil
                                                                     :preview-value nil
-                                                                    :transaction-open? false}
+                                                                    :gesture-id    nil}
                                                                    initial-drag-state))})
-                   (draw-interactive-canvas! canvas props)))
+                   (draw-interactive-canvas! canvas {:render! render! :value value})))
+   ;; The canvas going ends its press: what it sent is committed
+   :on-deleted (fn [canvas] (gesture/finish! canvas nil :dispose))
    :desc (cond->
           {:fx/type :canvas
           :id id
@@ -223,9 +257,12 @@
                                  focus-traversable?
                                  has-keyboard?))
           :draw (fn [^Canvas canvas]
-                  ;; :draw receives this render's props even when the node is reused.
-                  (set-key-claims! canvas props)
-                  (draw-interactive-canvas! canvas props))
+                  ;; :draw receives this render's props even when the node is
+                  ;; reused: the ones it draws and claims keys with, never the
+                  ;; whole map, which has the context cljfx gave this
+                  ;; component (reactivity plan 33)
+                  (set-key-claims! canvas {:on-key on-key :claimed-keys claimed-keys :value value})
+                  (draw-interactive-canvas! canvas {:render! render! :value value}))
 
           :on-mouse-pressed
           (fn [e]
@@ -236,20 +273,24 @@
                 ;; which would take the keyboard focus back from the canvas
                 (.consume ^MouseEvent e))
               (when-let [result (and on-press (on-press x y button value (assoc drag-state :modifiers modifiers)))]
-                (let [open-transaction? (and (:drag-start result)
-                                             history-transaction?
-                                             (not (:transaction-open? drag-state)))
+                (let [press-id (when (and (:drag-start result) history-transaction?)
+                                 ;; A new press: one undo step, its own id (an
+                                 ;; earlier press still held ends first)
+                                 (:gesture-id (gesture/capture! canvas {:source-id [:canvas canvas-id]}
+                                                                #(press-ended! canvas %1 %2))))
+                      drag-state (or (get-drag-state canvas) drag-state)
                       new-drag (cond-> drag-state
                                  (:drag-start result) (assoc :dragging? true :drag-id (:drag-id result))
                                  (contains? result :preview-value) (assoc :preview-value (:preview-value result))
                                  (:drag-updates result) (merge (:drag-updates result))
-                                 open-transaction? (assoc :transaction-open? true))]
-                  (when open-transaction?
+                                 press-id (assoc :gesture-id press-id))]
+                  (when press-id
                     (events/dispatch! {:event/type :history/begin-transaction
                                        :label (or (:transaction-label result) "Canvas Edit")
-                                       :source-id [:canvas canvas-id]}))
+                                       :source-id [:canvas canvas-id]
+                                       :history/gesture-id press-id}))
                   (update-drag-state! canvas new-drag)
-                  (dispatch-result! (:dispatch result) :start)
+                  (dispatch-result! (:dispatch result) :start (:gesture-id new-drag))
                   (render! canvas (or (:preview-value new-drag) value) new-drag)))))
 
           :on-mouse-dragged
@@ -263,26 +304,21 @@
                                  (:preview-value result) (assoc :preview-value (:preview-value result))
                                  (:drag-updates result) (merge (:drag-updates result)))]
                   (update-drag-state! canvas new-drag)
-                  (dispatch-result! (:dispatch result) :drag)
+                  (dispatch-result! (:dispatch result) :drag (:gesture-id drag-state))
                   (render! canvas (or (:preview-value new-drag) value) new-drag)))))
 
           :on-mouse-released
           (fn [e]
-            (let [{:keys [canvas canvas-id drag-state modifiers]} (extract-event-info e)
+            (let [{:keys [canvas drag-state modifiers]} (extract-event-info e)
                   result (when (and on-release (:dragging? drag-state))
                            (on-release value (assoc drag-state :modifiers modifiers)))
-                  new-drag (assoc drag-state
-                                  :dragging? false
-                                  :drag-id nil
-                                  :preview-value nil
-                                  :transaction-open? false)]
-              ;; Release always closes a transaction this canvas opened, even
-              ;; after a click with no drag (TL-13)
+                  new-drag (merge drag-state no-drag)]
+              ;; Release always ends the press this canvas began, even after
+              ;; a click with no drag (TL-13): its edits first, then its commit
               (update-drag-state! canvas new-drag)
-              (dispatch-result! (:dispatch result) :stop)
-              (when (:transaction-open? drag-state)
-                (events/dispatch! {:event/type :history/commit-transaction
-                                   :source-id [:canvas canvas-id]}))
+              (dispatch-result! (:dispatch result) :stop (:gesture-id drag-state))
+              (when-let [press-id (:gesture-id drag-state)]
+                (gesture/finish! canvas press-id :release))
               (render! canvas value new-drag)))
 
           :on-mouse-moved
@@ -316,18 +352,17 @@
 
           :on-key-pressed
           (fn [e]
-            (let [{:keys [canvas canvas-id drag-state key-code shift? modifiers]} (extract-event-info e)]
+            (let [{:keys [canvas drag-state key-code shift? modifiers]} (extract-event-info e)]
               (when-let [result (and on-key (on-key key-code shift? value (assoc drag-state :modifiers modifiers)))]
                 (let [cancel? (:cancel-drag? result)
                       new-drag (cond-> drag-state
                                  (:drag-updates result) (merge (:drag-updates result))
-                                 cancel? (assoc :dragging? false :drag-id nil
-                                                :preview-value nil :transaction-open? false))]
+                                 cancel? (merge no-drag))]
                   (when (or (:drag-updates result) cancel?)
                     (update-drag-state! canvas new-drag))
-                  (when (and cancel? (:transaction-open? drag-state))
-                    (events/dispatch! {:event/type :history/abort-transaction
-                                       :source-id [:canvas canvas-id]}))
+                  ;; Escape aborts this drag's press, and no other
+                  (when-let [press-id (and cancel? (:gesture-id drag-state))]
+                    (gesture/finish! canvas press-id :abort))
                   (dispatch-result! (:dispatch result))
                   (render! canvas (or (:preview-value new-drag) value) new-drag)
                   (when (:consumed? result)

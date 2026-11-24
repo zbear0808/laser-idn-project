@@ -345,3 +345,50 @@
         pasted (grid/handle {:event/type :grid/paste-cell :col 3 :row 1 :state state})]
     (is (= section-8-3-after (get-in pasted [:state :chains :cue-chains [3 1]]))
         "a cue copied from an older build routes the same here")))
+
+
+;; Zone patterns in a show with old hardware (plans/2026-11-23-cljfx-reactivity/28 §4.5)
+
+(deftest mixed-show-converts-only-declared-pattern-refs-test
+  (let [cue-pattern {:id "zp" :effect-id :zone-pattern :enabled? true
+                     :params {:style :steps :zones [:left :right :zone/a] :from :left
+                              :steps [[:left] [:left :right] []] :step-on :hit}
+                     :keyframe-modulator {:enabled? true :restart-on :left
+                                          :keyframes [{:position 0.0 :params {:from :right}}]}}
+        cell-pattern {:id "cp" :effect-id :zone-pattern :enabled? true
+                      :params {:zones [:right :left] :from :right}
+                      :keyframe-modulator {:enabled? false
+                                           :keyframes [{:position 0.0 :params {:steps [[:left] [:right]]}}
+                                                       {:position 1.0 :params {:from :left}}]}}
+        anchor {:id "an" :effect-id :scale :enabled? true :params {:anchor :left}}
+        cycle {:id "mc" :effect-id :zone-map-cycle :enabled? true :params {:maps [:left :map/odd-even]}}
+        state (-> (domains/build-initial-state)
+                  (merge old-hardware)
+                  (assoc-in [:chains :cue-chains] {[0 0] {:items [{:id "i1" :type :preset :preset-id :circle
+                                                                   :effects [(zone-sel "z1" :left)]}]
+                                                          :zone-patterns [cue-pattern]}})
+                  (assoc-in [:chains :effect-chains] {[1 1] {:active? false
+                                                             :items [(zone-sel "z2" :left) cell-pattern anchor cycle]}}))
+        convert #(-> % (migration/zones-z2-show old-hardware) (migration/zones-z4))
+        once (convert state)
+        cue (get-in once [:chains :cue-chains [0 0]])
+        cell (get-in once [:chains :effect-chains [1 1] :items])]
+    (testing "the empty built-in Left is the automatic Left in every place, source and step; Right (manual) stays"
+      (is (= {:style :steps :zones [:auto/left :right :zone/a] :from :auto/left
+              :steps [[:auto/left] [:auto/left :right] []] :step-on :hit}
+             (get-in cue [:zone-patterns 0 :params])))
+      (is (= [{:position 0.0 :params {:from :right}}] (get-in cue [:zone-patterns 0 :keyframe-modulator :keyframes])))
+      (is (= {:zones [:right :auto/left] :from :right} (:params (first cell))))
+      (is (= [{:position 0.0 :params {:steps [[:auto/left] [:right]]}} {:position 1.0 :params {:from :auto/left}}]
+             (get-in (first cell) [:keyframe-modulator :keyframes])))
+      (is (= "Right (manual)" (get-in once [:zone-groups :right :name])))
+      (is (not (contains? (:zone-groups once) :left))))
+    (testing "the old Zone Selector: the item's target now, and gone; the effects grid's goes"
+      (is (= :auto/left (get-in cue [:items 0 :target])))
+      (is (= [] (get-in cue [:items 0 :effects])))
+      (is (= ["cp" "an" "mc"] (mapv :id cell))))
+    (testing "the same keyword where no pattern stores a place stays"
+      (is (= anchor (second cell)) "another effect's params")
+      (is (= cycle (nth cell 2)) "a Map cycle's maps are map ids")
+      (is (= :left (get-in cue [:zone-patterns 0 :keyframe-modulator :restart-on])) "a keyframe animation's setting"))
+    (is (= once (convert once)) "converting again changes nothing")))

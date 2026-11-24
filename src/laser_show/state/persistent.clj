@@ -250,14 +250,13 @@
           state
           (filter #(contains? owners (:owner %)) all-path-specs)))
 
-(defn- clear-keyboard-holds [runtime]
-  ;; The old show's actions must not receive key-up in the new show. Other
-  ;; input devices keep their session, as before.
-  (let [keyboard? #(= :keyboard (:source %))]
-    (-> runtime
-        (assoc :keyboard-activations {})
-        (update :held-inputs #(into #{} (remove keyboard?) %))
-        (update :active-triggers #(into {} (remove (comp keyboard? :input val)) %)))))
+(defn- clear-input-holds
+  "trigger-runtime without what any key holds: the old show's actions must
+   not get a key's release in the new show, whatever its source
+   (handlers/triggers.clj: a release with no activation ends nothing), and
+   the new show starts with nothing held."
+  [runtime]
+  (assoc runtime :activations {} :held-inputs #{} :active-triggers {}))
 
 (defn begin-document
   "state with a new document identity: a fresh random UUID at
@@ -278,16 +277,16 @@
 
 (defn- reset-session
   "Reset state that refers to the previous document (playback, what vibe
-   mode is doing, selection, list UI, dialogs, the status bar's notice, the
-   Vibes tab's selection, a pending zone map switch and the Map cycle's
-   pause, the pattern pads' style, a learn in progress, undo history,
-   project metadata), and give the new document its own identity
-   (begin-document). Backend/runtime state (streaming, Link, MIDI/OSC,
-   discovered devices) is kept."
+   mode is doing, what the keys hold, selection, list UI, dialogs, the
+   status bar's notice, the Vibes tab's selection, a pending zone map
+   switch and the Map cycle's pause, the pattern pads' style, a learn in
+   progress, undo history, project metadata), and give the new document its
+   own identity (begin-document). Backend/runtime state (streaming, Link,
+   MIDI/OSC, discovered devices) is kept."
   [state initial]
   (-> state
       (assoc :playback (:playback initial))
-      (update :trigger-runtime clear-keyboard-holds)
+      (update :trigger-runtime clear-input-holds)
       (assoc :vibe-runtime (:vibe-runtime initial))
       (assoc :list-ui (:list-ui initial))
       (assoc :history (:history initial))
@@ -324,7 +323,10 @@
    machine's rig (projectors, virtual projectors, [:rig], calibration) stays
    as it is (D-30): the zip's copy of it is only read, to match the show onto
    this rig. The show's pins follow their units to this rig's ids
-   (rig-file/rename-pins).
+   (rig-file/rename-pins). The rig's group copy keeps the definitions of the
+   groups its lasers are in that the incoming show doesn't define, as the
+   outgoing show and copy had them (rig-file/with-group-copy); the incoming
+   show's own win, and none goes into the incoming show.
    
    zip-contents is the {filename data} map from read-project. It is checked
    first (checked-project-files): contents that aren't a show throw, and
@@ -336,7 +338,8 @@
   [state zip-contents zip-path]
   (let [initial (domains/build-initial-state)
         zip-contents (checked-project-files zip-contents)
-        hardware (get zip-contents (:hardware zip-filenames))]
+        hardware (get zip-contents (:hardware zip-filenames))
+        outgoing-copy (rig-file/group-copy state)]
     (-> state
         (replace-document initial (zip-contents->file-data zip-contents) #{:show})
         (reset-session initial)
@@ -345,6 +348,7 @@
         (migration/zones-z2-show hardware)
         (migration/zones-z4)
         (rig-file/rename-pins hardware)
+        (rig-file/with-group-copy outgoing-copy)
         history/mark-clean
         (assoc-in [:project :current-file] zip-path))))
 

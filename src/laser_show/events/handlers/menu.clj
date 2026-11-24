@@ -14,7 +14,8 @@
             [laser-show.events.helpers :as h]
             [laser-show.events.handlers.grid :as grid]
             [laser-show.events.handlers.effects :as effects]
-            [laser-show.events.handlers.history :as history]))
+            [laser-show.events.handlers.history :as history]
+            [laser-show.events.handlers.rig-autosave :as rig-autosave]))
 
 
 
@@ -29,7 +30,9 @@
 ;; succeeded (:file/confirm-save). Open's chooser comes back later, so its
 ;; result carries the permission it was opened with (discard-authorization),
 ;; and :file/project-loaded asks again when that no longer covers the show
-;; open by then (may-discard?), parked as an Open of the file picked.
+;; open by then (may-discard?), parked as an Open of the file picked. So does
+;; an Exit that comes back later: Try again's, once the rig is written, and
+;; Exit's own, once it has waited for the rig writer (wait-for-the-rig).
 
 (def ^:private confirm-path [:ui :dialogs :unsaved-confirm])
 
@@ -46,6 +49,17 @@
   (and (not rig-force?)
        (= :write-failed (get-in state [:rig-file :status]))))
 
+(defn- rig-wait-needed?
+  "True when Exit would quit while a rig write isn't answered yet (Saving
+   rig…: [:rig-file :written] below :requested) in a window that writes the
+   rig file, and it hasn't waited for the writer already (:rig-waited?) nor
+   been told to go on regardless (:rig-force?)."
+  [state {:keys [rig-force? rig-waited?]}]
+  (and (not rig-force?)
+       (not rig-waited?)
+       (rig-autosave/writable? state)
+       (< (get-in state [:rig-file :written] 0) (get-in state [:rig-file :requested] 0))))
+
 (defn- ask-first
   "Open the unsaved-changes dialog for event (ignored if it is already open),
    parked with its :file-path when it has one."
@@ -56,28 +70,12 @@
                        :open? true
                        :pending (select-keys event [:event/type :file-path]))}))
 
-(defn- ask-about-the-rig
-  "Open the same dialog with the rig's question (reason :rig): its last
-   changes couldn't be written. Quit anyway continues with Exit, past both
-   questions; Try again writes the rig, then quits."
-  [state]
-  (if (get-in state (conj confirm-path :open?))
-    {:state state}
-    {:state (update-in state confirm-path assoc
-                       :open? true
-                       :reason :rig
-                       :error (get-in state [:rig-file :error])
-                       :pending {:event/type :file/exit :force? true :rig-force? true})}))
-
-(defn- close-confirm [state]
-  (update-in state confirm-path #(-> % (assoc :open? false :pending nil) (dissoc :reason :error))))
-
 (defn- discard-authorization
   "The permission to throw the open show away, as it was when given (Open's
-   chooser opening: the guard passed, or its dialog confirmed): which show
-   (h/document-id), and whether it had unsaved changes then, which the
-   unsaved-changes dialog had let go. Plain data, checked later by
-   may-discard?."
+   chooser opening, Exit going on to the rig: the guard passed, or its dialog
+   confirmed): which show (h/document-id), and whether it had unsaved
+   changes then, which the unsaved-changes dialog had let go. Plain data,
+   checked later by may-discard?."
   [state]
   {:document-id (h/document-id state)
    :dirty? (boolean (get-in state [:project :dirty?]))})
@@ -92,6 +90,25 @@
   [state {:keys [document-id dirty?]}]
   (or (not (get-in state [:project :dirty?]))
       (and dirty? (= document-id (h/document-id state)))))
+
+(defn- ask-about-the-rig
+  "Open the same dialog with the rig's question (reason :rig): its last
+   changes couldn't be written. Quit anyway continues with Exit, past both
+   questions; Try again writes the rig, then quits. That Exit carries the
+   permission the show's question gave (:authorized, the event's or now's),
+   which it is checked against when it comes back."
+  [state {:keys [authorized]}]
+  (if (get-in state (conj confirm-path :open?))
+    {:state state}
+    {:state (update-in state confirm-path assoc
+                       :open? true
+                       :reason :rig
+                       :error (get-in state [:rig-file :error])
+                       :pending {:event/type :file/exit :force? true :rig-force? true
+                                 :authorized (or authorized (discard-authorization state))})}))
+
+(defn- close-confirm [state]
+  (update-in state confirm-path #(-> % (assoc :open? false :pending nil) (dissoc :reason :error))))
 
 (defn- handle-file-new-project
   "Replace the document with a fresh starter project.
@@ -278,15 +295,35 @@
                                              {})
     :else (save-to event file-path)))
 
+(defn- wait-for-the-rig
+  "Exit's wait for the rig writer (:rig/flush, off the event thread): the
+   pending rig is written at once and the write running finishes, at most
+   rig-store/flush-ms, then Exit comes back (:rig-waited?) with the
+   permission the show's question gave (:authorized, the event's or now's).
+   A write that failed meanwhile is asked about then (rig-guard-needed?),
+   and so is an unsaved edit made meanwhile (may-discard?)."
+  [state {:keys [authorized]}]
+  {:rig/flush {:then {:event/type :file/exit
+                      :force? true
+                      :rig-waited? true
+                      :authorized (or authorized (discard-authorization state))}}})
+
 (defn- handle-file-exit
   "Exit the application. Asks first when the project has unsaved changes,
    then when the rig file couldn't take the last rig changes (zones plan
-   ZR). Also the handler for closing the main window."
-  [{:keys [state] :as event}]
+   ZR), and waits for a rig write not done yet (wait-for-the-rig). An Exit
+   that comes back later (Try again's once the rig is written, or after
+   that wait) carries the permission it was given (:authorized): when that
+   no longer covers the show open now (may-discard?), the show's question
+   is asked again, so an edit made meanwhile isn't thrown away unasked.
+   Also the handler for closing the main window."
+  [{:keys [state authorized] :as event}]
   (log/debug "File > Exit")
   (cond
+    (and authorized (not (may-discard? state authorized))) (ask-first state {:event/type :file/exit})
     (guard-needed? state event) (ask-first state event)
-    (rig-guard-needed? state event) (ask-about-the-rig state)
+    (rig-guard-needed? state event) (ask-about-the-rig state event)
+    (rig-wait-needed? state event) (wait-for-the-rig state event)
     :else {:system/exit true}))
 
 
@@ -323,7 +360,8 @@
 
 (defn- handle-file-confirm-retry
   "The rig's question, Try again: write the rig now, and carry on with the
-   parked Exit once it is written. Another failure ends the chain, with the
+   parked Exit once it is written; that Exit asks about an edit made
+   meanwhile (its :authorized). Another failure ends the chain, with the
    rig's status line saying why."
   [{:keys [state]}]
   (let [pending (pending-action state)]

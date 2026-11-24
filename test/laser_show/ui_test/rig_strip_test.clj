@@ -6,12 +6,15 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.projector :as projectors]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.drag-drop-cell :as dnd])
   (:import [javafx.event Event]
            [javafx.scene Node]
+           [javafx.scene.control CheckBox ComboBox Slider TextField]
            [javafx.scene.input KeyCode KeyEvent TransferMode]))
 
 (use-fixtures :once fixtures/with-toolkit)
@@ -51,6 +54,47 @@
   (let [strip (ui/query "#rig-strip")]
     (ui/on-fx-thread #(Event/fireEvent strip (KeyEvent. KeyEvent/KEY_PRESSED "" "" code false false (boolean alt?) false)))
     (ui/sync-fx!)))
+
+(defn- ticked
+  "Whether the check box selector finds is ticked, read on the FX thread:
+   true or false, nil when there is none (ui/selected? says false for a
+   missing node too)."
+  [selector]
+  (when-let [box (ui/query selector)]
+    (ui/on-fx-thread #(.isSelected ^CheckBox box))))
+
+(defn- notice-id [] (get-in (app-state) [:ui :notice :id]))
+
+(defn- undo-depth [] (count (get-in (app-state) [:history :undo-stack])))
+
+(defn- lock! [locked?]
+  (events/dispatch! {:event/type :vibe/set-show-lock :locked? locked?})
+  (ui/wait-for! #(= locked? (true? (get-in (app-state) [:ui :show-lock?])))))
+
+(defn- refused!
+  "Wait for a new notice (not the one with id before) that the lock refused
+   an event of type, and return its id."
+  [before type]
+  (ui/wait-for! #(and (some? (notice-id)) (not= before (notice-id))
+                      (= type (get-in (app-state) [:ui :show-lock-notice :event]))))
+  (notice-id))
+
+(defn- attempt!
+  "(act!), then wait for the lock's new refusal of an event of type."
+  [type act!]
+  (let [before (notice-id)]
+    (act!)
+    (refused! before type)))
+
+(defn- shown
+  "The value the control selector finds shows, read on the FX thread (nil
+   when there is none)."
+  [selector]
+  (when-let [node (ui/query selector)]
+    (ui/on-fx-thread #(condp instance? node
+                        ComboBox (.getValue ^ComboBox node)
+                        Slider (.getValue ^Slider node)
+                        TextField (.getText ^TextField node)))))
 
 (deftest scan-shows-a-card-per-output-in-ip-order-test
   (let [robot (ui/robot)]
@@ -326,3 +370,135 @@
         (ui/press! robot (if (= :c expected) KeyCode/RIGHT KeyCode/LEFT))
         (ui/wait-for! #(= expected (selected)))))
     (is (every? #(get-in (app-state) [:projectors % :enabled?]) [:a :b :c]) "no On box changed")))
+
+
+;; A refused edit (plans/2026-11-23-cljfx-reactivity/13): the control shows
+;; what applies
+
+(deftest locked-on-box-shows-the-applied-value-test
+  (let [robot (ui/robot)
+        enabled? #(get-in (app-state) [:projectors :a :enabled?])]
+    (with-lasers!)
+    (ui/click! robot "#projectors-tab")
+    (ui/click! robot "#rig-card-a")
+    (ui/wait-for! #(= :a (get-in (app-state) [:projector-ui :active-projector])))
+    (lock! true)
+    (let [depth (undo-depth)
+          before (notice-id)
+          _ (ui/click! robot "#rig-card-enable-a")
+          id (refused! before :projectors/set-enabled)]
+      (is (= {:text "Turn Projector On or Off refused" :event :projectors/set-enabled}
+             (get-in (app-state) [:ui :show-lock-notice])))
+      (ui/assert-text! "#status-notice-text" "Show lock is on: Turn Projector On or Off refused. Unlock it on the Perform tab")
+      (is (true? (enabled?)) "the laser stays on")
+      (ui/wait-for! #(true? (ticked "#rig-card-enable-a")))
+      (is (true? (ticked "#rig-card-enable-a")) "and its box says so")
+      (is (events/flush!))
+      (is (= id (notice-id)) "showing what applies sent nothing: no second notice")
+      (is (true? (enabled?)))
+      (is (= depth (undo-depth)) "no undo step"))
+    (testing "unlocked, the same click turns it off"
+      (lock! false)
+      (let [depth (undo-depth)]
+        (ui/click! robot "#rig-card-enable-a")
+        (ui/wait-for! #(false? (enabled?)))
+        (ui/wait-for! #(false? (ticked "#rig-card-enable-a")))
+        (is (= (inc depth) (undo-depth)) "one undo step")
+        (is (not (get-in (app-state) [:project :dirty?])) "a rig edit: the show is still saved")))))
+
+(deftest late-accepted-on-edit-wins-after-native-settle-test
+  ;; The box's wait is no answer: an edit that applies after it still wins.
+  ;; The setter is held on the event thread, never the FX thread
+  (let [robot (ui/robot)
+        enabled? #(get-in (app-state) [:projectors :a :enabled?])
+        entered (promise)
+        release (promise)
+        calls (atom 0)
+        handle projectors/handle]
+    (with-lasers!)
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(true? (ticked "#rig-card-enable-a")))
+    (let [depth (undo-depth)
+          notice (get-in (app-state) [:ui :notice])]
+      (with-redefs [projectors/handle (fn [event]
+                                        (when (= :projectors/set-enabled (:event/type event))
+                                          (swap! calls inc)
+                                          (deliver entered true)
+                                          (deref release 5000 nil))
+                                        (handle event))]
+        (try
+          (ui/click! robot "#rig-card-enable-a")
+          (is (deref entered 3000 false) "the setter has the edit")
+          (ui/wait-for! #(true? (ticked "#rig-card-enable-a")))
+          (is (true? (enabled?)) "held: on, and the box shows what applies")
+          (finally
+            (deliver release true)))
+        (ui/wait-for! #(false? (enabled?)))
+        (ui/wait-for! #(false? (ticked "#rig-card-enable-a")))
+        (is (events/flush!))
+        (is (= 1 @calls) "one setter: showing what applied sent nothing")
+        (is (= (inc depth) (undo-depth)) "one undo step")
+        (is (= notice (get-in (app-state) [:ui :notice])) "no warning")))))
+
+(deftest locked-inspector-and-rig-settings-show-applied-values-test
+  (let [robot (ui/robot)
+        projector #(get-in (app-state) [:projectors %])
+        rig #(get-in (app-state) [:rig %])]
+    (with-lasers!)
+    (events/write-state! #(-> %
+                              (assoc-in [:projectors :a :tags] #{:crowd-scanning})
+                              (assoc-in [:projectors :b :tags] #{:crowd-scanning :graphics})
+                              (assoc-in [:projector-ui :active-projector] :a)))
+    (ui/click! robot "#projectors-tab")
+    (ui/assert-text! "#projector-config-title" "CONFIGURE: Laser A")
+    (ui/wait-for! #(some? (ui/query "#projector-audience-in-all")))
+    (lock! true)
+    (let [depth (undo-depth)
+          middle (rig :middle)
+          width (rig :split-width)
+          width-text (ui/node-text "#rig-split-width-label")]
+      (testing "a tag, on and off: the tags stay, and so does what the laser is in"
+        (attempt! :projectors/set-tag #(ui/click! robot "#projector-tag-graphics"))
+        (is (= #{:crowd-scanning} (:tags (projector :a))))
+        (ui/wait-for! #(false? (ticked "#projector-tag-graphics")))
+        (attempt! :projectors/set-tag #(ui/click! robot "#projector-tag-crowd-scanning"))
+        (is (= #{:crowd-scanning} (:tags (projector :a))))
+        (ui/wait-for! #(true? (ticked "#projector-tag-crowd-scanning")))
+        (is (= {:zone-groups [] :exclude-from-all? false} (select-keys (projector :a) [:zone-groups :exclude-from-all?]))))
+      (testing "Exclude from All, with the audience offer there: still in All"
+        (attempt! :projectors/set-exclude-from-all #(ui/click! robot "#projector-exclude-from-all"))
+        (is (false? (:exclude-from-all? (projector :a))))
+        (ui/wait-for! #(false? (ticked "#projector-exclude-from-all")))
+        (is (= "■" (mark "all" :a)) "the All row says it too")
+        (is (some? (ui/query "#projector-audience-in-all")) "and the offer stays"))
+      (testing "the name, as it is typed"
+        (attempt! :projectors/update-settings
+                  #(do (ui/focus! robot "#projector-name-field")
+                       (.write robot "!")
+                       (ui/sync-fx!)))
+        (is (= "Laser A" (:name (projector :a))))
+        (ui/wait-for! #(= "Laser A" (shown "#projector-name-field")))
+        (ui/assert-text! "#projector-config-title" "CONFIGURE: Laser A"))
+      (testing "the middle laser and the split width"
+        (attempt! :rig/set-middle #(ui/select! robot "#rig-middle-choice" ":both"))
+        (is (= middle (rig :middle)))
+        (ui/wait-for! #(= :split (shown "#rig-middle-choice")))
+        (attempt! :rig/set-split-width #(ui/slide! robot "#rig-split-width-slider" 0.6))
+        (is (= width (rig :split-width)))
+        (ui/wait-for! #(== 0.75 (shown "#rig-split-width-slider")))
+        (is (= width-text (ui/node-text "#rig-split-width-label")))
+        (is (= "75%" width-text)))
+      (testing "another laser picked before the box shows what applies: that laser's"
+        (let [controls (applied-value/attached-count)]
+          (attempt! :projectors/set-tag #(ui/click! robot "#projector-tag-crowd-scanning"))
+          (events/dispatch! {:event/type :projectors/select-projector :projector-id :b})
+          (ui/assert-text! "#projector-config-title" "CONFIGURE: Laser B")
+          (ui/wait-for! #(true? (ticked "#projector-tag-crowd-scanning")))
+          (is (= controls (applied-value/attached-count)) "the same boxes, bound to Laser B"))
+        ;; Laser A's wait is over by now
+        (Thread/sleep (+ applied-value/settle-ms 100))
+        (is (true? (ticked "#projector-tag-crowd-scanning")) "Laser B's, after Laser A's wait too")
+        (is (true? (ticked "#projector-tag-graphics")))
+        (is (= #{:crowd-scanning} (:tags (projector :a))))
+        (is (= #{:crowd-scanning :graphics} (:tags (projector :b)))))
+      (is (= depth (undo-depth)) "no undo step"))))

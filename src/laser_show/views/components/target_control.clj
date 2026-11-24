@@ -17,7 +17,8 @@
             [clojure.string :as str]
             [laser-show.css.theme :as theme]
             [laser-show.routing.targets :as targets]
-            [laser-show.subs :as subs]))
+            [laser-show.subs :as subs]
+            [laser-show.views.components.applied-value :as applied-value]))
 
 
 ;; The menu as data
@@ -137,7 +138,8 @@
 (defn menu-items
   "menu-model's rows as menu items; a click continues on-set (an event map)
    with the row's :target. Combine is a submenu of check boxes that stays
-   open, so several refs can be ticked in a row."
+   open, so several refs can be ticked in a row; a tick the app refused (the
+   show lock) goes again (applied-value)."
   [rows on-set]
   (into []
         (keep (fn [{:keys [kind text checked? target audience? rows]}]
@@ -146,13 +148,16 @@
                   :separator {:fx/type :separator-menu-item}
                   :combine {:fx/type :menu
                             :text text
-                            :items (mapv (fn [{:keys [text checked? target]}]
+                            :items (mapv (fn [{:keys [ref text checked? target]}]
                                            {:fx/type :custom-menu-item
                                             :hide-on-click false
-                                            :content {:fx/type :check-box
-                                                      :text text
-                                                      :selected (boolean checked?)
-                                                      :on-action (assoc on-set :target target)}})
+                                            :content {:fx/type applied-value/applied-control
+                                                      :property :selected
+                                                      :address [on-set ref]
+                                                      :value checked?
+                                                      :on-change (fn [_] (assoc on-set :target target))
+                                                      :desc {:fx/type :check-box
+                                                             :text text}}})
                                          rows)}
                   :pin {:fx/type :menu-item
                         :text text
@@ -228,14 +233,15 @@
 
 (defn target-field
   "\"Target:\", the chip, then, dim, where an inherited target comes from
-   (\"from column 3\"). Props: target-chip's, and :from-id."
+   (\"from column 3\"). Props: target-chip's, and :from-id. The chip gets
+   them without the context cljfx gave the field: it gets its own."
   [{:keys [own inherited from-id] :as props}]
   (let [from (when (nil? (targets/normalize-target own)) (targets/from-text inherited))]
     {:fx/type :h-box
      :spacing 6
      :alignment :center-left
      :children (cond-> [{:fx/type :label :text "Target:" :min-width :use-pref-size :style-class ["label" "target-field-label"]}
-                        (assoc props :fx/type target-chip)]
+                        (assoc (dissoc props :fx/context) :fx/type target-chip)]
                  from (conj (cond-> {:fx/type :label :text from :min-width :use-pref-size :style-class ["label" "target-from"]}
                               from-id (assoc :id from-id))))}))
 

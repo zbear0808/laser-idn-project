@@ -104,8 +104,8 @@
                      :doc "Map of trigger ID to runtime timing state"}
    :held-inputs {:default #{}
                  :doc "Input identities currently held"}
-   :keyboard-activations {:default {}
-                          :doc "Key id -> action resolved on key-down, until key-up or a new show"}
+   :activations {:default {}
+                 :doc "Key -> the action its press played, until the key's release ends it (events/handlers/triggers.clj), whatever the key is bound to by then. A key as lookup-key names it, for every source: {:source :midi :channel :note} (channels 0-15), {:source :osc|:gamepad|:keyboard :id}. Retired, without its release, when its source can't send releases any more (:trigger/retire: a MIDI input disconnected or MIDI off, the OSC server stopped or OSC off), and with every other on New and Open"}
    :last-input-time {:default nil
                      :doc "Timestamp of the most recent discrete input"}})
 
@@ -385,10 +385,14 @@
                             :doc "Brightness for calibration test pattern (0.0-1.0)"}
    :identify {:default {}
               :doc "{projector-id until-ms}: projectors whose test pattern flashes until then (Identify)"}
+   :safety-versions {:default {:serial 0 :by-id {}}
+                     :doc "The safety zones' versions (events/safety_guard.clj wrap-safety-versions): {:serial n :by-id {projector-id {:geometry g :rows r}}}, each stamp the next serial. :geometry moves on with any change to a projector's zone (undo included), :rows when its blocked areas may be other rows (added, removed, replaced, restored), not with a coordinate field's edit. A blocked area's field sends :rows, so its edit can't land on another row; a safety question keeps :geometry, so its Allow applies only to the zone it asked about, and takes its id from :serial. A projector with no entry is at 0. For the session: not saved, not undone, never unsaved"}
    :discovered-devices {:default []
                         :doc "Devices from the last scan: IDN addresses and services, or a driver's :device-key and :outputs. Each device carries :driver."}
    :scanning? {:default false
                :doc "Whether output drivers are being scanned"}
+   :scan-id {:default nil
+             :doc "The id of the scan in progress (a random UUID each Scan, and the one at start-up, gets), which its result brings back: a result with another id (an earlier scan's, or one already in) changes nothing (handlers/projector.clj current-scan?). nil when no scan runs"}
    :broadcast-address {:default "255.255.255.255"
                        :doc "Broadcast address for device discovery"}
    :expanded-devices {:default #{}
@@ -533,19 +537,18 @@
                       :pending-installs []}
             :doc "The output drivers (laser-show.output.driver), as pure data: :drivers {id {:id :name :transport :fields :capabilities :discover? :addon}}, a copy of every registered driver's descriptor; :addons, a status per add-on the loader tried; :dir, the add-ons folder's path as the OS writes it. Written by :addons/loaded at startup. :pending-installs [{:id :name :version :file :replaced?}], the jars Install add-on… copied in since (each a <name>.jar.new that loads at the next start), written by :addons/installed. Never saved, never undone (the drivers themselves live in the registry)"}
    :input {:default {:midi {:enabled? true
-                            :devices {}                ; Map of device-name -> device instance
-                            :connected-devices #{}     ; Set of connected device names
-                            :handlers {}               ; Map of device-name -> handler fn
+                            :available-devices []      ; Names of the MIDI inputs the last Refresh found
+                            :connected-devices #{}     ; Names of the connected inputs (the device worker's, input.devices)
+                            :requests {}               ; {:list id :connections id}: the latest request to the device worker, until its result is in
                             :channel-filter nil        ; nil = all channels, or set of channel numbers (0-15)
                             :learn-mode nil            ; Promise when learning, nil otherwise
                             :note-mappings {}          ; Optional note remapping
                             :cc-mappings {}}           ; Optional CC remapping
                      :osc {:enabled? false
-                           :server nil                 ; OSC server instance
-                           :server-running? false
-                           :port 9000
+                           :server-running? false      ; The device worker's server is listening
+                           :port 9000                  ; The port Start Server listens on (while listening: the one it listens on)
+                           :requests {}                ; {:server id}: the latest Start or Stop, until its result is in
                            :address-mappings {}        ; Map of OSC address -> event config
-                           :handlers {}                ; Map of handler-id -> {:pattern :handler}
                            :learn-mode nil}            ; Promise when learning, nil otherwise
                      :mtc {:state :stopped :fps nil :text nil} ; the show clock's status of laser-show.input.mtc, see mirror-status
                      :gamepad {:enabled? true}
@@ -554,7 +557,7 @@
                               :event-log []
                               :enabled? true}
                      :values {}}
-           :doc "Input handling state for MIDI, OSC, and keyboard"}
+           :doc "Input handling state for MIDI, OSC, and keyboard. Plain data: the MIDI inputs and the OSC server themselves belong to the device worker (laser-show.input.devices), which reports their status back as events (handlers/input.clj applies only the latest request's result)"}
    :logging {:default {:enabled? false
                        :file nil
                        :path default-log-path}
@@ -601,7 +604,7 @@
    :written {:default 0
              :doc "The newest request a write answered (:rig/written or :rig/write-failed): a write is pending while it is below :requested"}
    :group-copy {:default {}
-                :doc "The rig file's copy of the groups its lasers are in (rig-file/group-copy), as last written or read"}})
+                :doc "This window's copy of the definitions of the groups its lasers are in (rig-file/group-copy): kept to the rig and the show's groups after every event that changes them (handlers/rig_autosave.clj), Undo and Redo (history/restore-snapshot) and Open, whether or not the file can be written; what the next write of the file holds. Not a written file's acknowledgement"}})
 
 
 ;; State Builder

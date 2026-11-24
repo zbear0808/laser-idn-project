@@ -1,11 +1,13 @@
 (ns laser-show.events.chain-params-handlers-test
-  "Tests that boolean parameter edits keep `false` instead of turning it into nil."
+  "Tests that boolean parameter edits keep `false` instead of turning it into
+   nil, and that a numeric field's typed text commits only a number."
   (:require
    [clojure.test :refer [deftest is testing]]
    [laser-show.events.handlers.chain.helpers :as chain-helpers]
    [laser-show.events.handlers.chain.params :as params]
    [laser-show.events.handlers.keyframe :as keyframe]
-   [laser-show.events.helpers :as h]))
+   [laser-show.events.helpers :as h])
+  (:import [javafx.event ActionEvent]))
 
 (def config (chain-helpers/chain-config :effect-chains [0 0]))
 
@@ -21,6 +23,30 @@
   (is (false? (h/first-some nil false)))
   (is (= 1 (h/first-some nil 1 2)))
   (is (nil? (h/first-some nil nil))))
+
+(deftest parse-number-text-test
+  (is (= 0.42 (h/parse-number-text "0.42" 0.0 1.0 false)))
+  (is (= 1000.0 (h/parse-number-text " 1e3 " nil nil false)) "spaces and exponents, as Double/parseDouble reads them")
+  (is (= 1.0 (h/parse-number-text "7" 0.0 1.0 false)) "clamped to max")
+  (is (= -2.0 (h/parse-number-text "-5" -2.0 2.0 false)) "and to min")
+  (testing "a whole number for an :int parameter"
+    (is (= 3 (h/parse-number-text "2.6" 1 8 true)))
+    (is (instance? Long (h/parse-number-text "2.6" 1 8 true)))
+    (is (= 8 (h/parse-number-text "12" 1 8 true))))
+  (testing "nothing for text that isn't a finite number, or isn't text"
+    (doseq [text ["abc" "" "  " "NaN" "Infinity" "-Infinity" "0,42" nil (ActionEvent.)]]
+      (is (nil? (h/parse-number-text text 0.0 1.0 false)) (pr-str text)))))
+
+(deftest update-param-from-text-test
+  (let [commit (fn [event]
+                 (get-in (params/handle-update-param-from-text
+                          state config (merge {:effect-path [0] :param-key :amount :min 0.0 :max 1.0 :is-int? false} event))
+                         [:chains :effect-chains [0 0] :items 0 :params :amount]))]
+    (is (= 0.25 (commit {:text "0.25"})) "the field's text, read on the FX thread")
+    (is (= 1.0 (commit {:text "4"})) "clamped")
+    (doseq [text ["abc" "" "NaN" "Infinity"]]
+      (is (= 0.5 (commit {:text text})) (str (pr-str text) " changes nothing")))
+    (is (= 0.5 (commit {:fx/event (ActionEvent.)})) "an ActionEvent without its text changes nothing")))
 
 (deftest update-param-unchecked-checkbox-test
   (testing "checkbox :fx/event false is stored as false"
