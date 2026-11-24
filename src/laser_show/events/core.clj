@@ -934,6 +934,7 @@
    {:state effect-state
     :dispatch effect-dispatch
     :dispatch-later effect-dispatch-later
+    :history/gesture-alarm effect-gesture-alarm
     :link/sync-to-downbeat effect-link-sync-to-downbeat
     :show-clock/read effect-show-clock-read
     :input/await-learn effect-input-await-learn
