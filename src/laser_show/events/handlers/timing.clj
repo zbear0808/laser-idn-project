@@ -177,22 +177,94 @@
               (update state :playback cue-timing/deactivate-cue cell)
               state)}))
 
+(def ^:private chase-report-keys
+  "What a :show-clock/chase report says (show-time's chase reports)."
+  [:cell :active? :document-id :source-version :expected-owner :chase-id :start])
+
 (defn- handle-show-clock-chase
-  "The show clock started (:active? true) or stopped following timecode for
-   the chasing timeline at cell."
-  [{:keys [cell active? state]}]
+  "The show clock saw timecode take the cell over (:active? true) or let go
+   of it (false), for the show, the cue version and the owner the report
+   names (show-time's chase reports). One for another show (a New or an
+   Open since, or none named) is dropped at once ({}). Otherwise the report
+   goes on to :show-clock/apply-chase with what the clock chases at the
+   cell now (:show-clock/read :chase-cell): timecode may have stopped, or
+   come back, since it was sent."
+  [{:keys [cell state] :as event}]
+  (if (and (some? (:document-id event)) (h/same-document? state event))
+    {:show-clock/read {:chase-cell cell
+                       :on-read (assoc (select-keys event chase-report-keys) :event/type :show-clock/apply-chase)}}
+    {}))
+
+(defn- owner-kind
+  "The kind of a playback/intent-owner: :none, :run, :chase or :other."
+  [owner]
+  (if (vector? owner) (first owner) owner))
+
+(defn- install-chase
+  "playback with timecode's marker for episode k at cell, in place of owner
+   there. A marker rebound to a new episode leaves the focus and the
+   transport as they are. Any other takes the focus, and the transport
+   plays if it did, or if start, the episode's start authority, still
+   allows it: timecode entered while the transport was free (:allowed?),
+   with no Stop or Retrigger since (the same :restart id) and nothing held
+   now. So an On that Stop overtook holds its cue, as Stop holds the others,
+   until Play."
+  [playback cell owner k start]
+  (let [playback' (assoc-in playback [:active-cues cell] {:chasing? true :timeline? true :chase-id k})]
+    (if (= :chase (owner-kind owner))
+      playback'
+      (assoc playback'
+             :active-cell cell
+             :playing? (or (true? (:playing? playback))
+                           (and (true? (:allowed? start))
+                                (contains? start :restart)
+                                (= (:restart start) (get-in playback [:requests :restart :id]))
+                                (empty? (:active-cues playback))))))))
+
+(defn- handle-show-clock-apply-chase
+  "A :show-clock/chase report with :clock {:chase-id}, the episode the show
+   clock chases at the cell now (nil: none). It applies only while all it
+   was decided for still holds, a missing field holding nothing: the same
+   show (:document-id, never nil), the same version of the cell's cue
+   (:source-version, nil for one gone or not following:
+   playback/source-version) and the same owner there (:expected-owner,
+   playback/intent-owner, :none for an empty cell); then
+   - On (:active? true): the cue follows timecode and the clock is still on
+     the report's episode (:chase-id): its marker goes in (install-chase);
+   - Off (:active? false): the clock chases nothing there: a chase marker
+     goes, its cue gone or not; a run only while its cue follows timecode.
+     It stops as any cue stops (cue-timing/deactivate-cue): the last one
+     stops the transport, others leave it as it is.
+   Anything else changes nothing ({}): an On late for timecode that
+   stopped, an Off late for timecode that came back, a report for a cue
+   since replaced or an owner since gone, a duplicate."
+  [{:keys [cell active? document-id source-version expected-owner chase-id start clock state] :as event}]
   (let [intent (get-in state [:playback :active-cues cell])
-        chases? (playback/chases-mtc? (get-in state [:chains :cue-chains cell]))]
-    {:state (cond
-              (and active? chases? (not (:chasing? intent)))
-              (-> state
-                  (assoc-in [:playback :active-cues cell] {:chasing? true :timeline? true})
-                  (update :playback assoc :playing? true :active-cell cell))
+        owner (playback/intent-owner intent)
+        version (playback/source-version state cell)
+        observed (:chase-id clock)
+        holds? (and (some? document-id)
+                    (h/same-document? state event)
+                    (contains? event :source-version)
+                    (= source-version version)
+                    (contains? event :expected-owner)
+                    (= expected-owner owner)
+                    (contains? clock :chase-id))]
+    (cond
+      (not holds?) {}
 
-              (and (not active?) intent (or chases? (:chasing? intent)))
-              (update state :playback cue-timing/deactivate-cue cell)
+      (true? active?)
+      (if (and (some? version) (some? chase-id) (= chase-id observed))
+        {:state (update state :playback install-chase cell owner chase-id start)}
+        {})
 
-              :else state)}))
+      (and (false? active?)
+           (nil? observed)
+           (or (= :chase (owner-kind owner))
+               (and (= :run (owner-kind owner)) (some? version))))
+      {:state (update state :playback cue-timing/deactivate-cue cell)}
+
+      :else {})))
 
 (defn- handle-show-clock-zone-map-due
   "The show clock reached the beat a zone map switch waits for (zones plan
@@ -311,6 +383,7 @@
     ;; Reports from the show clock
     :show-clock/cue-ended (handle-show-clock-cue-ended event)
     :show-clock/chase (handle-show-clock-chase event)
+    :show-clock/apply-chase (handle-show-clock-apply-chase event)
     :show-clock/status (handle-show-clock-status event)
     :show-clock/zone-map-due (handle-show-clock-zone-map-due event)
     :show-clock/pattern-due (handle-show-clock-pattern-due event)

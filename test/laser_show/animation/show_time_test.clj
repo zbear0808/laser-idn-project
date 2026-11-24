@@ -3,10 +3,14 @@
    (plans/2026-11-17-show-clock/01 §7). App state is built by the real
    handlers through events/event-handler, so intents have their real shape."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.animation.show-time :as show-time]
             [laser-show.events.core :as events]
+            [laser-show.input.mtc :as mtc]
+            [laser-show.input.mtc-test :as mtc-test]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
+            [laser-show.state.history :as history]
             [laser-show.state.templates :as templates]))
 
 (def ^:private circle
@@ -21,10 +25,15 @@
                    :timeline/start 0.0 :timeline/duration 16.0}]}
          extra))
 
+(def ^:private doc-id
+  "The show open in init!'s state (reactivity plan 20's [:project :document-id])."
+  #uuid "00000000-0000-0000-0000-00000000d0c1")
+
 (defn- init! [chains]
   (state/init-state! (-> (domains/build-initial-state)
                          (assoc-in [:chains :cue-chains] chains)
-                         (assoc-in [:timing :bpm] 120.0)))
+                         (assoc-in [:timing :bpm] 120.0)
+                         (assoc-in [:project :document-id] doc-id)))
   (show-time/reset-runtime!))
 
 (use-fixtures :each (fn [f] (init! {}) (f)))
@@ -470,29 +479,118 @@
         (is (true? (:ended? (get-in rt'' [:runs run]))) "it ends at its beat")
         (is (= [{:event/type :show-clock/cue-ended :cell cell :run run :position-ids {:restart nil :seek nil}}] reports))))))
 
-(def ^:private chasing
-  (timeline {:timeline/chase :mtc :timeline/tc-start 0.0 :timeline/tempo-bpm 120.0 :timeline/length 64.0}))
+;; Following timecode (plans/2026-11-23-cljfx-reactivity/15 §7, §8): an
+;; episode belongs to one show and one version of its cue, and a report
+;; applies only while the owner it found is still there
+
+(def ^:private C [2 0])
+(def ^:private B [1 0])
+
+(def ^:private follower
+  "15 §7's cue: beat 0 at 3,600 s, locked at 120 BPM, 64 beats."
+  (timeline {:timeline/chase :mtc :timeline/tc-start 3600.0 :timeline/tempo-bpm 120.0 :timeline/length 64.0}))
+
+(def ^:private ms 1000000)
+
+(def ^:private qf-decoder
+  "01:00:05:12 at 25 fps, as 8 quarter-frames 10 ms apart from 0 ms: anchored
+   at 3,605.55 s (the value and the forward 1.75 frames) when the last
+   arrives, at 70 ms."
+  (mtc-test/feed mtc/initial-decoder [0x0c 0x10 0x25 0x30 0x40 0x50 0x61 0x72] 25 0))
+
+(defn- mtc-at
+  "Where decoder (qf-decoder) has timecode t ms after its first quarter-frame."
+  ([t] (mtc-at qf-decoder t))
+  ([decoder t] (mtc/position decoder (long (* t ms)) nil)))
+
+(defn- running [seconds] {:state :running :seconds seconds :fps 25})
+
+(def ^:private stopped {:state :stopped :seconds nil :fps nil})
+
+(defn- chase-id [rt cell] (get-in rt [:chase cell :chase-id]))
+
+(defn- chase-at [rt cell] (get-in rt [:chase cell :accumulated-beats]))
+
+(defn- intent [cell] (get-in (state/get-raw-state) [:playback :active-cues cell]))
+
+(defn- version [cell] (get-in (state/get-raw-state) [:playback :chase-sources :cells cell]))
+
+(defn- marker [k] {:chasing? true :timeline? true :chase-id k})
+
+(defn- on-report
+  "The On the clock sends for episode k at cell: the cue's version, the owner
+   it found there and the episode's start authority."
+  [cell version owner k start]
+  {:event/type :show-clock/chase :cell cell :active? true :document-id doc-id
+   :source-version version :expected-owner owner :chase-id k :start start})
+
+(defn- off-report [cell version owner]
+  {:event/type :show-clock/chase :cell cell :active? false :document-id doc-id
+   :source-version version :expected-owner owner})
+
+(defn- deliver!
+  "App state after the show clock's reports, handled while the clock is at
+   runtime rt (what :show-clock/read reads)."
+  [rt reports]
+  (with-redefs [show-time/!runtime (atom rt)]
+    (run! events/event-handler reports))
+  (state/get-raw-state))
+
+(defn- follow!
+  "Follow Timecode switched on or off at cell, as the inspector does."
+  [cell on?]
+  (handle! {:event/type :timeline/apply-op :col (first cell) :row (second cell)
+            :op {:op :set-chase :source (when on? :mtc)}}))
+
+(defn- drawn
+  "How often each cell is drawn at rt with app state as it is now."
+  [rt]
+  (frequencies (map :cell (show-time/active-runs (state/get-raw-state) rt))))
 
 (deftest chase-activates-and-reports-test
-  (init! {[2 0] chasing})
-  (let [running {:state :running :seconds 10.0 :fps 25}
-        {rt :runtime reports :reports} (step (:runtime start) 0.0 running)]
-    (is (close? 20.0 (get-in rt [:chase [2 0] :accumulated-beats])))
-    (is (true? (get-in rt [:chase [2 0] :chasing?])))
-    (is (= [{:event/type :show-clock/chase :cell [2 0] :active? true}] reports))
-    (is (= [[2 0]] (map :cell (show-time/active-runs (assoc-in (state/get-raw-state) [:playback :playing?] true) rt)))
+  (init! {C follower})
+  (testing "example 1's samples, decoded"
+    (is (= [:running :freewheel :stopped] (map (comp :state mtc-at) [70 370 670])))
+    (is (every? true? (map #(close? %1 (:seconds (mtc-at %2))) [3605.55 3605.85 3605.55] [70 370 670]))))
+  (let [{rt1 :runtime reports1 :reports} (step (:runtime start) 70.0 (mtc-at 70))
+        k1 (chase-id rt1 C)]
+    (is (close? 11.10 (chase-at rt1 C)))
+    (is (true? (get-in rt1 [:chase C :chasing?])))
+    (is (= [doc-id C 0 nil (:tick rt1)] k1)
+        "the episode: the show, the cell, its cue's version, the clock's origin (none in a pure step) and its first tick")
+    (is (= [(on-report C 0 :none k1 {:restart nil :allowed? true})] reports1))
+    (is (= [C] (map :cell (show-time/active-runs (assoc-in (state/get-raw-state) [:playback :playing?] true) rt1)))
         "rendered before app state hears of it")
-    (run! events/event-handler reports)
-    (is (= {:chasing? true :timeline? true} (get-in (state/get-raw-state) [:playback :active-cues [2 0]])))
-    (is (true? (get-in (state/get-raw-state) [:playback :playing?])))
-    (is (empty? (:reports (step rt 16.0 running))) "app state agrees: nothing to report")
-    (testing "timecode stops: the chase ends and says so at once, not 250 ms after the last report"
-      (let [{rt' :runtime reports' :reports} (step rt 100.0 {:state :stopped :seconds 10.0 :fps 25})]
-        (is (empty? (:chase rt')))
-        (is (= [{:event/type :show-clock/chase :cell [2 0] :active? false}] reports'))
-        (run! events/event-handler reports')
-        (is (nil? (get-in (state/get-raw-state) [:playback :active-cues [2 0]])))
-        (is (false? (get-in (state/get-raw-state) [:playback :playing?])))))))
+    (testing "the first On, held across a stopped tick before any marker: the transport stays idle"
+      (let [{rt :runtime reports :reports} (step rt1 670.0 (mtc-at 670))
+            before (state/get-raw-state)]
+        (is (= [{} []] [(:chase rt) reports]) "nothing to retire")
+        (is (identical? before (deliver! rt reports1)))))
+    (deliver! rt1 reports1)
+    (is (= (marker k1) (intent C)))
+    (is (= [true {C nil} C] (transport)) "the first On from idle plays")
+    (let [installed (state/get-raw-state)]
+      (is (identical? installed (deliver! rt1 reports1)) "a duplicate changes nothing"))
+    (let [{rt2 :runtime reports2 :reports} (step rt1 370.0 (mtc-at 370))
+          {rt3 :runtime reports3 :reports} (step rt2 400.0 (mtc-at 370))]
+      (testing "freewheel, then the same position again: the same episode and no other activation"
+        (is (close? 11.70 (chase-at rt2 C)))
+        (is (close? 11.70 (chase-at rt3 C)))
+        (is (= k1 (chase-id rt2 C) (chase-id rt3 C)))
+        (is (= [] reports2 reports3)))
+      (testing "timecode stops: one Off at once, which takes the cue out and, the last, stops the transport"
+        (let [{rt4 :runtime reports4 :reports} (step rt3 670.0 (mtc-at 670))]
+          (is (= {} (:chase rt4)))
+          (is (= [(off-report C 0 [:chase k1])] reports4))
+          (deliver! rt4 reports4)
+          (is (= [false {} nil] (transport)))
+          (is (identical? (state/get-raw-state) (deliver! rt4 reports4)) "the duplicate changes nothing")
+          (testing "; timecode again is another episode"
+            (let [{rt5 :runtime reports5 :reports} (step rt4 1000.0 (running 3610.0))
+                  k2 (chase-id rt5 C)]
+              (is (close? 20.0 (chase-at rt5 C)))
+              (is (not= k1 k2))
+              (is (= [(on-report C 0 :none k2 {:restart nil :allowed? true})] reports5)))))))))
 
 (deftest sixty-hz-ticks-match-thirty-hz-ticks-test
   (init! {[0 0] circle})
@@ -539,7 +637,26 @@
     (is (close? 10.96 (chase-beats rt2)))
     (testing "the cue's own clock doesn't move it between timecode updates"
       (is (close? 10.96 (chase-beats (:runtime (step rt2 1500.0 {:state :running :seconds 3605.48 :fps 25}))))))
-    (is (nil? (chase-beats (:runtime (step rt2 1600.0 {:state :stopped :seconds 3605.48 :fps 25})))))))
+    (is (nil? (chase-beats (:runtime (step rt2 1600.0 {:state :stopped :seconds 3605.48 :fps 25})))))
+    (testing "its window is [0, 64) beats: 3,600 s is in, 3,632 s (beat 64) is out"
+      (is (= [false true true false]
+             (map #(some? (chase-beats (:runtime (step (:runtime start) 0.0 (running %)))))
+                  [3599.99 3600.0 3631.99 3632.0]))))
+    (testing "a locate alone doesn't start it"
+      (let [located (mtc/step-full-frame mtc/initial-decoder [0x7F 0x7F 0x01 0x01 (bit-or 0x20 1) 0 20 0 0xF7] 0)
+            pos (mtc/position located (* 1000 ms) nil)]
+        (is (= [:stopped 3620.0] ((juxt :state :seconds) pos)) "known (beat 40), not running")
+        (is (= {} (:chase (:runtime (step (:runtime start) 0.0 pos)))))))
+    (testing "a locate back while timecode runs: the same episode, where timecode went"
+      (let [back (-> qf-decoder
+                     (mtc/step-full-frame [0x7F 0x7F 0x01 0x01 (bit-or 0x20 1) 0 2 0 0xF7] (* 80 ms))
+                     (mtc-test/feed (mtc-test/qf-bytes {:h 1 :m 0 :s 2 :f 0} 25) 25 (* 90 ms)))
+            ra (:runtime (step (:runtime start) 70.0 (mtc-at 70)))
+            rb (:runtime (step ra 160.0 (mtc-at back 160)))]
+        (is (close? 11.10 (chase-beats ra)))
+        (is (= :running (:state (mtc-at back 160))))
+        (is (close? 4.14 (chase-beats rb)) "3,602.07 s")
+        (is (= (chase-id ra [0 0]) (chase-id rb [0 0])))))))
 
 (deftest non-chasing-cues-ignore-mtc-test
   (init! {[0 0] (timeline {:timeline/length 100.0})})
@@ -550,17 +667,39 @@
     (is (empty? (:chase rt)))))
 
 (deftest chase-takes-over-a-playing-cue-test
-  (testing "a cue playing when its chase is switched on stops when no timecode runs"
+  (testing "a cue playing when Follow is switched on stops when no timecode runs"
     (init! {[0 0] (timeline {:timeline/length 64.0})})
     (handle! {:event/type :timeline/play :col 0 :row 0 :from 2.0})
-    (let [rt (run-at (:runtime start) 0.0)]
-      (state/swap-state! assoc-in [:chains :cue-chains [0 0] :timeline/chase] :mtc)
-      (let [{rt' :runtime reports :reports} (step rt 16.0 {:state :stopped})]
+    (let [r1 (run-id [0 0])
+          rt (run-at (:runtime start) 0.0)]
+      (follow! [0 0] true)
+      (let [v (version [0 0])
+            {rt' :runtime reports :reports} (step rt 16.0 stopped)]
+        (is (pos-int? v) "the edit gave the follower a version")
+        (is (= r1 (:run (intent [0 0]))) "and left the run for the clock to settle")
         (is (empty? (:runs rt')) "the timecode drives it now")
         (is (empty? (show-time/active-runs (state/get-raw-state) rt')))
-        (is (= [{:event/type :show-clock/chase :cell [0 0] :active? false}] reports))
-        (run! events/event-handler reports)
-        (is (nil? (get-in (state/get-raw-state) [:playback :active-cues [0 0]])))))))
+        (is (= [(off-report [0 0] v [:run r1])] reports))
+        (deliver! rt' reports)
+        (is (nil? (intent [0 0])))
+        (is (false? (get-in (state/get-raw-state) [:playback :playing?])) "its last cue"))))
+  (testing "while timecode runs inside it, timecode takes it over"
+    (init! {[0 0] (timeline {:timeline/length 64.0})})
+    (handle! {:event/type :timeline/play :col 0 :row 0 :from 2.0})
+    (let [r1 (run-id [0 0])
+          rt (run-at (:runtime start) 0.0)]
+      (follow! [0 0] true)
+      (let [v (version [0 0])
+            {rt' :runtime reports :reports} (step rt 16.0 (running 10.0))
+            k (chase-id rt' [0 0])]
+        (is (close? 20.0 (chase-at rt' [0 0])))
+        (is (empty? (:runs rt')))
+        (is (= {[0 0] 1} (drawn rt')) "drawn once, at the timecode, before app state hears of it")
+        (is (= [(on-report [0 0] v [:run r1] k {:restart nil :allowed? true})] reports))
+        (deliver! rt' reports)
+        (is (= (marker k) (intent [0 0])))
+        (is (= [true {[0 0] nil} [0 0]] (transport)))
+        (is (= [] (:reports (step rt' 32.0 (running 10.016)))) "app state agrees")))))
 
 (deftest active-runs-keep-the-intents-order-test
   (init! {[0 0] circle [1 0] circle [2 0] {:items []}})
@@ -625,3 +764,288 @@
         (is (close? 0.5 (get-in (show-time/pulse-view rt2) [:flash :beats]))))
       (handle! {:event/type :transport/retrigger})
       (is (= stamps (:pulses (run-at rt1 1250.0 1500.0)))))))
+
+
+;; Following timecode, continued: what an edit, Stop and a later report do
+;; (plans/2026-11-23-cljfx-reactivity/15 §7 examples 2-5, §8)
+
+(defn- b-and-c-playing!
+  "B's circle triggered, then C's follower taken by timecode at 3,605.55 s
+   (example 2's C:k1, B:b): the runtime of that tick."
+  []
+  (init! {C follower B circle})
+  (handle! {:event/type :grid/trigger-cell :col 1 :row 0})
+  (let [{rt :runtime reports :reports} (step (:runtime start) 70.0 (mtc-at 70))]
+    (deliver! rt reports)
+    rt))
+
+(deftest follow-off-clear-and-replace-prune-chase-test
+  (let [rt1 (b-and-c-playing!)
+        k1 (chase-id rt1 C)
+        b (run-id B)
+        playing (state/get-raw-state)
+        positioned (fn [rt] (set (keys (show-time/positions rt))))]
+    (is (= [true {B b C nil} C] (transport)) "C:k1, B:b")
+    (testing "a snapshot that lost C's cue but kept its marker: the Off for that marker"
+      (is (= [(off-report C nil [:chase k1])]
+             (:reports (show-time/step rt1 (update-in playing [:chains :cue-chains] dissoc C) (mtc-at 100) 100.0)))))
+    (testing "example 2: Follow off while timecode runs, then Play from beat 3 before the next tick"
+      (follow! C false)
+      (is (= [true {B b} B] (transport)) "only B is left, and plays on")
+      (is (nil? (version C)))
+      (handle! {:event/type :timeline/play :col 2 :row 0 :from 3.0})
+      (let [r2 (run-id C)
+            {rt :runtime reports :reports} (step rt1 100.0 (mtc-at 100))]
+        (is (= {:run r2 :timeline? true :start-beat 3.0} (intent C)) "C has just r2")
+        (is (= [{} #{b r2}] [(:chase rt) (set (keys (:runs rt)))]))
+        (is (close? 3.0 (get (show-time/positions rt) C)) "at its start")
+        (is (= [B C] (map :cell (show-time/active-runs (state/get-raw-state) rt))))
+        (is (= {B 1 C 1} (drawn rt)))
+        (is (= [] reports))
+        (let [before (state/get-raw-state)]
+          (is (identical? before (deliver! rt [(off-report C nil [:chase k1])]))
+              "an old Off for k1 leaves both"))))
+    (testing "clearing C instead: no C position, nothing drawn there, no Off"
+      (state/reset-state! playing)
+      (handle! {:event/type :grid/clear-cell :col 2 :row 0})
+      (is (= [true {B b} B] (transport)))
+      (let [{rt :runtime reports :reports} (step rt1 100.0 (mtc-at 100))]
+        (is (= [{} #{b}] [(:chase rt) (set (keys (:runs rt)))]))
+        (is (= #{B} (positioned rt)))
+        (is (= {B 1} (drawn rt)))
+        (is (= [] reports) "Clear took the marker already")))
+    (testing "example 4: C's follower X replaced by Y, beat 0 at 3,604 s, while timecode runs at 3,605.55 s"
+      (state/reset-state! playing)
+      (let [{rt-x :runtime x-reports :reports} (step rt1 100.0 stopped)]
+        (is (= [(off-report C 0 [:chase k1])] x-reports) "X's Off, held")
+        (handle! {:event/type :timeline/apply-op :col 2 :row 0 :op {:op :set-tc-start :seconds 3604.0}})
+        (let [v (version C)
+              {rt :runtime reports :reports} (step rt1 100.0 (running 3605.55))
+              k2 (chase-id rt C)]
+          (is (pos-int? v) "Y is another version")
+          (is (= (marker k1) (intent C)) "the marker stays for the clock to rebind")
+          (is (close? 3.10 (chase-at rt C)) "one Y, at beat 3.10")
+          (is (= [doc-id C v] (subvec k2 0 3)) "a fresh episode")
+          (is (not= k1 k2))
+          (is (= {B 1 C 1} (drawn rt)) "C drawn once, in its marker's place")
+          (is (= [(on-report C v [:chase k1] k2 {:restart nil :allowed? true})] reports))
+          (let [before (state/get-raw-state)]
+            (is (identical? before (deliver! rt-x x-reports)) "X's Off fails the version guard"))
+          (deliver! rt reports)
+          (is (= (marker k2) (intent C)))
+          (is (= [true {B b C nil} C] (transport)) "rebound: the focus and the transport as they were"))))
+    (testing "B's circle pasted over C: the follower's marker goes with it"
+      (state/reset-state! playing)
+      (handle! {:event/type :grid/copy-cell :col 1 :row 0})
+      (handle! {:event/type :grid/paste-cell :col 2 :row 0})
+      (is (= [:circle nil] ((juxt (comp :preset-id first :items) :timeline/chase)
+                            (get-in (state/get-raw-state) [:chains :cue-chains C]))))
+      (is (= [true {B b} B] (transport)))
+      (is (nil? (version C)))
+      (let [{rt :runtime reports :reports} (step rt1 100.0 (mtc-at 100))]
+        (is (= {} (:chase rt)))
+        (is (= #{B} (positioned rt)))
+        (is (= {B 1} (drawn rt)))
+        (is (= [] reports))))
+    (testing "C moved to D: its marker moves with it, not ended, and is rebound there"
+      (state/reset-state! playing)
+      (handle! {:event/type :grid/move-cell :from-col 2 :from-row 0 :to-col 3 :to-row 0})
+      (let [D [3 0]
+            v (version D)
+            {rt :runtime reports :reports} (step rt1 100.0 (mtc-at 100))
+            kD (chase-id rt D)]
+        (is (= [true {B b D nil} D] (transport)) "the move kept both cues and the transport")
+        (is (= (marker k1) (intent D)))
+        (is (= [nil true] [(version C) (pos-int? v)]))
+        (is (= [#{D} #{B D}] [(set (keys (:chase rt))) (positioned rt)]) "nothing at C")
+        (is (= [doc-id D v] (subvec kD 0 3)))
+        (is (close? 11.16 (chase-at rt D)))
+        (is (= {B 1 D 1} (drawn rt)))
+        (is (= [(on-report D v [:chase k1] kD {:restart nil :allowed? true})] reports))
+        (deliver! rt reports)
+        (is (= (marker kD) (intent D)))
+        (is (= [true {B b D nil} D] (transport)))))
+    (testing "Follow off, then Undo and Redo: one edit; timecode takes C again only while it runs; reports aren't edits"
+      (state/reset-state! playing)
+      (let [undos (count (get-in (state/get-raw-state) [:history :undo-stack]))]
+        (follow! C false)
+        (is (= (inc undos) (count (get-in (state/get-raw-state) [:history :undo-stack]))))
+        (is (= "Set Follow Timecode" (history/undo-label (:history (state/get-raw-state)))))
+        (handle! {:event/type :edit/undo})
+        (let [v (version C)
+              undone (state/get-raw-state)]
+          (is (pos-int? v) "the follower back, as another version")
+          (is (= [true {B b} B] (transport)))
+          (is (= [] (:reports (step rt1 100.0 stopped))) "timecode stopped: nothing to take")
+          (let [{rt :runtime reports :reports} (step rt1 100.0 (mtc-at 100))
+                k (chase-id rt C)]
+            (is (not= k1 k))
+            (is (= [(on-report C v :none k {:restart nil :allowed? true})] reports))
+            (deliver! rt reports)
+            (is (= (marker k) (intent C)))
+            (is (= ((juxt :history :project) undone) ((juxt :history :project) (state/get-raw-state)))
+                "the report changed neither the history nor the unsaved flag")
+            (handle! {:event/type :edit/redo})
+            (is (= [true {B b} B] (transport)) "Redo is Follow off again")
+            (is (nil? (version C)))))))
+    (testing "the only cue, cleared: the transport stops, once"
+      (init! {C follower})
+      (let [{rt :runtime reports :reports} (step (:runtime start) 70.0 (mtc-at 70))]
+        (deliver! rt reports)
+        (is (= [true {C nil} C] (transport)))
+        (handle! {:event/type :grid/clear-cell :col 2 :row 0})
+        (is (= [false {} nil] (transport)))
+        (let [{rt' :runtime reports' :reports} (step rt 100.0 (mtc-at 100))]
+          (is (= [{} {} []] [(:chase rt') (show-time/positions rt') reports'])))))))
+
+(deftest stale-chase-off-cannot-retire-a-restart-test
+  (init! {C (timeline {:timeline/length 64.0})})
+  ;; As the start-timeline trigger does (handlers/triggers.clj)
+  (handle! {:event/type :timeline/play :col 2 :row 0})
+  (let [r1 (run-id C)
+        rt0 (run-at (:runtime start) 0.0)
+        _ (follow! C true)
+        v1 (version C)
+        queued (state/get-raw-state)
+        {rt1 :runtime reports :reports} (step rt0 16.0 stopped)]
+    (is (= [(off-report C v1 [:run r1])] reports) "example 3: Follow on while timecode is stopped")
+    (testing "delivered now: r1 stops, and no C timing remains"
+      (deliver! rt1 reports)
+      (is (= [false {} nil] (transport)))
+      (let [rt (:runtime (step rt1 32.0 stopped))]
+        (is (= [{} {} {}] [(:runs rt) (:chase rt) (show-time/positions rt)]))))
+    (testing "delivered after Follow off, timeline Stop and Play, and Follow on again: the new run survives"
+      (state/reset-state! queued)
+      (follow! C false)
+      (is (= r1 (:run (intent C))) "Follow off leaves a run alone")
+      (handle! {:event/type :timeline/stop :col 2 :row 0})
+      (handle! {:event/type :timeline/play :col 2 :row 0})
+      (follow! C true)
+      (let [r2 (run-id C)
+            before (state/get-raw-state)]
+        (is (not= r1 r2))
+        (is (= [true {C r2} C] (transport)))
+        (is (< v1 (version C)) "following again: another version")
+        (is (identical? before (deliver! rt1 reports)) "its whole intent, the focus and the transport")))
+    (testing "the owner guard alone: the same show, version and absent episode, another run in r1's place"
+      (state/reset-state! (assoc-in queued [:playback :active-cues C :run] (random-uuid)))
+      (let [before (state/get-raw-state)]
+        (is (identical? before (deliver! rt1 reports)))))
+    (testing "nor once a later episode took the cell over"
+      (state/reset-state! queued)
+      (let [{rt2 :runtime ons :reports} (step rt1 300.0 (running 10.0))
+            k (chase-id rt2 C)]
+        (is (= [(on-report C v1 [:run r1] k {:restart nil :allowed? true})] ons))
+        (deliver! rt2 ons)
+        (is (= (marker k) (intent C)) "taken over")
+        (let [before (state/get-raw-state)]
+          (is (identical? before (deliver! rt2 reports)) "the clock on that episode")
+          (is (identical? before (deliver! rt1 reports)) "the clock on none"))))
+    (testing "a missing owner is no :none"
+      (state/reset-state! (update queued :playback cue-timing/deactivate-cue C))
+      (let [{rt2 :runtime [on :as ons] :reports} (step rt1 300.0 (running 10.0))
+            before (state/get-raw-state)]
+        (is (= [:none {:restart nil :allowed? true}] ((juxt :expected-owner :start) on)))
+        (is (identical? before (deliver! rt2 [(dissoc on :expected-owner)])))
+        (deliver! rt2 ons)
+        (is (= (marker (:chase-id on)) (intent C)) "the same On, with its :none")
+        (is (= [true {C nil} C] (transport)))))
+    (testing "a pending report goes again after 250 ms, a changed owner's at once"
+      (state/reset-state! queued)
+      (let [{rt-a :runtime a :reports} (step rt0 16.0 stopped)
+            {rt-b :runtime b :reports} (step rt-a 200.0 stopped)
+            {rt-c :runtime c :reports} (step rt-b 266.0 stopped)
+            r2 (random-uuid)
+            _ (state/reset-state! (assoc-in queued [:playback :active-cues C :run] r2))
+            {d :reports} (step rt-c 300.0 stopped)]
+        (is (= [reports [] reports] [a b c]) "the same report, at 16 and 266 ms")
+        (is (= [(off-report C v1 [:run r2])] d) "34 ms later, for another run")))))
+
+(deftest chase-reports-respect-explicit-stop-test
+  (testing "example 5: B playing; C's first On held across Stop"
+    (init! {C follower B circle})
+    (handle! {:event/type :grid/trigger-cell :col 1 :row 0})
+    (let [b (run-id B)
+          {rt1 :runtime ons :reports} (step (:runtime start) 70.0 (mtc-at 70))
+          k1 (chase-id rt1 C)]
+      (is (= [(on-report C 0 :none k1 {:restart nil :allowed? true})] ons)
+          "the start authority as timecode entered: the transport played")
+      (handle! {:event/type :transport/stop})
+      (is (= [false {B b} B] (transport)))
+      (let [{rt2 :runtime retry :reports} (step rt1 330.0 (mtc-at 330))]
+        (is (= ons retry) "its retry, past 250 ms, is the same report")
+        (deliver! rt2 (concat ons retry))
+        (is (= [false {B b C nil} C] (transport)) "C is held, as B is: the gate stays closed")
+        (is (= (marker k1) (intent C)))
+        (testing "; timecode running on past the retry interval reopens nothing"
+          (let [{rt3 :runtime r3 :reports} (step rt2 600.0 (running 3606.0))
+                {rt4 :runtime r4 :reports} (step rt3 900.0 (running 3606.3))]
+            (is (= [] r3 r4))
+            (is (= k1 (chase-id rt4 C)))
+            (testing "; a revision of C's cue rebinds its held marker, and the gate stays closed"
+              (handle! {:event/type :timeline/apply-op :col 2 :row 0 :op {:op :set-tempo :bpm 100.0}})
+              (let [{rt5 :runtime r5 :reports} (step rt4 950.0 (running 3606.35))
+                    k2 (chase-id rt5 C)]
+                (is (= [(on-report C (version C) [:chase k1] k2 {:restart (restart-id) :allowed? false})] r5)
+                    "authority frozen at its entry: Stop held B")
+                (deliver! rt5 r5)
+                (is (= (marker k2) (intent C)))
+                (is (= [false {B b C nil} C] (transport)))
+                (testing "; timecode stops: its Off, twice, takes C out and leaves B held"
+                  (let [{rt6 :runtime offs :reports} (step rt5 1500.0 stopped)]
+                    (is (= [(off-report C (version C) [:chase k2])] offs))
+                    (deliver! rt6 (concat offs offs))
+                    (is (= [false {B b} B] (transport)))
+                    (handle! {:event/type :transport/play})
+                    (is (= [true {B b} B] (transport)))
+                    (is (= [B] (map :cell (show-time/active-runs (state/get-raw-state) (run-at rt6 1516.0))))
+                        "Play: exactly B"))))))))))
+  (testing "the last cue: held, retired, then an empty Play"
+    (init! {C follower})
+    (let [{rt1 :runtime ons :reports} (step (:runtime start) 70.0 (mtc-at 70))]
+      (deliver! rt1 ons)
+      (is (= [true {C nil} C] (transport)) "timecode entering an idle transport plays")
+      (handle! {:event/type :transport/stop})
+      (is (= [false {C nil} C] (transport)))
+      (let [{rt2 :runtime offs :reports} (step rt1 670.0 (mtc-at 670))]
+        (deliver! rt2 offs)
+        (is (= [false {} nil] (transport)) "its removal, the last")
+        (handle! {:event/type :transport/play})
+        (is (= [true {} nil] (transport)) "Play opens the empty transport")
+        (deliver! rt2 offs)
+        (is (= [true {} nil] (transport)) "a stale Off leaves that open gate alone")
+        (testing "; Stop again, then timecode again: a fresh entry from idle plays"
+          (handle! {:event/type :transport/stop})
+          (let [{rt3 :runtime ons' :reports} (step rt2 1000.0 (running 3610.0))]
+            (is (= {:restart (restart-id) :allowed? true} (:start (first ons'))))
+            (deliver! rt3 ons')
+            (is (= [true {C nil} C] (transport)))))))))
+
+(deftest stop-outlasts-an-old-end-and-a-chase-cleanup-test
+  (testing "00-overview's 03 → 15 check: after Stop with two intents, an end from before it and a matching
+            chase cleanup open nothing, and a newer run at the cleaned cell outlasts both"
+    (init! {[0 0] short-timeline C follower})
+    (handle! {:event/type :timeline/play :col 0 :row 0 :from 0.2})
+    (let [a [0 0]
+          r (run-id a)
+          {rt1 :runtime ons :reports} (step (:runtime start) 0.0 (running 3605.55))
+          k1 (chase-id rt1 C)]
+      (deliver! rt1 ons)
+      (let [{rt2 :runtime ends :reports} (step rt1 50.0 (running 3605.6))]
+        (is (= [true {a r C nil} C] (transport)) "two intents")
+        (is (= [(ended a r nil nil)] ends) "A's end, seen before Stop")
+        (handle! {:event/type :transport/stop})
+        (run! handle! ends)
+        (is (= [false {a r C nil} C] (transport)) "the earlier completion: both held")
+        (let [{rt3 :runtime cleanup :reports} (step rt2 60.0 stopped)]
+          (is (= [(off-report C 0 [:chase k1])] cleanup) "timecode stopped: C's cleanup")
+          (deliver! rt3 cleanup)
+          (is (= [false {a r} a] (transport)) "the matching cleanup takes C out, and A stays held")
+          (testing "; a newer run at C (Follow off, Play) outlasts both, delivered again"
+            (follow! C false)
+            (handle! {:event/type :timeline/play :col 2 :row 0})
+            (let [r2 (run-id C)
+                  playback (:playback (state/get-raw-state))]
+              (is (= [true {a r C r2} C] (transport)) "Play is what plays")
+              (deliver! rt3 (concat ends cleanup))
+              (is (= playback (:playback (state/get-raw-state)))))))))))

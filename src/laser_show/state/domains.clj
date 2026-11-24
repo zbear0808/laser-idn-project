@@ -64,7 +64,7 @@
    - where each cue is never reaches app state: views draw it from the show
      clock's newest tick (show-time/latest)"
   {:playing? {:default false
-              :doc "The transport: whether the cues in play are drawn, not whether there are any. Play sets it, with no cue in play too; Stop clears it and keeps the cues' intents, held until Play; starting a cue sets it; removing the last intent clears it, removing another leaves it as it is (cue-timing/deactivate-cue)"}
+              :doc "The transport: whether the cues in play are drawn, not whether there are any. Play sets it, with no cue in play too; Stop clears it and keeps the cues' intents, held until Play; starting a cue sets it, and so does timecode taking a cell over while nothing held it closed (handlers/timing.clj install-chase); removing the last intent clears it, removing another leaves it as it is (cue-timing/deactivate-cue)"}
    :active-cue {:default nil
                 :doc "Currently active cue data (legacy, may remove)"}
    :cue-queue {:default []
@@ -76,10 +76,14 @@
                        {:run uuid :timeline? bool :start-beat double
                         :paused? bool :seek {:id uuid :beat double}
                         :decay-beats double :hold? bool}
-                       or {:chasing? true :timeline? true} for a timeline
-                       following MIDI timecode. The show clock starts, moves
-                       and drops runs to match (show-time/step); a run with
-                       :decay-beats ends after them once :hold? is false."}
+                       or {:chasing? true :timeline? true :chase-id k} for a
+                       timeline following MIDI timecode, k the show clock's
+                       episode it was installed for (show-time :chase-id).
+                       The show clock starts, moves and drops runs to match
+                       (show-time/step); a run with :decay-beats ends after
+                       them once :hold? is false."}
+   :chase-sources {:default {:next 1 :cells {}}
+                   :doc "{:next n :cells {[col row] version}}: which version of each cue that follows timecode the show clock may chase (timeline.playback/source-version). The edit that makes or changes a follower gives it the next version, one that removes it or stops it following drops its entry (events.handlers.timeline/reconcile-chase-sources, on every changed cue, undo and redo too); :next never goes back. A new show's followers are 0. Session only: not saved, undone or compared for unsaved changes"}
    :requests {:default {}
               :doc "{:restart {:id} :align {:id} :shift {:id :offset}}: the show clock applies each id once (Stop and Retrigger, tap tempo, Link)"}
    :pulses {:default {}

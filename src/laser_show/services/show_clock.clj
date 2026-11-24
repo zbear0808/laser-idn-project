@@ -270,7 +270,8 @@
         before @show-time/!runtime
         t0 (or (:t0-ns before) now-ns)
         now-ms (/ (- (long now-ns) (long t0)) 1e6)
-        {:keys [runtime reports]} (show-time/step before state mtc-pos now-ms)
+        ;; The origin from the first tick on: it names a timecode episode
+        {:keys [runtime reports]} (show-time/step (assoc before :t0-ns t0) state mtc-pos now-ms)
         pulses (show-time/pulse-view runtime)
         beats (show-time/global-beats runtime)
         ;; The Map cycle's pick (zones plan Z5), then the map in use at this
@@ -282,7 +283,7 @@
         ;; What the zone stage reads (zones plan Z5): the routing's rig, the
         ;; pattern pads' style at this tick's beats
         zone-ctx (frame-service/zone-ctx routing (zone-patterns/live-style state beats))
-        runtime (assoc runtime :t0-ns t0 :routing-cache routing-cache)
+        runtime (assoc runtime :routing-cache routing-cache)
         _ (reset! show-time/!runtime runtime)
         playing? (boolean (get-in state [:playback :playing?]))
         {:keys [cues] :as rendered} (render state input-values (:global runtime)

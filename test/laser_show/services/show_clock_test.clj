@@ -15,6 +15,7 @@
             [laser-show.events.core :as events]
             [laser-show.events.handlers.input :as input-handlers]
             [laser-show.events.handlers.input-mapper :as mapper]
+            [laser-show.events.handlers.menu :as menu]
             [laser-show.events.handlers.projector :as projector-handlers]
             [laser-show.events.handlers.timing :as timing]
             [laser-show.idn.fake-dac :as dac]
@@ -1111,3 +1112,79 @@
                                  :target {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]}
                                  :row :zone/b :step 0})
           (is (= #{[:zone/a :zone/b]} (drawn-keys (show-clock/tick! (+ n4 16666667))))))))))
+
+
+;; Reactivity plan 15: a timecode report of the show that was open changes
+;; nothing in the next one, which reports its own (§7 example 4, §8)
+
+(deftest new-show-rejects-old-chase-reports-test
+  (let [c [2 0]
+        follower {:editor-type :timeline
+                  :tracks [{:id :t :type :track}]
+                  :items [{:id :a :type :preset :preset-id :circle :track-id :t :enabled? true :effects []
+                           :timeline/start 0.0 :timeline/duration 16.0}]
+                  :timeline/chase :mtc :timeline/tc-start 3600.0 :timeline/tempo-bpm 120.0 :timeline/length 64.0}
+        file "/no-such-folder/show.zip"
+        sent (atom [])
+        tick-at! (fn [ms seconds]
+                   (reset! sent [])
+                   (with-redefs [mtc/current (constantly (if seconds
+                                                           {:state :running :seconds seconds :fps 25}
+                                                           {:state :stopped :seconds nil :fps nil}))
+                                 events/dispatch! #(swap! sent conj %)]
+                     (show-clock/tick! (* ms 1000000))))
+        chases #(filterv (comp #{:show-clock/chase} :event/type) @sent)
+        now #(state/get-raw-state)
+        doc #(get-in (now) [:project :document-id])
+        marker (fn [report] {:chasing? true :timeline? true :chase-id (:chase-id report)})
+        unchanged-by? (fn [reports]
+                        (every? (fn [report]
+                                  (let [before (now)]
+                                    (events/event-handler report)
+                                    (identical? before (now))))
+                                reports))]
+    (init! {c follower})
+    (state/swap-state! #(-> % persistent/begin-document (assoc-in [:project :current-file] file) history/mark-clean))
+    (let [d1 (doc)
+          saved (persistent/project-files (now))
+          _ (tick-at! 0 3605.55)
+          [on1 :as ons] (chases)]
+      (is (= [d1 0 :none] ((juxt :document-id :source-version :expected-owner) on1)))
+      (run! events/event-handler ons)
+      (is (= (marker on1) (get-in (now) [:playback :active-cues c])) "the clock's own runtime confirms its On")
+      (tick-at! 100 nil)
+      (let [[off1] (chases)
+            _ (tick-at! 200 3605.75)
+            [on2] (chases)
+            held [off1 on2]]
+        (is (= [false [:chase (:chase-id on1)]] ((juxt :active? :expected-owner) off1)) "timecode stopped: its Off, held")
+        (is (= [true [:chase (:chase-id on1)]] ((juxt :active? :expected-owner) on2)) "and came back: another episode's On, held")
+        (testing "File > New: the old show's reports change nothing, and its starter cue at C, an ordinary one, isn't chased"
+          (events/event-handler {:event/type :file/new-project :force? true})
+          (is (not= d1 (doc)))
+          (is (unchanged-by? held))
+          (let [s (tick-at! 210 3605.77)]
+            (is (= [[] nil] [(:cues s) (get (:positions s) c)]))
+            (is (= [] (chases)))))
+        (testing "File > Open of the same file, with the same cue at the same cell"
+          (with-redefs [persistent/read-project (fn [path] (when (= file path) saved))]
+            (events/event-handler (assoc (get-in (menu/handle {:event/type :file/open :state (now)})
+                                                 [:fx/show-file-chooser :on-result])
+                                         :file-path file)))
+          (let [d3 (doc)]
+            (is (= file (get-in (now) [:project :current-file])) "it opened")
+            (is (not-any? #{d3} [nil d1]))
+            (is (= (get-in saved ["content.edn" :chains :cue-chains c]) (get-in (now) [:chains :cue-chains c])))
+            (is (unchanged-by? held) "even the old show's On for that cue changes nothing")
+            (let [s (tick-at! 220 3605.79)
+                  [on3 :as ons3] (chases)]
+              (is (= [] (:cues s)) "a show opens stopped")
+              (is (close? 11.58 (get (:positions s) c)) "its own episode, at the timecode")
+              (is (= [d3 0 :none {:restart nil :allowed? true}]
+                     ((juxt :document-id :source-version :expected-owner :start) on3))
+                  "its own On, at once: 20 ms after the old show's, another report")
+              (is (= d3 (first (:chase-id on3))))
+              (run! events/event-handler ons3)
+              (is (= (marker on3) (get-in (now) [:playback :active-cues c])))
+              (is (true? (get-in (now) [:playback :playing?])))
+              (is (= [c] (map :cell (:cues (tick-at! 240 3605.81))))))))))))

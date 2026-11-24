@@ -14,6 +14,7 @@
    Events dispatched by triggers (:source-trigger set) are always skipped."
   (:require [clojure.tools.logging :as log]
             [clojure.string :as str]
+            [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.events.safety-guard :as guard]
             [laser-show.state.history :as history]))
 
@@ -63,13 +64,15 @@
    :selected-cell (get-in state [:grid :selected-cell])})
 
 (defn- prune-active-cues
-  "Drop active cues whose cue cell no longer exists."
+  "Stop the cues whose cell has no cue now (the restore took it away), as
+   any cue stops (cue-timing/deactivate-cue): the last one stops the
+   transport, others leave it as it is."
   [state]
   (let [cue-chains (get-in state [:chains :cue-chains] {})
-        active (get-in state [:playback :active-cues])]
-    (if (and (map? active) (some #(not (contains? cue-chains %)) (keys active)))
-      (assoc-in state [:playback :active-cues]
-                (into {} (filter (fn [[k _]] (contains? cue-chains k))) active))
+        active (get-in state [:playback :active-cues])
+        gone (when (map? active) (remove #(contains? cue-chains %) (keys active)))]
+    (if (seq gone)
+      (update state :playback #(reduce cue-timing/deactivate-cue % gone))
       state)))
 
 (defn- apply-restore
