@@ -94,7 +94,7 @@
   (let [modes [:direct :nested :injected]]
     (testing "100 renders of the parent, an 8-entry LRU: the caches the newest one leads to when the child's description has the parent's context, at its top or nested, or none"
       (is (= [101 101 1] (mapv #(:reachable (parent-child % 100 8)) modes))))
-    (testing "20 renders on the app's 512 entries"
+    (testing "20 renders on a 512-entry LRU"
       (let [runs (mapv #(parent-child % 20 512) modes)]
         (testing ": a child given its parent's context renders with each parent render"
           (is (= [21 21 1] (mapv #(get-in % [:calls 1]) runs))))

@@ -341,26 +341,32 @@
       (ui/wait-for! #(not= [1 1] (counts)))
       (is (= [1 0] (counts)) "B's item went, A's stayed"))))
 
+(def ^:private caches
+  "The app's cache, which keeps a Grid render and an editor's (reactivity
+   plan 36), and one that keeps every render."
+  [["the app's cache" state/cache-factory]
+   ["a cache that keeps every render" cache/basic-cache-factory]])
+
 (deftest list-keys-work-after-the-editor-reopens-test
   ;; Closing the window took the list's props, which only the list's render
   ;; put back, and reopening it on the same cell can reuse that render from
-  ;; the cache: its keys did nothing. The app's cache has dropped it by then
-  ;; (a Grid render outgrows it, reactivity plan 36); one that keeps
-  ;; everything keeps it
-  (with-redefs [state/cache-factory cache/basic-cache-factory]
-    (app/start-test!))
-  (ui/sync-fx!)
-  (let [robot (ui/robot)]
-    (effect-cells! {[0 0] [(effect :scale)]})
-    (show-effects-cell! 0 0)
-    (ui/wait-for! #(seq (list-selection [:effect-chain 0 0])))
-    (events/dispatch! {:event/type :ui/close-dialog :dialog-id :effect-chain-editor})
-    (ui/wait-for! #(nil? (ui/query (effects-list 0 0))))
-    (show-effects-cell! 0 0)
-    (ui/focus! robot (effects-list 0 0))
-    (push! robot KeyCode/DELETE)
-    (ui/wait-for! #(empty? (cell-effects 0 0)))
-    (is (empty? (cell-effects 0 0)))))
+  ;; the cache: its keys did nothing. Both caches keep that render now
+  (doseq [[label factory] caches]
+    (testing label
+      (with-redefs [state/cache-factory factory]
+        (app/start-test!))
+      (ui/sync-fx!)
+      (let [robot (ui/robot)]
+        (effect-cells! {[0 0] [(effect :scale)]})
+        (show-effects-cell! 0 0)
+        (ui/wait-for! #(seq (list-selection [:effect-chain 0 0])))
+        (events/dispatch! {:event/type :ui/close-dialog :dialog-id :effect-chain-editor})
+        (ui/wait-for! #(nil? (ui/query (effects-list 0 0))))
+        (show-effects-cell! 0 0)
+        (ui/focus! robot (effects-list 0 0))
+        (push! robot KeyCode/DELETE)
+        (ui/wait-for! #(empty? (cell-effects 0 0)))
+        (is (empty? (cell-effects 0 0)))))))
 
 (deftest select-all-and-ranges-act-on-the-cell-the-editor-shows-test
   (let [robot (ui/robot)
@@ -521,50 +527,52 @@
 
 (deftest a-reopened-list-keeps-its-rows-and-deletes-in-its-cell-test
   ;; Plans 04, 33 and 34 together (overview: "04/33/34 list -> 36 cache"):
-  ;; Delete after the Effects editor showed another cell and reopened, with a
-  ;; cache that keeps every render, then an edit to another cell while it
-  ;; stays open. Its commands still act on the cell it shows, and it renders
-  ;; nothing for the other cell's edit: no body of the editor or its list
-  ;; runs, and its rows keep their nodes (no remount)
-  (let [ran (atom [])
-        call-context-fn @#'lifecycle/call-context-fn
-        editor-body? (fn [t]
-                       (let [n (.getName (class t))]
-                         (or (str/starts-with? n "laser_show.views.components.list$")
-                             (str/starts-with? n "laser_show.views.dialogs.effect_chain_editor$"))))]
-    (with-redefs-fn {#'lifecycle/call-context-fn (fn [context desc]
-                                                   (swap! ran conj (:fx/type desc))
-                                                   (call-context-fn context desc))
-                     #'state/cache-factory cache/basic-cache-factory}
-      (fn []
-        (app/start-test!)
-        (ui/sync-fx!)
-        (let [robot (ui/robot)
-              [a b] [(effect :scale) (effect :intensity)]]
-          (effect-cells! {[0 0] [a b] [1 0] [(effect :rotation)] [2 0] [(effect :hue-shift)]})
-          (show-effects-cell! 0 0)
-          (show-effects-cell! 1 0)
-          (events/dispatch! {:event/type :ui/close-dialog :dialog-id :effect-chain-editor})
-          (ui/wait-for! #(nil? (ui/query (effects-list 1 0))))
-          (show-effects-cell! 0 0)
-          (ui/wait-for! #(= ["Scale" "Intensity"] (shown-names)))
-          (testing "Delete after the editor showed [1 0] and reopened on [0 0]"
-            (ui/click-node! robot ((effect-rows) "Scale"))
-            (ui/wait-for! #(= #{(:id a)} (list-selection [:effect-chain 0 0])))
-            (push! robot KeyCode/DELETE)
-            (ui/wait-for! #(= [(:id b)] (cell-ids)))
-            (is (= 1 (count (cell-effects 1 0)))))
-          (let [row ((effect-rows) "Intensity")]
-            (reset! ran [])
-            (events/dispatch! {:event/type :effects/toggle-cell :col 2 :row 0})
-            (ui/wait-for! #(true? (get-in (state/get-raw-state) [:chains :effect-chains [2 0] :active?])))
+  ;; Delete after the Effects editor showed another cell and reopened, with
+  ;; the app's cache and with one that keeps every render, then an edit to
+  ;; another cell while it stays open. Its commands still act on the cell it
+  ;; shows, and it renders nothing for the other cell's edit: no body of the
+  ;; editor or its list runs, and its rows keep their nodes (no remount)
+  (doseq [[label factory] caches]
+    (testing label
+      (let [ran (atom [])
+            call-context-fn @#'lifecycle/call-context-fn
+            editor-body? (fn [t]
+                           (let [n (.getName (class t))]
+                             (or (str/starts-with? n "laser_show.views.components.list$")
+                                 (str/starts-with? n "laser_show.views.dialogs.effect_chain_editor$"))))]
+        (with-redefs-fn {#'lifecycle/call-context-fn (fn [context desc]
+                                                       (swap! ran conj (:fx/type desc))
+                                                       (call-context-fn context desc))
+                         #'state/cache-factory factory}
+          (fn []
+            (app/start-test!)
             (ui/sync-fx!)
-            (testing "another cell's edit: no body of the editor or its list runs, and the row keeps its node"
-              (is (= [] (filterv editor-body? @ran)))
-              (is (identical? row ((effect-rows) "Intensity"))))
-            (testing "Delete still deletes in the cell it shows"
-              (ui/click-node! robot row)
-              (ui/wait-for! #(= #{(:id b)} (list-selection [:effect-chain 0 0])))
-              (push! robot KeyCode/DELETE)
-              (ui/wait-for! #(empty? (cell-effects 0 0)))
-              (is (= 1 (count (cell-effects 1 0))) "[1 0] as it was"))))))))
+            (let [robot (ui/robot)
+                  [a b] [(effect :scale) (effect :intensity)]]
+              (effect-cells! {[0 0] [a b] [1 0] [(effect :rotation)] [2 0] [(effect :hue-shift)]})
+              (show-effects-cell! 0 0)
+              (show-effects-cell! 1 0)
+              (events/dispatch! {:event/type :ui/close-dialog :dialog-id :effect-chain-editor})
+              (ui/wait-for! #(nil? (ui/query (effects-list 1 0))))
+              (show-effects-cell! 0 0)
+              (ui/wait-for! #(= ["Scale" "Intensity"] (shown-names)))
+              (testing "Delete after the editor showed [1 0] and reopened on [0 0]"
+                (ui/click-node! robot ((effect-rows) "Scale"))
+                (ui/wait-for! #(= #{(:id a)} (list-selection [:effect-chain 0 0])))
+                (push! robot KeyCode/DELETE)
+                (ui/wait-for! #(= [(:id b)] (cell-ids)))
+                (is (= 1 (count (cell-effects 1 0)))))
+              (let [row ((effect-rows) "Intensity")]
+                (reset! ran [])
+                (events/dispatch! {:event/type :effects/toggle-cell :col 2 :row 0})
+                (ui/wait-for! #(true? (get-in (state/get-raw-state) [:chains :effect-chains [2 0] :active?])))
+                (ui/sync-fx!)
+                (testing "another cell's edit: no body of the editor or its list runs, and the row keeps its node"
+                  (is (= [] (filterv editor-body? @ran)))
+                  (is (identical? row ((effect-rows) "Intensity"))))
+                (testing "Delete still deletes in the cell it shows"
+                  (ui/click-node! robot row)
+                  (ui/wait-for! #(= #{(:id b)} (list-selection [:effect-chain 0 0])))
+                  (push! robot KeyCode/DELETE)
+                  (ui/wait-for! #(empty? (cell-effects 0 0)))
+                  (is (= 1 (count (cell-effects 1 0))) "[1 0] as it was"))))))))))
