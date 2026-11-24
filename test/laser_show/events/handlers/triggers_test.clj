@@ -81,9 +81,13 @@
   [state input-event]
   (let [{s :state dispatch :dispatch} (triggers/handle {:event/type :trigger/input :state state
                                                         :input-event input-event :time 1})]
-    (if dispatch (:state (handlers/handle-event (assoc dispatch :state s))) s)))
+    (cond dispatch (:state (handlers/handle-event (assoc dispatch :state s)))
+          s s
+          :else state)))
 
-(defn- note [type] {:type type :source :midi :channel 0 :note 60 :timestamp 1})
+(defn- note
+  ([type] (note type 60))
+  ([type n] {:type type :source :midi :channel 0 :note n :timestamp 1}))
 
 (defn- grid-outcome
   "What the grid and playback show of state, without the input bookkeeping;
@@ -190,13 +194,19 @@
         (is (= :grid/activate-cell (get-in (input draft :note-on) [:dispatch :event/type])))
         (is (= (grid-outcome draft) (grid-outcome (routed draft (note :note-on)))))))
     (testing "held twice, emptied, let go twice: a release ends the intent that is there (plan 10 §7.5)"
+      ;; Two keys on the cell: a held key's own repeat plays nothing (plan 26),
+      ;; so the second momentary press comes from another key
       (let [run #(get-in % [:playback :active-cues [0 0] :run])
-            s1 (routed (assoc-in state [:chains :cue-chains [0 0] :trigger-mode] :toggle) (note :note-on))
-            s2 (routed s1 (note :note-on))
+            two-keys (-> state
+                         (assoc-in [:chains :cue-chains [0 0] :trigger-mode] :toggle)
+                         (assoc-in [:config :input :trigger-map (assoc note-key :note 61)]
+                                   {:type :trigger-cue :target [0 0] :behavior :momentary}))
+            s1 (routed two-keys (note :note-on))
+            s2 (routed s1 (note :note-on 61))
             emptied (:state (handlers/handle-event {:event/type :chain/set-items :domain :cue-chains
                                                     :entity-key [0 0] :items [] :state s2}))
             let-go (routed emptied (note :note-off))
-            let-go-again (routed let-go (note :note-off))]
+            let-go-again (routed let-go (note :note-off 61))]
         (is (every? uuid? [(run s1) (run s2)]))
         (is (not= (run s1) (run s2)) "a momentary press starts it again, whatever its :toggle says")
         (is (= [{:id 1} {:id 2}] (map #(get-in % [:playback :pulses :cue]) [s1 s2])))
@@ -422,7 +432,7 @@
   [input-event]
   {:event/type :trigger/input :input-event input-event :time (:timestamp input-event)})
 
-(defn- note
+(defn- midi-note
   "MIDI note n on channel 1 (0 inside) at velocity, as the device delivers
    it (midi-clj's message through midi/midi-msg->event): velocity 0 is a
    note-off."
@@ -448,9 +458,9 @@
 (defn- activations [s] (get-in s [:trigger-runtime :activations]))
 
 (deftest midi-release-after-its-binding-is-cleared-ends-what-it-played-test
-  (let [pressed (played (world {note-60 a1}) (note 60 100))
+  (let [pressed (played (world {note-60 a1}) (midi-note 60 100))
         cleared (played pressed {:event/type :input/remove-trigger :trigger-key note-60})
-        released (played cleared (note 60 0))]
+        released (played cleared (midi-note 60 0))]
     (is (some? (playing pressed [0 0])))
     (is (= {note-60 a1} (activations pressed)) "the press keeps what it played, by the key")
     (is (empty? (get-in cleared [:config :input :trigger-map])))
@@ -461,14 +471,14 @@
 (deftest midi-release-after-rebinding-ends-the-original-not-the-new-binding-test
   (let [s0 (played (world {note-60 a1}) {:event/type :grid/activate-cell :col 1 :row 0})
         b1-run (playing s0 [1 0])
-        pressed (played s0 (note 60 100))
-        released (played (assoc-in pressed [:config :input :trigger-map note-60] b1) (note 60 0))]
+        pressed (played s0 (midi-note 60 100))
+        released (played (assoc-in pressed [:config :input :trigger-map note-60] b1) (midi-note 60 0))]
     (is (some? b1-run) "B1 plays, from a click")
     (is (some? (playing pressed [0 0])))
     (is (nil? (playing released [0 0])) "A1, which the press played, lets go")
     (is (= b1-run (playing released [1 0])) "B1, the note's binding now, plays on")
     (testing "the next press plays the new binding"
-      (let [again (played released (note 60 100))]
+      (let [again (played released (midi-note 60 100))]
         (is (not= b1-run (playing again [1 0])) "B1 started again")
         (is (= {note-60 b1} (activations again)))))))
 
@@ -503,10 +513,10 @@
         (is (empty? (activations off)))))))
 
 (deftest a-repeated-press-while-held-keeps-the-first-activation-test
-  (let [pressed (played (world {note-60 a1}) (note 60 100))
+  (let [pressed (played (world {note-60 a1}) (midi-note 60 100))
         a1-run (playing pressed [0 0])
-        again (played (assoc-in pressed [:config :input :trigger-map note-60] b1) (note 60 100))
-        released (played again (note 60 0))]
+        again (played (assoc-in pressed [:config :input :trigger-map note-60] b1) (midi-note 60 100))
+        released (played again (midi-note 60 0))]
     (is (= a1-run (playing again [0 0])) "a second note-on, no note-off between, starts A1 again no more")
     (is (nil? (playing again [1 0])) "nor plays the new binding")
     (is (= {note-60 a1} (activations again)) "one activation, the first press's")
@@ -540,7 +550,7 @@
                              push {:type :trigger-effect :target [1 3] :behavior :momentary} ; OSC: B4 while held
                              h b1                                         ; keyboard: B1 while held
                              j {:type :vibe :role :accent}})              ; keyboard: ACCENT
-                     (note 60 100) (note 36 100) (note 62 100) (osc-button "/1/push1" 1.0)
+                     (midi-note 60 100) (midi-note 36 100) (midi-note 62 100) (osc-button "/1/push1" 1.0)
                      (keyboard :h :pressed) (keyboard :j :pressed))
         midi-gone? (fn [s]
                      (is (nil? (playing s [0 0])) "A1 lets go, as its note-off would have")
@@ -560,7 +570,7 @@
         (testing "and a note-off that comes later ends nothing, whatever the note is bound to now"
           (let [later (played (assoc-in s [:config :input :trigger-map note-60] {:type :trigger-cue :target [5 0] :behavior :momentary})
                               {:event/type :grid/activate-cell :col 5 :row 0}
-                              (note 60 0) (note 36 0))]
+                              (midi-note 60 0) (midi-note 36 0))]
             (is (some? (playing later [5 0])))
             (is (= :input (held-role later :accent)))))))
     (testing "an earlier disconnect's answer, superseded: nothing lets go"
@@ -578,7 +588,7 @@
           (is (= [:input :input] [(held-role s :hit) (held-role s :accent)]))
           (is (= #{note-60 hit-key toggle-key h j} (set (keys (activations s))))))))
     (testing "nothing of the source held: no commit"
-      (let [none (played (world {}) (note 60 100))]
+      (let [none (played (world {}) (midi-note 60 100))]
         (is (= {} (events/handle-event-pipeline {:event/type :trigger/retire :source :osc :state none :time 0})))))))
 
 (deftest new-or-open-retires-every-hold-test
@@ -586,7 +596,7 @@
                   push {:type :trigger-effect :target [1 3] :behavior :momentary}
                   {:source :gamepad :id [0 :a]} {:type :vibe :role :hit}
                   {:source :keyboard :id :h} b1}
-        held (played (world bindings) (note 60 100) (osc-button "/1/push1" 1.0) (pad-button :a true) (keyboard :h :pressed))
+        held (played (world bindings) (midi-note 60 100) (osc-button "/1/push1" 1.0) (pad-button :a true) (keyboard :h :pressed))
         files (persistent/project-files held)]
     (is (= 4 (count (activations held))))
     (doseq [[label next-show] [["New" (persistent/new-project-state held)]
@@ -601,6 +611,6 @@
                           {:event/type :grid/activate-cell :col 1 :row 0}
                           {:event/type :effects/toggle-cell :col 2 :row 3})
                 s (played (merge s (select-keys next-show [:trigger-runtime]))
-                          (note 60 0) (osc-button "/1/push1" 0.0) (pad-button :a false) (keyboard :h :released))]
+                          (midi-note 60 0) (osc-button "/1/push1" 0.0) (pad-button :a false) (keyboard :h :released))]
             (is (some? (playing s [1 0])) "B1 plays on")
             (is (effect-on? s [2 3]) "C4 stays on")))))))
