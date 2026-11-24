@@ -15,6 +15,9 @@
    - A projector can be removed (:projectors/remove, after a confirm); a later
      scan finds the device again, turned off, with default calibration
    - The card menu can enable every output on one device
+   - Each Scan has an id its result brings back: only the result of the
+     scan in progress counts, so an earlier or a stopped app's scan that
+     answers later changes nothing
    
    This file handles:
    - Output device discovery (scan, auto-create projectors)
@@ -125,12 +128,29 @@
 
 
 (defn- handle-projectors-scan-network
-  "Start a scan (Scan): IDN's discovery and every output driver's
-   :discover (the :projectors/scan effect)."
+  "Start a scan (Scan, and the one at start-up): IDN's discovery and every
+   output driver's :discover (the :projectors/scan effect). It is a new
+   scan, with an id of its own ([:projector-ui :scan-id]) that its result
+   brings back (current-scan?), so an earlier scan's that comes later
+   changes nothing."
   [{:keys [state]}]
-  (let [broadcast-addr (get-in state [:projector-ui :broadcast-address] "255.255.255.255")]
-    {:state (assoc-in state [:projector-ui :scanning?] true)
-     :projectors/scan {:broadcast-address broadcast-addr}}))
+  (let [broadcast-addr (get-in state [:projector-ui :broadcast-address] "255.255.255.255")
+        scan-id (random-uuid)]
+    {:state (update state :projector-ui assoc :scanning? true :scan-id scan-id)
+     :projectors/scan {:broadcast-address broadcast-addr :scan-id scan-id}}))
+
+(defn- current-scan?
+  "Is event (:projectors/scan-complete or -failed) the result of the scan
+   in progress, by its :scan-id? Once a result is in, the scan is over: the
+   same result again, or an earlier scan's, isn't. A result without an id
+   (made by hand, as tests do) is only taken while no scan with one runs."
+  [state event]
+  (= (:scan-id event) (get-in state [:projector-ui :scan-id])))
+
+(defn- scan-over
+  "state with no scan in progress: Scan is back."
+  [state]
+  (update state :projector-ui assoc :scanning? false :scan-id nil))
 
 
 (defn- descriptor-of
@@ -227,32 +247,40 @@
    
    Discovery isn't a user edit: all of it is backfilled into undo history and
    the saved baseline, so it is never undone and never counts as an unsaved
-   change."
-  [{:keys [devices warnings state]}]
-  (let [{:keys [moves upgrades new notices]} (rig/match-discovered (:projectors state) devices)
-        new-projectors (into {} (map (fn [output] [(:id output) (discovered-projector state output)])) new)
-        new-effects (into {} (map (fn [id] [id {:items (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS)}]))
-                          (keys new-projectors))
-        found (found-in-scan new-projectors new-effects moves upgrades)
-        new-state (-> (found state)
-                      (assoc-in [:projector-ui :scanning?] false)
-                      (assoc-in [:projector-ui :discovered-devices] (vec devices))
-                      (assoc-in [:rig-ui :scanned?] true))]
-    (cond-> (cond
-              (seq warnings) (h/show-notice new-state (str/join " " (conj (vec notices) (str/join "; " warnings))) :warning)
-              (seq notices) (h/show-notice new-state (str/join " " notices) :info)
-              :else {:state new-state})
-      (or (seq new-projectors) (seq moves) (seq upgrades))
-      (assoc :history/backfill found))))
+   change. The result of a scan that isn't the one in progress
+   (current-scan?) changes nothing ({})."
+  [{:keys [devices warnings state] :as event}]
+  (if-not (current-scan? state event)
+    (do (log/info "Ignoring the result of a scan that is over or was replaced")
+        {})
+    (let [{:keys [moves upgrades new notices]} (rig/match-discovered (:projectors state) devices)
+          new-projectors (into {} (map (fn [output] [(:id output) (discovered-projector state output)])) new)
+          new-effects (into {} (map (fn [id] [id {:items (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS)}]))
+                            (keys new-projectors))
+          found (found-in-scan new-projectors new-effects moves upgrades)
+          new-state (-> (found state)
+                        (scan-over)
+                        (assoc-in [:projector-ui :discovered-devices] (vec devices))
+                        (assoc-in [:rig-ui :scanned?] true))]
+      (cond-> (cond
+                (seq warnings) (h/show-notice new-state (str/join " " (conj (vec notices) (str/join "; " warnings))) :warning)
+                (seq notices) (h/show-notice new-state (str/join " " notices) :info)
+                :else {:state new-state})
+        (or (seq new-projectors) (seq moves) (seq upgrades))
+        (assoc :history/backfill found)))))
 
 
 (defn- handle-projectors-scan-failed
-  "Handle scan failure: Scan is back, and a notice says why."
-  [{:keys [error state]}]
-  (log/warn "Network scan failed:" error)
-  (h/show-notice (assoc-in state [:projector-ui :scanning?] false)
-                 (str "Could not scan the network" (when-not (str/blank? error) (str ": " error)))
-                 :error))
+  "Handle scan failure: Scan is back, and a notice says why. The failure of
+   a scan that isn't the one in progress (current-scan?) changes nothing."
+  [{:keys [error state] :as event}]
+  (if-not (current-scan? state event)
+    (do (log/info "Ignoring the failure of a scan that is over or was replaced:" error)
+        {})
+    (do (log/warn "Network scan failed:" error)
+        (h/show-notice (scan-over state)
+                       (str "Could not scan the network" (when-not (str/blank? error) (str ": " error)))
+                       :error))))
 
 
 ;; Enable one or all outputs of a device
