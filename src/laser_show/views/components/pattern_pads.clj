@@ -19,6 +19,7 @@
             [laser-show.animation.show-time :as show-time]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.subs :as subs]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.clock-view :as clock-view]
             [laser-show.views.components.trigger-bank :as trigger-bank]
             [laser-show.views.components.vibe-pads :as vibe-pads]
@@ -69,16 +70,20 @@
 
 (defn- pad-menu
   "A pad's menu: Switch on the bar (not STEP's: a press is at once), its
-   control."
+   control. Switch on the bar shows the pad's setting, after a refused
+   click too (applied-value)."
   [node-id pad {:keys [bar? learning? bindings]}]
   {:fx/type :context-menu
    :items (into (if (= :step pad)
                   []
-                  [{:fx/type :check-menu-item
-                    :id (str node-id "-bar")
-                    :text "Switch on the bar"
-                    :selected (boolean bar?)
-                    :on-action {:event/type :pattern-pads/set-pad-bar :pad pad :bar? (not bar?)}}
+                  [{:fx/type applied-value/applied-control
+                    :property :selected
+                    :address [:pattern-pad pad :bar?]
+                    :value bar?
+                    :on-change (fn [on?] {:event/type :pattern-pads/set-pad-bar :pad pad :bar? on?})
+                    :desc {:fx/type :check-menu-item
+                           :id (str node-id "-bar")
+                           :text "Switch on the bar"}}
                    {:fx/type :separator-menu-item}])
                 [{:fx/type :menu-item
                   :id (str node-id "-learn")

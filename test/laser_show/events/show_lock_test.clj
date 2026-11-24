@@ -61,6 +61,8 @@
    {:event/type :vibe/remove :vibe :vibe-1}
    {:event/type :vibe/toggle-cell :vibe :vibe-1 :slot :hit :cell [4 0]}
    {:event/type :vibe/set-option :vibe :vibe-1 :key :allow-audience? :value true}
+   ;; FLASH's Solo starts on in Shapes (state/templates.clj): off is refused too
+   {:event/type :vibe/set-option :vibe :vibe-1 :role :flash :key :solo? :value false}
    {:event/type :vibe/add}
    {:event/type :vibe/clear-control :role :hit}
    {:event/type :projectors/toggle-enabled :projector-id :p1}
@@ -75,6 +77,9 @@
    {:event/type :projectors/set-enabled :projector-id :p1 :enabled? false}
    {:event/type :projectors/set-exclude-from-all :projector-id :p1 :exclude? true}
    {:event/type :projectors/set-tag :projector-id :p1 :tag :crowd-scanning :on? true}
+   ;; and taking away a tag it has (locked-blocks-structure-edits-test's P1 is
+   ;; tagged Graphics)
+   {:event/type :projectors/set-tag :projector-id :p1 :tag :graphics :on? false}
    ;; A show's rig onto this one (zones plan ZR), from the show s0 opened
    {:event/type :rig/set-up-from-show}
    {:event/type :rig/import-new-lasers}
@@ -129,8 +134,10 @@
   (let [s0 (-> (starter)
                (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 36}] {:type :vibe :role :hit})
                (assoc-in [:ui :dialogs :rig-report] opened-show)
-               ;; a laser in Graphics, and a cue pinned to a laser that isn't here
+               ;; a laser in Graphics, tagged Graphics, and a cue pinned to a
+               ;; laser that isn't here
                (assoc-in [:projectors :p1 :zone-groups] [:graphics])
+               (assoc-in [:projectors :p1 :tags] #{:graphics})
                (assoc-in [:chains :cue-chains [7 3]] {:items [] :target :auto.laser/p9})
                (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 50}] {:type :zone-map :target :map/odd-even})
                ;; a pattern pad's key (zones plan Z5)
@@ -368,6 +375,39 @@
       (is (= (lock s0) (without-notices s)) "locked, the only change is the notice")
       (is (= {:text "Change Output Settings refused" :event :projectors/update-driver-config}
              (get-in s [:ui :show-lock-notice]))))))
+
+(deftest refused-rig-setter-is-not-a-no-op-test
+  ;; Reactivity plan 13: a setter the lock refuses changes nothing, not even
+  ;; where the same edit unlocked writes the rig file and refreshes the
+  ;; engines. The effects are only looked at, never run
+  (let [rig-path (.getPath (java.io.File. (System/getProperty "java.io.tmpdir") "refused-rig-setter-test/rig.edn"))
+        s0 (-> (starter)
+               (assoc-in [:backend :streaming :running?] true)
+               (assoc-in [:rig-file :path] rig-path)
+               (history/mark-clean))
+        off {:event/type :projectors/set-enabled :projector-id :p1 :enabled? false}
+        same {:event/type :projectors/set-enabled :projector-id :p1 :enabled? true}]
+    (testing "unlocked, On → Off writes the rig file and refreshes the engines"
+      (let [effects (handle s0 off)]
+        (is (false? (get-in effects [:state :projectors :p1 :enabled?])))
+        (is (= rig-path (get-in effects [:rig/write :path])))
+        (is (false? (get-in effects [:multi-engine/refresh :projectors :p1 :enabled?])))))
+    (testing "unlocked, the value it has: the same state, and neither"
+      (let [effects (handle s0 same)]
+        (is (= s0 (:state effects)))
+        (is (not-any? #(contains? effects %) [:rig/write :multi-engine/refresh]))))
+    (testing "locked, both are refused: the notices and the notice's timer, nothing else"
+      (doseq [event [off same]]
+        (testing (pr-str (:enabled? event))
+          (let [effects (handle (lock s0) event)
+                s (:state effects)]
+            (is (= #{:state :dispatch-later} (set (keys effects))))
+            (is (= :projectors/set-enabled (get-in s [:ui :show-lock-notice :event])))
+            (is (= (lock s0) (without-notices s))
+                "the whole state as it was: undo and redo, the unsaved flag, the rig file's requests")
+            (is (= (get-in s0 [:rig-file :requested]) (get-in s [:rig-file :requested])))
+            (is (empty? (get-in s [:history :undo-stack])))
+            (is (false? (get-in s [:project :dirty?])))))))))
 
 (deftest enable-device-is-refused-while-locked-test
   (let [s0 (-> (starter)

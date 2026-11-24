@@ -17,7 +17,7 @@
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.css PseudoClass]
            [javafx.scene Node]
-           [javafx.scene.control Control Labeled Menu MenuButton MenuItem]))
+           [javafx.scene.control CheckBox CheckMenuItem ComboBox Control Labeled Menu MenuButton MenuItem ToggleButton]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -473,3 +473,103 @@
       (push! javafx.scene.input.KeyCode/SHORTCUT javafx.scene.input.KeyCode/SHIFT javafx.scene.input.KeyCode/Z)
       (ui/wait-for! #(= [:zone/a :zone/b :zone/c] (zones))))
     (is (window-open?))))
+
+
+;; A refused edit (plans/2026-11-23-cljfx-reactivity/13): the controls show
+;; what applies
+
+(defn- notice-id [] (get-in (app-state) [:ui :notice :id]))
+
+(defn- attempt!
+  "(act!), then wait for the show lock's new refusal of an event of type."
+  [type act!]
+  (let [before (notice-id)]
+    (act!)
+    (ui/wait-for! #(and (some? (notice-id)) (not= before (notice-id))
+                        (= type (get-in (app-state) [:ui :show-lock-notice :event]))))))
+
+(defn- ticked
+  "Whether the check box or radio button selector finds is ticked, on the
+   FX thread; nil when there is none."
+  [selector]
+  (when-let [node (ui/query selector)]
+    (ui/on-fx-thread #(if (instance? CheckBox node)
+                        (.isSelected ^CheckBox node)
+                        (.isSelected ^ToggleButton node)))))
+
+(defn- bar-item-ticked
+  "Whether pad's Switch on the bar item (its own CheckMenuItem, not the
+   popup's) is ticked; nil when it has none."
+  [^Control pad]
+  (let [id (str (ui/on-fx-thread #(.getId pad)) "-bar")]
+    (ui/on-fx-thread #(when-let [^CheckMenuItem item (some (fn [^MenuItem i] (when (= id (.getId i)) i))
+                                                           (.getItems (.getContextMenu pad)))]
+                        (.isSelected item)))))
+
+(deftest locked-pattern-controls-and-pad-timing-show-applied-values-test
+  (let [robot (ui/robot)
+        param #(get-in (cue-pattern) [:params %])
+        cycle-rate #(get-in (app-state) [:chains :effect-chains cycle-cell :items 0 :params :rate])
+        refused-text #(get-in (app-state) [:ui :show-lock-notice :text])
+        undo-depth #(count (get-in (app-state) [:history :undo-stack]))]
+    (lasers! 3)
+    (events/write-state! #(-> %
+                              (assoc-in [:chains :cue-chains [0 0] :name] "Beams")
+                              (assoc-in [:chains :cue-chains [0 0] :zone-patterns]
+                                        [(assoc (zone-patterns/preset-instance :alternate :cue) :id pattern-id)])))
+    (cycle-on!)
+    (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
+    (ui/wait-for! window-open?)
+    (ui/wait-for! #(true? (ticked "#zone-pattern-source-auto")))
+    (events/dispatch! {:event/type :vibe/set-show-lock :locked? true})
+    (ui/wait-for! #(true? (get-in (app-state) [:ui :show-lock?])))
+    (let [depth (undo-depth)]
+      (testing "the cue's pattern window: Follows the pattern pads"
+        (is (true? (ticked "#zone-pattern-follow-pads")))
+        (attempt! :chain/update-param #(ui/click! robot "#zone-pattern-follow-pads"))
+        (is (= "Zone pattern edit refused" (refused-text)))
+        (is (true? (param :follow-pads?)))
+        (ui/wait-for! #(true? (ticked "#zone-pattern-follow-pads"))))
+      (testing "Moves: another choice is refused; the one chosen is kept and sends nothing"
+        (attempt! :chain/update-param #(ui/click! robot "#zone-pattern-source-picture"))
+        (is (= :auto (param :source)))
+        (ui/wait-for! #(false? (ticked "#zone-pattern-source-picture")))
+        (is (true? (ticked "#zone-pattern-source-auto")))
+        (let [before (notice-id)]
+          (ui/click! robot "#zone-pattern-source-auto")
+          (is (events/flush!))
+          (ui/wait-for! #(true? (ticked "#zone-pattern-source-auto")))
+          (is (= before (notice-id)) "no edit, so no notice")))
+      (events/dispatch! {:event/type :ui/close-dialog :dialog-id :zone-pattern-editor})
+      (ui/wait-for! #(not (window-open?)))
+      (testing "the Map cycle in an effects cell: Every"
+        (events/dispatch! {:event/type :effect-chain/open-editor :col (first cycle-cell) :row (second cycle-cell)})
+        (ui/wait-for! #(some? (ui/query "#map-cycle-every")))
+        (attempt! :chain/update-param #(ui/select! robot "#map-cycle-every" "0.5"))
+        (is (= "Zone pattern edit refused" (refused-text)))
+        (is (= 0.25 (cycle-rate)))
+        (ui/wait-for! #(= 0.25 (let [^ComboBox c (ui/query "#map-cycle-every")]
+                                 (ui/on-fx-thread (fn [] (.getValue c))))))
+        (events/dispatch! {:event/type :ui/close-dialog :dialog-id :effect-chain-editor})
+        (ui/wait-for! #(nil? (ui/query "#map-cycle-visual"))))
+      (testing "Switch on the bar, on a map pad, a pattern pad and CYCLE"
+        (ui/wait-for! #(ui/visible? "#pattern-chip-chase"))
+        (doseq [[pad type stored] [["#zone-map-chip-odd-even" :zone-map/set-pad-bar [:config :zone-map-pads :map/odd-even :bar?]]
+                                   ["#pattern-chip-chase" :pattern-pads/set-pad-bar [:config :pattern-pads :chase :bar?]]
+                                   ["#zone-map-chip-cycle" :zone-map/set-pad-bar [:config :zone-map-pads :cycle :bar?]]]]
+          (testing pad
+            (let [node (ui/query pad)]
+              (is (false? (bar-item-ticked node)))
+              (attempt! type #(do (ui/right-click-node! robot node)
+                                  (ui/click! robot (str pad "-bar"))))
+              (is (nil? (get-in (app-state) stored)))
+              (ui/wait-for! #(false? (bar-item-ticked node)))
+              (ui/right-click-node! robot node)
+              (ui/wait-for! #(some? (ui/query (str pad "-bar"))))
+              (is (false? (bar-item-ticked node)) "the item, its menu open again")
+              (ui/press! robot javafx.scene.input.KeyCode/ESCAPE)
+              (ui/wait-for! #(some? (ui/query pad)))))))
+      (is (= depth (undo-depth)) "no undo step"))
+    (testing "a pad's press is a performer's: it goes through"
+      (press! robot "#pattern-chip-chase")
+      (ui/wait-for! #(= :chase (pads-style))))))

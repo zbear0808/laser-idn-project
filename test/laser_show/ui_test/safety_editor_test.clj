@@ -162,3 +162,34 @@
   (testing "streaming, on: Identify can run"
     (events/write-state! assoc-in [:projectors :a :enabled?] true)
     (ui/wait-for! #(ui/enabled? "#projector-identify-button"))))
+
+(deftest locked-coordinate-allows-shrinking-and-restores-a-refused-widening-test
+  ;; plans/2026-11-23-cljfx-reactivity/13 §7: the show lock lets a zone get
+  ;; smaller and refuses a larger one; the field shows what is stored
+  (let [robot (ui/robot)
+        notice-id #(get-in (app-state) [:ui :notice :id])
+        undo-depth #(count (get-in (app-state) [:history :undo-stack]))]
+    (with-projector! {:limit [-0.8 -0.8 0.8 0.8] :blocked []} :running? false)
+    (ui/click! robot "#projectors-tab")
+    (ui/assert-text! "#safety-limit-x0" "-0.80")
+    (events/dispatch! {:event/type :vibe/set-show-lock :locked? true})
+    (ui/wait-for! #(true? (get-in (app-state) [:ui :show-lock?])))
+    (testing "the left edge in, to -0.6: smaller, so it goes through"
+      (let [depth (undo-depth)]
+        (ui/fill! robot "#safety-limit-x0" "-0.6")
+        (ui/press! robot KeyCode/ENTER)
+        (ui/wait-for! #(= [-0.6 -0.8 0.8 0.8] (:limit (zone))))
+        (ui/assert-text! "#safety-limit-x0" "-0.60")
+        (is (= (inc depth) (undo-depth)) "one undo step")
+        (is (nil? (get-in (app-state) [:ui :show-lock-notice])))))
+    (testing "out to -0.9: larger, refused, and the field shows the zone"
+      (let [depth (undo-depth)
+            before (notice-id)]
+        (ui/fill! robot "#safety-limit-x0" "-0.9")
+        (ui/press! robot KeyCode/ENTER)
+        (ui/wait-for! #(and (some? (notice-id)) (not= before (notice-id))
+                            (= {:text "Larger safety zone refused" :event :projectors/set-safety}
+                               (get-in (app-state) [:ui :show-lock-notice]))))
+        (is (= [-0.6 -0.8 0.8 0.8] (:limit (zone))))
+        (ui/assert-text! "#safety-limit-x0" "-0.60")
+        (is (= depth (undo-depth)) "no undo step")))))
