@@ -473,3 +473,44 @@
       (push! javafx.scene.input.KeyCode/SHORTCUT javafx.scene.input.KeyCode/SHIFT javafx.scene.input.KeyCode/Z)
       (ui/wait-for! #(= [:zone/a :zone/b :zone/c] (zones))))
     (is (window-open?))))
+
+
+;; Stored, not playing: a disabled pattern or Map cycle still shows its pads
+;; (plans/2026-11-23-cljfx-reactivity/11 §7)
+
+(deftest stored-pattern-and-cycle-show-pads-without-running-test
+  (let [nested {:active? true
+                :items [{:id #uuid "00000000-0000-0000-0000-0000000000e1" :type :group :name "Outer"
+                         :items [{:id #uuid "00000000-0000-0000-0000-0000000000e2" :type :group :name "Off" :enabled? false
+                                  :items [(assoc (zone-patterns/preset-instance :chase :cell)
+                                                 :id #uuid "00000000-0000-0000-0000-0000000000e3")
+                                          {:id #uuid "00000000-0000-0000-0000-0000000000e4" :effect-id :scale :params {}}]}]}]}
+        cycle {:active? true
+               :items [(assoc (zone-patterns/cycle-instance) :id #uuid "00000000-0000-0000-0000-0000000000e5" :enabled? false)]}
+        grid-tab! #(do (events/dispatch! {:event/type :ui/set-active-tab :tab-id :grid})
+                       (ui/wait-for! (fn [] (some? (ui/query "#grid-cell-0-0")))))]
+    (is (not (ui/visible? "#zone-map-strip")) "a new show: no pads")
+    (testing "a pattern in a disabled group: the pattern and map pads, CYCLE dim"
+      (events/write-state! assoc-in [:chains :effect-chains [2 1]] nested)
+      (ui/wait-for! #(and (ui/visible? "#pattern-strip") (ui/visible? "#zone-map-strip")))
+      (is (has-class? "#zone-map-chip-cycle" "zone-map-pad-dim"))
+      (open-perform!)
+      (ui/wait-for! #(and (ui/visible? "#pattern-row") (ui/visible? "#zone-map-row")))
+      (is (has-class? "#zone-map-pad-cycle" "zone-map-pad-dim")))
+    (testing "a disabled Map cycle instead: the map pads only, CYCLE still dim"
+      (events/write-state! assoc-in [:chains :effect-chains [2 1]] cycle)
+      (ui/wait-for! #(not (ui/visible? "#pattern-row")))
+      (is (ui/visible? "#zone-map-row"))
+      (is (has-class? "#zone-map-pad-cycle" "zone-map-pad-dim"))
+      (is (= "Switch on a Map cycle cell on the Effects grid" (tooltip-of "#zone-map-pad-cycle")))
+      (grid-tab!)
+      (ui/wait-for! #(not (ui/visible? "#pattern-strip")))
+      (is (ui/visible? "#zone-map-strip"))
+      (is (has-class? "#zone-map-chip-cycle" "zone-map-pad-dim")))
+    (testing "removed: neither"
+      (events/write-state! update-in [:chains :effect-chains] dissoc [2 1])
+      (ui/wait-for! #(not (ui/visible? "#zone-map-strip")))
+      (is (not (ui/visible? "#pattern-strip")))
+      (open-perform!)
+      (is (not (ui/visible? "#zone-map-row")))
+      (is (not (ui/visible? "#pattern-row"))))))

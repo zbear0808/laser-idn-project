@@ -19,7 +19,6 @@
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
-            [laser-show.animation.chains :as chains]
             [laser-show.subs :as subs]
             [laser-show.events.core :as events]
             [laser-show.routing.zone-patterns :as zone-patterns]
@@ -79,11 +78,12 @@
 
 (defn effects-label
   "Display text for an effects cell, as a cue cell's: the custom name if set,
-   otherwise the first effect, plus \"+n\" for the others."
-  [{:keys [name first-effect-id effect-count]}]
+   otherwise the first effect, plus \"+n\" for the others; \"Groups only\"
+   for a cell that holds groups and no effect."
+  [{:keys [name first-effect-id effect-count has-content?]}]
   (cond
     (seq name) name
-    (nil? first-effect-id) ""
+    (nil? first-effect-id) (if has-content? "Groups only" "")
     (= effect-count 1) (effect-text first-effect-id)
     :else (str (effect-text first-effect-id) " +" (dec effect-count))))
 
@@ -441,11 +441,11 @@
                  :on-action {:event/type :zone-patterns/new-cell :col col :row row :style :map-cycle}})})
 
 (defn- effect-lines
-  "An effects cell's tooltip lines when it holds a zone pattern or a Map
-   cycle (zones plan Z5): each effect in chain order, those two saying what
-   they do; nil otherwise."
+  "An effects cell's tooltip lines when it stores a zone pattern or a Map
+   cycle (zones plan Z5), on or off: each effect it stores in chain order
+   (subs/stored-effect-cell), those two saying what they do; nil otherwise."
   [context col row]
-  (let [effects (chains/flatten-chain (:items (fx/sub-ctx context subs/effect-cell-chain col row)))]
+  (let [effects (:leaves (fx/sub-ctx context subs/stored-effect-cell col row))]
     (when (some #(contains? zone-patterns/zone-stage-ids (:effect-id %)) effects)
       (let [names (fx/sub-ctx context subs/names-ctx)
             zone-maps (fx/sub-val context :zone-maps)]
@@ -475,6 +475,8 @@
         trigger-map (fx/sub-ctx context subs/input-trigger-map)
         learning-target (fx/sub-ctx context subs/input-learning-target)
         has-effects? (:has-effects? display-data)
+        ;; Holds anything (effects or groups, on or off): not a slot to fill
+        has-content? (:has-content? display-data)
         has-trigger? (boolean (some (fn [[_ v]]
                                       (and (= (:type v) :trigger-effect)
                                            (= (:target v) [col row])))
@@ -482,7 +484,7 @@
         learning? (= learning-target {:type :trigger-effect :target [col row]})
         adapted-data {:active? (:active? display-data)
                       :selected? (:selected? display-data)
-                      :has-content? has-effects?
+                      :has-content? has-content?
                       :effect-count (:effect-count display-data)
                       :first-effect-id (:first-effect-id display-data)
                       :effect-ids (:effect-ids display-data)
@@ -502,9 +504,9 @@
                                      {:fx/type :menu-item
                                       :text "Edit Effect Chain..."
                                       :on-action {:event/type :effect-chain/open-editor :col col :row row}}
-                                     (when-not has-effects?
+                                     (when-not has-content?
                                        (new-reaction-menu col row))
-                                     (when-not has-effects?
+                                     (when-not has-content?
                                        (new-zone-pattern-menu col row))
                                      {:fx/type :separator-menu-item}
                                      (if learning?

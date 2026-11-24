@@ -463,7 +463,20 @@
         (is (= [[0 0]] (get-in (click s :vibe/toggle-cell :hit 0 2) [:config :vibes :library :vibe-1 :hit :cells])))))
     (is (= [0 0] (get-in (run s0 {:event/type :vibe/toggle-cell :vibe :vibe-2 :slot :bed :cell [0 0]})
                          [:config :vibes :library :vibe-2 :bed]))
-        "or given as :cell")))
+        "or given as :cell")
+    (testing "an effect cell by what it stores: a disabled tree goes in, a named cell with no items doesn't (plan 11 §6)"
+      (let [s (-> s0
+                  (assoc-in [:chains :effect-chains [5 3]]
+                            {:active? false :items [{:type :group :enabled? false :items [{:effect-id :scale :enabled? false}]}]})
+                  (assoc-in [:chains :effect-chains [6 3]] {:name "Old" :items []}))
+            fx #(get-in % [:config :vibes :library :vibe-1 :fx])
+            in (click s :vibe/toggle-fx :fx 5 3)]
+        (is (some #{[5 3]} (fx in)))
+        (is (= s (click s :vibe/toggle-fx :fx 6 3)))
+        (testing "and, its items deleted since, a click still takes it out"
+          (let [emptied (run in {:event/type :chain/set-items :domain :effect-chains :entity-key [5 3] :items []})]
+            (is (= [] (get-in emptied [:chains :effect-chains [5 3] :items])))
+            (is (not-any? #{[5 3]} (fx (click emptied :vibe/toggle-fx :fx 5 3))))))))))
 
 (deftest new-vibes-are-selected-test
   (let [selected #(get-in % [:ui :vibes :selected])]

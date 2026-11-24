@@ -3,12 +3,15 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
-            [laser-show.ui-test.testfx :as ui])
-  (:import [javafx.scene Node]
+            [laser-show.ui-test.testfx :as ui]
+            [laser-show.views.components.drag-drop-cell :as drag-drop])
+  (:import [javafx.event Event]
+           [javafx.scene Node]
            [javafx.scene.control Labeled MenuItem SplitPane]
-           [javafx.scene.input KeyCode MouseButton]
+           [javafx.scene.input KeyCode MouseButton MouseEvent TransferMode]
            [javafx.scene.layout BackgroundFill BorderStroke Region]
            [javafx.scene.paint Color]
            [org.testfx.api FxRobot FxRobotInterface]
@@ -443,3 +446,114 @@
         (ui/wait-for! #(seq (ui/query-all ".context-menu")))
         (is (empty? (ui/query-all "#new-reaction-menu")))
         (ui/press! robot KeyCode/ESCAPE)))))
+
+
+;; A cell that stores only disabled effects is occupied
+;; (plans/2026-11-23-cljfx-reactivity/11)
+
+(defn- menu-items
+  "The items of the menu a cell's right-click opens."
+  [selector]
+  (let [cell (node selector)]
+    (ui/on-fx-thread #(vec (.getItems (.getContextMenu ^Labeled (.getParent cell)))))))
+
+(defn- menu-ids [selector]
+  (ui/on-fx-thread #(into [] (keep (fn [^MenuItem item] (.getId item))) (menu-items selector))))
+
+(defn- fire-menu-item!
+  "Fire the item text of the menu a cell's right-click opens, as a click on
+   it does."
+  [selector text]
+  (let [item (some #(when (= text (ui/on-fx-thread (fn [] (.getText ^MenuItem %)))) %) (menu-items selector))]
+    (is (some? item) (str "a menu item " (pr-str text)))
+    (ui/on-fx-thread #(.fire ^MenuItem item))
+    (ui/sync-fx!)))
+
+(defn- drags-started
+  "What a drag gesture detected on the cell at selector starts, recorded
+   instead of started: [drag-type payload modes] for each start-drag! call."
+  [selector]
+  (let [started (atom [])
+        cell (node selector)]
+    (with-redefs [drag-drop/start-drag! (fn [_ drag-type payload modes]
+                                          (swap! started conj [drag-type payload (vec modes)])
+                                          nil)]
+      (ui/on-fx-thread
+       #(let [b (.getBoundsInLocal cell)
+              x (/ (+ (.getMinX b) (.getMaxX b)) 2)
+              y (/ (+ (.getMinY b) (.getMaxY b)) 2)
+              scene (.localToScene cell (double x) (double y))
+              screen (.localToScreen cell (double x) (double y))]
+          (Event/fireEvent cell (MouseEvent. MouseEvent/DRAG_DETECTED (.getX scene) (.getY scene)
+                                             (.getX screen) (.getY screen) MouseButton/PRIMARY 1
+                                             false false false false true false false false false false nil)))))
+    @started))
+
+(defn- texts-of
+  "The texts of the labels selector finds, in any window."
+  [selector]
+  (let [labels (ui/query-all selector)]
+    (ui/on-fx-thread #(mapv (fn [^Labeled l] (.getText l)) labels))))
+
+(deftest disabled-effect-cell-keeps-menu-and-drag-in-sync-test
+  (let [robot (ui/robot)
+        pattern (assoc (zone-patterns/preset-instance :chase :cell) :id #uuid "88888888-0000-0000-0000-000000000003")
+        tree {:active? false
+              :items [{:id #uuid "88888888-0000-0000-0000-000000000001" :type :group :name "Outer"
+                       :items [{:id #uuid "88888888-0000-0000-0000-000000000002" :type :group :name "Off" :enabled? false
+                                :items [pattern
+                                        {:id #uuid "88888888-0000-0000-0000-000000000004" :effect-id :scale
+                                         :enabled? true :params {}}]}]}]}
+        effects-cell #(get-in (state/get-raw-state) [:chains :effect-chains [%1 %2]])
+        source "#effects-cell-2-1"
+        neighbour "#effects-cell-3-1"
+        groups "#effects-cell-4-1"]
+    (events/write-state! #(-> %
+                              (assoc-in [:chains :effect-chains [2 1]] tree)
+                              (assoc-in [:chains :effect-chains [4 1]]
+                                        {:items [{:id #uuid "88888888-0000-0000-0000-000000000005" :type :group
+                                                  :name "Empty" :items []}]})))
+    (ui/click! robot "#effects-tab")
+    (ui/assert-visible! source)
+    (testing "it looks filled, named by what it stores, both effects in its tooltip"
+      (ui/wait-for! #(ui/has-style-class? source "grid-cell-content"))
+      (ui/wait-for! #(= "zone pattern +1" (label-text (str source " .grid-cell-label"))))
+      (is (= "Zone pattern: Chase across every laser, 1 step a beat (show beats)\nscale" (cell-tooltip source))))
+    (testing "it offers no New menu: it isn't empty; the empty cell beside it offers both"
+      (is (not-any? #{"new-reaction-menu" "new-zone-pattern-menu"} (menu-ids source)))
+      (is (ui/has-style-class? neighbour "grid-cell-empty"))
+      (is (every? (set (menu-ids neighbour)) ["new-reaction-menu" "new-zone-pattern-menu"])))
+    (testing "Edit opens the tree it stores"
+      (fire-menu-item! source "Edit Effect Chain...")
+      (ui/wait-for! #(= [true 2 1] ((juxt :open? :col :row) (get-in (state/get-raw-state) [:ui :dialogs :effect-chain-editor]))))
+      (ui/wait-for! #(= ["Zone pattern" "Scale"] (texts-of ".chain-item-name")))
+      (is (= ["Outer" "Off"] (texts-of ".group-name-label")))
+      (is (= tree (effects-cell 2 1)))
+      (events/dispatch! {:event/type :ui/close-dialog :dialog-id :effect-chain-editor})
+      (ui/wait-for! #(empty? (ui/query-all ".chain-item"))))
+    (testing "a drag starts from it, as a move, and not from the empty cell"
+      (let [drags (drags-started source)]
+        (is (= [[:effects-cell {:col 2 :row 1} [TransferMode/MOVE]]] drags))
+        (is (= [] (drags-started neighbour)))
+        (testing "; dropped on that cell, the whole tree moves there"
+          (let [[[drag-type payload]] drags]
+            (is (:completed? (ui/fire-drop! (node neighbour) (drag-drop/drag-content drag-type payload) 20 20
+                                            :mode TransferMode/MOVE)))
+            (ui/wait-for! #(and (nil? (effects-cell 2 1)) (= tree (effects-cell 3 1))))
+            (ui/wait-for! #(= "zone pattern +1" (label-text (str neighbour " .grid-cell-label"))))
+            (ui/wait-for! #(and (= "" (label-text (str source " .grid-cell-label")))
+                                (ui/has-style-class? source "grid-cell-empty")))
+            (is (ui/has-style-class? neighbour "grid-cell-content"))))))
+    (testing "a cell of groups only is occupied too: filled, named so, no New menu, and it can be dragged"
+      (ui/wait-for! #(= "Groups only" (label-text (str groups " .grid-cell-label"))))
+      (is (ui/has-style-class? groups "grid-cell-content"))
+      (is (not-any? #{"new-reaction-menu" "new-zone-pattern-menu"} (menu-ids groups)))
+      (is (= [[:effects-cell {:col 4 :row 1} [TransferMode/MOVE]]] (drags-started groups))))
+    (testing "the Vibes picker's effect cells say the same"
+      (ui/click! robot "#vibes-tab")
+      (ui/wait-for! #(= :vibes (get-in (state/get-raw-state) [:ui :active-tab])))
+      (ui/click! robot "#vibe-slot-fx")
+      (ui/wait-for! #(= "Groups only" (label-text "#pick-fx-cell-4-1 .grid-cell-label")))
+      (is (= "zone pattern +1" (label-text "#pick-fx-cell-3-1 .grid-cell-label")))
+      (is (ui/has-style-class? "#pick-fx-cell-3-1" "grid-cell-content"))
+      (is (ui/has-style-class? "#pick-fx-cell-2-1" "grid-cell-empty")))))
