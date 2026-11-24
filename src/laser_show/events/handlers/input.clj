@@ -82,9 +82,12 @@
   {:state (update-in state (midi-path) midi/enable)})
 
 (defn- handle-midi-disable
-  "Disable MIDI input processing."
+  "Disable MIDI input processing. The inputs' note-offs can't come in any
+   more, so what their keys hold lets go (:trigger/retire, handlers/
+   triggers.clj)."
   [{:keys [state]}]
-  {:state (update-in state (midi-path) midi/disable)})
+  {:state (update-in state (midi-path) midi/disable)
+   :dispatch {:event/type :trigger/retire :source :midi}})
 
 (defn- handle-midi-refresh-devices
   "Ask the device worker which MIDI inputs there are: their names come
@@ -147,15 +150,16 @@
 
 (defn- handle-midi-disconnected
   "The MIDI inputs still connected once the latest request disconnected one
-   or all of them. Their keys' releases can't come any more, so every role
-   a key holds lets go (:vibe/release-all :only :input); a pad's hold
-   stays."
+   or all of them. Their keys' releases can't come any more, so what the
+   MIDI keys hold lets go (:trigger/retire, handlers/triggers.clj); a
+   pad's hold, or another source's key's, stays. A disconnect superseded
+   by a later request lets nothing go: its answer changes nothing."
   [{:keys [state connected-devices] :as event}]
   (if (latest? state :midi :connections event)
     {:state (-> state
                 (answered :midi :connections)
                 (assoc-in (midi-path :connected-devices) (set connected-devices)))
-     :dispatch {:event/type :vibe/release-all :only :input}}
+     :dispatch {:event/type :trigger/retire :source :midi}}
     {}))
 
 (defn- handle-midi-set-channel-filter
@@ -203,9 +207,11 @@
   {:state (update-in state (osc-path) osc/enable)})
 
 (defn- handle-osc-disable
-  "Disable OSC input processing."
+  "Disable OSC input processing. No release comes in any more, so what OSC
+   keys hold lets go (:trigger/retire, handlers/triggers.clj)."
   [{:keys [state]}]
-  {:state (update-in state (osc-path) osc/disable)})
+  {:state (update-in state (osc-path) osc/disable)
+   :dispatch {:event/type :trigger/retire :source :osc}})
 
 (defn- handle-osc-start-server
   "Ask the device worker to start the OSC server on the port set now
@@ -220,24 +226,27 @@
   "The latest Start's result. Listening, the server lets its messages in:
    one switch, as the server without :enabled? drops every message
    (osc/create-osc-handler). A port that won't open leaves OSC off, and a
-   notice says so."
+   notice says so; what OSC keys held (on a server it replaced) lets go."
   [{:keys [state server-running? port error] :as event}]
   (if (latest? state :osc :server event)
     (let [state (answered state :osc :server)]
       (if server-running?
         {:state (update-in state (osc-path) assoc :server-running? true :port port :enabled? true)}
-        (h/show-notice (update-in state (osc-path) assoc :server-running? false :enabled? false)
-                       (or error (str "Could not listen for OSC on port " port))
-                       :error)))
+        (assoc (h/show-notice (update-in state (osc-path) assoc :server-running? false :enabled? false)
+                              (or error (str "Could not listen for OSC on port " port))
+                              :error)
+               :dispatch {:event/type :trigger/retire :source :osc})))
     {}))
 
 (defn- handle-osc-stop-server
   "Stop letting OSC messages in, and ask the device worker to stop the
-   server: :input/osc-stopped says when it has."
+   server: :input/osc-stopped says when it has. From now on no release
+   comes in, so what OSC keys hold lets go now (:trigger/retire)."
   [{:keys [state]}]
   (let [[state id] (request state :osc :server)]
     {:state (assoc-in state (osc-path :enabled?) false)
-     :input/osc-stop {:request-id id}}))
+     :input/osc-stop {:request-id id}
+     :dispatch {:event/type :trigger/retire :source :osc}}))
 
 (defn- handle-osc-stopped
   "The server stopped by the latest Stop: not listening."

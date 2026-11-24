@@ -250,14 +250,13 @@
           state
           (filter #(contains? owners (:owner %)) all-path-specs)))
 
-(defn- clear-keyboard-holds [runtime]
-  ;; The old show's actions must not receive key-up in the new show. Other
-  ;; input devices keep their session, as before.
-  (let [keyboard? #(= :keyboard (:source %))]
-    (-> runtime
-        (assoc :keyboard-activations {})
-        (update :held-inputs #(into #{} (remove keyboard?) %))
-        (update :active-triggers #(into {} (remove (comp keyboard? :input val)) %)))))
+(defn- clear-input-holds
+  "trigger-runtime without what any key holds: the old show's actions must
+   not get a key's release in the new show, whatever its source
+   (handlers/triggers.clj: a release with no activation ends nothing), and
+   the new show starts with nothing held."
+  [runtime]
+  (assoc runtime :activations {} :held-inputs #{} :active-triggers {}))
 
 (defn begin-document
   "state with a new document identity: a fresh random UUID at
@@ -278,16 +277,16 @@
 
 (defn- reset-session
   "Reset state that refers to the previous document (playback, what vibe
-   mode is doing, selection, list UI, dialogs, the status bar's notice, the
-   Vibes tab's selection, a pending zone map switch and the Map cycle's
-   pause, the pattern pads' style, a learn in progress, undo history,
-   project metadata), and give the new document its own identity
-   (begin-document). Backend/runtime state (streaming, Link, MIDI/OSC,
-   discovered devices) is kept."
+   mode is doing, what the keys hold, selection, list UI, dialogs, the
+   status bar's notice, the Vibes tab's selection, a pending zone map
+   switch and the Map cycle's pause, the pattern pads' style, a learn in
+   progress, undo history, project metadata), and give the new document its
+   own identity (begin-document). Backend/runtime state (streaming, Link,
+   MIDI/OSC, discovered devices) is kept."
   [state initial]
   (-> state
       (assoc :playback (:playback initial))
-      (update :trigger-runtime clear-keyboard-holds)
+      (update :trigger-runtime clear-input-holds)
       (assoc :vibe-runtime (:vibe-runtime initial))
       (assoc :list-ui (:list-ui initial))
       (assoc :history (:history initial))
