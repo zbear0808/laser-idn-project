@@ -4,6 +4,15 @@
    [cljfx.api :as fx]
    [clojure.core.cache :as cache]
    [clojure.test :refer [deftest is testing]]
+   [laser-show.animation.effects :as effects]
+   [laser-show.animation.effects.calibration]
+   [laser-show.animation.effects.color]
+   [laser-show.animation.effects.intensity]
+   [laser-show.animation.effects.points]
+   [laser-show.animation.effects.shape]
+   [laser-show.animation.effects.zone]
+   [laser-show.animation.modulator-registry :as modulator-registry]
+   [laser-show.animation.registries :as registries]
    [laser-show.events.handlers.timing :as timing]
    [laser-show.output.driver]
    [laser-show.state.core :as state]
@@ -2538,3 +2547,78 @@
       (is (= #{} (lit (with-clip {:type :cue-chain :data {:items []} :copied-at 1})))
           "Step 4b: an empty cell's clip, nowhere")
       (is (= #{:step-grid} (lit (with-clip {:type :step-grid :grid {:zones [:zone/a] :steps [[:zone/a]]} :copied-at 1})))))))
+
+
+;; The registries as data (plans/2026-11-23-cljfx-reactivity/17): what the
+;; effect banks offer and what the tap reactions follow come from what
+;; :registries/published last put in app state
+
+(defn- published
+  "ctx after the effect and modulator registries, as they are now, are
+   published (:registries/published)."
+  [ctx]
+  (handle ctx (registries/published-event)))
+
+(deftest effect-bank-follows-published-effects-test
+  (let [scale (effects/get-effect :scale)
+        n (count (effects/list-effects))
+        bank #(fx/sub-ctx %1 subs/effect-bank-categories %2)
+        in-bank (fn [ctx scope id] (some #(when (= id (:id %)) %) (apply concat (vals (bank ctx scope)))))
+        ctx (published (context base-state))
+        offered (bank ctx :item)]
+    (is (= {} (bank (context base-state) :item)) "nothing before the registries are published")
+    (testing "what each bank offers"
+      (is (= #{:shape :color :intensity} (set (keys offered))) "a cue's: no Zone tab, nothing for calibration alone")
+      (is (= #{:zone-pattern :zone-map-cycle} (set (map :id (:zone (bank ctx :global))))) "the effects grid's Zone tab")
+      (is (nil? (in-bank ctx :global :zone-selector)) "hidden: in none")
+      (is (some? (in-bank ctx :item :decimate)) "a shape effect that calibrates too")
+      (is (nil? (in-bank ctx :item :axis-transform)) "a calibration effect")
+      (is (= (dissoc scale :apply-transducer) (in-bank ctx :item :scale)) "an effect as data: its definition without its function"))
+    (is (identical? offered (bank (published ctx) :item)) "published again, unchanged: the same")
+    (try
+      (effects/register-effect! (-> scale (assoc :name "Size") (assoc-in [:parameters 0 :default] 7.0)))
+      (is (= n (count (effects/list-effects))) "as many effects as before")
+      (let [ctx' (published ctx)]
+        (is (= "Size" (:name (in-bank ctx' :item :scale))) "re-registered, and published: its new name")
+        (is (= 7.0 (get-in (in-bank ctx' :item :scale) [:parameters 0 :default])) "and its new default")
+        (is (= "Size" (:name (in-bank ctx' :global :scale))) "in the effects grid's bank too"))
+      (finally
+        (effects/register-effect! scale)))))
+
+(deftest tap-reactions-follow-published-modulators-test
+  (let [envelope (modulator-registry/get-modulator :envelope)
+        default-source (fn [source] (update envelope :params (fn [ps] (mapv #(cond-> % (= :source (:key %)) (assoc :default source)) ps))))
+        ;; Swell in Groove's FX set: an envelope with no source of its own, so its type's default
+        s (-> groove
+              (assoc-in [:chains :effect-chains [7 3]]
+                        {:name "Groove · Swell" :active? false
+                         :items [{:effect-id :scale :enabled? true
+                                  :params {:x-scale {:type :envelope :active? true :min 1.0 :max 1.25}}}]})
+              (assoc-in [:config :vibes :library :groove :fx] [[7 3]]))
+        shown (fn [ctx] {:pads (into {} (for [role [:hit :accent]] [role (:reactions (fx/sub-ctx ctx subs/vibe-pad role))]))
+                         :edited (fx/sub-ctx ctx subs/vibe-edited-reactions)
+                         :badge (fx/sub-ctx ctx subs/vibes-tab-label)
+                         :lint (fx/sub-ctx ctx subs/vibe-lint)})
+        swell {:grid :effects :cell [7 3] :name "Swell"}
+        ctx (published (context s))
+        before (shown ctx)]
+    (is (= {:hit ["Swell"] :accent []} (:pads before)) "an envelope follows HIT, its type's default source")
+    (is (= {:hit [swell]} (:edited before)))
+    (is (= "Vibes" (:badge before)) "HIT moves effects: no error")
+    (try
+      (testing "the default source re-registered as ACCENT: Perform's pads, the Vibes tab's reactions and its lint follow, once published"
+        (modulator-registry/register-modulator! (default-source :accent))
+        (let [ctx' (published ctx)
+              {:keys [pads edited badge lint]} (shown ctx')]
+          (is (= {:hit [] :accent ["Swell"]} pads))
+          (is (= {:accent [swell]} edited))
+          (is (= "Vibes ⚠ 1" badge) "HIT does nothing now")
+          (is (= (library/lint (in-state ctx')) lint))))
+      (testing "its category re-registered as a wave's, which follows no press: no reaction at all"
+        (modulator-registry/register-modulator! (assoc envelope :category :wave))
+        (let [{:keys [pads edited]} (shown (published ctx))]
+          (is (= {:hit [] :accent []} pads))
+          (is (= {} edited))))
+      (finally
+        (modulator-registry/register-modulator! envelope)))
+    (is (= before (shown (published ctx))) "put back, and published: as before")))

@@ -319,20 +319,19 @@
        :history/description "Add Clip"})))
 
 (defn- handle-add-effect-to-timeline-item
-  "Add an effect to the clip :target-item-id, or the track or folder
-   :target-track-id, with the definition's default params (:item, else
-   looked up by :item-id). Optional :index inserts at that position instead
-   of appending. :select-target? (drops from the browser) also selects the
-   target, as pressing it on the canvas would. No target: nothing happens."
-  [{:keys [col row item item-id target-item-id target-track-id index select-target? state]}]
-  (if-not (or target-item-id target-track-id)
-    {:state state}
-    (let [item (or item (effects/get-effect item-id))
-          result (op-effects state col row
+  "Add the effect :item-id to the clip :target-item-id, or the track or
+   folder :target-track-id, with its definition's default params as they
+   are when the event is handled (effects/get-default-params: a bank click
+   or drop carries the id alone, reactivity plan 17). Optional :index
+   inserts at that position instead of appending. :select-target? (drops
+   from the browser) also selects the target, as pressing it on the canvas
+   would. No target, or an id no effect has: nothing happens."
+  [{:keys [col row item-id target-item-id target-track-id index select-target? state]}]
+  (if-let [params (when (or target-item-id target-track-id) (effects/get-default-params item-id))]
+    (let [result (op-effects state col row
                              (cond-> {:op :add-effect
-                                      :effect-id (or item-id (:id item))
-                                      :params (reduce (fn [acc {:keys [key default]}] (assoc acc key default))
-                                                      {} (:parameters item []))}
+                                      :effect-id item-id
+                                      :params params}
                                target-item-id (assoc :clip-id target-item-id)
                                (not target-item-id) (assoc :track-id target-track-id)
                                (some? index) (assoc :index index)))]
@@ -345,7 +344,8 @@
                           (select-track-in-sidebar col row (:track-id clip))))
                     (-> (view-assoc s col row :selection #{})
                         (select-track-in-sidebar col row target-track-id)))))
-        result))))
+        result))
+    {:state state}))
 
 
 ;; Transport: play / pause / stop / seek one timeline cue.

@@ -17,6 +17,7 @@
    UI components should use :chain/* events with {:domain :effect-chains}
    for all effect-level operations."
  (:require [laser-show.animation.chains :as chains]
+           [laser-show.animation.effects :as effects]
            [laser-show.events.helpers :as h]
            [laser-show.routing.zone-maps :as zone-maps]
            [laser-show.vibes.reactions :as reactions]
@@ -145,33 +146,30 @@
 
 
 (defn- handle-effect-chain-add-effect-from-bank
-  "Add an effect to an effect chain from the effect bank.
-   
-   This handles the data-driven event format from effect-bank component,
-   where :item contains the full effect definition and :item-id is the effect-id.
+  "Add the effect :item-id to the effect chain at [col row] from the effect
+   bank, with its definition's defaults as they are when the click is
+   handled (effects/get-default-params: the bank's event carries the id
+   alone, reactivity plan 17); an id no effect has adds nothing.
    
    Auto-selects the newly added effect for better UX."
-  [{:keys [col row item item-id state]}]
-  (let [effect-id (or item-id (:id item))
-        params-map (reduce (fn [acc {:keys [key default]}]
-                             (assoc acc key default))
-                           {}
-                           (:parameters item []))
-        new-effect (h/ensure-item-fields {:effect-id effect-id
-                                          :params params-map})
-        new-effect-id (:id new-effect)
-        ensure-cell (fn [s]
-                      (if (get-in s [:chains :effect-chains [col row]])
-                        s
-                        (assoc-in s [:chains :effect-chains [col row]] {:items [] :active? false})))
-        state-with-cell (ensure-cell state)
-        current-effects (get-in state-with-cell [:chains :effect-chains [col row] :items] [])]
-    {:state (-> state-with-cell
-                (assoc-in [:chains :effect-chains [col row] :items] (conj current-effects new-effect)))
-     :dispatch {:event/type :list/select-item
-                :component-id [:effect-chain col row]
-                :item-id new-effect-id
-                :mode :single}}))
+  [{:keys [col row item-id state]}]
+  (if-let [params-map (effects/get-default-params item-id)]
+    (let [new-effect (h/ensure-item-fields {:effect-id item-id
+                                            :params params-map})
+          new-effect-id (:id new-effect)
+          ensure-cell (fn [s]
+                        (if (get-in s [:chains :effect-chains [col row]])
+                          s
+                          (assoc-in s [:chains :effect-chains [col row]] {:items [] :active? false})))
+          state-with-cell (ensure-cell state)
+          current-effects (get-in state-with-cell [:chains :effect-chains [col row] :items] [])]
+      {:state (-> state-with-cell
+                  (assoc-in [:chains :effect-chains [col row] :items] (conj current-effects new-effect)))
+       :dispatch {:event/type :list/select-item
+                  :component-id [:effect-chain col row]
+                  :item-id new-effect-id
+                  :mode :single}})
+    {:state state}))
 
 
 ;; Public API

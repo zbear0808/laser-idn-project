@@ -5,6 +5,8 @@
    from chain.clj. Cue-chain specific operations (add-preset, etc.) use :cue-chain/*."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [laser-show.animation.effects :as registry]
+   [laser-show.animation.effects.shape]
    [laser-show.state.history :as history]
    [laser-show.events.handlers.cue-chain :as cue-chain]
    [laser-show.events.handlers.chain :as chain]
@@ -347,6 +349,30 @@
       (is (= :wave (:preset-id (second items))))
       ;; Should auto-select the newly added preset (ID-based selection in list-ui)
       (is (= #{new-item-id} selected-ids)))))
+
+
+;; The effect bank (reactivity plan 17): a click carries the effect's id, and
+;; the handler reads its definition when it runs
+
+(deftest add-effect-from-bank-reads-the-registry-test
+  (let [scale (registry/get-effect :scale)
+        add (fn [event]
+              (cue-chain/handle (merge {:event/type :cue-chain/add-effect-from-bank :col 0 :row 0 :parent-path [0 :effects]
+                                        :state sample-state-with-item}
+                                       event)))]
+    (try
+      (registry/register-effect! (assoc-in scale [:parameters 0 :default] 7.0))
+      (let [{:keys [state dispatch]} (add {:item-id :scale :item scale})
+            [added & more] (get-in state [:chains :cue-chains [0 0] :items 0 :effects])]
+        (is (= :scale (:effect-id added)))
+        (is (= {:x-scale 7.0 :y-scale 1.0 :uniform? false} (:params added))
+            "the definition registered when the click is handled, not one the event carries")
+        (is (nil? more))
+        (is (= {:event/type :list/select-item :component-id [:item-effects 0 0] :item-id (:id added) :mode :single}
+               dispatch)))
+      (finally
+        (registry/register-effect! scale)))
+    (is (= {:state sample-state-with-item} (add {:item-id :no-such-effect})) "an id no effect has: nothing")))
 
 
 ;; Remove Item Tests (using cue-chain/handle with :cue-chain/set-item-effects)

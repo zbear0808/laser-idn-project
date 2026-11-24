@@ -21,6 +21,7 @@
   (:require [clojure.tools.logging :as log]
             [laser-show.events.helpers :as h]
             [laser-show.animation.cue-chains :as cue-chains]
+            [laser-show.animation.effects :as effects]
             [laser-show.routing.targets :as targets]))
 
 
@@ -83,32 +84,30 @@
                 :mode :single}}))
 
 (defn- handle-cue-chain-add-effect-from-bank
-  "Add an effect to a cue chain item from the effect bank.
-   
-   This handles the data-driven event format from effect-bank component,
-   where :item contains the full effect definition and :item-id is the effect-id.
+  "Add the effect :item-id to a cue chain item's effects (:parent-path, e.g.
+   [0 :effects]) from the effect bank, with its definition's defaults as
+   they are when the click is handled (effects/get-default-params: the
+   bank's event carries the id alone, reactivity plan 17); an id no effect
+   has adds nothing.
    
    Auto-selects the newly added effect for better UX.
    
    Requires cell to exist - errors if [:chains :cue-chains [col row]] is nil."
-  [{:keys [col row parent-path item item-id state]}]
-  (let [effect-id (or item-id (:id item))
-        params-map (reduce (fn [acc {:keys [key default]}]
-                             (assoc acc key default))
-                           {}
-                           (:parameters item []))
-        new-effect (h/ensure-item-fields {:effect-id effect-id
-                                          :params params-map})
-        new-effect-id (:id new-effect)
-        ;; parent-path should be something like [0 :effects]
-        target-path (vec (concat [:chains :cue-chains [col row] :items] parent-path))
-        current-effects (get-in state target-path [])]
-    {:state (-> state
-                (assoc-in target-path (conj current-effects new-effect)))
-     :dispatch {:event/type :list/select-item
-                :component-id [:item-effects col row]
-                :item-id new-effect-id
-                :mode :single}}))
+  [{:keys [col row parent-path item-id state]}]
+  (if-let [params-map (effects/get-default-params item-id)]
+    (let [new-effect (h/ensure-item-fields {:effect-id item-id
+                                            :params params-map})
+          new-effect-id (:id new-effect)
+          ;; parent-path should be something like [0 :effects]
+          target-path (vec (concat [:chains :cue-chains [col row] :items] parent-path))
+          current-effects (get-in state target-path [])]
+      {:state (-> state
+                  (assoc-in target-path (conj current-effects new-effect)))
+       :dispatch {:event/type :list/select-item
+                  :component-id [:item-effects col row]
+                  :item-id new-effect-id
+                  :mode :single}})
+    {:state state}))
 
 ;; NOTE: Preset parameter handlers have been removed - now using generic :chain/* events
 ;; from chain.clj with {:domain :cue-chains :entity-key [col row] :effect-path preset-path}

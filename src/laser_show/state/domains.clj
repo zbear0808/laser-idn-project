@@ -538,6 +538,9 @@
                       :dir nil
                       :pending-installs []}
             :doc "The output drivers (laser-show.output.driver), as pure data: :drivers {id {:id :name :transport :fields :capabilities :discover? :addon}}, a copy of every registered driver's descriptor; :addons, a status per add-on the loader tried; :dir, the add-ons folder's path as the OS writes it. Written by :addons/loaded at startup. :pending-installs [{:id :name :version :file :replaced?}], the jars Install add-on… copied in since (each a <name>.jar.new that loads at the next start), written by :addons/installed. Never saved, never undone (the drivers themselves live in the registry)"}
+   :registries {:default {:effects {}
+                          :modulators {}}
+                :doc "The effect and modulator registries (laser-show.animation.registries), as pure data: :effects {id descriptor}, :modulators {type descriptor}, each a registration without its functions. Written by :registries/published at startup and after a code reload; the effect banks and the tap reactions' selectors read them (reactivity plan 17). Never saved, never undone (the registries themselves live in their namespaces)"}
    :input {:default {:midi {:enabled? true
                             :available-devices []      ; Names of the MIDI inputs the last Refresh found
                             :connected-devices #{}     ; Names of the connected inputs (the device worker's, input.devices)
