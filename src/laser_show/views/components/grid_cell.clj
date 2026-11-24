@@ -292,15 +292,10 @@
    - Drop on cell: Move cell content"
   [{:keys [fx/context col row size font-size]}]
   (let [display-data (fx/sub-ctx context subs/cell-display-data col row)
-        trigger-map (fx/sub-ctx context subs/input-trigger-map)
-        learning-target (fx/sub-ctx context subs/input-learning-target)
         has-content? (:has-content? display-data)
         timeline? (:timeline? display-data)
-        has-trigger? (boolean (some (fn [[_ v]]
-                                      (and (= (:type v) :trigger-cue)
-                                           (= (:target v) [col row])))
-                                    trigger-map))
-        learning? (= learning-target {:type :trigger-cue :target [col row]})
+        has-trigger? (fx/sub-ctx context subs/cell-has-trigger? :trigger-cue col row)
+        learning? (fx/sub-ctx context subs/cell-learning? :trigger-cue col row)
         ;; In play while Stop blacks the output out: held, not playing
         held? (and (:active? display-data) (fx/sub-ctx context subs/output-held?))
         ;; Too heavy for a laser, while it plays (zones plan Z3)
@@ -472,16 +467,11 @@
    - Drop on cell: Move effects"
   [{:keys [fx/context col row size font-size]}]
   (let [display-data (fx/sub-ctx context subs/effect-cell-display-data col row)
-        trigger-map (fx/sub-ctx context subs/input-trigger-map)
-        learning-target (fx/sub-ctx context subs/input-learning-target)
         has-effects? (:has-effects? display-data)
         ;; Holds anything (effects or groups, on or off): not a slot to fill
         has-content? (:has-content? display-data)
-        has-trigger? (boolean (some (fn [[_ v]]
-                                      (and (= (:type v) :trigger-effect)
-                                           (= (:target v) [col row])))
-                                    trigger-map))
-        learning? (= learning-target {:type :trigger-effect :target [col row]})
+        has-trigger? (fx/sub-ctx context subs/cell-has-trigger? :trigger-effect col row)
+        learning? (fx/sub-ctx context subs/cell-learning? :trigger-effect col row)
         adapted-data {:active? (:active? display-data)
                       :selected? (:selected? display-data)
                       :has-content? has-content?
