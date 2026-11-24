@@ -1802,41 +1802,94 @@
 (defn- vibe-locked? [state]
   (= :locked (get-in state [:vibe-runtime :rotation])))
 
-(defn- reaction-inputs
-  "What the cells that react to a press depend on (vibes.reactions/reactions
-   and what may play: the audience rule reads the rig's order, and since
-   zones plan Z4 the zone maps and the column and show defaults)."
-  [state]
-  (-> (select-keys state [:chains :projectors :virtual-projectors :rig :zone-maps])
-      (assoc :grid (select-keys (:grid state) [:column-targets])
-             :config (select-keys (:config state) [:default-target]))))
+;; Who a cue can reach (vibes.library's audience rule, V6; zones plans Z4,
+;; Z5), as the pads and the Vibes tab's picker read it: one routing
+;; projection, so they agree with each other and with the full state.
+
+(defn- audience-rig-inputs
+  "What the audience groups are folded from (vibes.library/audience-groups):
+   the projectors, the virtual projectors (one counts when it or its
+   projector scans the crowd) and the rig (the automatic groups a scanner
+   is in follow the order)."
+  [context]
+  {:projectors (fx/sub-val context :projectors)
+   :virtual-projectors (fx/sub-val context :virtual-projectors)
+   :rig (fx/sub-val context :rig)})
+
+(defn vibe-audience-groups
+  "The refs that reach the audience (vibes.library/audience-groups), from
+   audience-rig-inputs alone: a zone map or a default changing leaves them
+   be."
+  [context]
+  (library/audience-groups (fx/sub-ctx context audience-rig-inputs)))
+
+(defn vibe-audience-routing
+  "What the audience rule reads besides the cue or effect cell it asks
+   about (vibes.library/audience-cue?, unplayable, playable-cells,
+   audience-fx?), as a state: audience-rig-inputs, the group definitions
+   (a zone pattern's lane drops a group that isn't one, zones plan Z5), the
+   zone maps, and the column defaults and the show's (zones plan Z4). The
+   pads and the picker add the chains they ask about, so they re-run when
+   one of these changes, and only then: not for the map in use or the show
+   clock's status."
+  [context]
+  (assoc (fx/sub-ctx context audience-rig-inputs)
+         :zone-groups (fx/sub-val context :zone-groups)
+         :zone-maps (fx/sub-val context :zone-maps)
+         :grid {:column-targets (fx/sub-val context get-in [:grid :column-targets])}
+         :config {:default-target (fx/sub-val context get-in [:config :default-target])}))
+
+(defn- slot-chains
+  "{cell chain} of the cues at cells (cue-cell-chain), each read now."
+  [context cells]
+  (into {} (map (fn [[col row :as cell]] [cell (fx/sub-ctx context cue-cell-chain col row)])) cells))
 
 (defn- vibe-reactions
-  "The current vibe's tap reactions by role (vibes.reactions/reactions), and
-   :quiet, the roles whose press plays no cue: HIT or ACCENT with nothing
-   playable in its pool, FLASH without a playable cue. Recomputed when the
-   chains, the vibes, the projectors or the current vibe change."
+  "The current vibe's tap reactions by role (vibes.reactions/reactions): its
+   FX set, its flash FX, the effects grid's cells that are on and the cues
+   its slots name, whether those play or not; {} without vibes. Recomputed
+   when the vibe, those cues or the effects grid change."
   [context]
-  (let [id (fx/sub-ctx context vibe-current-id)
-        {:keys [library]} (fx/sub-ctx context vibe-config)
-        state (assoc-in (fx/sub-val context reaction-inputs) [:config :vibes] {:library library})
-        vibe (get library id)]
-    {:by-role (if vibe (reactions/reactions state id) {})
-     :quiet (set (for [role [:hit :accent :flash]
-                       :let [cells (if (= :flash role)
-                                     (keep identity [(get-in vibe [:flash :cue])])
-                                     (get-in vibe [role :cells]))]
-                       :when (empty? (library/playable-cells state vibe cells))]
-                   role))}))
+  (let [id (fx/sub-ctx context vibe-current-id)]
+    (if-let [vibe (fx/sub-val context library/vibe id)]
+      (reactions/reactions {:config {:vibes {:library {id vibe}}}
+                            :chains {:effect-chains (fx/sub-val context get-in [:chains :effect-chains])
+                                     :cue-chains (slot-chains context (into [] (mapcat #(library/slot-cells vibe %))
+                                                                            library/cue-slots))}}
+                           id)
+      {})))
+
+(def ^:private cue-slot
+  "The slot whose cues a role's press may start (vibes.library/slot-cells)."
+  {:hit :hit :accent :accent :flash :flash-cue})
+
+(defn- vibe-pad-cue-status
+  "What role's press can start, for its pad: {:quiet? (no cue: none of its
+   cues is one the vibe that plays may start, vibes.library/playable-cells)
+   :audience? (the vibe allows audience cells, and one it may start can
+   reach the crowd, vibes.library/audience-cell?)}. HIT's and ACCENT's
+   pools and FLASH's cue, over vibe-audience-routing with their chains
+   alone; FLASH's effects never mark it. Both false for VIBE and BLACKOUT;
+   a cue role with no cue, or no vibe, is quiet."
+  [context role]
+  (if-let [slot (cue-slot role)]
+    (let [vibe (fx/sub-val context library/vibe (fx/sub-ctx context vibe-current-id))
+          cells (library/slot-cells vibe slot)
+          state (assoc (fx/sub-ctx context vibe-audience-routing) :chains {:cue-chains (slot-chains context cells)})
+          playable (library/playable-cells state vibe cells)
+          groups (when (:allow-audience? vibe) (fx/sub-ctx context vibe-audience-groups))]
+      {:quiet? (empty? playable)
+       :audience? (boolean (and groups (some #(library/audience-cell? state % groups) playable)))})
+    {:quiet? false :audience? false}))
 
 (defn- vibe-pad-reactions
   "role's pad: the names of its reactions, and :effects-only? when its
-   press plays no cue but moves some."
+   press plays no cue (vibe-pad-cue-status) but moves some."
   [context role]
-  (let [{:keys [by-role quiet]} (fx/sub-ctx context vibe-reactions)
-        names (mapv :name (get by-role role))]
+  (let [names (mapv :name (get (fx/sub-ctx context vibe-reactions) role))
+        {:keys [quiet?]} (fx/sub-ctx context vibe-pad-cue-status role)]
     {:reactions names
-     :effects-only? (boolean (and (contains? quiet role) (seq names)))}))
+     :effects-only? (boolean (and quiet? (seq names)))}))
 
 (defn vibe-pad
   "One of the Perform tab's five pads: {:role :label :bindings (trigger-map
@@ -1918,15 +1971,6 @@
   [context grid col row]
   (fx/sub-ctx context indexed-cell-vibes grid col row))
 
-(defn vibe-audience-groups
-  "The refs that reach the audience (vibes.library/audience-groups), from
-   the projectors and the rig (the automatic groups a scanner is in follow
-   the order)."
-  [context]
-  (library/audience-groups {:projectors (fx/sub-val context :projectors)
-                            :virtual-projectors (fx/sub-val context :virtual-projectors)
-                            :rig (fx/sub-val context :rig)}))
-
 (defn map-warnings
   "What the map editor says of map id (routing.zone-maps/map-warnings): its
    empty lanes, the ones with no projector or that reach the audience, the
@@ -1937,19 +1981,6 @@
                                :zones (fx/sub-ctx context map-zones)
                                :reach (fx/sub-ctx context ref-reach)
                                :audience (fx/sub-ctx context vibe-audience-groups)})))
-
-(defn vibe-audience-routing
-  "What the audience rule reads besides a cue and the audience groups
-   (vibes.library/audience-cue?, zones plan Z4): the zone maps, the column
-   defaults and the show's, and for a zone pattern's lane the rig (zones
-   plan Z5); so the picker re-runs when one changes, and only then."
-  [context]
-  {:zone-maps (fx/sub-val context :zone-maps)
-   :grid {:column-targets (fx/sub-val context get-in [:grid :column-targets])}
-   :config {:default-target (fx/sub-val context get-in [:config :default-target])}
-   :projectors (fx/sub-val context :projectors)
-   :rig (fx/sub-val context :rig)
-   :zone-groups (fx/sub-val context :zone-groups)})
 
 (defn- edited-allows-audience? [state]
   (boolean (:allow-audience? (library/vibe state (library/edited-id state)))))
@@ -2213,15 +2244,9 @@
 (defn vibe-pad-audience?
   "Can role's press start a cue that reaches the audience: the vibe that
    plays allows audience cells, and one its role may play is one
-   (vibes.library/audience-cell?): HIT's or ACCENT's pool, FLASH's cue."
+   (vibe-pad-cue-status): HIT's or ACCENT's pool, FLASH's cue."
   [context role]
-  (boolean
-   (when (and (#{:hit :accent :flash} role) (fx/sub-ctx context vibe-audience?))
-     (let [vibe (get (:library (fx/sub-ctx context vibe-config)) (fx/sub-ctx context vibe-current-id))
-           state (fx/sub-val context reaction-inputs)
-           cells (if (= :flash role) (keep identity [(get-in vibe [:flash :cue])]) (get-in vibe [role :cells]))
-           groups (library/audience-groups state)]
-       (some #(library/audience-cell? state % groups) (library/playable-cells state vibe cells))))))
+  (:audience? (fx/sub-ctx context vibe-pad-cue-status role)))
 
 (defn vibes-tab-label
   "The Vibes tab's label: \"Vibes\", and the lint's error count while it
