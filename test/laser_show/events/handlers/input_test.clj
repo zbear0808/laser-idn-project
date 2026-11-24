@@ -582,3 +582,38 @@
           (is (= :pad (get-in (press-key (learning pad hit) 50) [:vibe-runtime :held :hit :src]))))))
     (finally
       (stop-learning!))))
+
+
+;; A learn binds into the show it was started in (reactivity plan 20)
+
+(deftest a-capture-after-new-or-open-binds-nothing-test
+  ;; Before: the old learn's input bound in the new show, which became
+  ;; unsaved and got a "Learn Trigger" undo step
+  (try
+    (let [show (history/mark-clean (initial-state))
+          cell {:type :trigger-cue :target [0 0]}
+          pending #(deref @#'input/!pending-learn)]
+      (doseq [[label replace] [["File > New" {:event/type :file/new-project :force? true}]
+                               ["File > Open" {:event/type :file/project-loaded :file-path "other.zip"
+                                               :contents (persistent/project-files show)}]]
+              [what start target input!] [["a cell's learn" {:event/type :input/start-learn :target-action cell}
+                                           cell #(router/dispatch! (note 36))]
+                                          ["Learn all" learn-all hit-role #(router/dispatch! (note 37))]
+                                          ["a fader's learn" {:event/type :input/start-learn :target-action slider-1}
+                                           slider-1 #(move! 0 1 0.1 0.5)]]]
+        (testing (str label ", during " what)
+          (let [learning (piped show start)
+                p (pending)
+                replaced (piped learning replace)
+                _ (input!)
+                late (piped replaced {:event/type :input/learn-captured :target-action target :input-event (caught p)})]
+            (is (= target (learning-target learning)))
+            (is (some? (caught p)) "the old learn's listener still caught the input")
+            (is (nil? (learning-target replaced)) "the new show isn't learning")
+            (is (nil? (get-in replaced [:backend :input :learning-capture])) "so its keys play their bindings")
+            (is (nil? (wizard replaced)))
+            (is (= (get-in replaced [:config :input]) (get-in late [:config :input])) "the late capture binds nothing")
+            (is (false? (get-in late [:project :dirty?])))
+            (is (empty? (get-in late [:history :undo-stack])))))))
+    (finally
+      (stop-learning!))))

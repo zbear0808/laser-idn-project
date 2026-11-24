@@ -7,6 +7,7 @@
   (:require
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing use-fixtures]]
+   [laser-show.app :as app]
    [laser-show.events.core :as events]
    [laser-show.events.handlers.menu :as menu]
    [laser-show.output.jar-builder :as jar]
@@ -714,3 +715,248 @@
   (testing "a rig that is saved: Exit quits at once"
     (is (= {:system/exit true}
            (menu/handle {:event/type :file/exit :state (assoc-in rig-not-saved [:rig-file :status] :saved)})))))
+
+
+;; Work that belongs to the show it started in (reactivity plan 20)
+
+
+(defn- document-id [state]
+  (get-in state [:project :document-id]))
+
+(defn- found-in?
+  "Is x anywhere in data?"
+  [x data]
+  (boolean (some #(= x %) (tree-seq coll? seq data))))
+
+(defn- rename-cue!
+  "An edit through the pipeline: cue [2 0] named text."
+  [text]
+  (events/event-handler {:event/type :cue-chain/set-name :col 2 :row 0 :name text}))
+
+(defn- chooser-result
+  "The event the chooser event (File > Open or Save As) asks for in state
+   sends back once file-path is picked."
+  [event state file-path]
+  (assoc (get-in (menu/handle (assoc event :state state)) [:fx/show-file-chooser :on-result])
+         :file-path file-path))
+
+(deftest document-id-rotates-on-successful-new-and-open-test
+  (let [^File dir (jar/temp-dir! "document-id")
+        a-path (str (io/file dir "A.zip"))
+        b-path (str (io/file dir "B.zip"))
+        id #(document-id (state/get-raw-state))
+        run (fn [event] (events/event-handler event) (id))
+        save-as (fn [file-path] (chooser-result {:event/type :file/save-as} (state/get-raw-state) file-path))]
+    (try
+      (is (persistent/write-project! b-path (zip-contents-of (assoc-in document-state [:timing :bpm] 77.0))))
+      (spit (io/file dir "not-a-show.zip") "not a zip")
+      (testing "the starter show has an identity, a new one at each start"
+        (let [starter (#'app/starter-state)]
+          (is (uuid? (document-id starter)))
+          (is (not= (document-id starter) (document-id (#'app/starter-state))))
+          (state/reset-state! starter)))
+      (let [a (id)]
+        (testing "it is the session's, not the show's: not saved, not in an undo step, no unsaved change"
+          (rename-cue! "Edited")
+          (let [s (state/get-raw-state)]
+            (is (true? (get-in s [:project :dirty?])) "the edit is unsaved")
+            (is (= 1 (count (get-in s [:history :undo-stack]))) "and has its undo step")
+            (is (not (found-in? a (zip-contents-of s))))
+            (is (not (found-in? a (:history s))))
+            (is (not (found-in? a (history/extract-document-state s))))))
+        (testing "Undo keeps it"
+          (is (= a (run {:event/type :edit/undo})))
+          (is (false? (get-in (state/get-raw-state) [:project :dirty?]))))
+        (testing "Save As, a Save As that fails, and Save keep it"
+          (rename-cue! "Edited again")
+          (is (= a (run (save-as a-path))))
+          (is (= a-path (get-in (state/get-raw-state) [:project :current-file])))
+          (is (= a (run (save-as (str a-path "/inside.zip")))))
+          (is (= "Could not save inside.zip" (get-in (state/get-raw-state) [:ui :notice :text])))
+          (rename-cue! "Edited once more")
+          (is (= a (run {:event/type :file/save})))
+          (is (false? (get-in (state/get-raw-state) [:project :dirty?]))))
+        (testing "an Open that is cancelled, or finds no file or no show, keeps it"
+          (is (= a (run {:event/type :file/open-result :file-path nil})))
+          (is (= a (run {:event/type :file/open-result :file-path (str (io/file dir "missing.zip"))})))
+          (is (= a (run {:event/type :file/open-result :file-path (str (io/file dir "not-a-show.zip"))})))
+          (is (= a (run {:event/type :file/project-loaded :file-path b-path :contents {"project-metadata.edn" {}}}))))
+        (testing "a New that asks first keeps it, until it goes ahead"
+          (rename-cue! "Unsaved")
+          (is (= a (run {:event/type :file/new-project})))
+          (is (true? (:open? (confirm-dialog (state/get-raw-state)))))
+          (is (= a (run {:event/type :file/confirm-cancel})))
+          (is (= a (run {:event/type :file/new-project}))))
+        (testing "each New and Open that replaces the show gives the next show its own"
+          (let [b (run {:event/type :file/confirm-discard})
+                c (run {:event/type :file/open-result :file-path b-path})
+                d (run {:event/type :file/new-project})
+                e (run {:event/type :file/project-loaded :file-path b-path :contents (persistent/read-project b-path)})]
+            (is (= 77.0 (get-in (state/get-raw-state) [:timing :bpm])) "B.zip is open")
+            (is (every? uuid? [b c d e]))
+            (is (= 5 (count (distinct [a b c d e])))))))
+      (finally
+        (jar/delete-tree! dir)))))
+
+(deftest chooser-open-rechecks-a-document-changed-while-choosing-test
+  ;; Before: File > Open asked only before its chooser, so an edit that
+  ;; landed while the chooser was open was thrown away without a question
+  (let [^File dir (jar/temp-dir! "open-rechecks")
+        a-path (str (io/file dir "A.zip"))
+        b-path (str (io/file dir "B.zip"))
+        clean (-> document-state
+                  (assoc-in [:project :document-id] (random-uuid))
+                  (assoc-in [:project :current-file] a-path)
+                  history/mark-clean)
+        now #(state/get-raw-state)
+        pick-b (fn [open-event state] (chooser-result open-event state b-path))
+        b-open? #(and (= b-path (get-in % [:project :current-file]))
+                      (= 77.0 (get-in % [:timing :bpm])))
+        asked? #(= {:open? true :pending {:event/type :file/open-result :file-path b-path}}
+                   (select-keys (confirm-dialog %) [:open? :pending]))]
+    (try
+      (is (persistent/write-project! b-path (zip-contents-of (assoc-in document-state [:timing :bpm] 77.0))))
+      (testing "the chooser's result says what it may throw away: this show, with no unsaved changes"
+        (is (= {:document-id (document-id clean) :dirty? false}
+               (:authorized (pick-b {:event/type :file/open} clean)))))
+      (testing "nothing changed while choosing: B.zip opens"
+        (state/reset-state! clean)
+        (events/event-handler (pick-b {:event/type :file/open} clean))
+        (is (b-open? (now))))
+      (testing "an edit landed while choosing"
+        (state/reset-state! clean)
+        (rename-cue! "While choosing")
+        (events/event-handler (pick-b {:event/type :file/open} clean))
+        (let [asking (now)]
+          (testing ": nothing is replaced, and the question is asked again, for B.zip"
+            (is (asked? asking))
+            (is (= "While choosing" (get-in asking [:chains :cue-chains [2 0] :name])))
+            (is (= a-path (get-in asking [:project :current-file])))
+            (is (true? (get-in asking [:project :dirty?])))
+            (is (= (document-id clean) (document-id asking))))
+          (testing "; Cancel keeps the show"
+            (state/reset-state! asking)
+            (events/event-handler {:event/type :file/confirm-cancel})
+            (is (= "While choosing" (get-in (now) [:chains :cue-chains [2 0] :name])))
+            (is (false? (:open? (confirm-dialog (now))))))
+          (testing "; Don't Save opens B.zip"
+            (state/reset-state! asking)
+            (events/event-handler {:event/type :file/confirm-discard})
+            (is (b-open? (now))))
+          (testing "; Save writes A.zip with the edit, then opens B.zip"
+            (state/reset-state! asking)
+            (events/event-handler {:event/type :file/confirm-save})
+            (is (b-open? (now)))
+            (is (= "While choosing" (get-in (persistent/read-project a-path) ["content.edn" :chains :cue-chains [2 0] :name]))))))
+      (testing "the show was replaced while choosing"
+        (testing "by one with no unsaved changes: nothing to lose, B.zip opens"
+          (state/reset-state! clean)
+          (events/event-handler {:event/type :file/new-project})
+          (events/event-handler (pick-b {:event/type :file/open} clean))
+          (is (b-open? (now))))
+        (testing "by one with unsaved changes: they are asked about first"
+          (state/reset-state! clean)
+          (events/event-handler {:event/type :file/new-project})
+          (rename-cue! "In the new show")
+          (events/event-handler (pick-b {:event/type :file/open} clean))
+          (is (asked? (now)))
+          (is (= "In the new show" (get-in (now) [:chains :cue-chains [2 0] :name])))))
+      (testing "unsaved changes Don't Save had already let go"
+        (state/reset-state! clean)
+        (rename-cue! "Confirmed")
+        (let [dirty (now)
+              confirmed (pick-b {:event/type :file/open :force? true} dirty)]
+          (is (= {:document-id (document-id clean) :dirty? true} (:authorized confirmed)))
+          (testing ": B.zip opens without asking again"
+            (state/reset-state! dirty)
+            (events/event-handler confirmed)
+            (is (b-open? (now))))
+          (testing ", but not over another show's"
+            (state/reset-state! dirty)
+            (events/event-handler {:event/type :file/new-project :force? true})
+            (rename-cue! "Another show's")
+            (events/event-handler confirmed)
+            (is (asked? (now)))
+            (is (= "Another show's" (get-in (now) [:chains :cue-chains [2 0] :name]))))))
+      (finally
+        (jar/delete-tree! dir)))))
+
+(deftest parked-paste-from-a-replaced-document-does-nothing-test
+  ;; Before: a paste waiting for the OS clipboard pasted into the show New or
+  ;; Open had put there meanwhile
+  (let [clip {:type :cue-chain :data {:items [{:type :preset :preset-id :star}]} :copied-at 1}
+        show (-> document-state
+                 (assoc-in [:project :document-id] (random-uuid))
+                 (assoc-in [:ui :active-tab] :grid)
+                 (assoc-in [:grid :selected-cell] [5 2])
+                 history/mark-clean)
+        now #(state/get-raw-state)
+        parked (get-in (menu/handle {:event/type :edit/paste :state show :time 1}) [:clipboard/read :then])]
+    (testing "Edit > Paste with nothing copied in this app waits for the OS clipboard, for this show"
+      (is (= {:event/type :grid/paste-cell :col 5 :row 2 :document-id (document-id show)} parked)))
+    (testing "back in the same show, the read pastes"
+      (state/reset-state! show)
+      (events/event-handler (assoc parked :clipboard/system clip))
+      (is (= (:data clip) (get-in (now) [:chains :cue-chains [5 2]]))))
+    (doseq [[label replace!] [["File > New" #(events/event-handler {:event/type :file/new-project})]
+                              ["File > Open" #(events/event-handler {:event/type :file/project-loaded :file-path test-file
+                                                                      :contents (zip-contents-of show)})]]
+            [found what] [[clip "a cue"] [nil "nothing"]]]
+      (testing (str "back after " label ", with " what ": nothing at all")
+        (state/reset-state! show)
+        (replace!)
+        (let [replaced (now)
+              back (assoc parked :clipboard/system found)]
+          (is (not= (document-id show) (document-id replaced)))
+          (is (= {} (events/handle-event-pipeline (assoc back :state replaced))) "no state, no notice")
+          (events/event-handler back)
+          (is (= replaced (now))))))
+    (testing "a list's paste belongs to its show too"
+      (let [triangle {:type :cue-chain-items :copied-at 5
+                      :items [{:id (random-uuid) :type :preset :preset-id :triangle :effects []}]}
+            parked (get-in (events/handle-event-pipeline {:event/type :list/paste-items :component-id [:cue-chain 0 0]
+                                                          :items-path [:chains :cue-chains [0 0] :items]
+                                                          :on-change-event :chain/set-items
+                                                          :on-change-params {:domain :cue-chains :entity-key [0 0]}
+                                                          :state show})
+                           [:clipboard/read :then])]
+        (is (= (document-id show) (:document-id parked)))
+        (state/reset-state! show)
+        (events/event-handler (assoc parked :clipboard/system triangle))
+        (is (= [:circle :triangle] (mapv :preset-id (get-in (now) [:chains :cue-chains [0 0] :items])))
+            "in the same show, pasted")
+        (state/reset-state! show)
+        (events/event-handler {:event/type :file/new-project})
+        (let [replaced (now)]
+          (events/event-handler (assoc parked :clipboard/system triangle))
+          (is (= replaced (now)) "after New, nothing"))))))
+
+(deftest save-as-chooser-for-a-replaced-document-saves-nothing-test
+  (let [^File dir (jar/temp-dir! "save-as-replaced")
+        path (str (io/file dir "A.zip"))
+        show (assoc-in document-state [:project :document-id] (random-uuid))
+        exits (atom 0)
+        chosen (fn [then] (chooser-result (cond-> {:event/type :file/save-as} then (assoc :then then)) show path))]
+    (events/set-exit-fn! #(swap! exits inc))
+    (try
+      (testing "Save As's chooser answers for the show it was opened on"
+        (is (= (document-id show) (:document-id (chosen nil)))))
+      (testing "that show was replaced while choosing: nothing is written, and what waited for the save doesn't run"
+        (state/reset-state! show)
+        (events/event-handler {:event/type :file/new-project :force? true})
+        (let [replaced (state/get-raw-state)
+              back (chosen {:event/type :file/exit :force? true})]
+          (is (= {} (events/handle-event-pipeline (assoc back :state replaced))))
+          (events/event-handler back)
+          (is (= replaced (state/get-raw-state)))
+          (is (not (.exists (io/file path))))
+          (is (zero? @exits))))
+      (testing "the same show: written, then Exit"
+        (state/reset-state! show)
+        (events/event-handler (chosen {:event/type :file/exit :force? true}))
+        (is (= path (get-in (state/get-raw-state) [:project :current-file])))
+        (is (= 140.0 (get-in (persistent/read-project path) ["project-metadata.edn" :timing :bpm])))
+        (is (= 1 @exits)))
+      (finally
+        (events/set-exit-fn! nil)
+        (jar/delete-tree! dir)))))

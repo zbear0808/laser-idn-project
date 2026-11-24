@@ -259,12 +259,31 @@
         (update :held-inputs #(into #{} (remove keyboard?) %))
         (update :active-triggers #(into {} (remove (comp keyboard? :input val)) %)))))
 
+(defn begin-document
+  "state with a new document identity: a fresh random UUID at
+   [:project :document-id] (see state.domains). The starter show gets one at
+   start, and every New and Open (reset-session), so work that comes back
+   for the show that went (events.helpers/same-document?) can tell."
+  [state]
+  (assoc-in state [:project :document-id] (random-uuid)))
+
+(defn- end-learn
+  "state without the learn waiting for an input (handlers/input.clj): what
+   it learns goes into the show ([:config :input]), so its capture, should
+   one still come, finds no learn and binds nothing into the next show."
+  [state]
+  (cond-> state
+    (get-in state [:backend :input])
+    (update-in [:backend :input] dissoc :learning-target :learning-capture)))
+
 (defn- reset-session
   "Reset state that refers to the previous document (playback, what vibe
    mode is doing, selection, list UI, dialogs, the status bar's notice, the
    Vibes tab's selection, a pending zone map switch and the Map cycle's
-   pause, the pattern pads' style, undo history, project metadata).
-   Backend/runtime state (streaming, Link, MIDI/OSC, discovered devices) is kept."
+   pause, the pattern pads' style, a learn in progress, undo history,
+   project metadata), and give the new document its own identity
+   (begin-document). Backend/runtime state (streaming, Link, MIDI/OSC,
+   discovered devices) is kept."
   [state initial]
   (-> state
       (assoc :playback (:playback initial))
@@ -273,6 +292,8 @@
       (assoc :list-ui (:list-ui initial))
       (assoc :history (:history initial))
       (assoc :project (:project initial))
+      (begin-document)
+      (end-learn)
       (assoc :zone-group-ui (:zone-group-ui initial))
       (assoc-in [:ui :dialogs] (get-in initial [:ui :dialogs]))
       (assoc-in [:ui :notice] (get-in initial [:ui :notice]))
@@ -310,7 +331,8 @@
    replace nothing.
    An old show is converted (state.migration: Z2's rows, its groups judged by
    its own hardware, then Z4's, its routing as :target) before the saved
-   baseline is taken, so it isn't \"unsaved\" right after loading."
+   baseline is taken, so it isn't \"unsaved\" right after loading. The show
+   opened has a new identity (reset-session)."
   [state zip-contents zip-path]
   (let [initial (domains/build-initial-state)
         zip-contents (checked-project-files zip-contents)
@@ -329,7 +351,8 @@
 (defn new-project-state
   "Return state with a fresh starter show on the same rig: the rig stays as
    it is, and the groups its lasers are in come into the new show
-   (rig-file/group-copy). Runtime/backend state is kept."
+   (rig-file/group-copy). The new show has a new identity (reset-session).
+   Runtime/backend state is kept."
   [state]
   (let [initial (domains/build-initial-state)
         rig-groups (rig-file/group-copy state)]
