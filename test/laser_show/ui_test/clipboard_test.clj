@@ -595,13 +595,14 @@
   ;; p18: before Step 4a the step grid kept a clipboard of its own: its Copy
   ;; reached neither [:ui :clipboard] nor the OS clipboard, and its Paste
   ;; ignored what the lists copied
-  (let [target {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]}]
+  (let [target {:domain :cue-zone-patterns :entity-key [0 0]}]
     (set-os-text! "")
     (events/dispatch! {:event/type :list/select-item :component-id [:cue-chain 0 0]
                        :item-id (:id (first (cue-items))) :mode :single :items-path cue-items-path})
     (events/dispatch! (copy-event))
     (ui/wait-for! #(= :cue-chain-items (:type (slot))))
-    (events/dispatch! {:event/type :step-grid/open :target target})
+    ;; A1 has no pattern: its first, as the Pattern chip asks for it
+    (events/dispatch! {:event/type :step-grid/open :target target :create-first? true})
     (ui/wait-for! #(some? (node "#step-grid-paste")))
     (is (disabled? "#step-grid-paste") "cue items copied: nothing a grid takes")
     (ui/on-fx-thread #(.fire ^javafx.scene.control.ButtonBase (node "#step-grid-copy")))

@@ -158,6 +158,59 @@
       (is (= 2 (get-in restored [:timing :beat-index])))
       (is (nil? (get-in restored [:project :dirty?]))))))
 
+(def ^:private balcony {:id :group-balcony :name "Balcony" :description "House" :color "#2468AC"})
+
+(deftest snapshot-carries-only-listed-rig-only-definitions-test
+  ;; Reactivity plan 23: the definitions an undo step needs to bring a
+  ;; membership back, beside its document
+  (let [graphics {:id :graphics :name "Graphics" :color "#9B59B6"}
+        rigged (-> sample-state
+                   (assoc-in [:zone-groups :graphics] graphics)
+                   (assoc-in [:projectors :proj-1 :zone-groups] [:group-balcony :graphics :all :auto/left :group-unknown])
+                   (assoc :rig-file {:path nil :status :saved :requested 3 :written 3 :error nil
+                                     :group-copy {:group-balcony balcony
+                                                  :graphics {:id :graphics :name "Graphics (old)"}
+                                                  :group-unused {:id :group-unused :name "Unused"}
+                                                  :all {:id :all :name "Everything"}
+                                                  :auto/left {:id :auto/left :name "Left"}}}))
+        snapshot (history/make-snapshot {:state rigged :description "Remove Projector"})
+        ;; Since: the member removed, the copy kept to what is listed
+        removed (-> rigged
+                    (update :projectors dissoc :proj-1)
+                    (assoc-in [:rig-file :group-copy] {}))
+        copy-after (fn [current snapshot] (get-in (history/restore-snapshot current snapshot) [:rig-file :group-copy]))]
+    (is (= {:group-balcony balcony} (:rig-only-group-definitions snapshot))
+        "a listed group only the rig's copy defines: not the show's Graphics, an unused or derived one, nor the unknown")
+    (is (not-any? (set (keys (:document-state snapshot))) [:rig-file :rig-only-group-definitions]) "not in the document")
+    (is (not-any? (set (keys (get-in (history/mark-clean rigged) [:project :saved-document]))) [:rig-file :rig-only-group-definitions])
+        "nor in the saved baseline")
+    (testing "restored: the membership with its definition, the writer's fields as they are now"
+      (let [current (update removed :rig-file assoc :status :write-failed :requested 5 :written 4 :error "disk full")
+            restored (history/restore-snapshot current snapshot)]
+        (is (= [:group-balcony :graphics :all :auto/left :group-unknown] (get-in restored [:projectors :proj-1 :zone-groups])))
+        (is (= {:group-balcony balcony :graphics graphics} (get-in restored [:rig-file :group-copy]))
+            "the unknown group stays unknown")
+        (is (= {:path nil :status :write-failed :requested 5 :written 4 :error "disk full"}
+               (dissoc (:rig-file restored) :group-copy)))))
+    (testing "a snapshot from before the field: the copy as it is, if it still knows the group"
+      (let [legacy (dissoc snapshot :rig-only-group-definitions)]
+        (is (= {:group-balcony balcony :graphics graphics}
+               (copy-after (assoc-in removed [:rig-file :group-copy] {:group-balcony balcony}) legacy)))
+        (is (= {:graphics graphics} (copy-after removed legacy)))))
+    (testing "a present {}: no definition to bring back, whatever the copy knows now"
+      (is (= {:graphics graphics}
+             (copy-after (assoc-in removed [:rig-file :group-copy] {:group-balcony balcony})
+                         (assoc snapshot :rig-only-group-definitions {})))))
+    (testing "the copy keeps its map when it is the same"
+      (let [kept (assoc-in rigged [:rig-file :group-copy] {:group-balcony balcony :graphics graphics})]
+        (is (identical? (:rig-file kept) (:rig-file (history/restore-snapshot kept snapshot))))))
+    (testing "a discovery's backfill in between stays, and the field with it"
+      (let [h (history/backfill-history {:undo-stack [snapshot] :redo-stack []}
+                                        #(assoc-in % [:projectors :found] {:name "Found" :zone-groups []}))
+            restored (history/restore-snapshot removed (peek (:undo-stack h)))]
+        (is (= "Found" (get-in restored [:projectors :found :name])))
+        (is (= {:group-balcony balcony :graphics graphics} (get-in restored [:rig-file :group-copy])))))))
+
 (deftest restore-document-grafts-live-item-fields-by-id-test
   (let [snapshot-doc (doc sample-state)
         ;; Since the snapshot: the group was collapsed, then moved behind a new item
@@ -225,48 +278,69 @@
                                        (history/push-undo-snapshot (snap "a"))
                                        (history/push-undo-snapshot (snap "b"))))))))))
 
+(def ^:private press-a #uuid "00000000-0000-0000-0000-0000000016a1")
+(def ^:private press-b #uuid "00000000-0000-0000-0000-0000000016b2")
+
 (deftest transaction-lifecycle-test
   (testing "transaction captures baseline on begin, and commits on mouse-up only if changed"
     (let [h0 {:undo-stack [] :redo-stack [] :transaction nil}
-          h1 (history/begin-transaction h0 sample-state {:label "Drag Slider" :source-id [:slider :size]})]
+          h1 (history/begin-transaction h0 sample-state {:label "Drag Slider" :gesture-id press-a :source-id [:slider :size]})]
       (is (some? (:transaction h1)))
       (is (= "Drag Slider" (get-in h1 [:transaction :label])))
-      (let [h-no-change (history/commit-transaction h1 sample-state)]
+      (is (= press-a (history/gesture-id h1)))
+      (let [h-no-change (history/finish-transaction h1 sample-state press-a)]
         (is (nil? (:transaction h-no-change)))
         (is (false? (history/can-undo? h-no-change))))
       (testing "live changes alone don't create a step"
-        (is (false? (history/can-undo? (history/commit-transaction h1 (assoc-in sample-state [:timing :bpm] 150.0))))))
-      (let [h-committed (history/commit-transaction h1 (edit-content sample-state))]
+        (is (false? (history/can-undo? (history/finish-transaction h1 (assoc-in sample-state [:timing :bpm] 150.0) press-a)))))
+      (let [h-committed (history/finish-transaction h1 (edit-content sample-state) press-a)]
         (is (nil? (:transaction h-committed)))
         (is (true? (history/can-undo? h-committed)))
         (is (= "Drag Slider" (history/undo-label h-committed))))))
 
   (testing "abort-transaction returns baseline and clears transaction"
-    (let [h1 (history/begin-transaction {} sample-state {:label "Drag Slider" :source-id [:slider :size]})
-          {:keys [history baseline]} (history/abort-transaction h1)]
+    (let [h1 (history/begin-transaction {} sample-state {:label "Drag Slider" :gesture-id press-a :source-id [:slider :size]})
+          {:keys [history baseline]} (history/abort-transaction h1 press-a)]
       (is (nil? (:transaction history)))
-      (is (some? baseline)))))
+      (is (some? baseline))))
+  (testing "without a press id nothing begins"
+    (is (nil? (:transaction (history/begin-transaction {} sample-state {:label "x" :source-id [:slider :size]}))))))
 
 (deftest transaction-source-scoping-test
-  (let [h1 (history/begin-transaction {} sample-state {:label "A" :source-id [:slider :a]})
+  ;; Reactivity plan 16: a press owns the transaction by its id; the control
+  ;; (:source-id) is only described
+  (let [h1 (history/begin-transaction {} sample-state {:label "A" :gesture-id press-a :source-id [:slider :a] :now 0})
         edited (edit-content sample-state)]
-    (testing "any mouse-up commits the open transaction (a missed mouse-up can't leave it stuck)"
-      (is (nil? (:transaction (history/commit-transaction h1 edited))))
-      (is (= "A" (history/undo-label (history/commit-transaction h1 edited)))))
-    (testing "begin from the same source keeps the open transaction"
-      (is (= (:transaction h1) (:transaction (history/begin-transaction h1 edited {:label "A" :source-id [:slider :a]})))))
-    (testing "begin from a new source commits the open one first"
-      (let [h2 (history/begin-transaction h1 edited {:label "B" :source-id [:slider :b]})]
-        (is (= "A" (history/undo-label h2)))
-        (is (= "B" (get-in h2 [:transaction :label])))))))
+    (testing "two presses on the same control get two baselines: a new press seals the open one first"
+      (let [h2 (history/begin-transaction h1 edited {:label "A" :gesture-id press-b :source-id [:slider :a] :now 10})]
+        (is (= "A" (history/undo-label h2)) "the first press's step")
+        (is (= press-b (history/gesture-id h2)))
+        (is (= (doc edited) (get-in h2 [:transaction :baseline-snapshot :document-state]))
+            "the second press's baseline is the document after the first")))
+    (testing "the same press again is inert"
+      (is (= h1 (history/begin-transaction h1 edited {:label "A" :gesture-id press-a :source-id [:slider :a] :now 99}))))
+    (testing "another press's touch, commit or abort does nothing"
+      (is (= h1 (history/touch-transaction h1 press-b 500)))
+      (is (= h1 (history/finish-transaction h1 edited press-b)))
+      (is (= {:history h1 :baseline nil} (history/abort-transaction h1 press-b)))
+      (is (= h1 (history/finish-transaction h1 edited nil)) "nor an end with no press"))
+    (testing "the open press's touch marks its activity"
+      (is (= 500 (get-in (history/touch-transaction h1 press-a 500) [:transaction :last-activity]))))
+    (testing "a late end, after its press was sealed, does nothing"
+      (let [sealed (history/finish-transaction h1 edited press-a)]
+        (is (= sealed (history/finish-transaction sealed edited press-a)))
+        (is (= 1 (count (:undo-stack sealed))))))))
 
 (deftest stale-transaction-test
-  (let [h (history/begin-transaction {} sample-state {:label "A" :source-id :x :now 0})]
+  (let [h (history/begin-transaction {} sample-state {:label "A" :gesture-id press-a :source-id :x :now 0})]
     (is (not (history/stale-transaction? h 1000)))
-    (is (history/stale-transaction? h (inc history/stale-transaction-ms)))
+    (is (not (history/stale-transaction? h (dec history/stale-transaction-ms))))
+    (is (history/stale-transaction? h history/stale-transaction-ms) "due at its deadline")
+    (is (= history/stale-transaction-ms (history/transaction-deadline h)))
     (testing "activity keeps a long drag fresh"
-      (let [touched (history/touch-transaction h 50000)]
+      (let [touched (history/touch-transaction h press-a 50000)]
         (is (not (history/stale-transaction? touched 100000)))
+        (is (= (+ 50000 history/stale-transaction-ms) (history/transaction-deadline touched)))
         (is (history/stale-transaction? touched (+ 50001 history/stale-transaction-ms)))))
     (is (not (history/stale-transaction? {} (inc history/stale-transaction-ms))))))
 
@@ -289,6 +363,26 @@
       (is (false? (history/undoable-changed?
                    (doc sample-state)
                    (doc (assoc-in sample-state [:chains :effect-chains [7 7]] {:active? true}))))))))
+
+(deftest effect-cell-sources-are-where-restore-takes-on-off-test
+  ;; Reactivity plan 22: the live state that names effect cells (the vibes'
+  ;; switches) follows them by the same cells
+  (let [x {:id #uuid "55555555-5555-5555-5555-5555555555a1" :effect-id :scale}
+        y {:id #uuid "55555555-5555-5555-5555-5555555555b1" :effect-id :hue-shift}
+        z {:id #uuid "55555555-5555-5555-5555-5555555555c1" :effect-id :rotation}
+        cells #(assoc-in sample-state [:chains :effect-chains] %)
+        snapshot-doc (doc (cells {[0 0] {:active? false :items [x]}
+                                  [1 0] {:active? false :items [y]}
+                                  [2 0] {:active? false :items [z]}}))
+        ;; Since: [0 0] moved to [3 0], [1 0] cleared, [2 0] given another
+        ;; effect, both switched on
+        current (cells {[3 0] {:active? true :items [x]}
+                        [2 0] {:active? true :items [y z]}})]
+    (is (= {[0 0] [3 0] [2 0] [2 0]} (history/effect-cell-sources current snapshot-doc))
+        "moved: from where it is now; still there: from itself; cleared: none")
+    (is (= {[0 0] true [1 0] false [2 0] true}
+           (update-vals (get-in (history/restore-document current snapshot-doc) [:chains :effect-chains]) :active?))
+        "their on/off is what restore-document grafts")))
 
 (deftest restore-clamps-selected-keyframe-test
   (let [kf (fn [n sel] {:enabled? true :selected-keyframe sel

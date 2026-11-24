@@ -3,12 +3,15 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
-            [laser-show.ui-test.testfx :as ui])
-  (:import [javafx.scene Node]
+            [laser-show.ui-test.testfx :as ui]
+            [laser-show.views.components.drag-drop-cell :as drag-drop])
+  (:import [javafx.event Event]
+           [javafx.scene Node]
            [javafx.scene.control Labeled MenuItem SplitPane]
-           [javafx.scene.input KeyCode MouseButton]
+           [javafx.scene.input KeyCode MouseButton MouseEvent TransferMode]
            [javafx.scene.layout BackgroundFill BorderStroke Region]
            [javafx.scene.paint Color]
            [org.testfx.api FxRobot FxRobotInterface]
@@ -163,6 +166,91 @@
       (is (= "#656565" (fill-hex "#effects-cell-0-0")) "off, hovered")
       (move-away! robot "#effects-cell-0-0")
       (is (= "#505050" (fill-hex "#effects-cell-0-0"))))))
+
+
+;; A click names its cell: what the cell holds when the click is handled
+;; decides what it does (plans/2026-11-23-cljfx-reactivity/10)
+
+(defn- recorded-click!
+  "The events a real primary click on selector dispatches, recorded instead
+   of dispatched; the mouse is moved off the cells after, so the next click
+   counts as a single one."
+  [robot selector]
+  (let [sent (atom [])]
+    (with-redefs [events/dispatch! #(swap! sent conj %)]
+      (ui/click! robot selector))
+    (move-away! robot selector)
+    @sent))
+
+(defn- handled!
+  "Dispatch events in turn and wait until the app has handled them."
+  [& events]
+  (run! events/dispatch! events)
+  (is (events/flush!)))
+
+(defn- edit-marks
+  "How many undo steps, and whether there are unsaved changes."
+  []
+  (let [s (state/get-raw-state)]
+    [(count (get-in s [:history :undo-stack])) (get-in s [:project :dirty?])]))
+
+(deftest primary-click-resolves-current-cue-test
+  (let [robot (ui/robot)
+        A [2 1]
+        cell "#grid-cell-2-1"
+        circle {:id (random-uuid) :type :preset :preset-id :circle :enabled? true :params {} :effects []}
+        click {:event/type :grid/trigger-cell :col 2 :row 1}
+        cue #(get-in (state/get-raw-state) [:chains :cue-chains A])
+        playback #(:playback (state/get-raw-state))
+        selected #(get-in (state/get-raw-state) [:grid :selected-cell])]
+    (ui/assert-visible! cell)
+    (testing "shown empty, filled before the click is handled: the click plays the cue there (§7 case 2)"
+      (ui/wait-for! #(ui/has-style-class? cell "grid-cell-empty"))
+      (let [clicks (recorded-click! robot cell)
+            items [{:id (random-uuid) :type :group :name "Group" :enabled? false :items [circle]}]]
+        (is (= [click] clicks) "the cell's coordinate, and nothing it showed")
+        (is (nil? (cue)))
+        (handled! {:event/type :chain/set-items :domain :cue-chains :entity-key A :items items})
+        (ui/wait-for! #(seq (:items (cue))))
+        (let [marks (edit-marks)]
+          (apply handled! clicks)
+          (let [{:keys [active-cues active-cell playing? pulses]} (playback)
+                run (get-in active-cues [A :run])]
+            (is (uuid? run))
+            (is (= {A {:run run}} active-cues))
+            (is (= [A true {:id 1}] [active-cell playing? (:cue pulses)])))
+          (is (= A (selected)))
+          (is (= marks (edit-marks)) "no undo step, and the unsaved flag as it was")
+          (ui/wait-for! #(and (ui/has-style-class? cell "grid-cell-active")
+                              (ui/has-style-class? cell "grid-cell-content")))
+          (is (= "circle" (label-text (str cell " .grid-cell-label"))) "one preset, the circle")
+          (testing "the same click again stops it"
+            (apply handled! clicks)
+            (is (= [{} nil false {:id 1}]
+                   ((juxt :active-cues :active-cell :playing? (comp :cue :pulses)) (playback))))
+            (is (= marks (edit-marks)))
+            (ui/wait-for! #(not (ui/has-style-class? cell "grid-cell-active")))))))
+    (testing "shown with a cue, cleared before the click is handled: the click only selects the cell (§7 case 1)"
+      (events/write-state! assoc-in [:chains :cue-chains A] {:items [circle]})
+      (handled! {:event/type :grid/trigger-cell :col 0 :row 0})
+      (ui/wait-for! #(and (ui/has-style-class? cell "grid-cell-content")
+                          (ui/has-style-class? "#grid-cell-0-0" "grid-cell-active")))
+      (let [clicks (recorded-click! robot cell)]
+        (is (= [click] clicks) "the same click as the empty cell's")
+        (handled! {:event/type :grid/clear-cell :col 2 :row 1})
+        (ui/wait-for! #(nil? (cue)))
+        (let [cleared (playback)
+              marks (edit-marks)]
+          (apply handled! clicks)
+          (is (= A (selected)))
+          (is (nil? (cue)) "the cue stays gone")
+          (is (= cleared (playback)) "no run, no pulse")
+          (is (some? (get-in (playback) [:active-cues [0 0]])) "the other cue plays on")
+          (is (= marks (edit-marks)) "no undo step, and the unsaved flag as it was")
+          (ui/wait-for! #(and (ui/has-style-class? cell "grid-cell-selected")
+                              (ui/has-style-class? cell "grid-cell-empty")))
+          (is (not (ui/has-style-class? cell "grid-cell-active")))
+          (is (ui/has-style-class? "#grid-cell-0-0" "grid-cell-active")))))))
 
 
 ;; What the tabs say about the clicks
@@ -358,3 +446,114 @@
         (ui/wait-for! #(seq (ui/query-all ".context-menu")))
         (is (empty? (ui/query-all "#new-reaction-menu")))
         (ui/press! robot KeyCode/ESCAPE)))))
+
+
+;; A cell that stores only disabled effects is occupied
+;; (plans/2026-11-23-cljfx-reactivity/11)
+
+(defn- menu-items
+  "The items of the menu a cell's right-click opens."
+  [selector]
+  (let [cell (node selector)]
+    (ui/on-fx-thread #(vec (.getItems (.getContextMenu ^Labeled (.getParent cell)))))))
+
+(defn- menu-ids [selector]
+  (ui/on-fx-thread #(into [] (keep (fn [^MenuItem item] (.getId item))) (menu-items selector))))
+
+(defn- fire-menu-item!
+  "Fire the item text of the menu a cell's right-click opens, as a click on
+   it does."
+  [selector text]
+  (let [item (some #(when (= text (ui/on-fx-thread (fn [] (.getText ^MenuItem %)))) %) (menu-items selector))]
+    (is (some? item) (str "a menu item " (pr-str text)))
+    (ui/on-fx-thread #(.fire ^MenuItem item))
+    (ui/sync-fx!)))
+
+(defn- drags-started
+  "What a drag gesture detected on the cell at selector starts, recorded
+   instead of started: [drag-type payload modes] for each start-drag! call."
+  [selector]
+  (let [started (atom [])
+        cell (node selector)]
+    (with-redefs [drag-drop/start-drag! (fn [_ drag-type payload modes]
+                                          (swap! started conj [drag-type payload (vec modes)])
+                                          nil)]
+      (ui/on-fx-thread
+       #(let [b (.getBoundsInLocal cell)
+              x (/ (+ (.getMinX b) (.getMaxX b)) 2)
+              y (/ (+ (.getMinY b) (.getMaxY b)) 2)
+              scene (.localToScene cell (double x) (double y))
+              screen (.localToScreen cell (double x) (double y))]
+          (Event/fireEvent cell (MouseEvent. MouseEvent/DRAG_DETECTED (.getX scene) (.getY scene)
+                                             (.getX screen) (.getY screen) MouseButton/PRIMARY 1
+                                             false false false false true false false false false false nil)))))
+    @started))
+
+(defn- texts-of
+  "The texts of the labels selector finds, in any window."
+  [selector]
+  (let [labels (ui/query-all selector)]
+    (ui/on-fx-thread #(mapv (fn [^Labeled l] (.getText l)) labels))))
+
+(deftest disabled-effect-cell-keeps-menu-and-drag-in-sync-test
+  (let [robot (ui/robot)
+        pattern (assoc (zone-patterns/preset-instance :chase :cell) :id #uuid "88888888-0000-0000-0000-000000000003")
+        tree {:active? false
+              :items [{:id #uuid "88888888-0000-0000-0000-000000000001" :type :group :name "Outer"
+                       :items [{:id #uuid "88888888-0000-0000-0000-000000000002" :type :group :name "Off" :enabled? false
+                                :items [pattern
+                                        {:id #uuid "88888888-0000-0000-0000-000000000004" :effect-id :scale
+                                         :enabled? true :params {}}]}]}]}
+        effects-cell #(get-in (state/get-raw-state) [:chains :effect-chains [%1 %2]])
+        source "#effects-cell-2-1"
+        neighbour "#effects-cell-3-1"
+        groups "#effects-cell-4-1"]
+    (events/write-state! #(-> %
+                              (assoc-in [:chains :effect-chains [2 1]] tree)
+                              (assoc-in [:chains :effect-chains [4 1]]
+                                        {:items [{:id #uuid "88888888-0000-0000-0000-000000000005" :type :group
+                                                  :name "Empty" :items []}]})))
+    (ui/click! robot "#effects-tab")
+    (ui/assert-visible! source)
+    (testing "it looks filled, named by what it stores, both effects in its tooltip"
+      (ui/wait-for! #(ui/has-style-class? source "grid-cell-content"))
+      (ui/wait-for! #(= "zone pattern +1" (label-text (str source " .grid-cell-label"))))
+      (is (= "Zone pattern: Chase across every laser, 1 step a beat (show beats)\nscale" (cell-tooltip source))))
+    (testing "it offers no New menu: it isn't empty; the empty cell beside it offers both"
+      (is (not-any? #{"new-reaction-menu" "new-zone-pattern-menu"} (menu-ids source)))
+      (is (ui/has-style-class? neighbour "grid-cell-empty"))
+      (is (every? (set (menu-ids neighbour)) ["new-reaction-menu" "new-zone-pattern-menu"])))
+    (testing "Edit opens the tree it stores"
+      (fire-menu-item! source "Edit Effect Chain...")
+      (ui/wait-for! #(= [true 2 1] ((juxt :open? :col :row) (get-in (state/get-raw-state) [:ui :dialogs :effect-chain-editor]))))
+      (ui/wait-for! #(= ["Zone pattern" "Scale"] (texts-of ".chain-item-name")))
+      (is (= ["Outer" "Off"] (texts-of ".group-name-label")))
+      (is (= tree (effects-cell 2 1)))
+      (events/dispatch! {:event/type :ui/close-dialog :dialog-id :effect-chain-editor})
+      (ui/wait-for! #(empty? (ui/query-all ".chain-item"))))
+    (testing "a drag starts from it, as a move, and not from the empty cell"
+      (let [drags (drags-started source)]
+        (is (= [[:effects-cell {:col 2 :row 1} [TransferMode/MOVE]]] drags))
+        (is (= [] (drags-started neighbour)))
+        (testing "; dropped on that cell, the whole tree moves there"
+          (let [[[drag-type payload]] drags]
+            (is (:completed? (ui/fire-drop! (node neighbour) (drag-drop/drag-content drag-type payload) 20 20
+                                            :mode TransferMode/MOVE)))
+            (ui/wait-for! #(and (nil? (effects-cell 2 1)) (= tree (effects-cell 3 1))))
+            (ui/wait-for! #(= "zone pattern +1" (label-text (str neighbour " .grid-cell-label"))))
+            (ui/wait-for! #(and (= "" (label-text (str source " .grid-cell-label")))
+                                (ui/has-style-class? source "grid-cell-empty")))
+            (is (ui/has-style-class? neighbour "grid-cell-content"))))))
+    (testing "a cell of groups only is occupied too: filled, named so, no New menu, and it can be dragged"
+      (ui/wait-for! #(= "Groups only" (label-text (str groups " .grid-cell-label"))))
+      (is (ui/has-style-class? groups "grid-cell-content"))
+      (is (not-any? #{"new-reaction-menu" "new-zone-pattern-menu"} (menu-ids groups)))
+      (is (= [[:effects-cell {:col 4 :row 1} [TransferMode/MOVE]]] (drags-started groups))))
+    (testing "the Vibes picker's effect cells say the same"
+      (ui/click! robot "#vibes-tab")
+      (ui/wait-for! #(= :vibes (get-in (state/get-raw-state) [:ui :active-tab])))
+      (ui/click! robot "#vibe-slot-fx")
+      (ui/wait-for! #(= "Groups only" (label-text "#pick-fx-cell-4-1 .grid-cell-label")))
+      (is (= "zone pattern +1" (label-text "#pick-fx-cell-3-1 .grid-cell-label")))
+      (is (ui/has-style-class? "#pick-fx-cell-3-1" "grid-cell-content"))
+      (is (ui/has-style-class? "#pick-fx-cell-2-1" "grid-cell-empty")))))

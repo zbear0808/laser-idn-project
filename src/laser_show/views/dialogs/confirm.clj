@@ -4,15 +4,24 @@
 
    State lives in [:ui :dialogs :confirm]:
    {:open? :title :message :details :choice :choice-value :confirm-label
-    :danger? :confirm-event}
+    :danger? :confirm-event :safety-review}
    :choice is optional, {:key :label :options [{:value :text}]}; its combo
    keeps the picked option in :choice-value. Cancel closes the dialog; the
    confirm button dispatches :ui/confirm, which closes it and continues with
    :confirm-event, plus {(:key choice) choice-value} when there's a choice.
-   :confirm-event is plain data: whoever opens the dialog builds it fresh."
+   :confirm-event is plain data: whoever opens the dialog builds it fresh.
+   A safety zone's question has :safety-review {:id …}
+   (events/safety_guard.clj ask-review): Cancel, the confirm button and the
+   window's close send its :review-id, so they answer that question only."
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [laser-show.views.dialogs.common :as common]))
+
+(defn- scoped
+  "event with the :review-id of the question it answers, when it is a
+   safety zone's."
+  [event review-id]
+  (cond-> event (some? review-id) (assoc :review-id review-id)))
 
 (defn- choice-row
   [{:keys [choice choice-value]}]
@@ -38,8 +47,9 @@
 
 (defn- confirm-content
   [{:keys [fx/context]}]
-  (let [{:keys [title message details choice confirm-label danger?] :as data}
-        (fx/sub-ctx context subs/dialog-data :confirm)]
+  (let [{:keys [title message details choice confirm-label danger? safety-review] :as data}
+        (fx/sub-ctx context subs/dialog-data :confirm)
+        review-id (:id safety-review)]
     {:fx/type :v-box
      :id "confirm-dialog"
      :spacing 16
@@ -77,22 +87,23 @@
                             :text "Cancel"
                             :cancel-button true
                             :style-class ["button-secondary"]
-                            :on-action {:event/type :ui/close-dialog :dialog-id :confirm}}
+                            :on-action (scoped {:event/type :ui/close-dialog :dialog-id :confirm} review-id)}
                            {:fx/type :button
                             :id "confirm-ok"
                             :text (or confirm-label "OK")
                             :default-button true
                             :style-class [(if danger? "button-danger" "button-primary")]
-                            :on-action {:event/type :ui/confirm}}]}])}))
+                            :on-action (scoped {:event/type :ui/confirm} review-id)}]}])}))
 
 (defn confirm-dialog
   "The shared confirm window. Application-modal, so nothing else can be
    clicked while the question is open."
   [{:keys [fx/context]}]
-  (let [{:keys [title]} (fx/sub-ctx context subs/dialog-data :confirm)]
+  (let [{:keys [title safety-review]} (fx/sub-ctx context subs/dialog-data :confirm)]
     {:fx/type common/dialog-stage
      :dialog-id :confirm
      :title (or title "Confirm")
      :modality :application-modal
      :resizable false
+     :on-close-request (scoped {:event/type :ui/close-dialog :dialog-id :confirm} (:id safety-review))
      :content {:fx/type confirm-content}}))

@@ -380,7 +380,8 @@
 (deftest stale-voices-are-forgotten-test
   (let [s1 (tap (starter) :hit 1000)
         {:keys [cell run]} (rt s1 :voices :hit)
-        ended (:state (handlers/handle-event {:event/type :show-clock/cue-ended :cell cell :run run :state s1}))]
+        ended (:state (handlers/handle-event {:event/type :show-clock/cue-ended :cell cell :run run
+                                              :position-ids {:restart nil :seek nil} :state s1}))]
     (is (nil? (intent ended cell)) "the clock ended its run")
     (is (nil? (rt (press ended :accent 1500) :voices :hit)) "the next event forgets the voice")
     (testing "a flash whose cue went keeps its effect cells to switch off"

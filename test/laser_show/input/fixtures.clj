@@ -1,12 +1,13 @@
 (ns laser-show.input.fixtures
   "Real-shaped input messages, built with the same library code that
-   produces them at runtime (overtone/midi-clj and overtone/osc-clj)."
+   produces them at runtime (overtone/midi-clj and overtone/osc-clj), and a
+   fake MIDI input device shaped like the ones javax.sound.midi gives."
   (:require [overtone.midi :as m]
             [overtone.osc.decode :as osc-decode]
             [overtone.osc.encode :as osc-encode]
             [overtone.osc.util :as osc-util])
   (:import [java.nio ByteBuffer]
-           [javax.sound.midi ShortMessage SysexMessage]))
+           [javax.sound.midi MidiDevice MidiMessage Receiver ShortMessage SysexMessage Transmitter]))
 
 (defn short-message
   "Builds a javax.sound.midi.ShortMessage. channel is 0-based (0-15)."
@@ -64,3 +65,59 @@
     (assoc (osc-decode/osc-decode-packet buf)
            :src-host "localhost"
            :src-port 9001)))
+
+(defn midi-source
+  "A MIDI input as overtone.midi/midi-sources lists it ({:name :description
+   :vendor :version :sources :sinks :info :device}, typed :midi-device), on
+   a fake javax.sound.midi device. Like a real port, each getTransmitter
+   opens a new transmitter, and every one of them hands what the device
+   sends (send-midi!) to its receiver. calls gets what is done to the
+   device: :open, :get-transmitter, [:set-receiver r] (nil detaches),
+   :close-transmitter and :close-device."
+  ([device-name] (midi-source device-name (atom [])))
+  ([device-name calls]
+   (let [open? (atom false)
+         transmitters (atom [])
+         record! #(swap! calls conj %)
+         transmitter (fn []
+                       (let [receiver (atom nil)]
+                         (reify Transmitter
+                           (setReceiver [_ r] (record! [:set-receiver r]) (reset! receiver r))
+                           (getReceiver [_] @receiver)
+                           (close [this]
+                             (record! :close-transmitter)
+                             (swap! transmitters #(filterv (fn [t] (not (identical? t this))) %))))))
+         device (reify MidiDevice
+                  (getDeviceInfo [_] nil)
+                  (open [_] (record! :open) (reset! open? true))
+                  (isOpen [_] @open?)
+                  (close [_]
+                    (record! :close-device)
+                    (reset! open? false)
+                    (reset! transmitters []))
+                  (getMaxTransmitters [_] -1)
+                  (getMaxReceivers [_] 0)
+                  (getTransmitter [_]
+                    (record! :get-transmitter)
+                    (let [t (transmitter)]
+                      (swap! transmitters conj t)
+                      t))
+                  (getTransmitters [_] @transmitters))]
+     (with-meta {:name device-name
+                 :description device-name
+                 :vendor "Fake"
+                 :version "1.0"
+                 :sources Integer/MAX_VALUE
+                 :sinks 0
+                 :info nil
+                 :device device}
+       {:type :midi-device}))))
+
+(defn send-midi!
+  "What a source (midi-source) sends: msg (a ShortMessage, e.g.
+   (short-message ShortMessage/NOTE_ON 0 60 100)) to the receiver of each
+   transmitter still open, as the device's own thread would."
+  [source ^MidiMessage msg]
+  (doseq [^Transmitter t (.getTransmitters ^MidiDevice (:device source))]
+    (when-let [^Receiver r (.getReceiver t)]
+      (.send r msg -1))))

@@ -76,6 +76,7 @@
        :entity-key [col row]
        :effect-path effect-path
        :item-path item-path  ;; Important: pass item-path for cue chains domain
+       :owner-id (:id item)
        :effect selected-effect
        :effect-def effect-def
        :dialog-data dialog-data}

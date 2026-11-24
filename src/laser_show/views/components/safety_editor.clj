@@ -8,7 +8,14 @@
    while that can't let light anywhere new (or the projector isn't
    outputting), inside one undo transaction; a drag that would widen a live
    projector's area shows a dashed preview and dispatches once on release,
-   which asks. Escape puts back the zone from before the drag."
+   which asks. Escape puts back the zone from before the drag.
+
+   A number field sends its own coordinate only
+   (:projectors/set-safety-coordinate), which the handler sets in the zone
+   stored then, so fields committed from one render all apply
+   (plans/2026-11-23-cljfx-reactivity/08). A zone that can't be read is drawn
+   as the whole range, but nothing edits it except Reset
+   (:projectors/reset-safety)."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.animation.safety :as safety]
@@ -174,28 +181,38 @@
        (catch NumberFormatException _ nil)))
 
 (defn- coord-field
-  "A number field for one coordinate of the zone at path (e.g. [:limit 0])."
-  [{:keys [projector-id zone path id]}]
+  "A number field for one coordinate of projector-id's zone: path [:limit k]
+   or [:blocked i k], showing value. Its commit sends that coordinate only,
+   with a blocked area's row-version (the layout its row is in), never the
+   zone it was rendered with."
+  [{:keys [projector-id path value row-version id disable]}]
   {:fx/type commit-field/commit-field
    :id id
-   :text (fmt (get-in zone path))
+   :text (fmt value)
    :pref-width 56
+   :disable disable
    :on-commit (fn [typed]
                 (when-let [v (parse-coord typed)]
-                  {:event/type :projectors/set-safety
-                   :projector-id projector-id
-                   :safety (assoc-in zone path v)}))})
+                  (cond-> {:event/type :projectors/set-safety-coordinate
+                           :projector-id projector-id
+                           :path path
+                           :value v}
+                    row-version (assoc :row-version row-version))))})
 
 (defn- rect-row
-  [{:keys [projector-id zone label base id-prefix key-suffix removable-index]}]
-  (let [;; The key changes with the stored zone and the confirm dialog, so a
-        ;; field whose text was refused or is waiting for a question is made
-        ;; again with the stored value (cljfx keeps a field whose description
-        ;; didn't change)
+  [{:keys [projector-id rect label base row-version editable? asking? id-prefix removable-index]}]
+  (let [;; The key changes with the field's own number, its row's layout,
+        ;; whether it can be edited and the confirm dialog, so a field whose
+        ;; text was refused or is waiting for a question is made again with
+        ;; the stored value (cljfx keeps a field whose description didn't
+        ;; change); an edit of another number leaves it as it is, with what
+        ;; is typed in it
         field (fn [k idx]
-                {:fx/type coord-field :fx/key [idx key-suffix]
-                 :projector-id projector-id :zone zone
-                 :path (conj base idx) :id (str id-prefix "-" k)})
+                (let [path (conj base idx)
+                      value (nth rect idx)]
+                  {:fx/type coord-field :fx/key [path row-version value editable? asking?]
+                   :projector-id projector-id :path path :value value :row-version row-version
+                   :disable (not editable?) :id (str id-prefix "-" k)}))
         text (fn [t] {:fx/type :label :text t :min-width :use-pref-size :style-class ["label-secondary"]})]
     {:fx/type :h-box
      :spacing 4
@@ -233,21 +250,22 @@
                                 :to (mapv :id others) :mirror? mirror?}}])))})
 
 (defn safety-section
-  "The SAFETY ZONE section for projector-id."
+  "The SAFETY ZONE section for projector-id. Its numbers can be edited, and
+   its zone dragged, only for a projector there is, with a zone that can be
+   read; Reset replaces one that can't."
   [{:keys [fx/context projector-id]}]
   (let [projector (fx/sub-val context get-in [:projectors projector-id])
         stored (try (safety/normalize (:safety projector)) (catch clojure.lang.ExceptionInfo _ nil))
         zone (or stored safety/default-safety)
+        editable? (boolean (and projector stored))
+        rows (fx/sub-val context get-in [:projector-ui :safety-versions :by-id projector-id :rows] 0)
         streaming? (fx/sub-val context get-in [:backend :streaming :running?])
         live? (guard/outputting? {:backend {:streaming {:running? streaming?}}
                                   :projectors {projector-id projector}}
                                  projector-id)
         asking? (fx/sub-ctx context subs/dialog-open? :confirm)
         others (filterv #(not= projector-id (:id %)) (fx/sub-ctx context subs/projectors-list))
-        full? (>= (count (:blocked zone)) 8)
-        ;; A field waiting for a question, or refused, shows the stored value
-        ;; again once the dialog closes
-        key-suffix [asking? zone]]
+        full? (>= (count (:blocked zone)) 8)]
     {:fx/type :v-box
      :id "safety-section"
      :spacing 6
@@ -275,7 +293,7 @@
                                          (= :move (peek h)) "move"
                                          :else "crosshair")}))
                 :on-press (fn [x y _ value _]
-                            (when-let [grabbed (and stored (hit value x y))]
+                            (when-let [grabbed (and editable? (hit value x y))]
                               {:drag-start true
                                :drag-id grabbed
                                :transaction-label "Change Safety Zone"
@@ -298,16 +316,16 @@
                 :on-key (fn [^KeyCode key-code _ _ drag]
                           (when (and (= KeyCode/ESCAPE key-code) (:dragging? drag))
                             {:cancel-drag? true :consumed? true :drag-updates {:widening? false}}))}
-               {:fx/type rect-row :projector-id projector-id :zone zone :label "Limit"
-                :base [:limit] :id-prefix "safety-limit" :key-suffix key-suffix}
+               {:fx/type rect-row :projector-id projector-id :rect (:limit zone) :label "Limit"
+                :base [:limit] :id-prefix "safety-limit" :editable? editable? :asking? asking?}
                {:fx/type :v-box
                 :spacing 4
-                :children (vec (for [i (range (count (:blocked zone)))]
+                :children (vec (for [[i rect] (map-indexed vector (:blocked zone))]
                                  {:fx/type rect-row :fx/key [:blocked i]
-                                  :projector-id projector-id :zone zone
+                                  :projector-id projector-id :rect rect
                                   :label (str "Blocked " (inc i))
-                                  :base [:blocked i] :id-prefix (str "safety-blocked-" i)
-                                  :key-suffix key-suffix :removable-index i}))}
+                                  :base [:blocked i] :row-version rows :id-prefix (str "safety-blocked-" i)
+                                  :editable? editable? :asking? asking? :removable-index i}))}
                {:fx/type :h-box
                 :spacing 6
                 :alignment :center-left
@@ -327,11 +345,11 @@
                                      :id "safety-reset-button"
                                      :text "Reset"
                                      :min-width :use-pref-size
+                                     :disable (nil? projector)
                                      :style-class ["button-secondary"]
                                      :tooltip {:fx/type :tooltip :text "The whole range, nothing blocked"}
-                                     :on-action {:event/type :projectors/set-safety
-                                                 :projector-id projector-id
-                                                 :safety safety/default-safety}}])}
+                                     :on-action {:event/type :projectors/reset-safety
+                                                 :projector-id projector-id}}])}
                ;; Only with somewhere to copy to, and a zone that can be read
                (when (and stored (seq others))
                  {:fx/type :h-box
