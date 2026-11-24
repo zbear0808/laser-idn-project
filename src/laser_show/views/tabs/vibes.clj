@@ -15,17 +15,15 @@
    rules are open."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
-            [laser-show.events.core :as events]
             [laser-show.subs :as subs]
             [laser-show.vibes.library :as library]
             [laser-show.vibes.reactions :as reactions]
+            [laser-show.views.components.applied-value :as applied-value]
+            [laser-show.views.components.commit-field :as commit-field]
             [laser-show.views.components.vibe-controls :as vibe-controls]
             [laser-show.views.components.vibe-picker :as vibe-picker]
             [laser-show.views.components.vibe-strip :as vibe-strip]
-            [laser-show.views.dialogs.common :as common])
-  (:import [javafx.beans.value ChangeListener]
-           [javafx.event ActionEvent]
-           [javafx.scene.control TextField]))
+            [laser-show.views.dialogs.common :as common]))
 
 
 ;; Above: what is left to do
@@ -119,30 +117,16 @@
 
 (defn- name-field
   "The vibe's name, applied on Enter or when the field loses the focus, not
-   on every key. The focus listener is set up once, so it calls the commit
-   fn of the latest render, which the field keeps as its user data."
+   on every key (commit-field): a blank name, or one the app refused (the
+   show lock) or spells otherwise, is put back as it is stored."
   [{:keys [vibe text]}]
-  (let [commit! (fn [^TextField field]
-                  (let [typed (.getText field)]
-                    (when (not= typed text)
-                      (if (str/blank? typed)
-                        (.setText field text)
-                        (events/dispatch! {:event/type :vibe/rename :vibe vibe :name typed})))))]
-    {:fx/type fx/ext-on-instance-lifecycle
-     :on-created (fn [^TextField field]
-                   (.addListener (.focusedProperty field)
-                                 (reify ChangeListener
-                                   (changed [_ _ _ focused?]
-                                     (when-not focused?
-                                       (when-let [f (.getUserData field)]
-                                         (f field)))))))
-     :desc {:fx/type :text-field
-            :id "vibe-name-field"
-            :style-class ["text-field-dark"]
-            :pref-width 200
-            :text (or text "")
-            :user-data commit!
-            :on-action (fn [^ActionEvent e] (commit! (.getSource e)))}}))
+  {:fx/type commit-field/commit-field
+   :id "vibe-name-field"
+   :text (or text "")
+   :pref-width 200
+   :on-commit (fn [typed]
+                (when-not (str/blank? typed)
+                  {:event/type :vibe/rename :vibe vibe :name typed}))})
 
 (defn- color-swatches [{:keys [vibe color]}]
   {:fx/type :h-box
@@ -233,14 +217,17 @@
                              :id "vibe-editor-now"
                              :style-class "vibe-editor-now"
                              :text (if current? "plays now" "")}]}
-                {:fx/type :check-box
+                {:fx/type applied-value/applied-control
                  ;; Keyed by the vibe, so its listener is never a vibe late
                  :fx/key id
-                 :id "vibe-allow-audience"
-                 :style-class ["check-box" "vibe-check-box"]
-                 :text "Allow audience cells: cues that can reach the crowd may play in this vibe"
-                 :selected (boolean allow-audience?)
-                 :on-selected-changed {:event/type :vibe/set-option :vibe id :key :allow-audience? :value :fx/event}}]}))
+                 :property :selected
+                 :address [id :allow-audience?]
+                 :value allow-audience?
+                 :on-change (fn [on?] {:event/type :vibe/set-option :vibe id :key :allow-audience? :value on?})
+                 :desc {:fx/type :check-box
+                        :id "vibe-allow-audience"
+                        :style-class ["check-box" "vibe-check-box"]
+                        :text "Allow audience cells: cues that can reach the crowd may play in this vibe"}}]}))
 
 (def ^:private slot-names
   {:hit "HIT" :accent "ACCENT" :flash-cue "FLASH cue" :bed "BED" :fx "FX set" :flash-fx "FLASH effects"})
@@ -314,14 +301,17 @@
       (:flash-cue :flash-fx) (with-reactions
                                {:fx/type :h-box
                                 ;; Keyed by the vibe, so its listener is never a vibe late
-                                :children [{:fx/type :check-box
+                                :children [{:fx/type applied-value/applied-control
                                             :fx/key id
-                                            :id "vibe-solo"
-                                            :style-class ["check-box" "vibe-check-box"]
-                                            :text "Solo: HIT, ACCENT and the bed step aside while FLASH is held"
-                                            :selected (boolean (get-in vibe [:flash :solo?]))
-                                            :on-selected-changed {:event/type :vibe/set-option :vibe id :role :flash
-                                                                  :key :solo? :value :fx/event}}]}
+                                            :property :selected
+                                            :address [id :flash :solo?]
+                                            :value (get-in vibe [:flash :solo?])
+                                            :on-change (fn [on?] {:event/type :vibe/set-option :vibe id :role :flash
+                                                                  :key :solo? :value on?})
+                                            :desc {:fx/type :check-box
+                                                   :id "vibe-solo"
+                                                   :style-class ["check-box" "vibe-check-box"]
+                                                   :text "Solo: HIT, ACCENT and the bed step aside while FLASH is held"}}]}
                                :flash)
       :bed (note "The bed plays all through the vibe, under the hits")
       :fx (note "The FX set is on while the vibe plays")

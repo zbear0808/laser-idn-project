@@ -9,8 +9,12 @@
    step names a ref that isn't a row (08 invariant 2). An edit that can't
    apply (a ref that is a row already, a step outside the grid) returns the
    params as they were. A pattern of another style becomes a grid with
-   as-grid: its own style's first steps, so it plays the same for them."
-  (:require [laser-show.routing.targets :as targets]
+   as-grid: its own style's first steps, so it plays the same for them.
+
+   A grid is found by its pattern's id (locate-pattern), wherever the
+   pattern is now among its cell's: never by the place it had."
+  (:require [laser-show.animation.chains :as chains]
+            [laser-show.routing.targets :as targets]
             [laser-show.routing.zone-remap :as zone-remap]))
 
 (def min-length "The shortest grid." 1)
@@ -45,6 +49,19 @@
   "Is params a step grid with steps (a pattern of style Steps that has some)?"
   [params]
   (and (= :steps (:style params)) (pos? (length params))))
+
+(defn locate-pattern
+  "Where the zone pattern whose :id is instance-id is in owner-items (one
+   cell's vector of patterns or effects, its groups searched too:
+   chains/find-path-by-id): {:effect-path (in owner-items) :instance}, or
+   nil unless instance-id is a UUID and the item with it is a zone pattern."
+  [owner-items instance-id]
+  (when (and (uuid? instance-id) (sequential? owner-items))
+    (let [items (vec owner-items)]
+      (when-let [path (chains/find-path-by-id items instance-id)]
+        (let [fx (chains/get-item-at-path items path)]
+          (when (= :zone-pattern (:effect-id fx))
+            {:effect-path path :instance fx}))))))
 
 (defn- in-row-order
   "The rows among refs, once each, in rows' order."

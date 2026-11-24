@@ -32,18 +32,30 @@
     (not (contains? item :enabled?)) (assoc :enabled? true)))
 
 
-(defn parse-and-clamp-from-text-event
-  "Extract text from ActionEvent, parse as double, clamp to bounds.
-   Returns nil if parsing fails.
+(defn finite-number?
+  "Is v a number a numeric parameter can hold: not NaN or an infinity?"
+  [v]
+  (and (number? v) (Double/isFinite (double v))))
+
+(defn parse-number-text
+  "The number typed into a numeric field as text, or nil for text that isn't
+   a finite number (\"abc\", \"\", \"NaN\", \"Infinity\") or isn't text at
+   all (a text field's ActionEvent: the field reads its text on the FX
+   thread). Read as Double/parseDouble reads it, clamped to min and max
+   (each ignored when nil), and for an :int parameter (int?) rounded to a
+   whole number, a long.
    
    Example:
-   (parse-and-clamp-from-text-event action-event 0.0 1.0)
-   => 0.5"
-  [fx-event min max]
-  (let [text-field (.getSource fx-event)
-        text (.getText text-field)]
-    (when-let [parsed (try (Double/parseDouble text) (catch Exception _ nil))]
-      (-> parsed (clojure.core/max min) (clojure.core/min max)))))
+   (parse-number-text \"1.5\" 0.0 1.0 false)
+   => 1.0"
+  [text min max int?]
+  (let [parsed (when (string? text) (parse-double text))
+        clamped (when (finite-number? parsed)
+                  (cond-> (double parsed)
+                    (number? min) (clojure.core/max (double min))
+                    (number? max) (clojure.core/min (double max))))]
+    (when (finite-number? clamped)
+      (if int? (Math/round (double clamped)) clamped))))
 
 
 
@@ -77,9 +89,11 @@
 
 (defn parked
   "event as plain data, to continue later (after a confirm, or the OS
-   clipboard's read): without its co-effects."
+   clipboard's read): without its co-effects, and without the press it came
+   from (:history/gesture-id): the continuation is a discrete edit of its
+   own, which neither revives nor needs that press (reactivity plan 16)."
   [event]
-  (dissoc event :state :time :fx/event))
+  (dissoc event :state :time :fx/event :history/gesture-id))
 
 
 ;; The open show's identity (reactivity plan 20)

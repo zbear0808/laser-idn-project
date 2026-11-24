@@ -52,6 +52,19 @@
   [state]
   (update state :ui assoc :notice nil :show-lock-notice nil))
 
+(def ^:private b1-grid
+  "The step grid window's target on the grid of the cue at B1 (zones plan
+   Z6): the pattern by its id (reactivity plan 05)."
+  {:domain :cue-zone-patterns :entity-key [1 0] :effect-instance-id #uuid "00000000-0000-0000-0000-0000000010b1"})
+
+(defn- with-b1-grid
+  "state with a step grid on the cue at B1, its window open on it."
+  [state]
+  (-> state
+      (assoc-in [:chains :cue-chains [1 0] :zone-patterns]
+                [(assoc (zone-patterns/preset-instance :steps :cue) :id (:effect-instance-id b1-grid))])
+      (run {:event/type :step-grid/open :target b1-grid})))
+
 (def ^:private structure-edits
   "One real edit of each kind the lock refuses, on starter."
   [{:event/type :grid/move-cell :from-col 0 :from-row 0 :to-col 5 :to-row 2}
@@ -61,6 +74,8 @@
    {:event/type :vibe/remove :vibe :vibe-1}
    {:event/type :vibe/toggle-cell :vibe :vibe-1 :slot :hit :cell [4 0]}
    {:event/type :vibe/set-option :vibe :vibe-1 :key :allow-audience? :value true}
+   ;; FLASH's Solo starts on in Shapes (state/templates.clj): off is refused too
+   {:event/type :vibe/set-option :vibe :vibe-1 :role :flash :key :solo? :value false}
    {:event/type :vibe/add}
    {:event/type :vibe/clear-control :role :hit}
    {:event/type :projectors/toggle-enabled :projector-id :p1}
@@ -75,6 +90,9 @@
    {:event/type :projectors/set-enabled :projector-id :p1 :enabled? false}
    {:event/type :projectors/set-exclude-from-all :projector-id :p1 :exclude? true}
    {:event/type :projectors/set-tag :projector-id :p1 :tag :crowd-scanning :on? true}
+   ;; and taking away a tag it has (locked-blocks-structure-edits-test's P1 is
+   ;; tagged Graphics)
+   {:event/type :projectors/set-tag :projector-id :p1 :tag :graphics :on? false}
    ;; A show's rig onto this one (zones plan ZR), from the show s0 opened
    {:event/type :rig/set-up-from-show}
    {:event/type :rig/import-new-lasers}
@@ -114,7 +132,7 @@
    {:event/type :pattern-pads/set-pad-bar :pad :chase :bar? true}
    {:event/type :pattern-pads/clear-control :pad :chase}
    ;; A step grid's edits are a zone pattern's (zones plan Z6)
-   {:event/type :step-grid/toggle :target {:domain :cue-zone-patterns :entity-key [1 0] :effect-path [0]} :row :zone/a :step 1}])
+   {:event/type :step-grid/toggle :target b1-grid :row :zone/a :step 1}])
 
 (def ^:private opened-show
   "What Open kept of friday.zip's rig (zones plan ZR): P1 with its own
@@ -129,14 +147,16 @@
   (let [s0 (-> (starter)
                (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 36}] {:type :vibe :role :hit})
                (assoc-in [:ui :dialogs :rig-report] opened-show)
-               ;; a laser in Graphics, and a cue pinned to a laser that isn't here
+               ;; a laser in Graphics, tagged Graphics, and a cue pinned to a
+               ;; laser that isn't here
                (assoc-in [:projectors :p1 :zone-groups] [:graphics])
+               (assoc-in [:projectors :p1 :tags] #{:graphics})
                (assoc-in [:chains :cue-chains [7 3]] {:items [] :target :auto.laser/p9})
                (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 50}] {:type :zone-map :target :map/odd-even})
                ;; a pattern pad's key (zones plan Z5)
                (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 51}] {:type :pattern-pad :target :chase})
-               ;; a step grid on the cue at B1 (zones plan Z6)
-               (assoc-in [:chains :cue-chains [1 0] :zone-patterns] [(assoc (zone-patterns/preset-instance :steps :cue) :id :g1)])
+               ;; a step grid on the cue at B1, in its open window (zones plan Z6)
+               (with-b1-grid)
                ;; a map of yours, and a timeline cue (zones plan Z4)
                (assoc-in [:zone-maps :map/custom-1] {:name "Sweep" :lanes [:auto/left :graphics] :overrides {:zone/c :auto/center}})
                (assoc-in [:chains :cue-chains [6 3]] {:editor-type :timeline
@@ -184,14 +204,14 @@
   ;; the paste before its handler runs, so a locked paste reads nothing
   (let [s0 (-> (starter)
                (assoc-in [:ui :clipboard] nil)
-               (assoc-in [:chains :cue-chains [1 0] :zone-patterns] [(assoc (zone-patterns/preset-instance :steps :cue) :id :g1)])
+               (with-b1-grid)
                (assoc-in [:ui :active-tab] :grid)
                (assoc-in [:grid :selected-cell] [5 2])
                (history/mark-clean))]
     (doseq [event [{:event/type :grid/paste-cell :col 5 :row 2}
                    {:event/type :effects/paste-cell :col 5 :row 2}
                    {:event/type :edit/paste}
-                   {:event/type :step-grid/paste :target {:domain :cue-zone-patterns :entity-key [1 0] :effect-path [0]}}]]
+                   {:event/type :step-grid/paste :target b1-grid}]]
       (testing (str (:event/type event))
         (is (contains? (handle s0 event) :clipboard/read) "unlocked, it asks the OS clipboard")
         (let [effects (handle (lock s0) event)]
@@ -263,12 +283,27 @@
       (is (nil? (get-in (run unlocked {:event/type :grid/clear-cell :col 0 :row 0}) [:chains :cue-chains [0 0]]))
           "and the edit works again"))))
 
+(def ^:private grid-session #uuid "00000000-0000-0000-0000-0000000010d1")
+(def ^:private grid-press #uuid "00000000-0000-0000-0000-0000000010d2")
+
+(defn- grid-press-events
+  "Valid step grid press events (with their :state), on B1's grid in its
+   open window: without them they rightly do nothing ({})."
+  []
+  (let [s (run (with-b1-grid (starter)) {:event/type :step-grid/open :target b1-grid :editor-id grid-session})
+        press {:editor-id grid-session :target b1-grid :history/gesture-id grid-press}
+        pressed (run s (assoc press :event/type :step-grid/paint-start :row 0 :step 0))]
+    {:step-grid/paint-start (assoc press :state s :row 0 :step 1)
+     :step-grid/paint (assoc press :state pressed :row 0 :step 2)}))
+
 (deftest blocked-events-name-real-events-test
-  (doseq [type show-lock/blocked-events]
-    ;; A chooser's result without a file is the one that does nothing (cancelled)
-    (let [result (try (handlers/handle-event {:event/type type :state (starter) :file-path "x.zip"})
-                      (catch Throwable _ ::threw))]
-      (is (not= {} result) (str type " is not routed to a handler (unknown events return {})"))))
+  (let [valid (grid-press-events)]
+    (doseq [type show-lock/blocked-events]
+      ;; A chooser's result without a file is the one that does nothing (cancelled)
+      (let [event (get valid type {:state (starter) :file-path "x.zip"})
+            result (try (handlers/handle-event (assoc event :event/type type))
+                        (catch Throwable _ ::threw))]
+        (is (not= {} result) (str type " is not routed to a handler (unknown events return {})")))))
   (testing "every vibe edit with an undo label is refused: the vibes are fixed for the show"
     (doseq [type (keys history-handlers/event-descriptions)
             :when (= "vibe" (namespace type))]
@@ -369,6 +404,39 @@
       (is (= {:text "Change Output Settings refused" :event :projectors/update-driver-config}
              (get-in s [:ui :show-lock-notice]))))))
 
+(deftest refused-rig-setter-is-not-a-no-op-test
+  ;; Reactivity plan 13: a setter the lock refuses changes nothing, not even
+  ;; where the same edit unlocked writes the rig file and refreshes the
+  ;; engines. The effects are only looked at, never run
+  (let [rig-path (.getPath (java.io.File. (System/getProperty "java.io.tmpdir") "refused-rig-setter-test/rig.edn"))
+        s0 (-> (starter)
+               (assoc-in [:backend :streaming :running?] true)
+               (assoc-in [:rig-file :path] rig-path)
+               (history/mark-clean))
+        off {:event/type :projectors/set-enabled :projector-id :p1 :enabled? false}
+        same {:event/type :projectors/set-enabled :projector-id :p1 :enabled? true}]
+    (testing "unlocked, On → Off writes the rig file and refreshes the engines"
+      (let [effects (handle s0 off)]
+        (is (false? (get-in effects [:state :projectors :p1 :enabled?])))
+        (is (= rig-path (get-in effects [:rig/write :path])))
+        (is (false? (get-in effects [:multi-engine/refresh :projectors :p1 :enabled?])))))
+    (testing "unlocked, the value it has: the same state, and neither"
+      (let [effects (handle s0 same)]
+        (is (= s0 (:state effects)))
+        (is (not-any? #(contains? effects %) [:rig/write :multi-engine/refresh]))))
+    (testing "locked, both are refused: the notices and the notice's timer, nothing else"
+      (doseq [event [off same]]
+        (testing (pr-str (:enabled? event))
+          (let [effects (handle (lock s0) event)
+                s (:state effects)]
+            (is (= #{:state :dispatch-later} (set (keys effects))))
+            (is (= :projectors/set-enabled (get-in s [:ui :show-lock-notice :event])))
+            (is (= (lock s0) (without-notices s))
+                "the whole state as it was: undo and redo, the unsaved flag, the rig file's requests")
+            (is (= (get-in s0 [:rig-file :requested]) (get-in s [:rig-file :requested])))
+            (is (empty? (get-in s [:history :undo-stack])))
+            (is (false? (get-in s [:project :dirty?])))))))))
+
 (deftest enable-device-is-refused-while-locked-test
   (let [s0 (-> (starter)
                (assoc-in [:projectors :n1] {:name "Nova 1" :driver :acme/nova :enabled? false :zone-groups []
@@ -416,12 +484,15 @@
     (testing "switching a pattern cell on is a performer's"
       (is (true? (get-in (run (lock s0) {:event/type :effects/toggle-cell :col 4 :row 2}) [:chains :effect-chains [4 2] :active?]))))
     (testing "a step grid's own edits, on a cell's grid too, are refused with their label (zones plan Z6)"
-      (let [s1 (-> s0
-                   (assoc-in [:chains :effect-chains [6 2]] {:active? true :items [(assoc (zone-patterns/preset-instance :steps :cell) :id :g2)]})
-                   (history/mark-clean))
-            target {:domain :effect-chains :entity-key [6 2] :effect-path [0]}]
+      (let [g2 #uuid "00000000-0000-0000-0000-0000000010b2"
+            target {:domain :effect-chains :entity-key [6 2] :effect-instance-id g2}
+            s1 (-> s0
+                   (assoc-in [:chains :effect-chains [6 2]] {:active? true :items [(assoc (zone-patterns/preset-instance :steps :cell) :id g2)]})
+                   (history/mark-clean)
+                   (run {:event/type :step-grid/open :target target :editor-id grid-session}))]
         (doseq [event [{:event/type :step-grid/set-length :target target :n 16}
-                       {:event/type :step-grid/paint-start :target target :row 0 :step 1}
+                       {:event/type :step-grid/paint-start :target target :editor-id grid-session
+                        :history/gesture-id grid-press :row 0 :step 1}
                        {:event/type :step-grid/start-from :target target :style :all-on}
                        {:event/type :step-grid/paste :target target}]]
           (testing (str (:event/type event))
@@ -435,11 +506,13 @@
 (deftest locked-step-grid-opens-and-a-drag-lets-go-test
   ;; Zones plan Z6: the grid's window, its cursor and Copy are no edits, and
   ;; a drag held when the lock goes on still lets go, as a held key does
-  (let [chase-target {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]}
-        grid-target {:domain :cue-zone-patterns :entity-key [1 0] :effect-path [0]}
+  (let [chase-id #uuid "00000000-0000-0000-0000-0000000010c1"
+        chase-target {:domain :cue-zone-patterns :entity-key [0 0] :effect-instance-id chase-id}
+        grid-target b1-grid
         s0 (-> (starter)
-               (assoc-in [:chains :cue-chains [0 0] :zone-patterns] [(assoc (zone-patterns/preset-instance :chase :cue) :id :p1)])
-               (assoc-in [:chains :cue-chains [1 0] :zone-patterns] [(assoc (zone-patterns/preset-instance :steps :cue) :id :g1)])
+               (assoc-in [:chains :cue-chains [0 0] :zone-patterns] [(assoc (zone-patterns/preset-instance :chase :cue) :id chase-id)])
+               (assoc-in [:chains :cue-chains [1 0] :zone-patterns]
+                         [(assoc (zone-patterns/preset-instance :steps :cue) :id (:effect-instance-id grid-target))])
                (history/mark-clean))]
     (testing "opening a pattern's grid while locked shows it and makes nothing: no grid, no notice"
       (let [s (run (lock s0) {:event/type :step-grid/open :target chase-target})]
@@ -455,13 +528,57 @@
         (is (= [0 2] (get-in s [:ui :dialogs :step-grid-editor :cursor])))
         (is (= 8 (count (get-in s [:ui :clipboard :grid :steps]))))
         (is (nil? (get-in s [:ui :show-lock-notice])))))
-    (testing "a drag held when the lock goes on: its paint is refused, its release still commits it"
-      (let [held (run s0 {:event/type :step-grid/paint-start :target grid-target :row 1 :step 0})
+    (testing "a drag held when the lock goes on: its paint is refused, its matching end still commits it"
+      (let [press {:target grid-target :editor-id grid-session :history/gesture-id grid-press}
+            held (-> s0
+                     (run {:event/type :step-grid/open :target grid-target :editor-id grid-session})
+                     (run (assoc press :event/type :step-grid/paint-start :row 1 :step 0)))
             locked (run held {:event/type :vibe/set-show-lock :locked? true})
-            painted (run locked {:event/type :step-grid/paint :target grid-target :row 1 :step 2})
-            released (run painted {:event/type :step-grid/paint-end :target grid-target})]
+            painted (run locked (assoc press :event/type :step-grid/paint :row 1 :step 2))
+            other-end (run painted (assoc press :event/type :step-grid/paint-end :history/gesture-id (random-uuid)))
+            released (run painted (assoc press :event/type :step-grid/paint-end))]
         (is (some? (get-in locked [:history :transaction])))
         (is (= "Edit Step Grid refused" (get-in painted [:ui :show-lock-notice :text])))
+        (is (= (:history painted) (:history other-end)) "another press's end lets go of nothing")
         (is (nil? (get-in released [:history :transaction])) "it let go")
-        (is (nil? (get-in released [:ui :step-grid :drag])))
         (is (= 1 (count (get-in released [:history :undo-stack]))) "what was painted before the lock is one undo step")))))
+
+(deftest lock-classifies-reordered-modulator-target-test
+  ;; Reactivity plan 07: a modulator's field edits name their effect by its
+  ;; instance, so the lock judges the effect they edit where it is now, not
+  ;; what holds the place it had when its editor rendered
+  (let [pattern-id #uuid "0000000a-0000-0000-0000-000000000001"
+        point-id #uuid "0000000a-0000-0000-0000-000000000002"
+        wave {:type :triangle :active? true :period 7.0 :min 0.2 :max 0.8}
+        pattern (-> (zone-patterns/preset-instance :swap :cell)
+                    (assoc :id pattern-id)
+                    (assoc-in [:params :offset] (assoc wave :min -4.0 :max 4.0)))
+        point {:id point-id :effect-id :intensity :enabled? true :params {:amount wave}}
+        ;; Rendered as [point pattern]; swapped since
+        s0 (-> (starter)
+               (assoc-in [:chains :effect-chains [4 2]] {:active? false :items [pattern point]})
+               (history/mark-clean))
+        edit (fn [type id param rendered-at & {:as more}]
+               (merge {:event/type type :domain :effect-chains :entity-key [4 2] :effect-instance-id id
+                       :param-key param :effect-path [rendered-at]}
+                      more))
+        pattern-edits [(edit :modulator/update-param pattern-id :offset 1 :mod-param-key :max :fx/event 8.0)
+                       (edit :modulator/set-type pattern-id :offset 1 :mod-type :square :param-spec {:min -64.0 :max 64.0})]
+        point-edits [(edit :modulator/update-param point-id :amount 0 :mod-param-key :max :fx/event 0.9)
+                     (edit :modulator/set-type point-id :amount 0 :mod-type :square :param-spec {:min 0.0 :max 3.0})]]
+    (doseq [event pattern-edits]
+      (testing (str "the pattern's " (:event/type event) ", now where the point effect was rendered")
+        (is (not= (history/extract-document-state s0) (history/extract-document-state (run s0 event))) "unlocked, a real edit")
+        (let [effects (handle (lock s0) event)
+              s (:state effects)]
+          (is (= (lock s0) (without-notices s)) "locked, only the notice")
+          (is (= {:text "Zone pattern edit refused" :event (:event/type event)} (get-in s [:ui :show-lock-notice])))
+          (is (= #{:state :dispatch-later} (set (keys effects)))))))
+    (doseq [event point-edits]
+      (testing (str "the point effect's " (:event/type event) ", now where the pattern was rendered")
+        (let [s (run (lock s0) event)]
+          (is (nil? (get-in s [:ui :show-lock-notice])) "goes through")
+          (is (not= (history/extract-document-state s0) (history/extract-document-state s)) "a real edit")
+          (is (= (history/extract-document-state (run s0 event)) (history/extract-document-state s)) "as it does unlocked")
+          (is (= pattern (get-in s [:chains :effect-chains [4 2] :items 0]))
+              "on the point effect, where it is now: the pattern is untouched"))))))

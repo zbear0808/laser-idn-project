@@ -321,9 +321,10 @@
   "Stop the mounted cljfx application and release application-owned services:
    the UI, the show clock, the input mapper, the gamepad poller, the
    streaming engines (the output runtime is drained), the add-ons' drivers
-   (unregistered, their jars closed), input devices, the Carabiner link and
+   (unregistered, their jars closed), input devices, the Carabiner link,
    the rig file (its pending change written and the write running finished,
-   then its lock let go: stop-rig-file!). dispatch!
+   then its lock let go: stop-rig-file!) and the open press's deadline
+   wake-up (events/dispose-gesture-alarm!). dispatch!
    falls back to the synchronous handler afterwards, and the write guard
    start! or start-test! installed is removed.
 
@@ -353,6 +354,7 @@
       (release-devices! (state/get-raw-state)))
     (events/retire!)
     (stop-rig-file!)
+    (events/dispose-gesture-alarm!)
     (events/set-exit-fn! nil)
     (events/set-dispatch-fn! nil)
     (state/guard-writes! nil)

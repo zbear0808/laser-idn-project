@@ -20,9 +20,9 @@
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.css.core :as css]
-            [laser-show.events.core :as events]
             [laser-show.routing.targets :as targets]
             [laser-show.subs :as subs]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.group-matrix :as group-matrix]
             [laser-show.views.components.zone-chips :as zone-chips]
             [laser-show.views.components.zone-maps-panel :as zone-maps-panel]))
@@ -162,7 +162,8 @@
 
 (defn- laser-item
   "One laser of the group, in rig order: its place, its name, its mark, and
-   a box where a click changes something."
+   a box where a click changes something. A box shows what applies after a
+   refused click too (applied-value)."
   [{:keys [group laser]}]
   (let [{:keys [id position mark]} laser
         event (member-event group laser)]
@@ -189,14 +190,21 @@
                                  :style (str "-fx-font-size: 15; -fx-text-fill: "
                                              (if (#{:whole :left-half :right-half :member} mark) (:color group) "#808080") ";")}]
                          event (conj (if (= :all (:kind group))
-                                       {:fx/type :check-box
-                                        :selected (= :whole mark)
-                                        :on-selected-changed (fn [in-all?]
-                                                               (events/dispatch! {:event/type :projectors/set-exclude-from-all
-                                                                                  :projector-id id :exclude? (not in-all?)}))}
-                                       {:fx/type :check-box
-                                        :selected (= :member mark)
-                                        :on-selected-changed event})))}
+                                       ;; ticked: in All
+                                       {:fx/type applied-value/applied-control
+                                        :property :selected
+                                        :address [:all id]
+                                        :value (= :whole mark)
+                                        :on-change (fn [in-all?] {:event/type :projectors/set-exclude-from-all
+                                                                  :projector-id id :exclude? (not in-all?)})
+                                        :desc {:fx/type :check-box}}
+                                       ;; a click toggles it, once
+                                       {:fx/type applied-value/applied-control
+                                        :property :selected
+                                        :address [(:id group) id]
+                                        :value (= :member mark)
+                                        :on-change (fn [_] event)
+                                        :desc {:fx/type :check-box}})))}
       event (assoc :on-mouse-clicked event))))
 
 (defn- vp-item
@@ -211,7 +219,12 @@
      :padding 6
      :style "-fx-cursor: hand;"
      :on-mouse-clicked event
-     :children [{:fx/type :check-box :selected (:member? vp) :on-selected-changed event}
+     :children [{:fx/type applied-value/applied-control
+                 :property :selected
+                 :address [(:id group) (:id vp)]
+                 :value (:member? vp)
+                 :on-change (fn [_] event)
+                 :desc {:fx/type :check-box}}
                 {:fx/type :label :text (:name vp) :style-class ["label-bold"]}]}))
 
 (defn- members-panel

@@ -96,22 +96,38 @@
     (assoc-in state items-path updated-items)))
 
 (defn handle-update-param-from-text
-  "Update a parameter from text field input.
-   Uses h/parse-and-clamp-from-text-event for parsing.
+  "Update a parameter from its text field: the typed :text as a number
+   (h/parse-number-text, with :min, :max and :is-int?).
    
    Parameters:
    - state: Application state
    - config: Configuration map with :items-path
-   - event: Map with :effect-path, :param-key, :min, :max, and :fx/event
+   - event: Map with :effect-path, :param-key, :min, :max, :is-int? and
+     :text (the field reads it on the FX thread)
    
-   Returns: Updated state (unchanged if parsing fails)"
-  [state config {:keys [effect-path param-key min max] :as event}]
-  (if-let [clamped (h/parse-and-clamp-from-text-event (:fx/event event) min max)]
+   Returns: Updated state (unchanged if the text isn't a number)"
+  [state config {:keys [effect-path param-key min max is-int? text]}]
+  (if-some [number (h/parse-number-text text min max is-int?)]
     (let [items-path (:items-path config)
           items-vec (vec (get-in state items-path []))
-          updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) clamped)]
+          updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) number)]
       (assoc-in state items-path updated-items))
     state))
+
+(defn param-spec
+  "The definition of param-key in the effect registry's entry for the effect
+   at effect-path (a path under config's :items-path), or nil when the
+   registry has no such effect or parameter."
+  [state config effect-path param-key]
+  (let [effect (get-in state (into (:items-path config) effect-path))]
+    (some #(when (= param-key (:key %)) %)
+          (:parameters (effects/get-effect (:effect-id effect))))))
+
+(defn numeric-spec?
+  "Does a parameter of spec hold a number: :float or :int, or no :type (a
+   slider, as the editors show it)?"
+  [spec]
+  (contains? #{:float :int} (:type spec :float)))
 
 (defn handle-update-color-param
   "Update color parameters from ColorPicker's ActionEvent.

@@ -17,6 +17,7 @@
             [laser-show.css.core :as css]
             [laser-show.events.core :as events]
             [laser-show.subs :as subs]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.drag-drop-cell :as dnd]
             [laser-show.views.components.group-matrix :as group-matrix]
             [laser-show.views.components.load-warning :as load-warning]
@@ -166,7 +167,9 @@
 (defn- card-host
   "The address (driver/summary-parts: \"10.0.0.7 #1\"; for another driver
    its name, \"LSPS\", with its settings, \"127.0.0.1:7266\", on a line of
-   their own under it, the card's full width), and the On box at the right."
+   their own under it, the card's full width), and the On box at the right,
+   which shows whether the output is on, after a refused click too
+   (applied-value)."
   [{:keys [id host-label address-lines enabled?]}]
   (let [[line detail] address-lines]
     {:fx/type :v-box
@@ -180,14 +183,17 @@
                                      :tooltip {:fx/type :tooltip :text (str host-label)}
                                      :style-class ["text-small" "label-secondary"]}
                                     {:fx/type :region :h-box/hgrow :always}
-                                    {:fx/type :check-box
-                                     :id (str "rig-card-enable-" (id-text id))
-                                     :text "On"
-                                     :min-width :use-pref-size
-                                     :selected (boolean enabled?)
-                                     :on-selected-changed {:event/type :projectors/set-enabled
+                                    {:fx/type applied-value/applied-control
+                                     :property :selected
+                                     :address [:projector id :enabled?]
+                                     :value enabled?
+                                     :on-change (fn [on?] {:event/type :projectors/set-enabled
                                                            :projector-id id
-                                                           :enabled? :fx/event}}]}]
+                                                           :enabled? on?})
+                                     :desc {:fx/type :check-box
+                                            :id (str "rig-card-enable-" (id-text id))
+                                            :text "On"
+                                            :min-width :use-pref-size}}]}]
                  detail (conj {:fx/type :label
                                :id (str "rig-card-address-detail-" (id-text id))
                                :text detail
