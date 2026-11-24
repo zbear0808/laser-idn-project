@@ -855,3 +855,112 @@
           (is (= #{[4 0]} (active let-go))))
         (testing "ticked again: nothing starts by itself, the next press may pick them"
           (is (= #{[4 0]} (active (run s {:event/type :vibe/set-option :vibe :vibe-1 :key :allow-audience? :value true})))))))))
+
+
+;; Undo and Redo (reactivity plan 22): what the vibe switched on stays the
+;; vibe's wherever a restore takes the cell's on/off, so the next vibe and
+;; Save switch it off; what was switched on by hand stays the user's
+
+(def ^:private scale-cell {:items [{:id #uuid "22000000-0000-0000-0000-0000000000a1" :effect-id :scale}] :active? false})
+(def ^:private hue-cell {:items [{:id #uuid "22000000-0000-0000-0000-0000000000b1" :effect-id :hue-shift}] :active? false})
+
+(def ^:private cell-a [0 3])
+(def ^:private cell-b [2 3])
+
+(defn- move [[from-col from-row] [to-col to-row]]
+  {:event/type :effects/move-cell :from-col from-col :from-row from-row :to-col to-col :to-row to-row})
+
+(defn- switched-on
+  "The effect cells that are on."
+  [state]
+  (into #{} (keep (fn [[cell e]] (when (:active? e) cell))) (get-in state [:chains :effect-chains])))
+
+(defn- saved-on
+  "cell's on/off in the show Save writes (persistent/project-files)."
+  [state cell]
+  (get-in (persistent/project-files state) ["content.edn" :chains :effect-chains cell :active?]))
+
+(defn- next-vibe [state] (run state {:event/type :vibe/select :vibe :vibe-1 :input-time 5000}))
+
+(defn- lines-owns-a
+  "Lines (vibe-2) playing, saved: its FX set is the effect cell A, which it
+   switched on; [1 3] is on by hand."
+  []
+  (-> (starter)
+      (assoc-in [:chains :effect-chains cell-a] scale-cell)
+      (assoc-in [:chains :effect-chains [1 3]] (assoc hue-cell :active? true))
+      (assoc-in [:config :vibes :library :vibe-2 :fx] [cell-a])
+      (history/mark-clean)
+      (run {:event/type :vibe/select :vibe :vibe-2 :input-time 1000})))
+
+(deftest undo-of-a-cell-move-returns-vibe-ownership-test
+  (let [s0 (lines-owns-a)
+        moved (run s0 (move cell-a cell-b))
+        undone (run moved {:event/type :edit/undo})]
+    (is (= [#{cell-a [1 3]} [cell-a]] [(switched-on s0) (rt s0 :fx-on)]))
+    (is (= [#{cell-b [1 3]} [cell-b]] [(switched-on moved) (rt moved :fx-on)]) "the vibe's switch moves with the cell")
+    (is (= #{cell-a [1 3]} (switched-on undone)) "Undo: the effect is back at A, on")
+    (is (nil? (get-in undone [:chains :effect-chains cell-b])))
+    (is (= [cell-a] (rt undone :fx-on)) "and the vibe's again")
+    (is (= [cell-a] (get-in undone [:config :vibes :library :vibe-2 :fx])))
+    (is (= [0 1] [(undo-count undone) (count (get-in undone [:history :redo-stack]))]) "only the move's step moved")
+    (is (false? (get-in undone [:project :dirty?])))
+    (is (false? (saved-on undone cell-a)) "Save writes the vibe's switch off")
+    (let [s (next-vibe undone)]
+      (is (= #{[1 3]} (switched-on s)) "the next vibe switches it off; what is on by hand stays on")
+      (is (= [] (rt s :fx-on))))))
+
+(deftest redo-of-a-cell-move-moves-vibe-ownership-again-test
+  (let [undone (-> (lines-owns-a) (run (move cell-a cell-b)) (run {:event/type :edit/undo}))
+        redone (run undone {:event/type :edit/redo})
+        again (run redone {:event/type :edit/undo})]
+    (is (= #{cell-b [1 3]} (switched-on redone)))
+    (is (nil? (get-in redone [:chains :effect-chains cell-a])))
+    (is (= [cell-b] (rt redone :fx-on)) "Redo: the vibe's at B")
+    (is (= [1 0] [(undo-count redone) (count (get-in redone [:history :redo-stack]))]))
+    (is (false? (saved-on redone cell-b)))
+    (is (= #{[1 3]} (switched-on (next-vibe redone))))
+    (testing "and Undo again"
+      (is (= [cell-a] (rt again :fx-on)))
+      (is (= #{[1 3]} (switched-on (next-vibe again)))))))
+
+(deftest manual-switch-stays-manual-through-undo-test
+  (let [moved (run (lines-owns-a) (move [1 3] cell-b))
+        undone (run moved {:event/type :edit/undo})
+        redone (run undone {:event/type :edit/redo})]
+    (is (= [cell-a] (rt moved :fx-on)) "the vibe never switched [1 3] on")
+    (doseq [[label s cell] [["Undo" undone [1 3]] ["Redo" redone cell-b]]]
+      (testing label
+        (is (= #{cell-a cell} (switched-on s)))
+        (is (= [cell-a] (rt s :fx-on)) "the hand's switch isn't the vibe's; the vibe's own still is")
+        (is (= [true false] [(saved-on s cell) (saved-on s cell-a)]) "Save writes the hand's on, the vibe's off")
+        (is (= #{cell} (switched-on (next-vibe s))) "the next vibe leaves it on")))))
+
+(deftest undone-cell-lets-go-of-its-ownership-test
+  (let [added (run (lines-owns-a) {:event/type :vibe/add-reaction :vibe :vibe-2 :kind :punch-size})
+        undone (run added {:event/type :edit/undo})
+        redone (run undone {:event/type :edit/redo})
+        by-hand (run redone {:event/type :effects/toggle-cell :col 2 :row 3})]
+    (is (= [cell-a cell-b] (rt added :fx-on)) "Lines plays: its new reaction at B is on, the vibe's")
+    (is (= [cell-a] (rt undone :fx-on)) "Undo: B is gone, and its ownership with it")
+    (is (= #{cell-a [1 3]} (switched-on undone)) "nothing else is switched on")
+    (is (= #{cell-a [1 3]} (switched-on redone)) "Redo: B is back off, as a cell that doesn't exist comes back")
+    (is (= [cell-a] (rt redone :fx-on)) "and isn't the vibe's")
+    (is (= #{[1 3] cell-b} (switched-on (next-vibe by-hand))) "switched on by hand, it stays on")
+    (is (true? (saved-on by-hand cell-b)))))
+
+(deftest undo-of-a-move-under-a-held-flash-returns-its-cells-test
+  (let [held (-> (starter)
+                 (assoc-in [:chains :effect-chains cell-a] scale-cell)
+                 (assoc-in [:config :vibes :library :vibe-1 :flash :fx] [cell-a])
+                 (run {:event/type :vibe/press :role :flash :input-time 1000}))
+        moved (run held (move cell-a cell-b))
+        undone (run moved {:event/type :edit/undo})
+        flash-cells #((juxt :fx :fx-on) (rt % :voices :flash))]
+    (is (= [[cell-a] [cell-a]] (flash-cells held)) "FLASH held: A is on, the flash's")
+    (is (= [[cell-b] [cell-b]] (flash-cells moved)))
+    (is (= #{cell-a} (switched-on undone)))
+    (is (= [[cell-a] [cell-a]] (flash-cells undone)) "Undo: the held flash's again")
+    (is (false? (saved-on undone cell-a)))
+    (is (= #{} (switched-on (run undone {:event/type :vibe/release :role :flash :input-time 2000})))
+        "FLASH let go of switches it off")))

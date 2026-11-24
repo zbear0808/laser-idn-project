@@ -380,7 +380,8 @@
 (deftest stale-voices-are-forgotten-test
   (let [s1 (tap (starter) :hit 1000)
         {:keys [cell run]} (rt s1 :voices :hit)
-        ended (:state (handlers/handle-event {:event/type :show-clock/cue-ended :cell cell :run run :state s1}))]
+        ended (:state (handlers/handle-event {:event/type :show-clock/cue-ended :cell cell :run run
+                                              :position-ids {:restart nil :seek nil} :state s1}))]
     (is (nil? (intent ended cell)) "the clock ended its run")
     (is (nil? (rt (press ended :accent 1500) :voices :hit)) "the next event forgets the voice")
     (testing "a flash whose cue went keeps its effect cells to switch off"
@@ -455,6 +456,21 @@
       (is (empty? (playing s2)) "a held HIT is cut, however short")
       (is (= :vibe-1 (rt s2 :current)) "and VIBE neither switches nor locks")
       (is (= :active (rt s2 :rotation))))))
+
+(deftest release-all-lets-go-of-some-roles-test
+  (testing ":roles: the keys of an input that can't send their releases any more hold those (events/handlers/triggers.clj)"
+    (let [s0 (-> (starter)
+                 (press :hit 1000)
+                 (press :accent 1005)
+                 (press :vibe 1020))
+          s1 (:state (engine/release-all s0 {:only :input :roles #{:hit :vibe} :time 1030}))]
+      (is (= #{:accent} (set (keys (rt s1 :held)))) "ACCENT's key holds on")
+      (is (nil? (rt s1 :voices :hit)) "HIT is cut")
+      (is (some? (rt s1 :voices :accent)))
+      (is (= [false true] (mapv #(get-in s1 [:playback :pulses % :held?]) [:hit :accent])) "the pulses with them")
+      (is (= :vibe-1 (rt s1 :current)) "VIBE neither switches nor locks")
+      (is (= :active (rt s1 :rotation)))
+      (is (= s1 (:state (engine/release-all s1 {:only :input :roles #{:hit} :time 1040}))) "HIT again: nothing to let go"))))
 
 
 ;; Edits to the vibe that plays (Phase 3): the Vibes tab's edits take effect

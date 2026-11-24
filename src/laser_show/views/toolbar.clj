@@ -215,7 +215,9 @@
 
 
 (defn connection-indicator
-  "Visual streaming status indicator (a style class per state)."
+  "Visual streaming status indicator (a style class per state): green only
+   while every wanted output streams; amber while they start, some still
+   start (:mixed), they stop, or none is enabled."
   [{:keys [state]}]
   {:fx/type :region
    :id "streaming-indicator"
@@ -224,7 +226,7 @@
    :style-class ["status-indicator"
                  (case state
                    :streaming "status-indicator-connected"
-                   (:starting :stopping :idle) "status-indicator-connecting"
+                   (:starting :mixed :stopping :idle) "status-indicator-connecting"
                    "status-indicator-disconnected")]})
 
 (defn output-held-chip

@@ -5,7 +5,15 @@
    - MIDI device discovery, connection, and configuration
    - OSC server management and address mappings
    - Gamepad and keyboard input switches
-   - Input learning and bindings"
+   - Input learning and bindings
+   
+   The MIDI inputs and the OSC server belong to the device worker
+   (laser-show.input.devices): a Refresh, Connect, Disconnect, Start Server
+   or Stop Server here is a request to it, a registered effect with an id
+   of its own, the latest of its kind ([:backend :input :midi :requests],
+   [:backend :input :osc :requests]). Its result comes back as an event with
+   that id, plain data, and changes the status only while it answers the
+   latest request: an earlier one's, coming late, changes nothing."
   (:require [clojure.string :as str]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.events.helpers :as h]
@@ -15,7 +23,6 @@
             [laser-show.input.events :as input-events]
             [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.routing.zone-patterns :as zone-patterns]
-            [laser-show.state.core :as state]
             [laser-show.vibes.engine :as engine]
             [laser-show.vibes.library :as library]))
 
@@ -35,6 +42,37 @@
   (get-in state (osc-path)))
 
 
+;; Requests to the device worker
+
+(defn- request
+  "[state id]: state with a new request of kind (:list or :connections for
+   :midi, :server for :osc) recorded as device's latest, and its id."
+  [state device kind]
+  (let [id (random-uuid)]
+    [(assoc-in state [:backend :input device :requests kind] id) id]))
+
+(defn- latest?
+  "Is event the result of device's latest request of kind, still waiting
+   for it? Once one is in, the request is over: the same result again, or
+   an earlier request's, isn't."
+  [state device kind {:keys [request-id]}]
+  (and (some? request-id)
+       (= request-id (get-in state [:backend :input device :requests kind]))))
+
+(defn- answered
+  "state with device's request of kind over."
+  [state device kind]
+  (update-in state [:backend :input device :requests] dissoc kind))
+
+(defn- with-error
+  "{:state state}, with a notice for error (the device worker's sentence)
+   when there is one."
+  [state error]
+  (if error
+    (h/show-notice state error :error)
+    {:state state}))
+
+
 ;; MIDI Event Handlers
 
 
@@ -44,48 +82,85 @@
   {:state (update-in state (midi-path) midi/enable)})
 
 (defn- handle-midi-disable
-  "Disable MIDI input processing."
+  "Disable MIDI input processing. The inputs' note-offs can't come in any
+   more, so what their keys hold lets go (:trigger/retire, handlers/
+   triggers.clj)."
   [{:keys [state]}]
-  {:state (update-in state (midi-path) midi/disable)})
+  {:state (update-in state (midi-path) midi/disable)
+   :dispatch {:event/type :trigger/retire :source :midi}})
 
 (defn- handle-midi-refresh-devices
-  "Refresh list of available MIDI devices.
-   This is a query operation - doesn't change state but returns available devices."
+  "Ask the device worker which MIDI inputs there are: their names come
+   back as :input/midi-listed."
   [{:keys [state]}]
-  ;; Store discovered devices in state for UI access
-  (let [devices (midi/list-device-names)]
-    {:state (assoc-in state (midi-path :available-devices) (vec devices))}))
+  (let [[state id] (request state :midi :list)]
+    {:state state
+     :input/midi-list {:request-id id}}))
+
+(defn- handle-midi-listed
+  "The MIDI inputs the latest Refresh found, for the device list."
+  [{:keys [state available-devices] :as event}]
+  (if (latest? state :midi :list event)
+    {:state (-> state
+                (answered :midi :list)
+                (assoc-in (midi-path :available-devices) (vec available-devices)))}
+    {}))
 
 (defn- handle-midi-connect-device
-  "Connect to a MIDI input device."
+  "Ask the device worker to connect a MIDI input by name: which inputs are
+   connected comes back as :input/midi-connected."
   [{:keys [state device-name]}]
-  (let [midi-state (get-midi-state state)
-        ;; Use state/get-raw-state for background thread access
-        updated-midi (midi/connect-device
-                      midi-state
-                      device-name
-                      router/dispatch!
-                      #(get-midi-state (state/get-raw-state)))]
-    {:state (assoc-in state (midi-path) updated-midi)}))
+  (let [[state id] (request state :midi :connections)]
+    {:state state
+     :input/midi-connect {:request-id id :device-name device-name}}))
+
+(defn- handle-midi-auto-connect
+  "Ask the device worker to connect the first MIDI input there is (once:
+   connected already, it opens nothing)."
+  [{:keys [state]}]
+  (let [[state id] (request state :midi :connections)]
+    {:state state
+     :input/midi-connect {:request-id id :auto? true}}))
+
+(defn- handle-midi-connected
+  "The MIDI inputs connected once the latest Connect or Auto-Connect was
+   done, and a notice when its input couldn't be connected."
+  [{:keys [state connected-devices error] :as event}]
+  (if (latest? state :midi :connections event)
+    (-> state
+        (answered :midi :connections)
+        (assoc-in (midi-path :connected-devices) (set connected-devices))
+        (with-error error))
+    {}))
 
 (defn- handle-midi-disconnect-device
-  "Disconnect from a MIDI device. Its keys' releases can't come any more, so
-   every role a key holds lets go (:vibe/release-all :only :input); a pad's
-   hold stays."
+  "Ask the device worker to disconnect a MIDI input: :input/midi-disconnected
+   says when it has."
   [{:keys [state device-name]}]
-  (let [midi-state (get-midi-state state)
-        updated-midi (midi/disconnect-device midi-state device-name)]
-    {:state (assoc-in state (midi-path) updated-midi)
-     :dispatch {:event/type :vibe/release-all :only :input}}))
+  (let [[state id] (request state :midi :connections)]
+    {:state state
+     :input/midi-disconnect {:request-id id :device-name device-name}}))
 
 (defn- handle-midi-disconnect-all
-  "Disconnect from all MIDI devices; every role a key holds lets go, as
-   for one device."
+  "Ask the device worker to disconnect every MIDI input."
   [{:keys [state]}]
-  (let [midi-state (get-midi-state state)
-        updated-midi (midi/disconnect-all midi-state)]
-    {:state (assoc-in state (midi-path) updated-midi)
-     :dispatch {:event/type :vibe/release-all :only :input}}))
+  (let [[state id] (request state :midi :connections)]
+    {:state state
+     :input/midi-disconnect {:request-id id :all? true}}))
+
+(defn- handle-midi-disconnected
+  "The MIDI inputs still connected once the latest request disconnected one
+   or all of them. Their keys' releases can't come any more, so what the
+   MIDI keys hold lets go (:trigger/retire, handlers/triggers.clj); a
+   pad's hold, or another source's key's, stays. A disconnect superseded
+   by a later request lets nothing go: its answer changes nothing."
+  [{:keys [state connected-devices] :as event}]
+  (if (latest? state :midi :connections event)
+    {:state (-> state
+                (answered :midi :connections)
+                (assoc-in (midi-path :connected-devices) (set connected-devices)))
+     :dispatch {:event/type :trigger/retire :source :midi}}
+    {}))
 
 (defn- handle-midi-set-channel-filter
   "Set MIDI channel filter.
@@ -122,16 +197,6 @@
         updated-midi (midi/cancel-learn midi-state)]
     {:state (assoc-in state (midi-path) updated-midi)}))
 
-(defn- handle-midi-auto-connect
-  "Auto-connect to the first available MIDI device."
-  [{:keys [state]}]
-  (let [midi-state (get-midi-state state)
-        updated-midi (midi/auto-connect
-                      midi-state
-                      router/dispatch!
-                      #(get-midi-state (state/get-raw-state)))]
-    {:state (assoc-in state (midi-path) updated-midi)}))
-
 
 ;; OSC Event Handlers
 
@@ -142,34 +207,55 @@
   {:state (update-in state (osc-path) osc/enable)})
 
 (defn- handle-osc-disable
-  "Disable OSC input processing."
+  "Disable OSC input processing. No release comes in any more, so what OSC
+   keys hold lets go (:trigger/retire, handlers/triggers.clj)."
   [{:keys [state]}]
-  {:state (update-in state (osc-path) osc/disable)})
+  {:state (update-in state (osc-path) osc/disable)
+   :dispatch {:event/type :trigger/retire :source :osc}})
 
 (defn- handle-osc-start-server
-  "Start the OSC server, and let its messages in: one switch, as the
-   server without :enabled? drops every message (osc/create-osc-handler).
-   A port that won't open leaves OSC off, and a notice says so."
-  [{:keys [state port]}]
-  (let [osc-state (get-osc-state state)
-        server-port (or port (:port osc-state 9000))
-        updated-osc (osc/start-server
-                     osc-state
-                     server-port
-                     router/dispatch!
-                     #(get-osc-state (state/get-raw-state)))]
-    (if (:server-running? updated-osc)
-      {:state (assoc-in state (osc-path) (osc/enable updated-osc))}
-      (h/show-notice (assoc-in state (osc-path) updated-osc)
-                     (str "Could not listen for OSC on port " server-port)
-                     :error))))
+  "Ask the device worker to start the OSC server on the port set now
+   ([:backend :input :osc :port], read here: not a :port the button was
+   drawn with). Whether it listens comes back as :input/osc-started."
+  [{:keys [state]}]
+  (let [[state id] (request state :osc :server)]
+    {:state state
+     :input/osc-start {:request-id id :port (get-in state (osc-path :port) 9000)}}))
+
+(defn- handle-osc-started
+  "The latest Start's result. Listening, the server lets its messages in:
+   one switch, as the server without :enabled? drops every message
+   (osc/create-osc-handler). A port that won't open leaves OSC off, and a
+   notice says so; what OSC keys held (on a server it replaced) lets go."
+  [{:keys [state server-running? port error] :as event}]
+  (if (latest? state :osc :server event)
+    (let [state (answered state :osc :server)]
+      (if server-running?
+        {:state (update-in state (osc-path) assoc :server-running? true :port port :enabled? true)}
+        (assoc (h/show-notice (update-in state (osc-path) assoc :server-running? false :enabled? false)
+                              (or error (str "Could not listen for OSC on port " port))
+                              :error)
+               :dispatch {:event/type :trigger/retire :source :osc})))
+    {}))
 
 (defn- handle-osc-stop-server
-  "Stop the OSC server, and stop letting messages in."
+  "Stop letting OSC messages in, and ask the device worker to stop the
+   server: :input/osc-stopped says when it has. From now on no release
+   comes in, so what OSC keys hold lets go now (:trigger/retire)."
   [{:keys [state]}]
-  (let [osc-state (get-osc-state state)
-        updated-osc (osc/disable (osc/stop-server osc-state))]
-    {:state (assoc-in state (osc-path) updated-osc)}))
+  (let [[state id] (request state :osc :server)]
+    {:state (assoc-in state (osc-path :enabled?) false)
+     :input/osc-stop {:request-id id}
+     :dispatch {:event/type :trigger/retire :source :osc}}))
+
+(defn- handle-osc-stopped
+  "The server stopped by the latest Stop: not listening."
+  [{:keys [state] :as event}]
+  (if (latest? state :osc :server event)
+    {:state (-> state
+                (answered :osc :server)
+                (assoc-in (osc-path :server-running?) false))}
+    {}))
 
 (defn- handle-osc-set-port
   "Set the OSC server port (requires restart to take effect)."
@@ -487,6 +573,10 @@
     :input/midi-start-learn (handle-midi-start-learn event)
     :input/midi-cancel-learn (handle-midi-cancel-learn event)
     :input/midi-auto-connect (handle-midi-auto-connect event)
+    ;; What the device worker reports back
+    :input/midi-listed (handle-midi-listed event)
+    :input/midi-connected (handle-midi-connected event)
+    :input/midi-disconnected (handle-midi-disconnected event)
 
     ;; OSC events
     :input/osc-enable (handle-osc-enable event)
@@ -498,6 +588,9 @@
     :input/osc-load-default-mappings (handle-osc-load-default-mappings event)
     :input/osc-start-learn (handle-osc-start-learn event)
     :input/osc-cancel-learn (handle-osc-cancel-learn event)
+    ;; What the device worker reports back
+    :input/osc-started (handle-osc-started event)
+    :input/osc-stopped (handle-osc-stopped event)
 
     ;; Session input switches
     :input/gamepad-enable (set-device-enabled event :gamepad true)

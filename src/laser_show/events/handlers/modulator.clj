@@ -3,24 +3,36 @@
    
    Handles modulator toggle, type selection, and sub-parameter updates.
    The toggle updates the parameter and its effect's keyframe mode together.
-   Type and sub-parameter changes delegate to :chain/update-param.
    
    Event Types:
    - :modulator/toggle - Toggle between static value and modulator
-   - :modulator/set-type - Change modulator type
-   - :modulator/update-param - Update a modulator sub-parameter
+   - :modulator/set-type - Change an active modulator's type
+   - :modulator/update-param - Update one field of an active modulator
+   - :modulator/update-static-value - Set the static value of a modulator
+     that is off (a number, or a modulatable choice's choice)
    
-   All events require:
-   - :domain - The chain domain (:effect-chains, :cue-chains, :projector-effects)
+   All events have:
+   - :domain - The chain domain (:effect-chains, :cue-chains, :projector-effects,
+     the timeline's :timeline-items and :timeline-tracks, :cue-zone-patterns)
    - :entity-key - The entity key within the domain
-   - :effect-path - Path to the effect within the chain
-   - :param-key - The parameter being modulated"
+   - :param-key - The parameter being modulated
+   
+   The toggle finds its effect at :effect-path. The three field edits
+   (set-type, update-param, update-static-value) name it by its instance
+   instead: :effect-instance-id, and :owner-id for an effect a cue item, a
+   clip, a track or a folder owns (chain-helpers/resolve-effect-instance-path).
+   Each reads the parameter as it is stored now where that effect is now, and
+   changes its own field only, so two edits from one render both stay
+   (reactivity plan 07). An effect that is gone, keyframes on, a stored value
+   of another kind or mode, invalid input or no change does nothing ({})."
   (:require
    [clojure.edn :as edn]
    [clojure.string :as str]
    [clojure.tools.logging :as log]
    [laser-show.animation.modulation :as mod]
    [laser-show.animation.modulator-defs :as mod-defs]
+   [laser-show.animation.modulator-registry :as reg]
+   [laser-show.events.helpers :as h]
    [laser-show.events.handlers.chain.helpers :as chain-helpers]
    [laser-show.events.handlers.chain.params :as params]
    [laser-show.events.handlers.keyframe :as keyframe]))
@@ -50,54 +62,94 @@
               (and effect (not= value new-value))
               (params/handle-update-param config {:effect-path effect-path :param-key param-key :value new-value}))}))
 
+
+;; A modulator's field edits (reactivity plan 07)
+
+
+(defn- active-config?
+  "Is v a modulator config that is on? (One saved before :active? existed
+   is.)"
+  [v]
+  (and (mod/modulator-config? v) (reg/active-modulator? v)))
+
+(defn- inactive-config?
+  "Is v a modulator config that is off?"
+  [v]
+  (and (mod/modulator-config? v) (not (reg/active-modulator? v))))
+
+(defn- field-target
+  "The effect a field edit names by its instance
+   (chain-helpers/resolve-effect-instance-path), where it is now, and the
+   base value stored at the event's :param-key: {:config :effect-path
+   :value}, or nil when the effect or that parameter is gone, or the
+   effect's keyframes are on (they set its parameters then)."
+  [{:keys [state domain entity-key param-key] :as event}]
+  (when-let [effect-path (chain-helpers/resolve-effect-instance-path state event)]
+    (let [config (chain-helpers/chain-config domain entity-key)
+          effect (get-in state (into (:items-path config) effect-path))
+          params (:params effect)]
+      (when (and (map? params)
+                 (contains? params param-key)
+                 (not (get-in effect [:keyframe-modulator :enabled?])))
+        {:config config :effect-path effect-path :value (get params param-key)}))))
+
+(defn- same?
+  "Is new what old already is: equal, or the same number (a slider gives
+   4.0 for the 4 a default holds)?"
+  [old new]
+  (if (and (number? old) (number? new)) (== old new) (= old new)))
+
+(defn- write-param
+  "{:state} with value as the target's parameter: params/handle-update-param
+   given only the target's place, the parameter and the value."
+  [state {:keys [config effect-path]} param-key value]
+  {:state (params/handle-update-param state config {:effect-path effect-path :param-key param-key :value value})})
+
+(defn- selectable-type?
+  "Does an editor of domain offer mod-type in its type dropdown: a
+   registered type, not an internal one, and for calibration
+   (:projector-effects), which never sees a press, not one that follows a
+   press (views.components.modulator-param-control/modulator-choices)?"
+  [domain mod-type]
+  (let [category (:category (reg/get-modulator mod-type))]
+    (and (some? category)
+         (not= :internal category)
+         (not (and (= :projector-effects domain) (= :pulse category))))))
+
 (defn- handle-set-type
-  "Handle changing the modulator type.
+  "Change the type of the active modulator stored at the event's parameter:
+   the new type's defaults within the parameter's bounds (:param-spec,
+   mod-defs/build-default-modulator), with the stored Min and Max when it
+   has them. The type is :mod-type, the id the dropdown sends (or a type
+   keyword, or an item's :id, as :fx/event). The type it has already
+   changes nothing, so its fields stay; nor does a type its editor doesn't
+   offer, or a modulator that is off.
    
-   Creates a new modulator config with the selected type, preserving
-   min/max from the current modulator if they were customized.
-   
-   The :fx/event may be:
-   - A modulator type keyword directly (e.g., :sine)
-   - A modulator info map from combo-box (e.g., {:id :sine :name \"Sine\" :icon \"〰️\"})
-   
-   Returns a :dispatch effect to update the parameter via :chain/update-param."
-  [{:keys [domain entity-key effect-path param-key param-spec current-value] :as event}]
+   Example: stored {:type :triangle :min 0.2 :max 0.9 :period 7.0}, :mod-type :square
+   => {:type :square :active? true :min 0.2 :max 0.9 :period 1.0 :duty-cycle 0.5 ...}"
+  [{:keys [state domain param-key param-spec] :as event}]
   (let [fx-event (:fx/event event)
-        mod-type (cond
-                   ;; If it's a map with :id, extract the :id (combo-box item)
-                   (and (map? fx-event) (:id fx-event)) (:id fx-event)
-                   ;; If it's a keyword, use it directly
-                   (keyword? fx-event) fx-event
-                   ;; Fall back to :mod-type key if present
-                   :else (:mod-type event))]
+        mod-type (or (:mod-type event)
+                     (when (keyword? fx-event) fx-event)
+                     (when (map? fx-event) (:id fx-event)))
+        {stored :value :as target} (field-target event)]
     (log/trace "modulator/set-type - param-key:" param-key "new type:" mod-type)
-    (if-not mod-type
-      (do
-        (log/warn "modulator/set-type called without valid mod-type")
-        {})
-      (let [new-config (mod-defs/build-default-modulator mod-type param-spec)
-            final-config (cond-> new-config
-                           (and (mod/modulator-config? current-value)
-                                (contains? current-value :min))
-                           (assoc :min (:min current-value))
-                           (and (mod/modulator-config? current-value)
-                                (contains? current-value :max))
-                           (assoc :max (:max current-value)))]
-        {:dispatch {:event/type :chain/update-param
-                    :domain domain
-                    :entity-key entity-key
-                    :effect-path effect-path
-                    :param-key param-key
-                    :value final-config}}))))
+    (if (and (active-config? stored)
+             (selectable-type? domain mod-type)
+             (not= mod-type (:type stored)))
+      (let [fields (set (map :key (reg/get-params mod-type)))
+            carry (fn [config k]
+                    (cond-> config
+                      (and (contains? stored k) (contains? fields k)) (assoc k (get stored k))))]
+        (write-param state target param-key
+                     (reduce carry (mod-defs/build-default-modulator mod-type param-spec) [:min :max])))
+      {})))
 
 (defn- parse-text-value
-  "Parse a text field value, clamping to min/max bounds."
+  "Parse a text field value, clamping to min/max bounds: nil unless it is a
+   finite number (h/parse-number-text)."
   [text-value min-val max-val]
-  (try
-    (let [parsed (Double/parseDouble (str text-value))]
-      (max (double min-val) (min (double max-val) parsed)))
-    (catch Exception _
-      nil)))
+  (h/parse-number-text (str text-value) min-val max-val false))
 
 (defn- parse-number-list
   "The numbers in text, split on commas and spaces, as doubles; what doesn't
@@ -107,63 +159,66 @@
         (keep #(try (Double/parseDouble %) (catch NumberFormatException _ nil)))
         (remove str/blank? (str/split (str text) #"[\s,]+"))))
 
+(defn- text-or-edn
+  "A text field's text, or the EDN it holds when it starts with [, { or :
+   (the text itself when that doesn't read)."
+  [text]
+  (try
+    (if (or (str/starts-with? text "[")
+            (str/starts-with? text "{")
+            (str/starts-with? text ":"))
+      (edn/read-string text)
+      text)
+    (catch Exception _ text)))
+
+(defn- field-def
+  "The definition of key among mod-type's fields (the registry's), or nil."
+  [mod-type key]
+  (some #(when (= key (:key %)) %) (reg/get-params mod-type)))
+
+(defn- field-value
+  "The value event sets a field to, given the field's definition (the
+   registry's), or nil for none. Typed :text (:mod-text-field? or
+   :text-field?; the field reads it on the FX thread) is read as the
+   field's type says: a :text field's text, or the EDN in it; a
+   :number-list's numbers (the Step's palette, \"\" none); otherwise a
+   number, clamped to :mod-param-min and :mod-param-max (parse-text-value).
+   A control's own value (:value, else :fx/event) is taken when it fits the
+   field: a finite number for a number, one of its :choices for a choice,
+   true or false for a checkbox. Never anything else, such as the
+   ActionEvent a text field's Enter delivers."
+  [{:keys [type choices]} event]
+  (if (or (:mod-text-field? event) (:text-field? event))
+    (let [text (:text event)]
+      (when (string? text)
+        (case type
+          :text (text-or-edn text)
+          :number-list (parse-number-list text)
+          (:float :int nil) (parse-text-value text (or (:mod-param-min event) -10.0) (or (:mod-param-max event) 10.0))
+          nil)))
+    (let [v (h/first-some (:value event) (:fx/event event))]
+      (case type
+        (:float :int nil) (when (h/finite-number? v) v)
+        :choice (when (some #(= v %) choices) v)
+        :boolean (when (boolean? v) v)
+        nil))))
+
 (defn- handle-update-mod-param
-  "Handle updating a sub-parameter of a modulator.
-   
-   Updates a specific key within the modulator config (e.g., :period, :phase).
-   
-   Supports both slider values (:fx/event) and text field values.
-   For text fields, looks for :mod-text-field? true and parses the text: a
-   number, clamped, or with :text-field-type :text the text or EDN, or with
-   :number-list a vector of numbers (the Step's palette).
-   
-   Returns a :dispatch effect to update the parameter via :chain/update-param."
-  [{:keys [domain entity-key effect-path param-key current-value mod-param-key] :as event}]
-  (let [;; Handle text field input - parse the text from the event source
-        text-field? (or (:mod-text-field? event) (:text-field? event))
-        raw-val (or (:value event) (:fx/event event))
-        ;; For text field, extract text from the event (TextField text or source)
-        new-val (if text-field?
-                  (let [text-val (cond
-                                   (string? raw-val) raw-val
-                                   (instance? javafx.scene.control.TextField raw-val) (.getText ^javafx.scene.control.TextField raw-val)
-                                   (instance? javafx.event.ActionEvent raw-val)
-                                   (let [source (.getSource ^javafx.event.ActionEvent raw-val)]
-                                     (when (instance? javafx.scene.control.TextField source)
-                                       (.getText ^javafx.scene.control.TextField source)))
-                                   :else (str raw-val))
-                        text-type (:text-field-type event)]
-                    (case text-type
-                      :text
-                      (try
-                        (if (or (str/starts-with? text-val "[")
-                                (str/starts-with? text-val "{")
-                                (str/starts-with? text-val ":"))
-                          (edn/read-string text-val)
-                          text-val)
-                        (catch Exception _ text-val))
-
-                      :number-list
-                      (parse-number-list text-val)
-
-                      (let [min-val (or (:mod-param-min event) -10.0)
-                            max-val (or (:mod-param-max event) 10.0)]
-                        (parse-text-value text-val min-val max-val))))
-                  raw-val)]
-    (log/trace "modulator/update-param - param-key:" param-key "mod-param-key:" mod-param-key "new-val:" new-val "text-field?:" text-field?)
-    (when new-val
-      (if (mod/modulator-config? current-value)
-        (let [updated-config (assoc current-value mod-param-key new-val)]
-          {:dispatch {:event/type :chain/update-param
-                      :domain domain
-                      :entity-key entity-key
-                      :effect-path effect-path
-                      :param-key param-key
-                      :value updated-config}})
-        ;; If not a modulator config, something is wrong - log and no-op
-        (do
-          (log/warn "modulator/update-param called on non-modulator value:" current-value)
-          {})))))
+  "Change one field (:mod-param-key) of the active modulator stored at the
+   event's parameter, keeping every other: the value field-value reads, for
+   a field its type defines (the registry's: a field a saved config leaves
+   out can be set, one only another type has can't). A modulator that is
+   off, a number, a value that doesn't fit the field, or the value it has
+   already changes nothing."
+  [{:keys [state param-key mod-param-key] :as event}]
+  (let [{stored :value :as target} (field-target event)
+        field (when (active-config? stored) (field-def (:type stored) mod-param-key))
+        new-val (when field (field-value field event))]
+    (log/trace "modulator/update-param - param-key:" param-key "mod-param-key:" mod-param-key "new-val:" new-val)
+    (if (and (some? new-val)
+             (not (and (contains? stored mod-param-key) (same? (get stored mod-param-key) new-val))))
+      (write-param state target param-key (assoc stored mod-param-key new-val))
+      {})))
 
 (defn- handle-retrigger
   "Handle retrigger event for a modulator.
@@ -177,34 +232,35 @@
   ;; Reset the playback accumulators using existing transport/retrigger handler
   {:dispatch {:event/type :transport/retrigger}})
 
+(defn- static-value
+  "The static value event sets, or nil for none. A field's typed :text is a
+   number (h/parse-number-text, with :min, :max and :is-int?). Otherwise
+   :value or :fx/event when it is a finite number (the slider's), or a
+   keyword the parameter's definition lists in its :choices (a modulatable
+   choice's combo box; the definition is the target effect's,
+   params/param-spec); never anything else, such as the ActionEvent a text
+   field's Enter delivers."
+  [state {:keys [config effect-path]} {:keys [param-key] :as event}]
+  (if (contains? event :text)
+    (h/parse-number-text (:text event) (:min event) (:max event) (:is-int? event))
+    (let [value (h/first-some (:value event) (:fx/event event))]
+      (cond
+        (h/finite-number? value) value
+        (keyword? value) (some #{value} (:choices (params/param-spec state config effect-path param-key)))))))
+
 (defn- handle-update-static-value
-  "Handle updating the static value while preserving an inactive modulator config.
-   
-   When modulation is toggled off, we keep the modulator config with :active? false.
-   When the user adjusts the static slider/text field, we need to update the :value
-   field in the config (which is used as the static output) without losing the settings.
-   
-   If the current value is:
-   - A modulator config: update its :value field
-   - A plain number: just use the new value
-   
-   Returns a :dispatch effect to update the parameter via :chain/update-param."
-  [{:keys [domain entity-key effect-path param-key current-value] :as event}]
-  (let [new-static-value (:fx/event event)
-        new-value (if (mod/modulator-config? current-value)
-                    ;; Preserve the modulator config, just update :value
-                    (assoc current-value :value new-static-value)
-                    ;; Plain number - just use new value
-                    new-static-value)]
-    (log/trace "modulator/update-static-value - param-key:" param-key
-               "new-value:" new-static-value
-               "has-config?:" (mod/modulator-config? current-value))
-    {:dispatch {:event/type :chain/update-param
-                :domain domain
-                :entity-key entity-key
-                :effect-path effect-path
-                :param-key param-key
-                :value new-value}}))
+  "Set the static value of the modulator that is off at the event's
+   parameter (static-value's), keeping its type, its range and every other
+   setting. Once that parameter is an active modulator, a number or gone,
+   the edit is from a control that no longer shows: nothing changes; nor
+   does the value it has already."
+  [{:keys [state param-key] :as event}]
+  (let [{stored :value :as target} (field-target event)
+        new-static (when (inactive-config? stored) (static-value state target event))]
+    (log/trace "modulator/update-static-value - param-key:" param-key "new-value:" new-static)
+    (if (and (some? new-static) (not (same? (:value stored) new-static)))
+      (write-param state target param-key (assoc stored :value new-static))
+      {})))
 
 
 ;; Main Dispatcher
@@ -213,8 +269,9 @@
 (defn handle
   "Main dispatcher for modulator events.
    
-   Routes to appropriate handler based on :event/type.
-   All handlers return effect maps (typically :dispatch to chain/update-param)."
+   Routes to appropriate handler based on :event/type. The toggle and the
+   field edits return their :state, or {} when nothing changes; the
+   retrigger a :dispatch."
   [{:keys [event/type] :as event}]
   (log/trace "modulator/handle - type:" type)
   (case type

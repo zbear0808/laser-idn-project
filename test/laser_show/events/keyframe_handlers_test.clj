@@ -5,10 +5,14 @@
    These handlers follow the re-frame pattern: pure functions that receive
    state as part of the event map and return effect maps with :state key."
   (:require [clojure.test :refer [deftest is testing]]
+            [laser-show.animation.effects.intensity] ; :intensity's :amount is a :float
+            [laser-show.events.core :as events]
+            [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
             [laser-show.events.handlers.keyframe :as keyframe]
             [laser-show.events.handlers.chain :as chain]
-            [laser-show.common.util :as u]))
+            [laser-show.common.util :as u])
+  (:import [javafx.event ActionEvent]))
 
 
 ;; Test Fixtures
@@ -271,6 +275,158 @@
     (let [state (make-test-state [sample-effect-with-keyframes])
           result (keyframe/handle-update-keyframe-param state sample-config [0] 10 :x 0.8)]
       (is (= state result)))))
+
+
+(def keyframed-intensity
+  "An Intensity whose keyframes set its :amount (a :float, 0 to 3), and a
+   :look its definition doesn't have."
+  {:id #uuid "44444444-4444-4444-4444-444444444444"
+   :effect-id :intensity
+   :enabled? true
+   :params {:amount 1.0}
+   :keyframe-modulator {:enabled? true
+                        :selected-keyframe 1
+                        :keyframes [{:position 0.0 :params {:amount 0.3 :look :soft}}
+                                    {:position 1.0 :params {:amount 0.9 :look :soft}}]}})
+
+(deftest update-param-commits-only-numbers-to-numeric-params-test
+  (let [state (make-test-state [keyframed-intensity sample-effect-with-keyframes])
+        edit (fn [event]
+               (keyframe/handle (merge {:event/type :keyframe/update-param :domain :effect-chains :entity-key [0 0]
+                                        :effect-path [0] :keyframe-idx 1 :param-key :amount :state state}
+                                       event)))
+        frames (fn [result effect-idx]
+                 (mapv :params (get-in result [:state :chains :effect-chains [0 0] :items effect-idx :keyframe-modulator :keyframes])))
+        amounts #(mapv :amount (frames % 0))
+        typed {:min 0.0 :max 3.0 :is-int? false}]
+    (testing "a field's typed text (read on the FX thread): a number in the addressed keyframe, clamped"
+      (is (= [0.3 0.42] (amounts (edit (assoc typed :text "0.42")))))
+      (is (= [0.3 3.0] (amounts (edit (assoc typed :text "12")))))
+      (is (= [0.3 0.0] (amounts (edit (assoc typed :text "-1")))))
+      (is (= [0.3 2] (amounts (edit (assoc typed :text "1.7" :is-int? true)))) "a whole number for an :int")
+      (is (= 1.0 (get-in (edit (assoc typed :text "0.42")) [:state :chains :effect-chains [0 0] :items 0 :params :amount]))
+          "the effect's own value stays"))
+    (testing "text that isn't a finite number commits nothing"
+      (doseq [text ["abc" "" "NaN" "Infinity" nil]]
+        (is (= {} (edit (assoc typed :text text))) (pr-str text))))
+    (testing "a slider's number still commits, zero too"
+      (is (= [0.3 0.6] (amounts (edit {:fx/event 0.6}))))
+      (is (= [0.3 0.0] (amounts (edit {:value 0.0})))))
+    (testing "an ActionEvent or another non-number never lands in a numeric parameter"
+      (doseq [payload [(ActionEvent.) ##NaN ##Inf "0.4" :fast nil]]
+        (is (= {} (edit {:fx/event payload})) (str ":fx/event " (pr-str payload)))
+        (is (= {} (edit {:value payload})) (str ":value " (pr-str payload)))))
+    (testing "a parameter its definition doesn't have keeps the kind of value its keyframe holds"
+      (is (= [:soft :hard] (mapv :look (frames (edit {:param-key :look :fx/event :hard}) 0))))
+      (is (= {} (edit {:param-key :look :fx/event (ActionEvent.)})) "but never an ActionEvent")
+      (is (= [0.8 1.5 0.5] (mapv :x (frames (edit {:effect-path [1] :keyframe-idx 0 :param-key :x :value 0.8}) 1)))
+          "a number where the keyframe holds one")
+      (is (= {} (edit {:effect-path [1] :keyframe-idx 0 :param-key :x :value :fast}))))))
+
+
+;; The selected keyframe's Value and Interp controls (reactivity plan 06)
+
+
+(def ^:private panel-frames
+  "Three keyframes, each its own amount, zone and mode."
+  [{:position 0.0 :params {:amount 0.2 :target-zone :auto/right} :interpolation :linear}
+   {:position 0.5 :params {:amount 0.5 :target-zone :all} :interpolation :step}
+   {:position 1.0 :params {:amount 0.9 :target-zone :auto/odd} :interpolation :exp-decay}])
+
+(def ^:private panel-effect
+  {:id #uuid "88888888-8888-8888-8888-888888888888" :effect-id :intensity :enabled? true :params {:amount 1.0}
+   :keyframe-modulator {:enabled? true :driver :time :period 4.0 :selected-keyframe 1 :keyframes panel-frames}})
+
+(def ^:private panel-targets
+  "The same keyframed effect directly in Effects cell [0 0], and among a cue
+   item's effects in cue [2 1]: [address, path of its :keyframes]."
+  [[{:domain :effect-chains :entity-key [0 0] :effect-path [0]}
+    [:chains :effect-chains [0 0] :items 0 :keyframe-modulator :keyframes]]
+   [{:domain :cue-chains :entity-key [2 1] :effect-path [0 :effects 0]}
+    [:chains :cue-chains [2 1] :items 0 :effects 0 :keyframe-modulator :keyframes]]])
+
+(defn- panel-state
+  "The initial state with both of panel-targets' effects, marked clean."
+  []
+  (-> (domains/build-initial-state)
+      (assoc-in [:chains :effect-chains [0 0]] {:active? false :items [panel-effect]})
+      (assoc-in [:chains :cue-chains [2 1]]
+                {:name "Cue" :items [{:id #uuid "99999999-9999-9999-9999-999999999999" :type :preset
+                                      :preset-id :circle :enabled? true :params {} :effects [panel-effect]}]})
+      history/mark-clean))
+
+(defn- pipeline
+  "Run event (already as the control delivers it: cljfx has added :fx/event)
+   through the event pipeline from state, effects unexecuted: [effects
+   state-after]."
+  [state event]
+  (let [effects (events/handle-event-pipeline (assoc event :state state))]
+    [effects (or (:state effects) state)]))
+
+(deftest keyframe-control-payloads-update-only-the-addressed-leaf-test
+  (let [zone {:event/type :keyframe/set-zone-value :keyframe-idx 1 :param-key :target-zone
+              :fx/event {:id :auto/left :name "Left" :kind :auto}}
+        value {:event/type :keyframe/update-param :keyframe-idx 1 :param-key :amount :value :fx/event :fx/event 0.6}
+        interp {:event/type :keyframe/set-interpolation :keyframe-idx 1 :interpolation :fx/event :fx/event :exp-grow}]
+    (doseq [[address frames-path] panel-targets
+            :let [before (panel-state)
+                  undo-depth #(count (get-in % [:history :undo-stack]))
+                  edit (fn [state event] (pipeline state (merge event address)))]]
+      (testing (str "the effect in " (:domain address))
+        (testing "an accepted edit: one leaf, one undo step"
+          (doseq [[event leaf expected] [[zone [:params :target-zone] :auto/left]
+                                         [(-> zone (dissoc :fx/event) (assoc :value :auto/center)) [:params :target-zone] :auto/center]
+                                         [(assoc zone :fx/event :auto/even) [:params :target-zone] :auto/even]
+                                         [value [:params :amount] 0.6]
+                                         [(assoc value :fx/event 0.0) [:params :amount] 0.0]
+                                         [interp [:interpolation] :exp-grow]]
+                  :let [[effects after] (edit before event)]]
+            (is (= (assoc-in (:chains before) (into (vec (rest frames-path)) (cons 1 leaf)) expected)
+                   (:chains after))
+                (pr-str event))
+            (is (= 1 (undo-depth after)) (pr-str event))
+            (is (true? (get-in after [:project :dirty?])) (pr-str event))
+            (is (nil? (:dispatch effects)) "no follow-up event")
+            (is (= (:chains before) (:chains (second (pipeline after {:event/type :edit/undo}))))
+                (str "Undo takes back " (pr-str event)))))
+        (testing "each of the four modes"
+          (let [states (reductions (fn [state mode] (second (edit state (assoc interp :fx/event mode))))
+                                   before [:linear :exp-decay :exp-grow :step])]
+            (is (= [:step :linear :exp-decay :exp-grow :step]
+                   (map #(get-in % (conj frames-path 1 :interpolation)) states)))
+            (is (= [0 1 2 3 4] (map undo-depth states)))
+            (is (= (mapv :params panel-frames) (mapv :params (get-in (last states) frames-path))) "params stay")))
+        (testing "nothing changes, and Undo and Redo stay, for"
+          (let [[_ with-redo] (edit before zone)
+                [_ with-redo] (pipeline with-redo {:event/type :edit/undo})
+                frame-1 {:keyframe-idx 1}]
+            (is (= [0 1] [(undo-depth with-redo) (count (get-in with-redo [:history :redo-stack]))]))
+            (doseq [[what event] (concat
+                                  [["no zone" (dissoc zone :fx/event)]
+                                   ["a zone option without an :id" (assoc zone :fx/event {:name "Left"})]
+                                   ["a zone that isn't a keyword" (assoc zone :fx/event "Left")]
+                                   ["the zone it has" (assoc zone :fx/event {:id :all :name "All"})]
+                                   ["an unknown mode" (assoc interp :fx/event :unknown)]
+                                   ["no mode" (assoc interp :fx/event nil)]
+                                   ["a mode that isn't a keyword" (assoc interp :fx/event "linear")]
+                                   ["the mode it has" (assoc interp :fx/event :step)]
+                                   ["the amount it has" (assoc value :fx/event 0.5)]
+                                   ["no amount" (assoc value :fx/event nil)]]
+                                  (for [event [zone value interp]
+                                        [what index] [["index -1" (assoc frame-1 :keyframe-idx -1)]
+                                                      ["no index" (dissoc frame-1 :keyframe-idx)]
+                                                      ["index 3 of three frames" (assoc frame-1 :keyframe-idx 3)]
+                                                      ["index 1.0" (assoc frame-1 :keyframe-idx 1.0)]]]
+                                    [(str what ", " (name (:event/type event)))
+                                     (merge (dissoc event :keyframe-idx) index)])
+                                  (for [event [zone value interp]
+                                        [what target] [["no effect there" {:effect-path [5]}]
+                                                       ["no such cell" {:entity-key [7 7]}]]]
+                                    [(str what ", " (name (:event/type event))) (merge event target)]))
+                    :let [[effects after] (pipeline with-redo (merge address event))]]
+              (testing what
+                (is (nil? (:state effects)) "no commit")
+                (is (identical? with-redo after))))))))))
 
 
 ;; Main Handle Function Tests

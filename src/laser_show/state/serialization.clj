@@ -15,8 +15,10 @@
             [clojure.java.io :as io]
             [clojure.pprint :as pprint]
             [clojure.tools.logging :as log])
-  (:import [java.util.zip ZipOutputStream ZipInputStream ZipEntry]
-           [java.io ByteArrayOutputStream ByteArrayInputStream]))
+  (:import [java.util.zip ZipOutputStream ZipInputStream ZipEntry ZipFile CRC32]
+           [java.io ByteArrayOutputStream ByteArrayInputStream PushbackReader StringReader]
+           [java.nio ByteBuffer]
+           [java.nio.charset CharacterCodingException CodingErrorAction StandardCharsets]))
 
 
 ;; Core Serialization Functions
@@ -281,6 +283,90 @@
           (log/error "Error saving to zip" zip-path ":" (.getMessage e))
           false)))))
 
+(defn- utf-8-text
+  "bytes as UTF-8 text. Throws on bytes that aren't UTF-8, instead of
+   putting replacement characters in their place."
+  ^String [^bytes bytes]
+  (try
+    (str (.decode (doto (.newDecoder StandardCharsets/UTF_8)
+                    (.onMalformedInput CodingErrorAction/REPORT)
+                    (.onUnmappableCharacter CodingErrorAction/REPORT))
+                  (ByteBuffer/wrap bytes)))
+    (catch CharacterCodingException _
+      (throw (ex-info "it isn't UTF-8 text" {})))))
+
+(def ^:private end-of-text
+  "What read-one-edn's reads return at the end of the text. Only this
+   object is it: no form in a file can be."
+  (Object.))
+
+(defn- read-one-edn
+  "The EDN form that the member entry-name's bytes are: UTF-8 text with
+   exactly one form, then nothing but whitespace and comments. The standard
+   tags (#inst, #uuid) read; any other tag, an empty member, a form cut short
+   or a second form throws, naming entry-name."
+  [entry-name bytes]
+  (let [reader (PushbackReader. (StringReader. (utf-8-text bytes)))
+        read-next #(edn/read {:eof end-of-text} reader)
+        form (read-next)]
+    (cond
+      (identical? end-of-text form)
+      (throw (ex-info (str entry-name " is empty") {:entry entry-name}))
+
+      (not (identical? end-of-text (read-next)))
+      (throw (ex-info (str entry-name " has more than one form") {:entry entry-name}))
+
+      :else form)))
+
+(defn- entry-bytes
+  "All of entry's bytes, read to its end, with the size and CRC-32 its zip
+   records for them."
+  ^bytes [^ZipFile zip ^ZipEntry entry]
+  (let [bytes (with-open [in (.getInputStream zip entry)]
+                (.readAllBytes in))]
+    (cond
+      (not= (.getSize entry) (alength bytes))
+      (throw (ex-info (str "it is " (alength bytes) " bytes, its zip says " (.getSize entry)) {}))
+
+      (not= (.getCrc entry) (.getValue (doto (CRC32.) (.update bytes))))
+      (throw (ex-info "its CRC-32 isn't the one its zip records" {}))
+
+      :else bytes)))
+
+(defn- cause-text [^Throwable t]
+  (or (ex-message t) (.getName (class t))))
+
+(defn- load-strict
+  "load-from-zip :strict?: {name form} of the members named in filenames
+   (every file member when nil), or throws ex-info with :zip-path, and
+   :entry when one member is the reason."
+  [zip-path filenames]
+  (try
+    (with-open [zip (ZipFile. (io/file zip-path))]
+      (let [entries (filterv (fn [^ZipEntry e]
+                               (and (not (.isDirectory e))
+                                    (or (nil? filenames) (contains? filenames (.getName e)))))
+                             (enumeration-seq (.entries zip)))]
+        (when-let [twice (some (fn [[entry-name n]] (when (> n 1) entry-name))
+                               (frequencies (map #(.getName ^ZipEntry %) entries)))]
+          (throw (ex-info (str twice " is in the zip more than once") {:entry twice})))
+        (into {}
+              (map (fn [^ZipEntry e]
+                     (let [entry-name (.getName e)]
+                       (try
+                         [entry-name (read-one-edn entry-name (entry-bytes zip e))]
+                         (catch Exception t
+                           (throw (ex-info (if (= entry-name (:entry (ex-data t)))
+                                             (cause-text t)
+                                             (str entry-name ": " (cause-text t)))
+                                           {:entry entry-name}
+                                           t)))))))
+              entries)))
+    (catch Exception t
+      (throw (ex-info (cause-text t)
+                      (merge (select-keys (ex-data t) [:entry]) {:zip-path (str zip-path)})
+                      t)))))
+
 (defn load-from-zip
   "Load files from a zip archive and deserialize EDN content.
    
@@ -289,19 +375,33 @@
    
    Options:
    - :if-not-found - Value to return if file doesn't exist (default nil)
-   - :on-error - Error handler for read/parse errors
+   - :on-error - Error handler for read/parse errors (not with :strict?)
    - :filenames - Optional set of filenames to load (loads all if not specified)
+   - :strict? - Read a project file (state.persistent/read-project): the zip
+     by its central directory, and each member named in :filenames read to
+     its end, with the size and CRC-32 the zip records, as exactly one EDN
+     form (read-one-edn). A member that isn't, a name the zip holds twice,
+     or a file that isn't a whole zip throws ex-info: its :zip-path, and its
+     :entry when one member is the reason. Never a partial map, and nothing
+     in place of a member that can't be read. Other members (folders, a
+     thumbnail) aren't read at all.
    
    Returns: Map of {filename data} or default value
    
    Example:
    (load-from-zip \"project.zip\")
    => {\"metadata.edn\" {:config {...}}, \"hardware.edn\" {:projectors {...}}}"
-  [zip-path & {:keys [if-not-found on-error filenames]
+  [zip-path & {:keys [if-not-found on-error filenames strict?]
                :or {if-not-found nil}}]
   (let [file (io/file zip-path)]
-    (if-not (.exists file)
+    (cond
+      (not (.exists file))
       if-not-found
+
+      strict?
+      (load-strict zip-path filenames)
+
+      :else
       (try
         (with-open [file-in (io/input-stream zip-path)
                     zip-in (ZipInputStream. file-in)]

@@ -8,7 +8,9 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.menu :as menu]
             [laser-show.state.core :as state]
+            [laser-show.state.persistent :as persistent]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.event Event]
@@ -146,6 +148,30 @@
           (ui/wait-for! #(= 1 @exits))
           (is (.exists file) "the project was written before the app was asked to exit")
           (is (false? (get-in (state/get-raw-state) [:project :dirty?])))))
+      (finally
+        (when (.exists file) (.delete file))))))
+
+(deftest open-asks-again-when-the-show-changed-while-choosing-test
+  ;; Reactivity plan 20: File > Open's chooser opened on a clean show, and an
+  ;; edit landed before the file was picked
+  (let [path "test-output/main-window-open-test.zip"
+        file (io/file path)]
+    (io/make-parents file)
+    (try
+      (is (persistent/write-project! path (persistent/project-files (assoc-in (state/get-raw-state) [:timing :bpm] 77.0))))
+      (let [picked (assoc (get-in (menu/handle {:event/type :file/open :state (state/get-raw-state)})
+                                  [:fx/show-file-chooser :on-result])
+                          :file-path path)]
+        (make-project-dirty!)
+        (events/dispatch! picked)
+        (ui/wait-for! #(ui/visible? "#unsaved-discard"))
+        (is (= "Save changes to this project before opening main-window-open-test.zip?"
+               (ui/node-text "#unsaved-message")))
+        (is (true? (get-in (state/get-raw-state) [:project :dirty?])) "nothing was replaced yet")
+        (ui/click! (ui/robot) "#unsaved-discard")
+        (ui/wait-for! #(= path (get-in (state/get-raw-state) [:project :current-file])))
+        (is (= 77.0 (get-in (state/get-raw-state) [:timing :bpm])) "the file picked opened")
+        (is (false? (get-in (state/get-raw-state) [:project :dirty?]))))
       (finally
         (when (.exists file) (.delete file))))))
 

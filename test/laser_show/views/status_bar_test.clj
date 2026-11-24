@@ -109,20 +109,29 @@
            (status-bar/playing-list [(cue 0 0 :circle 1) (cue 1 0 :square 1) (cue 2 0 :triangle 1)])))))
 
 (deftest output-health-text-test
-  (let [on (fn [state errors] {:running? true :state state :errors errors})
+  (let [on (fn
+             ([state errors] {:running? true :state state :errors errors})
+             ([state errors status-text] {:running? true :state state :errors errors :status-text status-text}))
         streaming (fn [fps] {:state :streaming :fps fps})]
     (testing "nothing while streaming is off, or has nothing to stream: the toolbar says so"
       (is (nil? (status-bar/output-health-text {:running? false :state :stopped :errors []} nil)))
       (is (nil? (status-bar/output-health-text {:running? false :state :stopping :errors []} nil)))
       (is (nil? (status-bar/output-health-text (on :idle []) {}))))
-    (is (= "Starting…" (status-bar/output-health-text (on :starting []) nil)))
+    (testing "while none streams yet or the outputs change, what the toolbar says"
+      (is (= "Starting…" (status-bar/output-health-text (on :starting [] "Starting…") nil)))
+      (is (= "Starting…" (status-bar/output-health-text (on :starting [] "Starting…") {:a {:state :starting}})))
+      (is (= "Updating outputs…"
+             (status-bar/output-health-text (on :starting [] "Updating outputs…") {:old (streaming 59.8) :a (streaming 59.8)}))))
     (is (= "Starting…" (status-bar/output-health-text (on :streaming []) {:a {:state :starting}}))
         "on, but no projector draws yet")
     (testing "the frame rate the projectors draw"
       (is (= "59.8 fps" (status-bar/output-health-text (on :streaming []) {:a (streaming 59.8)})))
       (is (= "59.8 fps" (status-bar/output-health-text (on :streaming []) {:a (streaming 59.8) :b (streaming 59.8)})))
       (is (= "25.0–59.8 fps" (status-bar/output-health-text (on :streaming []) {:a (streaming 59.8) :b (streaming 25.0)}))
-          "the slowest and the fastest"))
+          "the slowest and the fastest")
+      (is (= "59.8 fps" (status-bar/output-health-text (on :mixed [] "Streaming to 1 of 2 · 1 starting")
+                                                        {:a (streaming 59.8) :b {:state :starting}}))
+          "the one that streams while the other starts"))
     (testing "and how many fail"
       (is (= "59.8 fps · 1 error"
              (status-bar/output-health-text (on :error ["B: no host"])

@@ -37,6 +37,7 @@
             [laser-show.animation.chains :as chains]
             [laser-show.animation.presets :as presets]
             [laser-show.animation.safety :as safety]
+            [laser-show.events.handlers.chain.helpers :as chain-helpers]
             [laser-show.output.driver :as driver]
             [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
@@ -478,44 +479,62 @@
         item (assoc :item-name item)))))
 
 (defn connection-status
-  "Streaming status for the toolbar.
+  "Streaming status for the toolbar, from one published status.
    
    Depends on: [:backend :streaming :running?] (the operator's intent, which
-   picks the button) and the output runtime's status (what actually streams).
+   picks the button) and the output runtime's status (what each output
+   reports: :streaming, :starting or :error). Only a :streaming report
+   counts: a drained command queue doesn't mean an output streams. The
+   rig's names only label the errors.
    
    Returns map with:
    - :running? - streaming is on
-   - :state - :stopped, :stopping, :starting, :streaming, :error or :idle
-     (on, with no enabled projectors)
-   - :status-text - e.g. \"Streaming to 2 of 3 · 1 error\", or \"No
-     projectors enabled\" (:idle)
-   - :errors - [\"<projector name>: <error>\" …]"
+   - :state - :stopped, :stopping, :starting, :mixed (some outputs stream,
+     the others still start), :streaming (every wanted output streams),
+     :error or :idle (on, with no enabled projectors)
+   - :status-text - e.g. \"Streaming to 1 of 2 · 1 starting\", \"0 of 2
+     streaming · 1 error\", \"Updating outputs…\" or \"No projectors
+     enabled\" (:idle). It says N of M only of a settled status: nothing
+     pending, and a report for each of the M wanted outputs, none for an
+     engine still being retired
+   - :errors - [\"<projector name>: <error>\" …], by projector id"
   [context]
   (let [running? (boolean (fx/sub-val context get-in [:backend :streaming :running?]))
         {:keys [engines wanted pending? projectors] :as status} (fx/sub-ctx context streaming-status)
         names (fx/sub-val context :projectors)
-        streaming (count (filter #(= :streaming (:state %)) (vals projectors)))
+        wanted (or wanted 0)
+        {streaming :streaming starting :starting :or {streaming 0 starting 0}}
+        (frequencies (map :state (vals projectors)))
         errors (vec (for [[id {:keys [state error]}] (sort-by key projectors)
                           :when (= :error state)]
                       (str (or (get-in names [id :name]) (name id)) ": " error)))
+        settled? (and (some? status) (not pending?) (= wanted (count projectors)))
+        ratio (when (and settled? (pos? wanted))
+                (str (if (pos? streaming)
+                       (str "Streaming to " streaming " of " wanted)
+                       (str "0 of " wanted " streaming"))
+                     (when (pos? starting) (str " · " starting " starting"))))
         state (cond
                 (not running?) (if (pos? (or engines 0)) :stopping :stopped)
-                (or (nil? status) pending?) :starting
                 (seq errors) :error
-                (zero? (or wanted 0)) :idle
-                :else :streaming)]
+                (not settled?) :starting
+                (zero? wanted) :idle
+                (= streaming wanted) :streaming
+                (and (pos? streaming) (= wanted (+ streaming starting))) :mixed
+                :else :starting)]
     {:running? running?
      :state state
      :errors errors
      :status-text (case state
                     :stopped "Not streaming"
                     :stopping "Stopping…"
-                    :starting "Starting…"
                     :idle "No projectors enabled"
-                    (str "Streaming to " streaming " of " wanted
-                         (when (zero? wanted) " (no enabled projectors)")
-                         (when (seq errors)
-                           (str " · " (count errors) (if (= 1 (count errors)) " error" " errors")))))}))
+                    :starting (if (or (pos? streaming) (> (count projectors) wanted))
+                                "Updating outputs…"
+                                "Starting…")
+                    (:mixed :streaming) ratio
+                    :error (str (or ratio "Updating outputs…")
+                                " · " (count errors) (if (= 1 (count errors)) " error" " errors")))}))
 
 
 ;; Level 2: Computed UI State Subscriptions
@@ -604,13 +623,15 @@
   (:active-projector (fx/sub-val context :projector-ui)))
 
 (defn active-projector
-  "Get the full config of the currently selected projector.
+  "Get the full config of the currently selected projector, with its :id;
+   nil when none is selected or the selected id has no projector (an undo
+   took it away), so the inspector shows no selection.
    Depends on: projector-ui domain and projectors domain"
   [context]
   (let [active-id (:active-projector (fx/sub-val context :projector-ui))
-        projectors (fx/sub-val context :projectors)]
-    (when active-id
-      (assoc (get projectors active-id) :id active-id))))
+        projector (when active-id (get (fx/sub-val context :projectors) active-id))]
+    (when projector
+      (assoc projector :id active-id))))
 
 (defn discovered-devices
   "Get the devices from the last scan.
@@ -858,21 +879,6 @@
         :drop-position nil
         :renaming-id nil}))
 
-(defn list-ordered-ids
-  "Get the ordered vector of item IDs for a hierarchical list component or items-path.
-   Calculates visual document-order IDs directly from the state context.
-   Returns an eager vector of UUIDs in document order."
-  ([context component-id]
-   (list-ordered-ids context component-id nil))
-  ([context component-id items-path]
-   (let [target (or items-path (ex/resolve-items-path component-id))]
-     (if (and (vector? target) (= :chains (first target)))
-       (let [chains (fx/sub-val context :chains)
-             sub-path (subvec target 1)]
-         (chains/collect-all-ids (get-in chains sub-path [])))
-       (let [state (fx/sub-val context identity)]
-         (ex/chain-ordered-ids state (or target component-id)))))))
-
 
 ;; Level 2: Virtual Projector Subscriptions
 
@@ -1039,12 +1045,28 @@
   [context]
   (fx/sub-val context get-in [:config :default-target]))
 
-(defn zones-in-use
-  "Every zone the show draws into (Z4-Q1): those a cue names anywhere, a
-   column's default and the show's, sorted."
+(defn effect-ref-inputs
+  "The effect cells' chains as their stored references read them
+   (routing.refs/chain-ref-usage: the zone catalogue, the rig report):
+   {cell {:items items}} for each cell with items, so switching a cell on or
+   off leaves it equal."
   [context]
-  (let [cues (fx/sub-val context get-in [:chains :cue-chains])
-        refs (concat (mapcat refs/cue-refs (remove nil? (vals cues)))
+  (into {}
+        (keep (fn [[cell chain]]
+                (when (and (map? chain) (seq (:items chain)))
+                  [cell {:items (:items chain)}])))
+        (fx/sub-val context get-in [:chains :effect-chains])))
+
+(defn zones-in-use
+  "Every zone the show names (Z4-Q1): in a cue (routing.refs/cue-refs, its
+   zone patterns too), in an effect cell's zone patterns (a place, a source
+   or a lit step, a keyframe's too, the pattern on or off), a column's
+   default and the show's, sorted. Not a zone a label, a map's override or
+   the preview alone names."
+  [context]
+  (let [usage (refs/chain-ref-usage (fx/sub-val context get-in [:chains :cue-chains])
+                                    (fx/sub-ctx context effect-ref-inputs))
+        refs (concat (keys usage)
                      (mapcat targets/target-refs (vals (fx/sub-val context get-in [:grid :column-targets])))
                      (targets/target-refs (fx/sub-ctx context default-target)))]
     (vec (sort-by targets/zone-index (into #{} (filter targets/zone-ref?) refs)))))
@@ -1323,17 +1345,21 @@
 
 (defn step-grid
   "The step grid window's grid at target ({:domain :entity-key
-   :effect-path}, a cue's zone pattern or an effects cell's), or nil when it
-   holds no zone pattern: {:id (the pattern's, for the playhead) :params
+   :effect-instance-id}: the zone pattern with that id among a cue's
+   patterns or an effects cell's items, wherever it is among them now,
+   routing.step-grid/locate-pattern), or nil when they hold no zone pattern
+   with that id: {:id (the pattern's, for the playhead) :params
    (the grid as it shows, routing.step-grid/as-grid: a pattern that isn't
    one yet shows the grid it becomes) :grid? (it is one already) :rows
    [{:ref :text}] (each row and where it goes under the map in use) :lit
    (each step's refs, as sets) :length :cursor [row step] :keyframes? (its
    keyframes are on: the grid is greyed out) :locked? (the show lock is on)
    :wrap-note (S-5) :every-laser-note (S-4, once it became zones)}."
-  [context {:keys [domain entity-key effect-path] :as target}]
-  (let [fx (fx/sub-ctx context zone-pattern-at domain entity-key effect-path)]
-    (when (= :zone-pattern (:effect-id fx))
+  [context {:keys [domain entity-key effect-instance-id] :as target}]
+  (let [items-path (chain-helpers/zone-pattern-items-path domain entity-key)
+        fx (when items-path
+             (:instance (step-grid/locate-pattern (fx/sub-val context get-in items-path) effect-instance-id)))]
+    (when fx
       (let [world (fx/sub-ctx context pattern-world)
             params (step-grid/as-grid (:params fx) (count (rig/e-order (rig/rig-inputs world))))
             names (fx/sub-ctx context names-ctx)
@@ -1795,41 +1821,94 @@
 (defn- vibe-locked? [state]
   (= :locked (get-in state [:vibe-runtime :rotation])))
 
-(defn- reaction-inputs
-  "What the cells that react to a press depend on (vibes.reactions/reactions
-   and what may play: the audience rule reads the rig's order, and since
-   zones plan Z4 the zone maps and the column and show defaults)."
-  [state]
-  (-> (select-keys state [:chains :projectors :virtual-projectors :rig :zone-maps])
-      (assoc :grid (select-keys (:grid state) [:column-targets])
-             :config (select-keys (:config state) [:default-target]))))
+;; Who a cue can reach (vibes.library's audience rule, V6; zones plans Z4,
+;; Z5), as the pads and the Vibes tab's picker read it: one routing
+;; projection, so they agree with each other and with the full state.
+
+(defn- audience-rig-inputs
+  "What the audience groups are folded from (vibes.library/audience-groups):
+   the projectors, the virtual projectors (one counts when it or its
+   projector scans the crowd) and the rig (the automatic groups a scanner
+   is in follow the order)."
+  [context]
+  {:projectors (fx/sub-val context :projectors)
+   :virtual-projectors (fx/sub-val context :virtual-projectors)
+   :rig (fx/sub-val context :rig)})
+
+(defn vibe-audience-groups
+  "The refs that reach the audience (vibes.library/audience-groups), from
+   audience-rig-inputs alone: a zone map or a default changing leaves them
+   be."
+  [context]
+  (library/audience-groups (fx/sub-ctx context audience-rig-inputs)))
+
+(defn vibe-audience-routing
+  "What the audience rule reads besides the cue or effect cell it asks
+   about (vibes.library/audience-cue?, unplayable, playable-cells,
+   audience-fx?), as a state: audience-rig-inputs, the group definitions
+   (a zone pattern's lane drops a group that isn't one, zones plan Z5), the
+   zone maps, and the column defaults and the show's (zones plan Z4). The
+   pads and the picker add the chains they ask about, so they re-run when
+   one of these changes, and only then: not for the map in use or the show
+   clock's status."
+  [context]
+  (assoc (fx/sub-ctx context audience-rig-inputs)
+         :zone-groups (fx/sub-val context :zone-groups)
+         :zone-maps (fx/sub-val context :zone-maps)
+         :grid {:column-targets (fx/sub-val context get-in [:grid :column-targets])}
+         :config {:default-target (fx/sub-val context get-in [:config :default-target])}))
+
+(defn- slot-chains
+  "{cell chain} of the cues at cells (cue-cell-chain), each read now."
+  [context cells]
+  (into {} (map (fn [[col row :as cell]] [cell (fx/sub-ctx context cue-cell-chain col row)])) cells))
 
 (defn- vibe-reactions
-  "The current vibe's tap reactions by role (vibes.reactions/reactions), and
-   :quiet, the roles whose press plays no cue: HIT or ACCENT with nothing
-   playable in its pool, FLASH without a playable cue. Recomputed when the
-   chains, the vibes, the projectors or the current vibe change."
+  "The current vibe's tap reactions by role (vibes.reactions/reactions): its
+   FX set, its flash FX, the effects grid's cells that are on and the cues
+   its slots name, whether those play or not; {} without vibes. Recomputed
+   when the vibe, those cues or the effects grid change."
   [context]
-  (let [id (fx/sub-ctx context vibe-current-id)
-        {:keys [library]} (fx/sub-ctx context vibe-config)
-        state (assoc-in (fx/sub-val context reaction-inputs) [:config :vibes] {:library library})
-        vibe (get library id)]
-    {:by-role (if vibe (reactions/reactions state id) {})
-     :quiet (set (for [role [:hit :accent :flash]
-                       :let [cells (if (= :flash role)
-                                     (keep identity [(get-in vibe [:flash :cue])])
-                                     (get-in vibe [role :cells]))]
-                       :when (empty? (library/playable-cells state vibe cells))]
-                   role))}))
+  (let [id (fx/sub-ctx context vibe-current-id)]
+    (if-let [vibe (fx/sub-val context library/vibe id)]
+      (reactions/reactions {:config {:vibes {:library {id vibe}}}
+                            :chains {:effect-chains (fx/sub-val context get-in [:chains :effect-chains])
+                                     :cue-chains (slot-chains context (into [] (mapcat #(library/slot-cells vibe %))
+                                                                            library/cue-slots))}}
+                           id)
+      {})))
+
+(def ^:private cue-slot
+  "The slot whose cues a role's press may start (vibes.library/slot-cells)."
+  {:hit :hit :accent :accent :flash :flash-cue})
+
+(defn- vibe-pad-cue-status
+  "What role's press can start, for its pad: {:quiet? (no cue: none of its
+   cues is one the vibe that plays may start, vibes.library/playable-cells)
+   :audience? (the vibe allows audience cells, and one it may start can
+   reach the crowd, vibes.library/audience-cell?)}. HIT's and ACCENT's
+   pools and FLASH's cue, over vibe-audience-routing with their chains
+   alone; FLASH's effects never mark it. Both false for VIBE and BLACKOUT;
+   a cue role with no cue, or no vibe, is quiet."
+  [context role]
+  (if-let [slot (cue-slot role)]
+    (let [vibe (fx/sub-val context library/vibe (fx/sub-ctx context vibe-current-id))
+          cells (library/slot-cells vibe slot)
+          state (assoc (fx/sub-ctx context vibe-audience-routing) :chains {:cue-chains (slot-chains context cells)})
+          playable (library/playable-cells state vibe cells)
+          groups (when (:allow-audience? vibe) (fx/sub-ctx context vibe-audience-groups))]
+      {:quiet? (empty? playable)
+       :audience? (boolean (and groups (some #(library/audience-cell? state % groups) playable)))})
+    {:quiet? false :audience? false}))
 
 (defn- vibe-pad-reactions
   "role's pad: the names of its reactions, and :effects-only? when its
-   press plays no cue but moves some."
+   press plays no cue (vibe-pad-cue-status) but moves some."
   [context role]
-  (let [{:keys [by-role quiet]} (fx/sub-ctx context vibe-reactions)
-        names (mapv :name (get by-role role))]
+  (let [names (mapv :name (get (fx/sub-ctx context vibe-reactions) role))
+        {:keys [quiet?]} (fx/sub-ctx context vibe-pad-cue-status role)]
     {:reactions names
-     :effects-only? (boolean (and (contains? quiet role) (seq names)))}))
+     :effects-only? (boolean (and quiet? (seq names)))}))
 
 (defn vibe-pad
   "One of the Perform tab's five pads: {:role :label :bindings (trigger-map
@@ -1911,15 +1990,6 @@
   [context grid col row]
   (fx/sub-ctx context indexed-cell-vibes grid col row))
 
-(defn vibe-audience-groups
-  "The refs that reach the audience (vibes.library/audience-groups), from
-   the projectors and the rig (the automatic groups a scanner is in follow
-   the order)."
-  [context]
-  (library/audience-groups {:projectors (fx/sub-val context :projectors)
-                            :virtual-projectors (fx/sub-val context :virtual-projectors)
-                            :rig (fx/sub-val context :rig)}))
-
 (defn map-warnings
   "What the map editor says of map id (routing.zone-maps/map-warnings): its
    empty lanes, the ones with no projector or that reach the audience, the
@@ -1930,19 +2000,6 @@
                                :zones (fx/sub-ctx context map-zones)
                                :reach (fx/sub-ctx context ref-reach)
                                :audience (fx/sub-ctx context vibe-audience-groups)})))
-
-(defn vibe-audience-routing
-  "What the audience rule reads besides a cue and the audience groups
-   (vibes.library/audience-cue?, zones plan Z4): the zone maps, the column
-   defaults and the show's, and for a zone pattern's lane the rig (zones
-   plan Z5); so the picker re-runs when one changes, and only then."
-  [context]
-  {:zone-maps (fx/sub-val context :zone-maps)
-   :grid {:column-targets (fx/sub-val context get-in [:grid :column-targets])}
-   :config {:default-target (fx/sub-val context get-in [:config :default-target])}
-   :projectors (fx/sub-val context :projectors)
-   :rig (fx/sub-val context :rig)
-   :zone-groups (fx/sub-val context :zone-groups)})
 
 (defn- edited-allows-audience? [state]
   (boolean (:allow-audience? (library/vibe state (library/edited-id state)))))
@@ -2205,15 +2262,9 @@
 (defn vibe-pad-audience?
   "Can role's press start a cue that reaches the audience: the vibe that
    plays allows audience cells, and one its role may play is one
-   (vibes.library/audience-cell?): HIT's or ACCENT's pool, FLASH's cue."
+   (vibe-pad-cue-status): HIT's or ACCENT's pool, FLASH's cue."
   [context role]
-  (boolean
-   (when (and (#{:hit :accent :flash} role) (fx/sub-ctx context vibe-audience?))
-     (let [vibe (get (:library (fx/sub-ctx context vibe-config)) (fx/sub-ctx context vibe-current-id))
-           state (fx/sub-val context reaction-inputs)
-           cells (if (= :flash role) (keep identity [(get-in vibe [:flash :cue])]) (get-in vibe [role :cells]))
-           groups (library/audience-groups state)]
-       (some #(library/audience-cell? state % groups) (library/playable-cells state vibe cells))))))
+  (:audience? (fx/sub-ctx context vibe-pad-cue-status role)))
 
 (defn vibes-tab-label
   "The Vibes tab's label: \"Vibes\", and the lint's error count while it

@@ -6,6 +6,8 @@
    - Files are organized correctly
    - Load/save round-trips work"
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.output.jar-builder :as jar]
+            [laser-show.routing.legacy-shows-test :as legacy]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
@@ -15,7 +17,11 @@
             [laser-show.state.serialization :as ser]
             [laser-show.state.templates :as templates]
             [laser-show.vibes.engine :as engine]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io])
+  (:import [clojure.lang ExceptionInfo]
+           [java.io File IOException]
+           [java.nio.file AtomicMoveNotSupportedException Files]
+           [javafx.event ActionEvent]))
 
 
 ;; Test Fixtures
@@ -238,19 +244,26 @@
     (testing "File > New keeps the rig"
       (is (identical? (:rig saved) (:rig (persistent/new-project-state saved)))))))
 
-(deftest old-show-loads-clean-test
+(defn- pre-z2-show-files
+  "A show's files as a build from before zones Z2 saved them: hardware with
+   no :rig, the six built-in groups, a projector listing All and Left, a cue
+   and preview cells routed by :zone-group-id."
+  []
   (let [old-groups {:all {:id :all :name "All" :color "#808080"} :left {:id :left :name "Left" :color "#4A90D9"}
                     :right {:id :right :name "Right" :color "#D94A4A"} :center {:id :center :name "Center" :color "#4AD94A"}
-                    :graphics {:id :graphics :name "Graphics" :color "#9B59B6"} :crowd {:id :crowd :name "Crowd Scanning" :color "#E67E22"}}
-        files (-> (persistent/project-files (domains/build-initial-state))
-                  (update "hardware.edn" dissoc :rig)
-                  (assoc-in ["hardware.edn" :zone-groups] old-groups)
-                  (assoc-in ["hardware.edn" :projectors] {:p {:name "L" :host "10.0.0.5" :service-id 1 :enabled? true
-                                                              :unit-id "0A 1B" :zone-groups [:all :left]}})
-                  (assoc-in ["content.edn" :chains :cue-chains] {[0 0] {:items [{:id "i" :type :preset :preset-id :circle
-                                                                                :zone-group-id :center}]}})
-                  (assoc-in ["project-metadata.edn" :config :preview :grid-cells]
-                            [{:zone-group-id nil} {:zone-group-id :left} {:zone-group-id :right} {:zone-group-id :center}]))
+                    :graphics {:id :graphics :name "Graphics" :color "#9B59B6"} :crowd {:id :crowd :name "Crowd Scanning" :color "#E67E22"}}]
+    (-> (persistent/project-files (domains/build-initial-state))
+        (update "hardware.edn" dissoc :rig)
+        (assoc-in ["hardware.edn" :zone-groups] old-groups)
+        (assoc-in ["hardware.edn" :projectors] {:p {:name "L" :host "10.0.0.5" :service-id 1 :enabled? true
+                                                    :unit-id "0A 1B" :zone-groups [:all :left]}})
+        (assoc-in ["content.edn" :chains :cue-chains] {[0 0] {:items [{:id "i" :type :preset :preset-id :circle
+                                                                      :zone-group-id :center}]}})
+        (assoc-in ["project-metadata.edn" :config :preview :grid-cells]
+                  [{:zone-group-id nil} {:zone-group-id :left} {:zone-group-id :right} {:zone-group-id :center}]))))
+
+(deftest old-show-loads-clean-test
+  (let [files (pre-z2-show-files)
         loaded (persistent/apply-loaded-project (domains/build-initial-state) files "old.zip")]
     (is (= {} (:projectors loaded)) "the show's projectors are a copy: this rig's stay (none here)")
     (is (= #{:left :graphics :crowd} (set (keys (:zone-groups loaded)))) "All is built in; the empty Right and Center went")
@@ -400,7 +413,9 @@
                             (assoc-in [:projector-ui :calibrating-projector-id] :p)
                             (assoc-in [:projector-ui :identify :p] 12345))]
     (doseq [[label after] [["New" (persistent/new-project-state testing-pattern)]
-                           ["Open" (persistent/apply-loaded-project testing-pattern {} "/tmp/show.zip")]]]
+                           ["Open" (persistent/apply-loaded-project testing-pattern
+                                                                    {"content.edn" {:chains {:cue-chains {} :effect-chains {}}}}
+                                                                    "/tmp/show.zip")]]]
       (is (nil? (get-in after [:projector-ui :calibrating-projector-id])) label)
       (is (= {} (get-in after [:projector-ui :identify])) label))))
 
@@ -645,6 +660,64 @@
     (is (= {:random {:bar? true}} (get-in loaded [:config :pattern-pads])) "a pad's setting is the show's")
     (is (false? (get-in loaded [:project :dirty?])))))
 
+(defn- pinned-patterns
+  "plans/2026-11-23-cljfx-reactivity/28 §7.1's pattern fields, every pin
+   to pin: a cue's step grid (a rest first and last), an effect cell's
+   pattern in a group, a base source and two sparse keyframes."
+  [pin]
+  {:cue [{:id #uuid "00000000-0000-0000-0000-0000000000b1" :effect-id :zone-pattern :enabled? false
+          :params {:style :steps :from pin :zones [:zone/c pin] :steps [[] [:zone/c pin] [pin] []]}}]
+   :cell [{:id #uuid "00000000-0000-0000-0000-0000000000b2" :type :group :enabled? false
+           :items [{:id #uuid "00000000-0000-0000-0000-0000000000b3" :effect-id :zone-pattern :enabled? true
+                    :params {:from pin}
+                    :keyframe-modulator {:enabled? false
+                                         :keyframes [{:position 0.0 :params {:zones [pin]}}
+                                                     {:position 1.0 :params {:steps [[pin] []]}}]}}]}]})
+
+(defn- with-pinned-patterns [state pin]
+  (let [{:keys [cue cell]} (pinned-patterns pin)]
+    (-> state
+        (assoc-in [:chains :cue-chains [2 0]] {:items [{:type :preset :id #uuid "00000000-0000-0000-0000-0000000000b4" :preset-id :circle}]
+                                               :zone-patterns cue})
+        (assoc-in [:chains :effect-chains [2 0]] {:active? false :items cell}))))
+
+(deftest pattern-pins-round-trip-across-rigs-test
+  (let [rig-a (-> (domains/build-initial-state)
+                  (assoc :projectors {:projector-10-0-0-5-1 {:name "Laser L" :host "10.0.0.5" :port 7255 :service-id 1
+                                                             :unit-id unit-l :stable-id [:unit unit-l 1] :enabled? true
+                                                             :zone-groups [] :exclude-from-all? false}})
+                  (history/mark-clean))
+        pin-a :auto.laser/projector-10-0-0-5-1
+        pin-b :auto.laser/projector-10-0-0-57-1
+        zip (fn [n] (doto (java.io.File/createTempFile (str "pattern-pins-" n) ".zip") (.deleteOnExit)))
+        [zip-1 zip-2] [(zip 1) (zip 2)]
+        patterns (fn [s] {:cue (get-in s [:chains :cue-chains [2 0] :zone-patterns])
+                          :cell (get-in s [:chains :effect-chains [2 0] :items])})
+        opened-clean (fn [here loaded label]
+                       (doseq [path rig-paths]
+                         (is (identical? (get-in here path) (get-in loaded path)) (str label ": " path " is this machine's")))
+                       (is (empty? (get-in loaded [:history :undo-stack])) label)
+                       (is (false? (get-in loaded [:project :dirty?])) (str label ": renamed before the baseline")))]
+    (try
+      (is (some? (save! (with-pinned-patterns rig-a pin-a) (str zip-1))) "made on rig A, where Laser L is .5")
+      (let [rig-b (on-a-rig)
+            on-b (open rig-b (str zip-1))]
+        (testing "opened on rig B, where the same unit is .57: both grids, every keyframe, order and rests kept"
+          (is (= (pinned-patterns pin-b) (patterns on-b)))
+          (opened-clean rig-b on-b "on B"))
+        (is (some? (save! on-b (str zip-2))) "saved again on B: its copy of the rig is B's now")
+        (testing "reopened on B: as it was"
+          (let [again (open rig-b (str zip-2))]
+            (is (= (pinned-patterns pin-b) (patterns again)))
+            (opened-clean rig-b again "again on B")))
+        (testing "and opened on A again: back on the unit's id there"
+          (let [back (open rig-a (str zip-2))]
+            (is (= (pinned-patterns pin-a) (patterns back)))
+            (opened-clean rig-a back "back on A"))))
+      (finally
+        (.delete zip-1)
+        (.delete zip-2)))))
+
 (deftest pattern-pads-are-not-saved-test
   (let [show (-> (domains/build-initial-state)
                  (assoc :pattern-pads {:style :chase :pending {:id 1 :style :off :at-beat 9.0 :bar? false}})
@@ -667,3 +740,164 @@
         (is (= {:style nil :pending nil} (:pattern-pads s)) "As set again")
         (is (false? (get-in s [:zone-map :cycle-paused?])))
         (is (nil? (get-in s [:playback :pulses :zone-step])) "the Zone step key's count starts again")))))
+
+
+;; Only a readable show opens, and a save replaces the file only once what it
+;; wrote reads back (plans/2026-11-23-cljfx-reactivity/02)
+
+(def ^:private empty-grids
+  "content.edn of a show with both grids empty."
+  {:chains {:cue-chains {} :effect-chains {}}})
+
+(def ^:private png-bytes
+  "A thumbnail's first bytes: binary, and not UTF-8."
+  (byte-array (map unchecked-byte [0x89 0x50 0x4E 0x47 0x0D 0x0A 0x1A 0x0A 0xFF 0xFE 0x00])))
+
+(defn- names-in [^File dir]
+  (set (.list dir)))
+
+(defn- file-bytes [path]
+  (vec (Files/readAllBytes (.toPath (io/file path)))))
+
+(deftest checked-project-files-test
+  (let [good (persistent/project-files (test-state))
+        refused (fn [files]
+                  (try
+                    (persistent/checked-project-files files)
+                    ::accepted
+                    (catch ExceptionInfo e
+                      (select-keys (ex-data e) [:member :path]))))]
+    (is (identical? good (persistent/checked-project-files good)) "a show comes back as it is")
+    (is (= ::accepted (refused {"content.edn" empty-grids})) "content.edn alone")
+    (is (= ::accepted (refused (assoc good "thumbnail.png" png-bytes))) "another member isn't looked at")
+    (testing "content.edn is required, and holds a show"
+      (doseq [[label files path]
+              [["missing" (dissoc good "content.edn") []]
+               ["nil" (assoc good "content.edn" nil) []]
+               ["a vector" (assoc good "content.edn" []) []]
+               ["no :chains" (assoc good "content.edn" {:zone-maps {}}) [:chains]]
+               ["no effects grid" (update-in good ["content.edn" :chains] dissoc :effect-chains) [:chains :effect-chains]]
+               ["cues in a vector" (assoc-in good ["content.edn" :chains :cue-chains] []) [:chains :cue-chains]]
+               ["a cell that isn't [col row]" (assoc-in good ["content.edn" :chains :cue-chains :a] {:items []}) [:chains :cue-chains :a]]
+               ["a cell that isn't a map" (assoc-in good ["content.edn" :chains :effect-chains [0 1]] [:scale]) [:chains :effect-chains [0 1]]]
+               ["items that aren't maps" (assoc-in good ["content.edn" :chains :cue-chains [0 0] :items] [:circle]) [:chains :cue-chains [0 0] :items]]
+               ["zone maps that aren't a map" (assoc-in good ["content.edn" :zone-maps] [:map/custom-1]) [:zone-maps]]
+               ["calibration that isn't a map" (assoc-in good ["content.edn" :chains :projector-effects] []) [:chains :projector-effects]]]]
+        (is (= {:member "content.edn" :path path} (refused files)) label)))
+    (testing "the others may be missing; one that is there is a map, with a map (or nothing) at its paths"
+      (is (= ::accepted (refused (dissoc good "hardware.edn" "project-metadata.edn"))))
+      (is (= ::accepted (refused (update good "hardware.edn" dissoc :rig :zone-groups))) "an old one's paths default")
+      (doseq [[label files member path]
+              [["hardware.edn nil" (assoc good "hardware.edn" nil) "hardware.edn" []]
+               ["hardware.edn a string" (assoc good "hardware.edn" "{:projectors {}}") "hardware.edn" []]
+               ["groups in a vector" (assoc-in good ["hardware.edn" :zone-groups] [:graphics]) "hardware.edn" [:zone-groups]]
+               ["settings in a vector" (assoc-in good ["project-metadata.edn" :config] []) "project-metadata.edn" [:config]]
+               ["timing a number" (assoc-in good ["project-metadata.edn" :timing] 120.0) "project-metadata.edn" [:timing]]]]
+        (is (= {:member member :path path} (refused files)) label)))
+    (testing "apply-loaded-project checks first, so what isn't a show replaces nothing"
+      (is (thrown? ExceptionInfo (persistent/apply-loaded-project (test-state) {"project-metadata.edn" {}} "x.zip"))))))
+
+(deftest checked-open-accepts-old-and-empty-shows-test
+  (let [^File dir (jar/temp-dir! "checked-open")
+        zip-of! (fn [file-name files]
+                  (let [path (str (io/file dir file-name))]
+                    (is (ser/save-to-zip! path files) "written as an older build wrote it")
+                    path))]
+    (try
+      (testing "the six shows from before zones Z4"
+        (doseq [show legacy/show-names]
+          (testing show
+            (let [files (legacy/show-file show)
+                  read (persistent/read-project (zip-of! (str show ".zip") files))
+                  opened (persistent/apply-loaded-project (legacy/rig-state) read (str show ".zip"))]
+              (is (= files read) "read as written")
+              (is (= (history/extract-document-state (legacy/open-show show)) (history/extract-document-state opened))
+                  "and opened as legacy-shows-test opens it")
+              (is (false? (get-in opened [:project :dirty?])))
+              (is (empty? (get-in opened [:history :undo-stack])))))))
+      (testing "one from before zones Z2: its hardware has no :rig"
+        (let [files (pre-z2-show-files)
+              read (persistent/read-project (zip-of! "pre-z2.zip" files))
+              opened (persistent/apply-loaded-project (domains/build-initial-state) read "old.zip")]
+          (is (= files read))
+          (is (= (history/extract-document-state (persistent/apply-loaded-project (domains/build-initial-state) files "old.zip"))
+                 (history/extract-document-state opened))
+              "opened as old-show-loads-clean-test opens it")
+          (is (= "Left (manual)" (get-in opened [:zone-groups :left :name])))
+          (is (false? (get-in opened [:project :dirty?])))))
+      (testing "content.edn alone, both grids empty, beside a thumbnail: an empty show, the rest as a new one has it"
+        (let [path (str (jar/write-jar! (io/file dir "empty.zip") {"content.edn" (pr-str empty-grids)
+                                                                    "thumbnail.png" png-bytes}))
+              read (persistent/read-project path)
+              here (test-state)
+              opened (persistent/apply-loaded-project here read path)]
+          (is (= {"content.edn" empty-grids} read))
+          (is (= {} (get-in opened [:chains :cue-chains])))
+          (is (= {} (get-in opened [:chains :effect-chains])))
+          (is (= 120.0 (get-in opened [:timing :bpm])) "test-state's 140 BPM was the old show's")
+          (is (= (get-in (domains/build-initial-state) [:grid :size]) (get-in opened [:grid :size])))
+          (is (identical? (:projectors here) (:projectors opened)) "this machine's rig stays")
+          (is (= path (get-in opened [:project :current-file])))
+          (is (false? (get-in opened [:project :dirty?])))))
+      (finally
+        (jar/delete-tree! dir)))))
+
+(deftest rejected-save-preserves-existing-archive-test
+  (let [^File dir (jar/temp-dir! "rejected-save")
+        path (str (io/file dir "A.zip"))
+        good (persistent/project-files (test-state))
+        newer (persistent/project-files (assoc-in (test-state) [:timing :bpm] 99.0))]
+    (try
+      (is (persistent/write-project! path good))
+      (let [saved-bytes (file-bytes path)
+            saved (persistent/read-project path)
+            kept? (fn [label]
+                    (is (= saved-bytes (file-bytes path)) (str label ": A.zip's bytes as they were"))
+                    (is (= saved (persistent/read-project path)) (str label ": and its show"))
+                    (is (= #{"A.zip"} (names-in dir)) (str label ": no temporary file left")))]
+        (is (= good saved) "a save reads back as written")
+        (testing "a Java object in any member"
+          (doseq [[member at] [["project-metadata.edn" [:config :cue :on-enter]]
+                               ["hardware.edn" [:projectors :test-proj :handle]]
+                               ["content.edn" [:chains :effect-chains [0 0] :items 0 :params :amount]]]]
+            (is (false? (persistent/write-project! path (assoc-in newer (into [member] at) (ActionEvent.)))) member)
+            (kept? member)))
+        (testing "a member left out"
+          (is (false? (persistent/write-project! path (dissoc newer "hardware.edn"))))
+          (kept? "without hardware.edn"))
+        (testing "a writer that fails, having written half a file"
+          (with-redefs [ser/save-to-zip! (fn [zip-path _files & _]
+                                           (spit zip-path "PK half a zip")
+                                           (throw (IOException. "No space left on device")))]
+            (is (false? (persistent/write-project! path newer))))
+          (kept? "the write threw")
+          (with-redefs [ser/save-to-zip! (fn [zip-path _files & _]
+                                           (spit zip-path "PK half a zip")
+                                           false)]
+            (is (false? (persistent/write-project! path newer))))
+          (kept? "the write said it failed"))
+        (testing "a writer that says it wrote the show, but wrote another, readable one"
+          (let [save-to-zip! ser/save-to-zip!]
+            (with-redefs [ser/save-to-zip! (fn [zip-path files & opts]
+                                             (apply save-to-zip! zip-path (assoc-in files ["content.edn" :chains :cue-chains] {}) opts))]
+              (is (false? (persistent/write-project! path newer)))))
+          (kept? "read back as another show"))
+        (testing "the move onto A.zip fails"
+          (let [moves (atom 0)]
+            (with-redefs-fn {#'persistent/publish-project! (fn [& _]
+                                                             (swap! moves inc)
+                                                             (throw (AtomicMoveNotSupportedException. "A.zip.tmp" "A.zip" "can't replace it in one step")))}
+              #(is (false? (persistent/write-project! path newer))))
+            (is (= 1 @moves) "written and read back: it got as far as the move"))
+          (kept? "the move failed"))
+        (testing "Save As to a new file, refused: there is still no file"
+          (let [b (str (io/file dir "B.zip"))]
+            (is (false? (persistent/write-project! b (assoc-in newer ["content.edn" :chains :cue-chains [0 0] :items 0 :params :size] (Object.)))))
+            (is (not (.exists (io/file b))))
+            (kept? "B.zip refused")))
+        (testing "a save that reads back replaces A.zip"
+          (is (persistent/write-project! path newer))
+          (is (= newer (persistent/read-project path)))
+          (is (= #{"A.zip"} (names-in dir)))))
+      (finally
+        (jar/delete-tree! dir)))))
