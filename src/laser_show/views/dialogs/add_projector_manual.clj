@@ -2,7 +2,8 @@
   "Dialog for adding a projector by hand: its Type (the installed output
    drivers, IDN first), then IDN's own Host and Port, or the chosen driver's
    fields (views/components/driver_fields). Add stays off until they can be
-   used (subs/add-manual-form)."
+   used (subs/add-manual-form). Add sends no values: its handler
+   (:projectors/submit-manual-form) adds what the form holds when it runs."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.subs :as subs]
@@ -148,15 +149,8 @@
                              :text "Add Projector"
                              :style-class ["button-primary"]
                              :disable (not can-add?)
-                             :on-action (if idn?
-                                          {:event/type :projectors/add-manual
-                                           :name (if (str/blank? name-value) host-value name-value)
-                                           :host host-value
-                                           :port (try (Integer/parseInt port-value) (catch Exception _ 7255))}
-                                          {:event/type :projectors/add-manual
-                                           :driver driver
-                                           :name (when-not (str/blank? name-value) name-value)
-                                           :driver-config inputs})}]}]}))
+                             ;; No values: the handler adds the form as it is then
+                             :on-action {:event/type :projectors/submit-manual-form}}]}]}))
 
 (defn- add-projector-content
   "The form, in a window sized to it (common/fit-window-to-content!): another

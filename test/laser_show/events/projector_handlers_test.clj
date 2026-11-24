@@ -1377,6 +1377,55 @@
           "today's shape exactly: no :driver, no :driver-config")))
   (is (thrown? AssertionError (add-manual driver-state {:driver :idn :host " "})) "and still a host"))
 
+(defn- submit-form
+  "The Add Projector dialog's Add on state, through the real pipeline."
+  [state]
+  (events/handle-event-pipeline {:event/type :projectors/submit-manual-form :state state :time 1000}))
+
+(deftest submit-manual-form-adds-the-open-form-once-test
+  ;; Reactivity plan 09 (Add): Add sends no values; the handler adds what the
+  ;; open form holds when it handles it
+  (let [open (fn [form] (assoc-in driver-state [:ui :dialogs :add-projector-manual] (assoc form :open? true)))
+        typed (fn [state event]
+                (:state (events/handle-event-pipeline (merge {:event/type :ui/update-dialog-data :dialog-id :add-projector-manual}
+                                                             event {:state state}))))
+        added #(vals (get-in % [:state :projectors]))]
+    (testing "the form as it is now, not as the button showed it"
+      (let [result (submit-form (typed (open {:host "10.0.0.5"}) {:updates {:host "10.0.0.6" :name "Stage left" :port "7300"}}))
+            [p & more] (added result)]
+        (is (nil? more))
+        (is (= {:name "Stage left" :host "10.0.0.6" :port 7300 :enabled? true} (select-keys p [:name :host :port :enabled?])))
+        (is (= {:open? false} (get-in result [:state :ui :dialogs :add-projector-manual])) "closed and cleared")
+        (is (= "Add Projector" (history/undo-label (get-in result [:state :history]))))
+        (testing "a second submit, after the first closed the dialog, adds nothing"
+          (is (= (:state result) (:state (submit-form (:state result))))))))
+    (testing "an IDN projector's name and port, as the dialog shows them"
+      (doseq [[label form expected] [["no name: its host; no port: 7255" {:host "10.0.0.7"} {:name "10.0.0.7" :port 7255}]
+                                     ["a blank name; a port with spaces" {:host "10.0.0.7" :name "  " :port " 7301 "}
+                                      {:name "10.0.0.7" :port 7301}]
+                                     ["a number that is no port: 7255" {:host "10.0.0.7" :port "70000"} {:name "10.0.0.7" :port 7255}]
+                                     ["text: 7255" {:host "10.0.0.7" :port "abc"} {:name "10.0.0.7" :port 7255}]]]
+        (is (= expected (select-keys (first (added (submit-form (open form)))) [:name :port])) label)))
+    (testing "another driver's fields as typed last, coerced"
+      (let [s (-> (open {:driver :lsps :driver-config {:host "10.0.0.1"}})
+                  (typed {:updates {:name "Bridge"}})
+                  (typed {:event/type :projectors/set-manual-field :key :host :value " 127.0.0.1 "}))
+            [p & more] (added (submit-form s))]
+        (is (nil? more))
+        (is (= {:name "Bridge" :driver :lsps :driver-config {:host "127.0.0.1" :port 7266 :max-packet-bytes 1400}}
+               (select-keys p [:name :driver :driver-config])))))
+    (testing "a form that can't be added adds nothing, and stays open as typed"
+      (doseq [[label form] [["no host" {:name "Stage left" :port "7300"}]
+                            ["a blank host" {:host "   "}]
+                            ["a driver field that doesn't coerce" {:driver :lsps :driver-config {:host "h" :port "99999"}}]
+                            ["a required driver field left empty" {:driver :lsps :driver-config {:port "7266"}}]
+                            ["a driver that isn't installed" {:driver :acme/nova :driver-config {:serial "NV-00123"}}]]]
+        (let [s (open form)]
+          (is (= s (:state (submit-form s))) label))))
+    (testing "with the dialog closed, nothing, whatever its form holds"
+      (let [s (assoc-in driver-state [:ui :dialogs :add-projector-manual] {:open? false :host "10.0.0.5"})]
+        (is (= s (:state (submit-form s))))))))
+
 (defn- with-lsps
   "driver-state with an LSPS projector :b at 127.0.0.1:7266, and an IDN one :a."
   []

@@ -233,6 +233,7 @@
    :timeline/delete-selection "Delete Clip(s)"
    :timeline/nudge-selection "Nudge Clip(s)"
    :projectors/add-manual "Add Projector"
+   :projectors/submit-manual-form "Add Projector"
    :projectors/remove "Remove Projector"
    :projectors/set-safety "Change Safety Zone"
    :projectors/set-safety-coordinate "Change Safety Zone"
