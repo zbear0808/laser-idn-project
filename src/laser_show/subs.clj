@@ -479,44 +479,62 @@
         item (assoc :item-name item)))))
 
 (defn connection-status
-  "Streaming status for the toolbar.
+  "Streaming status for the toolbar, from one published status.
    
    Depends on: [:backend :streaming :running?] (the operator's intent, which
-   picks the button) and the output runtime's status (what actually streams).
+   picks the button) and the output runtime's status (what each output
+   reports: :streaming, :starting or :error). Only a :streaming report
+   counts: a drained command queue doesn't mean an output streams. The
+   rig's names only label the errors.
    
    Returns map with:
    - :running? - streaming is on
-   - :state - :stopped, :stopping, :starting, :streaming, :error or :idle
-     (on, with no enabled projectors)
-   - :status-text - e.g. \"Streaming to 2 of 3 · 1 error\", or \"No
-     projectors enabled\" (:idle)
-   - :errors - [\"<projector name>: <error>\" …]"
+   - :state - :stopped, :stopping, :starting, :mixed (some outputs stream,
+     the others still start), :streaming (every wanted output streams),
+     :error or :idle (on, with no enabled projectors)
+   - :status-text - e.g. \"Streaming to 1 of 2 · 1 starting\", \"0 of 2
+     streaming · 1 error\", \"Updating outputs…\" or \"No projectors
+     enabled\" (:idle). It says N of M only of a settled status: nothing
+     pending, and a report for each of the M wanted outputs, none for an
+     engine still being retired
+   - :errors - [\"<projector name>: <error>\" …], by projector id"
   [context]
   (let [running? (boolean (fx/sub-val context get-in [:backend :streaming :running?]))
         {:keys [engines wanted pending? projectors] :as status} (fx/sub-ctx context streaming-status)
         names (fx/sub-val context :projectors)
-        streaming (count (filter #(= :streaming (:state %)) (vals projectors)))
+        wanted (or wanted 0)
+        {streaming :streaming starting :starting :or {streaming 0 starting 0}}
+        (frequencies (map :state (vals projectors)))
         errors (vec (for [[id {:keys [state error]}] (sort-by key projectors)
                           :when (= :error state)]
                       (str (or (get-in names [id :name]) (name id)) ": " error)))
+        settled? (and (some? status) (not pending?) (= wanted (count projectors)))
+        ratio (when (and settled? (pos? wanted))
+                (str (if (pos? streaming)
+                       (str "Streaming to " streaming " of " wanted)
+                       (str "0 of " wanted " streaming"))
+                     (when (pos? starting) (str " · " starting " starting"))))
         state (cond
                 (not running?) (if (pos? (or engines 0)) :stopping :stopped)
-                (or (nil? status) pending?) :starting
                 (seq errors) :error
-                (zero? (or wanted 0)) :idle
-                :else :streaming)]
+                (not settled?) :starting
+                (zero? wanted) :idle
+                (= streaming wanted) :streaming
+                (and (pos? streaming) (= wanted (+ streaming starting))) :mixed
+                :else :starting)]
     {:running? running?
      :state state
      :errors errors
      :status-text (case state
                     :stopped "Not streaming"
                     :stopping "Stopping…"
-                    :starting "Starting…"
                     :idle "No projectors enabled"
-                    (str "Streaming to " streaming " of " wanted
-                         (when (zero? wanted) " (no enabled projectors)")
-                         (when (seq errors)
-                           (str " · " (count errors) (if (= 1 (count errors)) " error" " errors")))))}))
+                    :starting (if (or (pos? streaming) (> (count projectors) wanted))
+                                "Updating outputs…"
+                                "Starting…")
+                    (:mixed :streaming) ratio
+                    :error (str (or ratio "Updating outputs…")
+                                " · " (count errors) (if (= 1 (count errors)) " error" " errors")))}))
 
 
 ;; Level 2: Computed UI State Subscriptions

@@ -673,14 +673,80 @@
                                                           (assoc-in [:backend :streaming :running?] running?)
                                                           (assoc-in [:backend :streaming :status] status)))
                                              subs/connection-status)
-                                 [:state :status-text]))]
-    (is (= {:state :idle :status-text "No projectors enabled"}
+                                 [:running? :state :status-text]))]
+    (is (= {:running? true :state :idle :status-text "No projectors enabled"}
            (status-at true {:engines 0 :wanted 0 :pending? false :projectors {}}))
         "streaming is on, with nothing to stream")
-    (is (= {:state :streaming :status-text "Streaming to 1 of 1"}
+    (is (= {:running? true :state :streaming :status-text "Streaming to 1 of 1"}
            (status-at true {:engines 1 :wanted 1 :pending? false
                             :projectors {:a {:state :streaming :fps 59.8}}})))
-    (is (= {:state :stopped :status-text "Not streaming"} (status-at false nil)))))
+    (is (= {:running? false :state :stopped :status-text "Not streaming"} (status-at false nil)))
+    (is (= {:running? true :state :starting :status-text "Starting…"} (status-at true nil))
+        "on, and the output runtime has published nothing yet")
+    (testing "off: the intent goes first, whatever the last report says"
+      (is (= {:running? false :state :stopping :status-text "Stopping…"}
+             (status-at false {:engines 1 :wanted 0 :pending? false
+                               :projectors {:a {:state :error :error "open failed"}}}))
+          "an engine is still there, with an old error")
+      (is (= {:running? false :state :stopped :status-text "Not streaming"}
+             (status-at false {:engines 0 :wanted 0 :pending? true :projectors {}}))
+          "a queued command alone is no engine"))))
+
+(deftest connection-status-follows-published-projector-states-test
+  ;; One published sample at a time, as output-runtime/status makes them: only
+  ;; a :streaming report counts, and "N of M" needs a settled sample, with
+  ;; nothing pending and a report for each wanted output and no other. A
+  ;; drained queue alone says nothing about what streams
+  (let [starting {:state :starting}
+        streams {:state :streaming :fps 59.8}
+        failed {:state :error :error "open failed"}
+        sample (fn [engines wanted pending? projectors]
+                 {:engines engines :wanted wanted :pending? pending? :projectors projectors})
+        on (context (-> base-state
+                        (assoc :projectors {:a {:name "Laser L"} :b {:name "Laser R"}})
+                        (assoc-in [:backend :streaming :running?] true)))]
+    (reduce
+     (fn [ctx [why status expected errors]]
+       (let [ctx (fx/swap-context ctx assoc-in [:backend :streaming :status] status)
+             {:keys [running? state status-text] :as said} (fx/sub-ctx ctx subs/connection-status)]
+         (testing (str why " " (pr-str status))
+           (is (= expected [state status-text]))
+           (is (= errors (:errors said)) "the tooltip: a line for each error, by id")
+           (is (true? running?) "the intent, so the button stays Stop"))
+         ctx))
+     on
+     [["a command pending" (sample 1 1 true {:a starting})
+       [:starting "Starting…"] []]
+      ["the queue drained, and it still starts" (sample 1 1 false {:a starting})
+       [:starting "Starting…"] []]
+      ["it streams" (sample 1 1 false {:a streams})
+       [:streaming "Streaming to 1 of 1"] []]
+      ["another one added, still pending" (sample 2 2 true {:a streams :b starting})
+       [:starting "Updating outputs…"] []]
+      ["one streams, the other starts" (sample 2 2 false {:a streams :b starting})
+       [:mixed "Streaming to 1 of 2 · 1 starting"] []]
+      ["both stream" (sample 2 2 false {:a streams :b streams})
+       [:streaming "Streaming to 2 of 2"] []]
+      ["B failed before it was registered" (sample 1 2 false {:a starting :b failed})
+       [:error "0 of 2 streaming · 1 starting · 1 error"] ["Laser R: open failed"]]
+      ["both failed, with no engine" (sample 0 2 false {:b failed :a (assoc failed :error "No host")})
+       [:error "0 of 2 streaming · 2 errors"] ["Laser L: No host" "Laser R: open failed"]]
+      ["recovered: the errors go" (sample 2 2 false {:a streams :b streams})
+       [:streaming "Streaming to 2 of 2"] []]
+      ["two of three still start" (sample 3 3 false {:a streams :b starting :c starting})
+       [:mixed "Streaming to 1 of 3 · 2 starting"] []]
+      ["one not in the rig fails: its id names it" (sample 3 3 false {:a streams :b starting :c failed})
+       [:error "Streaming to 1 of 3 · 1 starting · 1 error"] ["c: open failed"]]
+      ["an old engine retires" (sample 2 1 true {:old streams :a streams})
+       [:starting "Updating outputs…"] []]
+      ["it fails while it retires" (sample 2 1 true {:old failed :a streams})
+       [:error "Updating outputs… · 1 error"] ["old: open failed"]]
+      ["still there with nothing pending: never 2 of 1" (sample 2 1 false {:old streams :a streams})
+       [:starting "Updating outputs…"] []]
+      ["gone" (sample 1 1 false {:a streams})
+       [:streaming "Streaming to 1 of 1"] []]
+      ["a warning is no error, and its output counts once" (sample 2 2 false {:a (assoc streams :warning "Corner Pin skipped") :b streams})
+       [:streaming "Streaming to 2 of 2"] []]])))
 
 (deftest zone-group-usage-counts-cues-test
   (let [s (-> base-state
