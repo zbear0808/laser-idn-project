@@ -631,6 +631,29 @@
       (ui/wait-for! #(= moved (:id (first (tracks)))))
       (is (= 2 (count (tracks)))))))
 
+(deftest track-drop-on-the-column-reorders-the-cell-shown-test
+  ;; Reactivity plan 04: showing another cell keeps the header column, whose
+  ;; drop on empty space kept the first cell's tracks, so it moved nothing
+  (let [tracks-of #(get-in (state/get-raw-state) [:chains :cue-chains [% 0] :tracks])
+        column #(some-> ^javafx.scene.Node (ui/query "#timeline-track-header-0") .getParent .getParent)]
+    (open-timeline!)
+    (ui/wait-for! #(some? (column)))
+    (let [pane (column)
+          first-cell (tracks-of 0)]
+      (switch-cell! 1 0)
+      (events/dispatch! {:event/type :timeline/add-track :col 1 :row 0})
+      (ui/wait-for! #(= 2 (count (tracks-of 1))))
+      (is (identical? pane (column)) "the same column shows the other cell's tracks")
+      (let [[t1 t2] (map :id (tracks-of 1))]
+        (events/dispatch! {:event/type :list/start-drag :component-id [:timeline-tracks 1 0]
+                           :item-id t1 :items-path [:chains :cue-chains [1 0] :tracks]})
+        (ui/wait-for! #(seq (get-in (state/get-raw-state) [:list-ui [:timeline-tracks 1 0] :dragging-ids])))
+        (is (:completed? (ui/fire-drop! pane
+                                        (doto (javafx.scene.input.ClipboardContent.) (.putString (pr-str t1)))
+                                        20 5 :mode javafx.scene.input.TransferMode/MOVE)))
+        (ui/wait-for! #(= [t2 t1] (map :id (tracks-of 1))))
+        (is (= first-cell (tracks-of 0)) "the first cell's tracks are as they were")))))
+
 (deftest escape-cancels-a-track-rename-test
   ;; Keyboard plan 03: the rename field keeps its keys (Delete, letters) and
   ;; Escape ends the rename, leaving the name as it was
