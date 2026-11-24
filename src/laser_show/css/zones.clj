@@ -158,8 +158,13 @@
         :-fx-cursor "hand"}
        ".zone-map-item .zone-map-item-name"
        {:-fx-text-fill text-primary}
-       ".zone-map-item .zone-map-item-dot"
-       {:-fx-text-fill blue}
+       ".zone-map-item .zone-map-item-manual"
+       {:-fx-background-color (colors/with-alpha "#000000" 0.35)
+        :-fx-background-radius 6
+        :-fx-padding [0 5 0 5]
+        :-fx-font-size 10
+        :-fx-font-weight "bold"
+        :-fx-text-fill text-primary}
 
        ;; The map editor
        ".zone-map-warning"
