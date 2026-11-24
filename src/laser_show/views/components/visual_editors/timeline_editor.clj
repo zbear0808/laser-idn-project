@@ -34,7 +34,7 @@
             [laser-show.views.components.visual-editors.timeline.inspector :as inspector])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.control Label]
-           [javafx.scene.input Dragboard KeyCode MouseButton MouseEvent ScrollEvent]
+           [javafx.scene.input DragEvent KeyCode MouseButton MouseEvent ScrollEvent]
            [javafx.scene.layout HBox Region]
            [javafx.scene.paint Color]
            [javafx.scene.text TextAlignment]))
@@ -463,9 +463,10 @@
 
 
 (defn- drop-at
-  "The browser drop at canvas (x, y): {:event :preview} or nil."
-  [^Dragboard db value x y]
-  (when-let [payload (dd/read-payload db :bank-item drop/valid-payload?)]
+  "The browser drop at canvas (x, y) of the drag event e: {:event :preview}
+   or nil."
+  [^DragEvent e value x y]
+  (when-let [payload (dd/read-payload e :bank-item drop/valid-payload?)]
     (drop/drop-target payload
                       (assoc (hit value x y) :beat (layout/x->beat (:view value) x))
                       {:col (:col value) :row (:row value)
@@ -473,16 +474,16 @@
                        :snap (:snap value)})))
 
 ;; DnD takes over the mouse, so the hover state is cleared too (R1)
-(defn- on-drop-over [x y db value _]
-  (let [t (drop-at db value x y)]
+(defn- on-drop-over [x y e value _]
+  (let [t (drop-at e value x y)]
     {:accept? (some? t)
      :drag-updates {:drop-preview (:preview t) :hover-id nil}}))
 
 (defn- on-drop-exit [_ _]
   {:drag-updates {:drop-preview nil :hover-id nil}})
 
-(defn- on-drop [x y db value _]
-  {:dispatch (:event (drop-at db value x y))
+(defn- on-drop [x y e value _]
+  {:dispatch (:event (drop-at e value x y))
    :drag-updates {:drop-preview nil :hover-id nil}})
 
 
@@ -1034,7 +1035,9 @@
    - :title                 — optional node shown at the left of the toolbar
    
    Local state (viewport, follow, renaming) resets when :cell changes, since
-   it's part of :initial-state; the measured lane size carries over."
+   it's part of :initial-state; the measured lane size carries over. The
+   body gets the props without the editor's context: cljfx gives it its
+   own."
   [{:keys [col row] :as props}]
   {:fx/type fx/ext-state
    ;; :cell is never read: it's here so a new cell resets the local state
@@ -1043,4 +1046,4 @@
    ;; won't fire again: keep the measured size, or the canvas stays 0x0
    :reset (fn [old new]
             (update new :view merge (select-keys (:view old) [:width :height])))
-   :desc (assoc props :fx/type editor-body)})
+   :desc (assoc (dissoc props :fx/context) :fx/type editor-body)})

@@ -15,7 +15,7 @@ The user may already have one, for example from Calva. Check before starting ano
 clj -M:dev .agents/skills/app-repl/nrepl_eval.clj '(+ 1 2)'
 ```
 
-Output `3` with exit status 0 means a REPL answers, so use it. "Nothing listens on port" means `.nrepl-port` is stale, and you should start a REPL. Calva's connect sequence also runs `(start)`, so a connected REPL may already have the app open. Check with `(count (javafx.stage.Window/getWindows))`.
+Output `3` with exit status 0 means a REPL answers, so use it. "Nothing listens on port" means `.nrepl-port` is stale, and you should start a REPL. Calva's connect sequence also runs `(start)`, so a connected REPL may already have the app open. Check on the FX thread: `(require '[cljfx.api :as fx])` then `@(fx/on-fx-thread (count (javafx.stage.Window/getWindows)))`.
 
 ## Start a REPL
 
@@ -77,33 +77,34 @@ Loading `laser-show.app` prints a `Reflection warning` from `cljfx/coerce.clj`. 
 Traps:
 
 - `(stop)` from `dev/user.clj` only stops an app started with `(start)`. After `start-test!` it prints "Stopped." and leaves the window open. Use `(laser-show.app/stop!)`.
-- `reload-styles!` and `watch-styles!` check the same flag, so they refuse after `start-test!`. Call `(require 'laser-show.css.reload)` and then `(laser-show.css.reload/reload-all-styles!)` directly; it returns `{:success? true}`, and the re-render follows by a `:dev/reloaded` event (`(laser-show.events.core/flush!)` waits for it).
+- `reload-styles!` and `watch-styles!` check the same flag, so they refuse after `start-test!`. Call `(require 'laser-show.css.reload)` and then `(laser-show.css.reload/reload-all-styles!)` directly. On success it dispatches `:dev/reloaded`; `events/flush!` waits for the event. To verify the stylesheet reached a scene, inspect that scene after the render.
 - `start!` does not stop an app that is already mounted. Call `(laser-show.app/stop!)` before `start!`.
 
 ## Reload changed code
 
-Reload an edited namespace with `(require 'the.ns :reload)`. To be sure view changes show up, remount the UI with `(laser-show.app/start-test!)`, which also resets the state to the starter state.
+Reload an edited namespace with `(require 'the.ns :reload)`. If checking a stale view or callback, reproduce it **before** remounting; a fresh node or cache can hide the bug. In your own test session, `(laser-show.app/start-test!)` gives you a fresh mount and resets the state to the starter state.
 
 ## Read app state
 
 ```clojure
-(require 'laser-show.state.core)
-(keys (laser-show.state.core/get-raw-state))   ; top-level keys, such as :backend, :chains, :config and :grid
+(require '[laser-show.state.core :as state]
+         '[laser-show.state.extractors :as ex])
+(let [snapshot (state/get-raw-state)] (ex/bpm snapshot)) ; one diagnostic read
 ```
 
-For specific values, use the pure readers in `src/laser_show/state/extractors.clj`.
+For related values, use pure extractors on the same snapshot. This tells you what the database holds, not what a view subscribes to. In a component or selector, read through its **supplied `:fx/context`**. For a subscription probe, create a small private `fx/create-context`, call the selector with `fx/sub-ctx`, then call it again on a successor from `fx/swap-context`. This exercises dependency tracking without touching the running app. See [Reactive state in this app](../../../docs/CLJFX_STATE_MANAGEMENT.md#reactive-state-in-this-app).
 
 ## Change app state
 
 Only the event pipeline writes app state. Dispatch an event, then wait until it has run:
 
 ```clojure
-(require 'laser-show.events.core)
-(laser-show.events.core/dispatch! {:event/type :timing/set-bpm :bpm 128.0})
-(laser-show.events.core/flush!)   ; true once every queued event has run; false after 2 s
+(require '[laser-show.events.core :as events])
+(events/dispatch! {:event/type :timing/set-bpm :bpm 128.0})
+(events/flush!)   ; true once events ahead of this marker have been handled
 ```
 
-For a raw write with no event for it, `(laser-show.events.core/write-state! assoc-in [:timing :bpm] 128.0)` runs `(apply swap-state! f args)` on the event thread and waits for it. It adds no undo step and leaves the unsaved flag alone. `state/swap-state!`, `assoc-in-state!` and the other write fns throw while an app started with `start-test!` runs, or one started with `(start)` in dev mode.
+Call `flush!` from the REPL thread: it returns false on timeout or immediately on the event or FX thread. For a worker result or a rendered control, wait for that specific result using `plorer`'s `wait-for`. For REPL or fixture setup, `(events/write-state! assoc-in [:timing :bpm] 128.0)` writes on the event thread and waits; it bypasses normal undo, dirty, output-sync and rig-autosave handling. Exercise an actual edit with its event or control.
 
 ## UI work
 

@@ -411,17 +411,21 @@
   (sync-fx!)
   robot-instance)
 
-(defn- test-dragboard
+(defn test-dragboard
   "A Dragboard holding `content` (a ClipboardContent) that offers the
-   transfer `modes`, for synthetic drag events. FX thread only."
-  [content modes]
+   transfer `modes`, for synthetic drag events. An entry with a nil value
+   announces its format and hides its content, as a platform may during a
+   drag. With :put? false its setContent fails (returns false), as a
+   platform's that can't take the content. FX thread only."
+  [content modes & {:keys [put?] :or {put? true}}]
   (let [store (atom (into {} content))]
     (DragboardHelper/createDragboard
      (reify TKClipboard
        (getContentTypes [_] (set (keys @store)))
        (putContent [_ pairs]
-         (doseq [^Pair p pairs] (swap! store assoc (.getKey p) (.getValue p)))
-         true)
+         (when put?
+           (doseq [^Pair p pairs] (swap! store assoc (.getKey p) (.getValue p))))
+         (boolean put?))
        (getContent [_ fmt] (get @store fmt))
        (hasContent [_ fmt] (contains? @store fmt))
        (getTransferModes [_] (set modes))
@@ -438,10 +442,13 @@
    synthetic DragEvents (DRAG_ENTERED, DRAG_OVER, DRAG_DROPPED, and
    DRAG_EXITED unless :exit? is false), because the headless glass platform
    can't run a real drag-and-drop: its DnD clipboard throws
-   UnsupportedOperationException. The drag source isn't involved. :mode is
-   the one transfer mode the drag offers (default COPY, as bank drags do).
-   Returns {:accepted? :completed?}."
-  [^Node node content x y & {:keys [drop? exit? mode] :or {drop? true exit? true mode TransferMode/COPY}}]
+   UnsupportedOperationException. The drag source isn't involved: the
+   events' gesture source is :gesture-source (default nil, a drag from
+   outside the app), and nothing ends its drag (fire-drag-done!). Each
+   call drags a board of its own. :mode is the one transfer mode the drag
+   offers (default COPY, as bank drags do). Returns {:accepted? :completed?}."
+  [^Node node content x y & {:keys [drop? exit? mode gesture-source]
+                             :or {drop? true exit? true mode TransferMode/COPY}}]
   (let [result (run-on-fx-thread!
                 (fn []
                   (let [db (test-dragboard content [mode])
@@ -450,7 +457,7 @@
                         event (fn [type mode]
                                 (DragEvent. type db (.getX scene-p) (.getY scene-p)
                                             (.getX screen-p) (.getY screen-p)
-                                            mode nil node nil))
+                                            mode gesture-source node nil))
                         _ (Event/fireEvent node (event DragEvent/DRAG_ENTERED mode))
                         over (event DragEvent/DRAG_OVER mode)
                         _ (Event/fireEvent node over)
@@ -465,6 +472,31 @@
                      :completed? (boolean (some-> ^DragEvent dropped .isDropCompleted))})))]
     (sync-fx!)
     result))
+
+(defn fire-drag-detected!
+  "A drag gesture detected at the centre of node, as the mouse starts one:
+   the node's drag-detected handlers run (a drag source starts its drag)."
+  [^Node node]
+  (run-on-fx-thread!
+   #(let [b (.getBoundsInLocal node)
+          x (/ (+ (.getMinX b) (.getMaxX b)) 2)
+          y (/ (+ (.getMinY b) (.getMaxY b)) 2)
+          scene (.localToScene node (double x) (double y))
+          screen (.localToScreen node (double x) (double y))]
+      (Event/fireEvent node (MouseEvent. MouseEvent/DRAG_DETECTED (.getX scene) (.getY scene)
+                                         (.getX screen) (.getY screen) MouseButton/PRIMARY 1
+                                         false false false false true false false false false false nil))))
+  (sync-fx!))
+
+(defn fire-drag-done!
+  "The end of the drag node started, as the platform reports it to the
+   source: DRAG_DONE with transfer `mode`, what the target accepted, or nil
+   for a drag cancelled (Escape) or released where nothing took it."
+  [^Node node mode]
+  (run-on-fx-thread!
+   #(Event/fireEvent node (DragEvent. DragEvent/DRAG_DONE (test-dragboard {} (if mode [mode] []))
+                                      0.0 0.0 0.0 0.0 mode node nil nil)))
+  (sync-fx!))
 
 (defn drag-by!
   "Press the primary button at (x, y) inside the node found by selector

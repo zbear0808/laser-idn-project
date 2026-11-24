@@ -254,7 +254,7 @@
     (testing "Pin them to… and Send them to All: the show's, unsaved"
       (let [repinned (run s {:event/type :rig/repin :from :auto.laser/d :to :auto.laser/b})]
         (is (= :auto.laser/b (get-in repinned [:chains :cue-chains [1 0] :target])))
-        (is (= "Re-pin Cues" (last-label repinned)))
+        (is (= "Re-pin References" (last-label repinned)))
         (is (true? (get-in repinned [:project :dirty?]))))
       (is (= :all (get-in (run s {:event/type :rig/repin :from :auto.laser/d :to :all})
                           [:chains :cue-chains [1 0] :target]))))
@@ -283,6 +283,46 @@
         (doseq [type [:rig/adopt-group :rig/repin :rig/add-groups-to-show :rig/import-new-lasers :rig/use-show-setup
                       :rig/request-use-show-setup :rig/open-report :rig/choose-lasers]]
           (is (identical? bare (handle bare {:event/type type})) (str type)))))))
+
+(deftest repin-patterns-is-one-show-edit-test
+  ;; plans/2026-11-23-cljfx-reactivity/28 §7.5: no cue names Balcony, a laser
+  ;; of the show that isn't here; an inactive effect cell's pattern does, in
+  ;; its lane and in a keyframe
+  (let [hardware {:projectors {:gone {:name "Balcony" :host "10.0.0.66" :enabled? true :zone-groups []
+                                      :stable-id [:host "10.0.0.66" 0]}}
+                  :rig {:order [:gone]}}
+        pattern {:id "zp" :effect-id :zone-pattern :enabled? true
+                 :params {:zones [:zone/f :auto.laser/gone]}
+                 :keyframe-modulator {:enabled? true :keyframes [{:position 0.0 :params {:steps [[:zone/c] [:auto.laser/gone] []]}}]}}
+        s (-> (rig-state)
+              (assoc-in [:chains :effect-chains [2 1]] {:active? false :items [pattern]})
+              (assoc-in [:rig-file :path] "/tmp/never-written/rig.edn")
+              (assoc-in [:ui :dialogs :rig-report] {:open? true :mode :report :file "friday.zip"
+                                                    :hardware hardware :chains {} :pins {:gone :gone}})
+              (history/mark-clean))
+        missing #(:missing-pins (rig-file/match-report % hardware {}))
+        fields (fn [st] [(get-in st [:chains :effect-chains [2 1] :items 0 :params])
+                         (get-in st [:chains :effect-chains [2 1] :items 0 :keyframe-modulator :keyframes 0 :params])])
+        effects (pipeline s {:event/type :rig/repin :from :auto.laser/gone :to :auto.laser/b})
+        repinned (:state effects)
+        undone (:state (pipeline repinned {:event/type :history/undo}))
+        redone (:state (pipeline undone {:event/type :history/redo}))]
+    (is (= [{:ref :auto.laser/gone :name "Balcony" :cues 0 :effect-cells 1}] (missing s)))
+    (testing "Pin it to… B: the lane and the keyframe, in one undo step, an unsaved show edit and no rig write"
+      (is (= [{:zones [:zone/f :auto.laser/b]} {:steps [[:zone/c] [:auto.laser/b] []]}] (fields repinned)))
+      (is (empty? (missing repinned)) "the row goes")
+      (is (= ["Re-pin References"] (mapv :description (get-in repinned [:history :undo-stack]))))
+      (is (true? (get-in repinned [:project :dirty?])))
+      (is (nil? (:rig/write effects)))
+      (is (false? (get-in repinned [:chains :effect-chains [2 1] :active?])) "the cell stays off"))
+    (testing "Undo: the fields and the row as they were, and clean"
+      (is (= (fields s) (fields undone)))
+      (is (= (missing s) (missing undone)))
+      (is (false? (get-in undone [:project :dirty?]))))
+    (testing "Redo: repaired again"
+      (is (= (fields repinned) (fields redone)))
+      (is (empty? (missing redone)))
+      (is (true? (get-in redone [:project :dirty?]))))))
 
 
 ;; Forget this laser… (09 §7, Q-ZR-6)
@@ -322,7 +362,7 @@
     (testing "with cues pinned to it, the same choice Z2's remove gives (04 S-13)"
       (let [pinned (assoc-in s [:chains :cue-chains [0 0]] {:items [] :target :auto.laser/c})
             asked (get-in (handle pinned {:event/type :rig/request-forget :projector-id :c}) [:ui :dialogs :confirm])]
-        (is (= {:key :retarget-to :label "Send its cues to:"} (select-keys (:choice asked) [:key :label])))
+        (is (= {:key :retarget-to :label "Replace references with:"} (select-keys (:choice asked) [:key :label])))
         (is (= :all (:choice-value asked)))
         (is (= "Its calibration and safety zone leave the rig. A scan that finds it again adds it as a new laser. 1 cue is pinned to it."
                (:message asked)))

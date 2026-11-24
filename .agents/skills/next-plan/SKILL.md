@@ -14,6 +14,7 @@ An optional focus from the user (an area, a time budget like "half a day", "no h
 1. `ls plans/` and note each folder or top-level file. Dated names (`YYYY-MM-DD-topic`) give age; newer usually supersedes older.
 2. For each folder, read its entry doc (`00-overview.md`, `00-README.md` or `README.md`): the `**Status:**` header, `## Start here`, the phase/doc table (its *Size*, *Needs* and *Depends on* columns) and any "Next is …" sentence. Then read only the `**Status:**` header (the first ~6 lines) of each phase doc. Read deeper only for candidates that survive step 2.
 3. Also mine the latest `*-improvement-review/00-overview.md` ranked-priority table for rows marked **Open** or **Partly**, and its "Next" or carry-over sections. These are candidates even when no plan folder covers them yet.
+   For UI/state work, also check the latest relevant audit in `plans/`. Treat dated findings and probes as leads to verify against the current code, not as an implementation plan or a permanent priority list.
 4. With many folders, give each folder to a parallel `explore` subagent ("quick") that returns the per-item fields below, so the main context stays small.
 
 Record one row per **work item** (a phase or step, not a whole folder):
@@ -39,6 +40,8 @@ Don't trust headers alone. Check cheaply:
 - **Open claims:** grep `git log --oneline` and the other plans for the item's id or topic. Plans cross-reference each other (e.g. a step in one folder is done by another), and the newer header wins.
 - **Drift:** `git rev-list --count <last-verified>..HEAD` and `git diff --stat <last-verified>..HEAD -- <files the item cites>`. Heavy churn in cited files means a re-check is owed before starting; add that to the item's cost.
 - **Conflicts:** unmerged branches or uncommitted changes (`git status --short`) touching the same files.
+
+For cljfx candidates, trace one actual interaction against [Reactive state in this app](../../../docs/CLJFX_STATE_MANAGEMENT.md#reactive-state-in-this-app): what the view subscribes to through its supplied `:fx/context`, which ID and value the event carries, and what the handler reads from its current `:state`. For delayed results, identify which request/document still owns them. Distinguish a legitimate frame or gesture store from a second writer of the app database. Give a reproduced wrong-target edit or persistence failure more weight than a proposed cache increase; a cache-size recommendation needs measurements on a representative tab or editor.
 
 ## 3. Rank
 

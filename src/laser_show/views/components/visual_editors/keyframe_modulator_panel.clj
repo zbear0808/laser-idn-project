@@ -37,6 +37,7 @@
    [cljfx.api :as fx]
    [laser-show.animation.modulators :as modulators]
    [laser-show.subs :as subs]
+   [laser-show.views.components.applied-value :as applied-value]
    [laser-show.views.components.zone-chips :as zone-chips]
    [laser-show.common.util :as u]
    [laser-show.views.components.visual-editors.keyframe-timeline :as timeline]))
@@ -93,14 +94,37 @@
   [:linear :exp-decay :exp-grow :step])
 
 (defn- interpolation-display-name
-  "Convert interpolation keyword to user-friendly display name."
+  "Convert interpolation keyword to user-friendly display name (\"\" for an
+   empty cell)."
   [mode]
   (case mode
     :linear "Linear"
     :exp-decay "Ease Out"
     :exp-grow "Ease In"
     :step "Step"
+    nil ""
     (name mode)))
+
+(defn- numeric-value-factory
+  "The Value spinner's factory for a keyframe whose parameter (param-spec)
+   holds stored-value, or nil for no spinner: a parameter that isn't a
+   number, or a stored value that isn't a finite one. An :int steps by 1,
+   a :float (or no :type, with a numeric default) by 0.1, within the
+   parameter's :min and :max, else -9999 to 9999; a missing value shows the
+   default, else zero. It only shows a value: nothing is written."
+  [{:keys [type default min max]} stored-value]
+  (let [kind (cond (#{:float :int} type) type
+                   (and (nil? type) (number? default)) :float)
+        value (if (some? stored-value) stored-value (if (number? default) default 0))]
+    (when (and kind (number? value) (Double/isFinite (double value)))
+      (let [lo (double (if (number? min) min -9999))
+            hi (double (if (number? max) max 9999))
+            shown (clojure.core/max lo (clojure.core/min hi (double value)))]
+        (if (= :int kind)
+          {:fx/type :integer-spinner-value-factory
+           :min (long lo) :max (long hi) :amount-to-step-by 1 :value (long shown)}
+          {:fx/type :double-spinner-value-factory
+           :min lo :max hi :amount-to-step-by 0.1 :value shown})))))
 
 ;; Sub-components
 
@@ -117,16 +141,20 @@
    :disable (not enabled?)
    :children [{:fx/type :label
                :text "Driver:"}
-              {:fx/type :combo-box
-               :pref-width 130
+              {:fx/type applied-value/applied-control
+               :property :value
+               :address [on-driver-change :driver]
                :value (or driver :time)
-               :items (mapv :id driver-options)
-               :button-cell (fn [item]
-                              {:text (driver-display-name item)})
-               :cell-factory {:fx/cell-type :list-cell
-                              :describe (fn [item]
-                                          {:text (driver-display-name item)})}
-               :on-value-changed on-driver-change}]})
+               :on-change (fn [d] (when (some? d) (assoc on-driver-change :fx/event d)))
+               :desc {:fx/type :combo-box
+                      :id "keyframe-driver"
+                      :pref-width 130
+                      :items (mapv :id driver-options)
+                      :button-cell (fn [item]
+                                     {:text (driver-display-name item)})
+                      :cell-factory {:fx/cell-type :list-cell
+                                     :describe (fn [item]
+                                                 {:text (driver-display-name item)})}}}]})
 
 (defn- edge-behavior-dropdown
   "Dropdown for selecting edge behavior for spatial drivers.
@@ -140,16 +168,20 @@
    :disable (not enabled?)
    :children [{:fx/type :label
                :text "Edge:"}
-              {:fx/type :combo-box
-               :pref-width 100
+              {:fx/type applied-value/applied-control
+               :property :value
+               :address [on-edge-behavior-change :edge-behavior]
                :value (or edge-behavior :clamp)
-               :items (mapv :id edge-behavior-options)
-               :button-cell (fn [item]
-                              {:text (edge-behavior-display-name item)})
-               :cell-factory {:fx/cell-type :list-cell
-                              :describe (fn [item]
-                                          {:text (edge-behavior-display-name item)})}
-               :on-value-changed on-edge-behavior-change}]})
+               :on-change (fn [b] (when (some? b) (assoc on-edge-behavior-change :fx/event b)))
+               :desc {:fx/type :combo-box
+                      :id "keyframe-edge"
+                      :pref-width 100
+                      :items (mapv :id edge-behavior-options)
+                      :button-cell (fn [item]
+                                     {:text (edge-behavior-display-name item)})
+                      :cell-factory {:fx/cell-type :list-cell
+                                     :describe (fn [item]
+                                                 {:text (edge-behavior-display-name item)})}}}]})
 
 (defn- normalize-checkbox
   "Checkbox for toggling normalize option (for radial driver only).
@@ -157,16 +189,21 @@
    - :normalize? - Current normalize state
    - :on-normalize-change - Event to dispatch when normalize changes"
   [{:keys [normalize? on-normalize-change enabled?]}]
-  {:fx/type :check-box
-   :text "Normalize"
-   :disable (not enabled?)
-   :selected (boolean normalize?)
-   :on-selected-changed on-normalize-change})
+  {:fx/type applied-value/applied-control
+   :property :selected
+   :address [on-normalize-change :normalize?]
+   :value normalize?
+   :on-change (fn [on?] (assoc on-normalize-change :fx/event on?))
+   :desc {:fx/type :check-box
+          :id "keyframe-normalize"
+          :text "Normalize"
+          :disable (not enabled?)}})
 
 (defn- header-row
   "Header with title and optional enable toggle.
    For spatial keyframes, no checkbox is shown - selecting the modulator type
-   is the activation. For time-based, shows enable toggle."
+   is the activation. For time-based, shows enable toggle, which sends the
+   state it was clicked to."
   [{:keys [enabled? on-toggle-event spatial?]}]
   {:fx/type :h-box
    :alignment :center-left
@@ -180,11 +217,14 @@
                ;; Only show enable checkbox for time-based keyframes
                ;; Spatial keyframes are activated by selecting the type from dropdown
                (when-not spatial?
-                 {:fx/type :check-box
-                  :text "Enable"
-                  :selected (boolean enabled?)
-                  :on-selected-changed (assoc on-toggle-event
-                                              :enabled? (not enabled?))})])})
+                 {:fx/type applied-value/applied-control
+                  :property :selected
+                  :address [on-toggle-event :enabled?]
+                  :value enabled?
+                  :on-change (fn [on?] (assoc on-toggle-event :enabled? on?))
+                  :desc {:fx/type :check-box
+                         :id "keyframe-enabled"
+                         :text "Enable"}})])})
 
 (defn- driver-row
   "Row with driver selection dropdown.
@@ -202,9 +242,11 @@
 (defn- time-settings-row
   "Settings row for time-based keyframe modulator.
    Shows period, time-unit, loop-mode and restart-on (from the newest press
-   of a source, as the waves can) controls."
+   of a source, as the waves can) controls. Each shows the setting that
+   applies after a change the app refused too (applied-value)."
   [{:keys [period time-unit loop-mode restart-on on-settings-event enabled?]}]
-  (let [{:keys [choices labels]} modulators/restart-on-param]
+  (let [{:keys [choices labels]} modulators/restart-on-param
+        setting (fn [k] (fn [v] (when (some? v) (assoc on-settings-event :setting-key k :fx/event v))))]
     {:fx/type :h-box
      :alignment :center-left
      :spacing 15
@@ -216,29 +258,37 @@
                  :spacing 5
                  :children [{:fx/type :label
                              :text "Period:"}
-                            {:fx/type :spinner
-                             :pref-width 80
-                             :value-factory {:fx/type :double-spinner-value-factory
-                                             :min 0.25
-                                             :max 64.0
-                                             :amount-to-step-by 0.25
-                                             :value (or period 4.0)}
-                             :on-value-changed (assoc on-settings-event :setting-key :period)}]}
+                            {:fx/type applied-value/applied-control
+                             :property :value
+                             :address [on-settings-event :period]
+                             :value (double (or period 4.0))
+                             :on-change (setting :period)
+                             :desc {:fx/type :spinner
+                                    :id "keyframe-period"
+                                    :pref-width 80
+                                    :value-factory {:fx/type :double-spinner-value-factory
+                                                    :min 0.25
+                                                    :max 64.0
+                                                    :amount-to-step-by 0.25}}}]}
                 
                 ;; Time unit
                 {:fx/type :h-box
                  :alignment :center-left
                  :spacing 5
-                 :children [{:fx/type :combo-box
-                             :pref-width 90
+                 :children [{:fx/type applied-value/applied-control
+                             :property :value
+                             :address [on-settings-event :time-unit]
                              :value (or time-unit :beats)
-                             :items [:beats :seconds]
-                             :button-cell (fn [item]
-                                            {:text (name item)})
-                             :cell-factory {:fx/cell-type :list-cell
-                                            :describe (fn [item]
-                                                        {:text (name item)})}
-                             :on-value-changed (assoc on-settings-event :setting-key :time-unit)}]}
+                             :on-change (setting :time-unit)
+                             :desc {:fx/type :combo-box
+                                    :id "keyframe-time-unit"
+                                    :pref-width 90
+                                    :items [:beats :seconds]
+                                    :button-cell (fn [item]
+                                                   {:text (name item)})
+                                    :cell-factory {:fx/cell-type :list-cell
+                                                   :describe (fn [item]
+                                                               {:text (name item)})}}}]}
                 
                 ;; Loop mode
                 {:fx/type :h-box
@@ -246,16 +296,20 @@
                  :spacing 5
                  :children [{:fx/type :label
                              :text "Loop:"}
-                            {:fx/type :combo-box
-                             :pref-width 90
+                            {:fx/type applied-value/applied-control
+                             :property :value
+                             :address [on-settings-event :loop-mode]
                              :value (or loop-mode :loop)
-                             :items [:loop :once]
-                             :button-cell (fn [item]
-                                            {:text (name item)})
-                             :cell-factory {:fx/cell-type :list-cell
-                                            :describe (fn [item]
-                                                        {:text (name item)})}
-                             :on-value-changed (assoc on-settings-event :setting-key :loop-mode)}]}
+                             :on-change (setting :loop-mode)
+                             :desc {:fx/type :combo-box
+                                    :id "keyframe-loop-mode"
+                                    :pref-width 90
+                                    :items [:loop :once]
+                                    :button-cell (fn [item]
+                                                   {:text (name item)})
+                                    :cell-factory {:fx/cell-type :list-cell
+                                                   :describe (fn [item]
+                                                               {:text (name item)})}}}]}
 
                 ;; Restart on
                 {:fx/type :h-box
@@ -263,15 +317,18 @@
                  :spacing 5
                  :children [{:fx/type :label
                              :text "Restart on:"}
-                            {:fx/type :combo-box
-                             :id "keyframe-restart-on"
-                             :pref-width 150
+                            {:fx/type applied-value/applied-control
+                             :property :value
+                             :address [on-settings-event :restart-on]
                              :value (or restart-on :own)
-                             :items choices
-                             :button-cell (fn [item] {:text (get labels item)})
-                             :cell-factory {:fx/cell-type :list-cell
-                                            :describe (fn [item] {:text (get labels item)})}
-                             :on-value-changed (assoc on-settings-event :setting-key :restart-on)}]}]}))
+                             :on-change (setting :restart-on)
+                             :desc {:fx/type :combo-box
+                                    :id "keyframe-restart-on"
+                                    :pref-width 150
+                                    :items choices
+                                    :button-cell (fn [item] {:text (get labels item)})
+                                    :cell-factory {:fx/cell-type :list-cell
+                                                   :describe (fn [item] {:text (get labels item)})}}}]}]}))
 
 (defn- spatial-driver-settings-row
   "Settings row for spatial driver keyframe modulator.
@@ -383,24 +440,35 @@
                :on-delete on-delete}]})
 
 (defn- actions-row
-  "Row with keyframe info.
+  "Row with keyframe info, and the selected keyframe's Value and Interp.
+   Each control's change sends its event once (applied-value): Value a
+   zone's option as :fx/event (the template is :keyframe/set-zone-value),
+   or a number as :value (:keyframe/update-param), Interp the mode as
+   :interpolation. A render that sets a control's value sends nothing; after
+   a change the app refused (the show lock), or that changed nothing, the
+   control shows the keyframe's value again.
    Props:
-   - :fx/context - cljfx context
+   - :fx/context - from cljfx, which gives every component its own; the
+     zone groups are read through it (the panel gives none)
    - :keyframes - Vector of keyframe maps
    - :selected-idx - Index of selected keyframe
    - :enabled? - Whether interactions are enabled
-   - :param-type - Type of parameter (e.g. :numeric, :zone-group-id)
+   - :param-type - Type of parameter (e.g. :float, :zone-group-id)
+   - :param-spec - The parameter's definition (for the Value spinner)
    - :param-key - Key of the parameter to edit
-   - :on-update-param - Event for parameter changes
+   - :on-update-param - Event for the Value control, addressed to the
+     selected keyframe and parameter
    - :on-set-interpolation - Event for setting interpolation"
-  [{:keys [fx/context keyframes selected-idx enabled? param-type param-key
+  [{:keys [fx/context keyframes selected-idx enabled? param-type param-spec param-key
            on-update-param on-set-interpolation]}]
   (let [selected-kf (when (and selected-idx
                                (>= selected-idx 0)
                                (< selected-idx (count keyframes)))
                       (nth keyframes selected-idx))
         zone-groups (when (= param-type :zone-group-id)
-                      (fx/sub-ctx context subs/target-groups))]
+                      (fx/sub-ctx context subs/target-groups))
+        value-factory (when (and selected-kf param-key (not= param-type :zone-group-id))
+                        (numeric-value-factory param-spec (get-in selected-kf [:params param-key])))]
     {:fx/type :h-box
      :alignment :center-left
      :spacing 10
@@ -425,28 +493,34 @@
                         :alignment :center-left
                         :spacing 5
                         :children [{:fx/type :label :text "Value:"}
-                                   {:fx/type :combo-box
+                                   {:fx/type applied-value/applied-control
+                                    :property :value
+                                    :address [on-update-param :value]
                                     :value selected-item
-                                    :items items
-                                    :button-cell (fn [item] (zone-chips/with-lock {:text (or (:name item) "Select Zone")} item))
-                                    :cell-factory {:fx/cell-type :list-cell
-                                                   :describe (fn [item] (zone-chips/with-lock {:text (or (:name item) "")} item))}
-                                    :on-value-changed (fn [new-item]
-                                                        (when new-item
-                                                          (assoc on-update-param :value (:id new-item))))}]})
+                                    ;; the option, as the map handler sent it (:fx/event)
+                                    :on-change (fn [item] (when (some? item) (assoc on-update-param :fx/event item)))
+                                    :desc {:fx/type :combo-box
+                                           :id "keyframe-zone-value"
+                                           :items items
+                                           :button-cell (fn [item] (zone-chips/with-lock {:text (or (:name item) "Select Zone")} item))
+                                           :cell-factory {:fx/cell-type :list-cell
+                                                          :describe (fn [item] (zone-chips/with-lock {:text (or (:name item) "")} item))}}}]})
                      
-                     ;; Numeric Value Editor
-                     {:fx/type :h-box
-                      :alignment :center-left
-                      :spacing 5
-                      :children [{:fx/type :label :text "Value:"}
-                                 {:fx/type :spinner
-                                  :pref-width 80
-                                  :value-factory {:fx/type :double-spinner-value-factory
-                                                  :min -9999.0 :max 9999.0
-                                                  :amount-to-step-by 0.1
-                                                  :value (get-in selected-kf [:params param-key] 0.0)}
-                                  :on-value-changed (fn [v] (assoc on-update-param :value v))}]}))
+                     ;; Numeric Value Editor (none for a parameter that isn't a number)
+                     (when value-factory
+                       {:fx/type :h-box
+                        :alignment :center-left
+                        :spacing 5
+                        :children [{:fx/type :label :text "Value:"}
+                                   {:fx/type applied-value/applied-control
+                                    :property :value
+                                    :address [on-update-param :value]
+                                    :value (:value value-factory)
+                                    :on-change (fn [v] (when (some? v) (assoc on-update-param :value v)))
+                                    :desc {:fx/type :spinner
+                                           :id "keyframe-value"
+                                           :pref-width 80
+                                           :value-factory (dissoc value-factory :value)}}]})))
                  
                  ;; Interpolation Dropdown
                  (when (and selected-kf (not= param-type :zone-group-id))
@@ -454,14 +528,18 @@
                     :alignment :center-left
                     :spacing 5
                     :children [{:fx/type :label :text "Interp:"}
-                               {:fx/type :combo-box
-                                :pref-width 100
+                               {:fx/type applied-value/applied-control
+                                :property :value
+                                :address [on-set-interpolation :interpolation]
                                 :value (:interpolation selected-kf :linear)
-                                :items interpolation-modes
-                                :button-cell (fn [item] {:text (interpolation-display-name item)})
-                                :cell-factory {:fx/cell-type :list-cell
-                                               :describe (fn [item] {:text (interpolation-display-name item)})}
-                                :on-value-changed (fn [mode] (assoc on-set-interpolation :interpolation mode))}]})])}))
+                                :on-change (fn [mode] (when (some? mode) (assoc on-set-interpolation :interpolation mode)))
+                                :desc {:fx/type :combo-box
+                                       :id "keyframe-interp"
+                                       :pref-width 100
+                                       :items interpolation-modes
+                                       :button-cell (fn [item] {:text (interpolation-display-name item)})
+                                       :cell-factory {:fx/cell-type :list-cell
+                                                      :describe (fn [item] {:text (interpolation-display-name item)})}}}]})])}))
 
 
 ;; Main Panel Component
@@ -586,14 +664,16 @@
                                                    :event/type :keyframe/delete)}
                                 
                                 {:fx/type actions-row
-                                 :fx/context context
                                  :keyframes keyframes
                                  :selected-idx selected-idx
                                  :enabled? enabled?
                                  :param-type param-type
+                                 :param-spec param-spec
                                  :param-key actual-param-key
                                  :on-update-param (assoc base-event
-                                                         :event/type :keyframe/update-param
+                                                         :event/type (if (= param-type :zone-group-id)
+                                                                       :keyframe/set-zone-value
+                                                                       :keyframe/update-param)
                                                          :keyframe-idx selected-idx
                                                          :param-key actual-param-key)
                                  :on-set-interpolation (assoc base-event

@@ -358,8 +358,8 @@
         watch-key ::status-writes]
     (add-watch (state/get-context-atom) watch-key
                (fn [_ _ old new]
-                 (when-not (= (get-in (:cljfx.context/m old) [:backend :streaming :status])
-                              (get-in (:cljfx.context/m new) [:backend :streaming :status]))
+                 (when-not (= (get-in (state/root-context->snapshot old) [:backend :streaming :status])
+                              (get-in (state/root-context->snapshot new) [:backend :streaming :status]))
                    (swap! writes inc))))
     (try
       (with-redefs-fn {#'idn-driver/target-address! (unresolvable "unresolvable.test")}
@@ -414,8 +414,8 @@
           watch-key ::load-writes]
       (add-watch (state/get-context-atom) watch-key
                  (fn [_ _ old new]
-                   (when-not (= (get-in (:cljfx.context/m old) [:backend :streaming :status])
-                                (get-in (:cljfx.context/m new) [:backend :streaming :status]))
+                   (when-not (= (get-in (state/root-context->snapshot old) [:backend :streaming :status])
+                                (get-in (state/root-context->snapshot new) [:backend :streaming :status]))
                      (swap! writes inc))))
       (try
         (with-redefs-fn {#'me/projector-frame (fn [id _] (get frames id))}
@@ -522,9 +522,9 @@
                          (deref release 3000 nil))
                        nil)
                      #'se/send-frame!
-                     (fn [engine frame n]
+                     (fn [engine frame & more]
                        (swap! send-threads conj (.getName (Thread/currentThread)))
-                       (send-frame! engine frame n))}
+                       (apply send-frame! engine frame more))}
       (fn []
         (try
           (dispatch! {:event/type :idn/start-multi-streaming})

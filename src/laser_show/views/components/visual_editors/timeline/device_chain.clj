@@ -77,10 +77,10 @@
       (if effect-def
         {:fx/type param-editor/effect-parameter-editor
          :v-box/vgrow :always
-         :fx/context context
          :domain domain
          :entity-key [col row]
          :item-path (:path target)
+         :owner-id (:id (:entity target))
          :effect-path [idx]
          :effect effect
          :effect-def effect-def
@@ -103,7 +103,7 @@
   "The browser drop at the event's position, plus where its insertion line
    goes: {:event :index :cards}, or nil."
   [^DragEvent e target col row]
-  (when-let [payload (dd/read-payload (.getDragboard e) :bank-item drop/valid-payload?)]
+  (when-let [payload (dd/read-payload e :bank-item drop/valid-payload?)]
     (let [chain ^Parent (.getSource e)
           box (.lookup chain "#timeline-device-cards")
           cards (or (cards-of chain) [])

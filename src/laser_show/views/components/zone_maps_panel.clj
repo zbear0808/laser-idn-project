@@ -3,13 +3,17 @@
    06 §7.5): the show's default target, the zones' labels, and the maps: the
    built-ins (read only, they follow the rig) and yours, each with its lanes
    (All or a group each, never a zone), where each zone goes, its overrides
-   and what is wrong with it (routing.zone-maps/map-warnings). Use now
-   switches at once; Delete asks first (:zone-maps/request-delete)."
+   and what is wrong with it (routing.zone-maps/map-warnings). The list
+   marks the manual map, and the editor says how the map is chosen (the
+   manual map, or a Map cycle: subs/editor-map-switch), never which map a
+   tick routed by. Use now chooses the edited map at once, pausing a
+   running Map cycle and clearing a queued switch; Delete asks first
+   (:zone-maps/request-delete)."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
-            [laser-show.events.core :as events]
             [laser-show.routing.targets :as targets]
             [laser-show.subs :as subs]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.commit-field :as commit-field]
             [laser-show.views.components.target-control :as target-control]))
 
@@ -60,9 +64,9 @@
 ;; The maps
 
 (defn- map-item
-  "A map in the list: ● when it is the one in use, and whether it is built
-   in."
-  [{:keys [map selected? active?]}]
+  "A map in the list: Manual on the manual map while no Map cycle runs
+   (subs/manual-map-marker-id), and whether it is built in."
+  [{:keys [map selected? manual?]}]
   {:fx/type :h-box
    :id (str "zone-map-item-" (id-text (:id map)))
    :style-class ["zone-map-item" (if selected? "list-item-selected" "list-item")]
@@ -70,8 +74,13 @@
    :alignment :center-left
    :padding {:top 4 :bottom 4 :left 6 :right 6}
    :on-mouse-clicked {:event/type :zone-maps/select :map (:id map)}
-   :children [{:fx/type :label :text (if active? "●" "") :min-width 10 :style-class ["label" "zone-map-item-dot"]}
-              {:fx/type :label :text (:name map) :style-class ["label" "zone-map-item-name"]}
+   :children [{:fx/type :label :text (:name map) :style-class ["label" "zone-map-item-name"]}
+              {:fx/type :label
+               :text (if manual? "Manual" "")
+               :visible manual?
+               :managed manual?
+               :min-width :use-pref-size
+               :style-class ["label" "zone-map-item-manual"]}
               {:fx/type :region :h-box/hgrow :always}
               {:fx/type :label :text (if (:built-in? map) "built-in" "") :style-class ["label-hint"]}]})
 
@@ -79,7 +88,7 @@
   "MAPS, with New map: the built-ins, then yours."
   [{:keys [fx/context]}]
   (let [selected (fx/sub-ctx context subs/selected-zone-map-id)
-        active (:id (fx/sub-ctx context subs/active-zone-map))]
+        manual (fx/sub-ctx context subs/manual-map-marker-id)]
     {:fx/type :v-box
      :spacing 3
      :min-width 210
@@ -95,7 +104,7 @@
                                    :tooltip {:fx/type :tooltip :text "A map of your own, Left / Right's lanes to start"}
                                    :on-action {:event/type :zone-maps/create}}]}]
                      (map (fn [m] {:fx/type map-item :fx/key (:id m) :map m
-                                   :selected? (= selected (:id m)) :active? (= active (:id m))}))
+                                   :selected? (= selected (:id m)) :manual? (= manual (:id m))}))
                      (fx/sub-ctx context subs/zone-maps-list))}))
 
 (defn zones-line
@@ -150,17 +159,21 @@
 
 (defn- override-zone-combo
   "The zone an override is for: the zones listed, less those another
-   override has."
+   override has. A zone the app refused (the show lock) goes back to the
+   one the override has (applied-value)."
   [{:keys [id zone ref choices]}]
-  {:fx/type :combo-box
-   :id (str "zone-map-override-zone-" (id-text zone))
-   :items choices
+  {:fx/type applied-value/applied-control
+   :property :value
+   :address [id :override zone]
    :value zone
-   :button-cell (fn [z] {:text (targets/zone-letter z)})
-   :cell-factory {:fx/cell-type :list-cell :describe (fn [z] {:text (targets/zone-letter z)})}
-   :on-value-changed (fn [z]
-                       (when (and z (not= z zone))
-                         (events/dispatch! {:event/type :zone-maps/set-override :map id :from zone :zone z :target ref})))})
+   :on-change (fn [z]
+                (when (and z (not= z zone))
+                  {:event/type :zone-maps/set-override :map id :from zone :zone z :target ref}))
+   :desc {:fx/type :combo-box
+          :id (str "zone-map-override-zone-" (id-text zone))
+          :items choices
+          :button-cell (fn [z] {:text (targets/zone-letter z)})
+          :cell-factory {:fx/cell-type :list-cell :describe (fn [z] {:text (targets/zone-letter z)})}}})
 
 (defn- overrides-row
   "Overrides: a zone, the group it goes to whatever its lane, ×; and +
@@ -205,15 +218,27 @@
                               :style-class ["label" "zone-map-warning"]})
                      ws)}))
 
+(defn- switch-text
+  "How the map is chosen (subs/editor-map-switch), under the editor's
+   title: \"Cycle mode · Manual fallback: Unison\" while a Map cycle runs,
+   else \"Manual map: Unison\", with \" · Switch queued\" while a switch
+   waits. Never which map a tick routed by."
+  [{:keys [mode manual-name queued?]}]
+  (str (if (= :cycle mode)
+         (str "Cycle mode · Manual fallback: " manual-name)
+         (str "Manual map: " manual-name))
+       (when queued? " · Switch queued")))
+
 (defn- map-editor
-  "The selected map: its name, lanes, where each zone goes, its overrides
-   and warnings; Use now, Duplicate, and for yours Delete."
+  "The selected map: its name, Use now, Duplicate, and for yours Delete;
+   how the map is chosen; its lanes, where each zone goes, its overrides
+   and warnings."
   [{:keys [fx/context]}]
   (let [id (fx/sub-ctx context subs/selected-zone-map-id)
         m (fx/sub-ctx context subs/zone-map id)
         names (fx/sub-ctx context subs/names-ctx)
         zones (fx/sub-ctx context subs/map-zones)
-        active? (= id (:id (fx/sub-ctx context subs/active-zone-map)))
+        switch (fx/sub-ctx context subs/editor-map-switch id)
         built-in? (:built-in? m)]
     {:fx/type :v-box
      :id "zone-map-editor"
@@ -223,14 +248,13 @@
                :spacing 8
                :alignment :center-left
                :children (cond-> [{:fx/type :label :id "zone-map-title" :text (:name m) :style-class ["label-bold"]}
-                                  {:fx/type :label :text (if active? "in use" "") :style-class ["label-hint"]}
                                   {:fx/type :region :h-box/hgrow :always}
                                   {:fx/type :button
                                    :id "zone-map-use-now"
                                    :text "Use now"
-                                   :disable active?
+                                   :disable (not (:can-use-now? switch))
                                    :style-class ["button-secondary"]
-                                   :tooltip {:fx/type :tooltip :text "Switch to this map at once"}
+                                   :tooltip {:fx/type :tooltip :text "Choose this map now, pause any running Map cycle, and clear any queued switch."}
                                    :on-action {:event/type :zone-maps/use-now :map id}}
                                   {:fx/type :button
                                    :id "zone-map-duplicate"
@@ -241,7 +265,12 @@
                                                   :id "zone-map-delete"
                                                   :text "Delete"
                                                   :style-class ["button-danger"]
-                                                  :on-action {:event/type :zone-maps/request-delete :map id}}))}]
+                                                  :on-action {:event/type :zone-maps/request-delete :map id}}))}
+              {:fx/type :label
+               :id "zone-map-mode"
+               :text (switch-text switch)
+               :wrap-text true
+               :style-class ["label-secondary"]}]
        built-in?
        (conj (row "Lanes" {:fx/type :label
                            :id "zone-map-lanes-text"

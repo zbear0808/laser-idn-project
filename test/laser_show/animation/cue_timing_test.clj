@@ -120,6 +120,41 @@
       (is (true? (:playing? p)))
       (is (= [0 0] (:active-cell p))))))
 
+(deftest deactivation-never-starts-transport-test
+  (let [a [0 0]
+        b [1 0]
+        ia {:run :ra :timeline? true :start-beat 0.0 :seek {:id :s :beat 2.0}}
+        ib {:run :rb :decay-beats 1.0 :hold? false}
+        two (fn [playing? focus] {:playing? playing? :active-cell focus :active-cues {a ia b ib}})]
+    (testing "one of two goes: the gate stays as it was (Stop holds the other), the other intent as it was"
+      (doseq [playing? [true false]]
+        (is (= {:playing? playing? :active-cell b :active-cues {b ib}} (ct/deactivate-cue (two playing? a) a))
+            (str "the focused cell, playing? " playing?))
+        (is (= {:playing? playing? :active-cell a :active-cues {a ia}} (ct/deactivate-cue (two playing? a) b))
+            (str "another cell keeps the focus, playing? " playing?))))
+    (testing "the last one goes: the gate closes, and nothing has the focus"
+      (doseq [playing? [true false]]
+        (is (= {:playing? false :active-cell nil :active-cues {}}
+               (-> (two playing? a) (ct/deactivate-cue b) (ct/deactivate-cue a)))
+            (str "playing? " playing?))))
+    (testing "no intent at the cell: nothing changes"
+      (let [empty-play {:playing? true :active-cell nil :active-cues {}}
+            held (two false a)]
+        (is (identical? empty-play (ct/deactivate-cue empty-play a)) "Play with no cue stays on")
+        (is (identical? held (ct/deactivate-cue held [5 5])) "held cues stay held")
+        (is (identical? held (ct/deactivate-cue held nil)))))))
+
+(deftest position-ids-test
+  (testing "the ids of the requests that put the cue at cell where it is: the restart's and its own seek's"
+    (is (= {:restart nil :seek nil} (ct/position-ids {} [0 0])) "nil before each, never left out")
+    (is (= {:restart nil :seek nil} (ct/position-ids {:active-cues {[0 0] {:run :r}}} [0 0])))
+    (let [pb {:requests {:restart {:id :k} :align {:id :al} :shift {:id :sh :offset 0.5}}
+              :active-cues {[0 0] {:run :r :seek {:id :s1 :beat 2.0}}
+                            [1 0] {:run :b :seek {:id :s2 :beat 4.0}}}}]
+      (is (= {:restart :k :seek :s1} (ct/position-ids pb [0 0])) "align and shift don't move a timeline")
+      (is (= {:restart :k :seek :s2} (ct/position-ids pb [1 0])) "each cell its own seek")
+      (is (= {:restart :k :seek nil} (ct/position-ids pb [2 0]))))))
+
 (deftest activate-cue-writes-decay-keys-test
   (is (= {:run :r :decay-beats 1.0 :hold? true}
          (get-in (ct/activate-cue {} [1 0] :r {:decay-beats 1 :hold? true}) [:active-cues [1 0]])))

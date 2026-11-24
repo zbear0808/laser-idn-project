@@ -4,10 +4,13 @@
    window's close; ⌘Z (Ctrl+Z) undoes in each editor; the timeline's Space
    plays unless a text field takes it; the question dialogs keep Enter and
    Escape on their default and cancel buttons; Help > About opens and
-   closes; and a style reload reaches a dialog that is already open."
+   closes; and a style reload, and a re-registered effect once published,
+   reach a dialog that is already open."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.animation.effects :as effects]
+            [laser-show.animation.registries :as registries]
             [laser-show.css.core :as css]
             [laser-show.events.core :as events]
             [laser-show.routing.zone-patterns :as zone-patterns]
@@ -119,7 +122,8 @@
   (events/dispatch! {:event/type :cue-chain/set-name :col 2 :row 0 :name "Dirty"})
   (ui/wait-for! #(true? (get-in (app-state) [:project :dirty?]))))
 
-(def ^:private a1-grid-target {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]})
+(def ^:private a1-grid-target
+  {:domain :cue-zone-patterns :entity-key [0 0] :effect-instance-id #uuid "00000000-0000-0000-0000-00000000d1a1"})
 
 (def ^:private opened-show
   "What the last Open kept of the show's rig, as :file/project-loaded keeps
@@ -381,3 +385,33 @@
           (is (identical? scene (ui/on-fx-thread #(.getScene stage))) "with the same scene")))
       (finally
         (io/delete-file marker-file true)))))
+
+
+;; The registries (reactivity plan 17): what the effect bank offers is what
+;; :registries/published last put in app state
+
+(defn- bank-button
+  "The effect bank's button that says text, in any window."
+  [text]
+  (let [nodes (ui/query-all ".bank-item-btn")]
+    (ui/on-fx-thread #(some (fn [n] (when (and (instance? Labeled n) (= text (.getText ^Labeled n))) n)) nodes))))
+
+(deftest a-re-registered-effect-reaches-an-open-bank-test
+  (let [robot (ui/robot)
+        scale (effects/get-effect :scale)
+        added #(get-in (app-state) [:chains :effect-chains [1 0] :items 0])]
+    (is (waited? #(= (:effects (registries/descriptors)) (get-in (app-state) [:backend :registries :effects])))
+        "start-test! published the registries")
+    (try
+      (events/dispatch! {:event/type :effect-chain/open-editor :col 1 :row 0})
+      (ui/wait-for! #(some? (bank-button "Scale")))
+      (effects/register-effect! (-> scale (assoc :name "Size") (assoc-in [:parameters 0 :default] 7.0)))
+      (events/dispatch! (registries/published-event))
+      (is (waited? #(some? (bank-button "Size"))) "the open bank shows the new name")
+      (is (nil? (bank-button "Scale")))
+      (ui/click-node! robot (bank-button "Size"))
+      (ui/wait-for! #(= :scale (:effect-id (added))))
+      (is (= 7.0 (get-in (added) [:params :x-scale])) "and a click adds it with the new default")
+      (finally
+        (effects/register-effect! scale)
+        (events/dispatch! (registries/published-event))))))

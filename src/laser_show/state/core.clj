@@ -7,10 +7,18 @@
    - Context-aware state updates that preserve memoization cache
    - Low-level write primitives, which only the event pipeline calls while
      an app runs (guard-writes!)
+   - Epochs: each init-state! makes a context of a new epoch, which every
+     write after it keeps; swap-state-in-epoch! writes only into one, so an
+     app's event can't write into the context of the app started after it
    
    For READ operations:
    - Backend/services: Use extractors directly with get-raw-state (thread-safe, no memoization)
-   - UI components: Use laser-show.subs (memoized, context-based subscriptions)
+   - Callbacks (a key, a click, a drop): get-raw-state when the input comes
+   - UI components: Use laser-show.subs on the component's own :fx/context
+     (memoized, context-based subscriptions); a snapshot is no render
+     dependency
+   - A root context from the atom (a swap's or a watch's old and new):
+     root-context->snapshot
    
    Usage:
    1. Initialize with (init-state!), once at start-up
@@ -41,14 +49,29 @@
   (atom nil))
 
 (defonce ^{:private true
+           :doc "How many contexts init-state! made: the newest one's ::epoch."}
+  !epochs
+  (atom 0))
+
+(defonce ^{:private true
            :doc "Registry of all defined state domains."}
   *domain-registry
   (atom {}))
 
 (def cache-factory
-  "LRU cache factory for context memoization.
-   Adjust :threshold based on app complexity."
-  #(cache/lru-cache-factory % :threshold 512))
+  "LRU cache factory for context memoization, 4096 entries (reactivity
+   plan 36). A render looks up every subscription and function component
+   on screen (its working set); an LRU smaller than that evicts it all each
+   render, so any change runs every view body (at 512: 226 on the starter
+   Grid, 370 with both chain editors open). Working sets of the starter
+   show, in entries: Grid 817, Vibes 602, Perform 296, Grid and both
+   editors 977; a cue in every cell and longer chains in both editors,
+   1036. At 4096, the first power of two at least twice that, a change no
+   view reads runs no view body, and a cell's rename only that cell's two.
+   The rest holds descriptions no view uses any more (a grid cell's: about
+   16 KB), never an earlier context's cache. ui-test cache-working-set-test
+   keeps the Grid and both editors under half of it."
+  #(cache/lru-cache-factory % :threshold 4096))
 
 
 ;; Section 2: Context Access Functions
@@ -60,40 +83,49 @@
   *context)
 
 
-(defn get-state
-  "Get the raw state map from the context with subscription tracking.
-   
-   Returns the unwrapped state map, useful for:
-   - Event handler co-effects (safe - not lazy)
-   - UI component rendering (memoized)
-   - Testing
-   - Debugging
-   
-   IMPORTANT: This participates in cljfx's subscription tracking system.
-   Do NOT use in subscription functions that return lazy sequences, as
-   subscription tracking must complete before the function returns.
-   
-   For background thread access without subscription tracking (e.g., timers,
-   async tasks), use get-raw-state instead.
-   
-   Returns nil if context not initialized."
-  []
-  (when-let [ctx @*context]
-    (fx/sub-val ctx identity)))
+(defn root-context->snapshot
+  "The app map root-context holds: root-context being a root context from
+   the context atom (its value, an atomic swap's old or new value, a
+   watch's old or new), not a component's :fx/context. It only converts:
+   it doesn't read the atom, subscribe or touch the subscription cache, and
+   it returns the map itself, not a copy. nil for nil.
+
+   The one place that knows how cljfx 1.10.6 (the deps.edn pin) keeps the
+   map, which cljfx calls private. Any other non-nil value (an app map given
+   by mistake, a context of a cljfx that keeps it differently) throws
+   instead of reading as nil or {}; state.core-test checks the adapter
+   against cljfx's own fx/sub-val."
+  [root-context]
+  (when (some? root-context)
+    (let [m (when (map? root-context) (:cljfx.context/m root-context))]
+      (if (map? m)
+        m
+        (throw (ex-info (str "laser-show.state.core/root-context->snapshot: not a root context holding"
+                             " an app map, as cljfx 1.10.6 (the deps.edn pin) keeps it. A cljfx"
+                             " upgrade that keeps it otherwise needs this adapter changed.")
+                        {:given (type root-context)}))))))
+
 
 (defn get-raw-state
-  "Get the raw state map from the context WITHOUT subscription tracking.
-   
-   Safe to use from background threads (timers, async tasks, etc.)
-   where fx/sub-val would cause assertion errors.
-   
-   Does not participate in cljfx's memoization/caching system.
-   Use get-state for UI thread access when possible.
+  "One current app map: the context atom read once, its map
+   (root-context->snapshot). No subscription and no cache access, so it is
+   for code that decides when to sample: an event's :state co-effect, the
+   show clock's tick, a callback when its input comes, the REPL. A view
+   subscribes through the :fx/context it is given instead (laser-show.subs):
+   this is no render dependency.
    
    Returns nil if context not initialized."
   []
-  (when-let [ctx @*context]
-    (:cljfx.context/m ctx)))
+  (root-context->snapshot @*context))
+
+(defn get-state
+  "Deprecated: get-raw-state's snapshot, the app map as it is now, nil if
+   context not initialized. A compatibility snapshot: no subscription, no
+   cache access, no render dependency. For display, subscribe through the
+   component's supplied :fx/context before returning (laser-show.subs)."
+  {:deprecated "1.0.0"}
+  []
+  (get-raw-state))
 
 
 ;; Section 3: State Mutation Primitives
@@ -127,6 +159,14 @@
           (throw e)
           (log/error e refused-message))))))
 
+(defn- successor
+  "The context after ctx holding (f state), of the same epoch (init-state!).
+   Throws when there is no context yet."
+  [ctx f]
+  (if ctx
+    (assoc (fx/swap-context ctx f) ::epoch (::epoch ctx))
+    (throw (ex-info "State not initialized. Call init-state! first." {}))))
+
 (defn swap-state!
   "Update state using a function, preserving context memoization.
    
@@ -139,11 +179,7 @@
    (swap-state! update-in [:playback :active-cues] dissoc [0 0])"
   [f & args]
   (check-write!)
-  (swap! *context
-         (fn [ctx]
-           (if ctx
-             (fx/swap-context ctx #(apply f % args))
-             (throw (ex-info "State not initialized. Call init-state! first." {}))))))
+  (swap! *context successor #(apply f % args)))
 
 (defn reset-state!
   "Reset state to a completely new value.
@@ -153,36 +189,52 @@
    - new-state: The new state map"
   [new-state]
   (check-write!)
-  (swap! *context
-         (fn [ctx]
-           (if ctx
-             (fx/swap-context ctx (constantly new-state))
-             (throw (ex-info "State not initialized. Call init-state! first." {}))))))
+  (swap! *context successor (constantly new-state)))
 
 (defn reset-state-vals!
   "Like reset-state!, but returns [old-state new-state], with old-state the
-   value it replaced."
+   map it replaced: taken from the old root the atomic swap returned, never
+   from reading the atom again, which can already hold a later write. The
+   dev lost-update check compares it to the event's snapshot by identity."
   [new-state]
   (check-write!)
-  (let [[old-ctx _] (swap-vals! *context
-                                (fn [ctx]
-                                  (if ctx
-                                    (fx/swap-context ctx (constantly new-state))
-                                    (throw (ex-info "State not initialized. Call init-state! first." {})))))]
-    [(:cljfx.context/m old-ctx) new-state]))
+  (let [[old-ctx _] (swap-vals! *context successor (constantly new-state))]
+    [(root-context->snapshot old-ctx) new-state]))
+
+(defn epoch
+  "Which init-state! made the context: a number each one increases, kept by
+   every write after it. nil before the first."
+  []
+  (::epoch @*context))
+
+(defn swap-state-in-epoch!
+  "Like swap-state!, but only while the context is still the one init-state!
+   made at epoch (see epoch): [old-state new-state], or nil, writing
+   nothing, once another init-state! replaced it. The check and the write
+   are one atomic step, so a re-initialization can't come between them (the
+   app's events write so: events.core effect-state)."
+  [epoch f & args]
+  (check-write!)
+  (loop []
+    (let [ctx @*context]
+      (when (= epoch (::epoch ctx))
+        (let [next-ctx (successor ctx #(apply f % args))]
+          (if (compare-and-set! *context ctx next-ctx)
+            [(root-context->snapshot ctx) (root-context->snapshot next-ctx)]
+            (recur)))))))
 
 (defn get-in-state
-  "Get a value at a path in state.
-   
-   This is a low-level primitive used internally.
-   
-   Parameters:
-   - path: Vector path into state
+  "Deprecated: (get-in (get-raw-state) path), the value at path in one
+   snapshot; nil if context not initialized or nothing is there. A
+   compatibility snapshot: no subscription, no cache access, no render
+   dependency. For display, subscribe through the component's supplied
+   :fx/context before returning (laser-show.subs).
    
    Example:
    (get-in-state [:timing :bpm]) => 120.0"
+  {:deprecated "1.0.0"}
   [path]
-  (get-in (get-state) path))
+  (get-in (get-raw-state) path))
 
 (defn assoc-in-state!
   "Set a value at a path in state.
@@ -207,10 +259,12 @@
    - initial-state: Map containing all application state
    
    This creates a cljfx context wrapping the state with an LRU cache.
-   Call this once at application startup before mounting the renderer."
+   Call this once at application startup before mounting the renderer.
+   Each call starts a new epoch (see epoch): a write computed for the
+   context before it can be told apart (swap-state-in-epoch!)."
   [initial-state]
   (check-write!)
-  (reset! *context (fx/create-context initial-state cache-factory))
+  (reset! *context (assoc (fx/create-context initial-state cache-factory) ::epoch (swap! !epochs inc)))
   (log/info "State initialized with" (count initial-state) "top-level keys"))
 
 

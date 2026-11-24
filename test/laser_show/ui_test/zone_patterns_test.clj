@@ -8,6 +8,7 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.animation.show-time :as show-time]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.input :as input]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.router :as input-router]
             [laser-show.routing.zone-patterns :as zone-patterns]
@@ -16,8 +17,11 @@
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.css PseudoClass]
+           [javafx.event Event]
            [javafx.scene Node]
-           [javafx.scene.control Control Labeled Menu MenuButton MenuItem]))
+           [javafx.scene.control CheckBox CheckMenuItem ComboBox Control Labeled Menu MenuButton MenuItem Slider Spinner
+            ToggleButton]
+           [javafx.scene.input MouseButton MouseEvent]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -347,7 +351,7 @@
         (ui/assert-text! "#pattern-pad-chase-keys" "Right-click to learn")
         (ui/right-click-node! robot (ui/query "#pattern-pad-chase"))
         (ui/click! robot "#pattern-pad-chase-learn")
-        (ui/wait-for! #(= {:type :pattern-pad :target :chase} (get-in (app-state) [:backend :input :learning-target])))
+        (ui/wait-for! #(= {:type :pattern-pad :target :chase} (input/learning-target (app-state))))
         (is (has-class? "#pattern-pad-chase" "pattern-pad-learning"))
         (is (nil? (pads-style)) "the menu pressed nothing")
         (input-router/dispatch! (note :note-on 40))
@@ -362,7 +366,7 @@
         (testing "learning it again for another pad moves it"
           (ui/right-click-node! robot (ui/query "#pattern-pad-swap"))
           (ui/click! robot "#pattern-pad-swap-learn")
-          (ui/wait-for! #(= {:type :pattern-pad :target :swap} (get-in (app-state) [:backend :input :learning-target])))
+          (ui/wait-for! #(= {:type :pattern-pad :target :swap} (input/learning-target (app-state))))
           (input-router/dispatch! (note :note-on 40))
           (ui/wait-for! #(= {:type :pattern-pad :target :swap} (bound)))
           (input-router/dispatch! (note :note-off 40))
@@ -473,3 +477,320 @@
       (push! javafx.scene.input.KeyCode/SHORTCUT javafx.scene.input.KeyCode/SHIFT javafx.scene.input.KeyCode/Z)
       (ui/wait-for! #(= [:zone/a :zone/b :zone/c] (zones))))
     (is (window-open?))))
+
+
+;; A refused edit (plans/2026-11-23-cljfx-reactivity/13): the controls show
+;; what applies
+
+(defn- notice-id [] (get-in (app-state) [:ui :notice :id]))
+
+(defn- attempt!
+  "(act!), then wait for the show lock's new refusal of an event of type."
+  [type act!]
+  (let [before (notice-id)]
+    (act!)
+    (ui/wait-for! #(and (some? (notice-id)) (not= before (notice-id))
+                        (= type (get-in (app-state) [:ui :show-lock-notice :event]))))))
+
+(defn- ticked
+  "Whether the check box or radio button selector finds is ticked, on the
+   FX thread; nil when there is none."
+  [selector]
+  (when-let [node (ui/query selector)]
+    (ui/on-fx-thread #(if (instance? CheckBox node)
+                        (.isSelected ^CheckBox node)
+                        (.isSelected ^ToggleButton node)))))
+
+(defn- bar-item-ticked
+  "Whether pad's Switch on the bar item (its own CheckMenuItem, not the
+   popup's) is ticked; nil when it has none."
+  [^Control pad]
+  (let [id (str (ui/on-fx-thread #(.getId pad)) "-bar")]
+    (ui/on-fx-thread #(when-let [^CheckMenuItem item (some (fn [^MenuItem i] (when (= id (.getId i)) i))
+                                                           (.getItems (.getContextMenu pad)))]
+                        (.isSelected item)))))
+
+(deftest locked-pattern-controls-and-pad-timing-show-applied-values-test
+  (let [robot (ui/robot)
+        param #(get-in (cue-pattern) [:params %])
+        cycle-rate #(get-in (app-state) [:chains :effect-chains cycle-cell :items 0 :params :rate])
+        refused-text #(get-in (app-state) [:ui :show-lock-notice :text])
+        undo-depth #(count (get-in (app-state) [:history :undo-stack]))]
+    (lasers! 3)
+    (events/write-state! #(-> %
+                              (assoc-in [:chains :cue-chains [0 0] :name] "Beams")
+                              (assoc-in [:chains :cue-chains [0 0] :zone-patterns]
+                                        [(assoc (zone-patterns/preset-instance :alternate :cue) :id pattern-id)])))
+    (cycle-on!)
+    (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
+    (ui/wait-for! window-open?)
+    (ui/wait-for! #(true? (ticked "#zone-pattern-source-auto")))
+    (events/dispatch! {:event/type :vibe/set-show-lock :locked? true})
+    (ui/wait-for! #(true? (get-in (app-state) [:ui :show-lock?])))
+    (let [depth (undo-depth)]
+      (testing "the cue's pattern window: Follows the pattern pads"
+        (is (true? (ticked "#zone-pattern-follow-pads")))
+        (attempt! :chain/update-param #(ui/click! robot "#zone-pattern-follow-pads"))
+        (is (= "Zone pattern edit refused" (refused-text)))
+        (is (true? (param :follow-pads?)))
+        (ui/wait-for! #(true? (ticked "#zone-pattern-follow-pads"))))
+      (testing "Moves: another choice is refused; the one chosen is kept and sends nothing"
+        (attempt! :chain/update-param #(ui/click! robot "#zone-pattern-source-picture"))
+        (is (= :auto (param :source)))
+        (ui/wait-for! #(false? (ticked "#zone-pattern-source-picture")))
+        (is (true? (ticked "#zone-pattern-source-auto")))
+        (let [before (notice-id)]
+          (ui/click! robot "#zone-pattern-source-auto")
+          (is (events/flush!))
+          (ui/wait-for! #(true? (ticked "#zone-pattern-source-auto")))
+          (is (= before (notice-id)) "no edit, so no notice")))
+      (events/dispatch! {:event/type :ui/close-dialog :dialog-id :zone-pattern-editor})
+      (ui/wait-for! #(not (window-open?)))
+      (testing "the Map cycle in an effects cell: Every"
+        (events/dispatch! {:event/type :effect-chain/open-editor :col (first cycle-cell) :row (second cycle-cell)})
+        (ui/wait-for! #(some? (ui/query "#map-cycle-every")))
+        (attempt! :chain/update-param #(ui/select! robot "#map-cycle-every" "0.5"))
+        (is (= "Zone pattern edit refused" (refused-text)))
+        (is (= 0.25 (cycle-rate)))
+        (ui/wait-for! #(= 0.25 (let [^ComboBox c (ui/query "#map-cycle-every")]
+                                 (ui/on-fx-thread (fn [] (.getValue c))))))
+        (events/dispatch! {:event/type :ui/close-dialog :dialog-id :effect-chain-editor})
+        (ui/wait-for! #(nil? (ui/query "#map-cycle-visual"))))
+      (testing "Switch on the bar, on a map pad, a pattern pad and CYCLE"
+        (ui/wait-for! #(ui/visible? "#pattern-chip-chase"))
+        (doseq [[pad type stored] [["#zone-map-chip-odd-even" :zone-map/set-pad-bar [:config :zone-map-pads :map/odd-even :bar?]]
+                                   ["#pattern-chip-chase" :pattern-pads/set-pad-bar [:config :pattern-pads :chase :bar?]]
+                                   ["#zone-map-chip-cycle" :zone-map/set-pad-bar [:config :zone-map-pads :cycle :bar?]]]]
+          (testing pad
+            (let [node (ui/query pad)]
+              (is (false? (bar-item-ticked node)))
+              (attempt! type #(do (ui/right-click-node! robot node)
+                                  (ui/click! robot (str pad "-bar"))))
+              (is (nil? (get-in (app-state) stored)))
+              (ui/wait-for! #(false? (bar-item-ticked node)))
+              (ui/right-click-node! robot node)
+              (ui/wait-for! #(some? (ui/query (str pad "-bar"))))
+              (is (false? (bar-item-ticked node)) "the item, its menu open again")
+              (ui/press! robot javafx.scene.input.KeyCode/ESCAPE)
+              (ui/wait-for! #(some? (ui/query pad)))))))
+      (is (= depth (undo-depth)) "no undo step"))
+    (testing "a pad's press is a performer's: it goes through"
+      (press! robot "#pattern-chip-chase")
+      (ui/wait-for! #(= :chase (pads-style))))))
+
+(defn- value-of
+  "The value the combo box, slider or spinner selector finds shows, on the
+   FX thread; nil when there is none."
+  [selector]
+  (when-let [node (ui/query selector)]
+    (ui/on-fx-thread #(condp instance? node
+                        ComboBox (.getValue ^ComboBox node)
+                        Slider (.getValue ^Slider node)
+                        Spinner (.getValue ^Spinner node)))))
+
+(defn- click-track!
+  "A primary click, its press and its release, on the slider selector
+   finds, at fraction of its track, as a real mouse sends it (headless, a
+   robot drag loses its button): a press of its own, whose value
+   gesture/slider sends."
+  [selector fraction]
+  (let [^Slider slider (ui/query selector)]
+    (ui/on-fx-thread
+     #(let [^Node track (.lookup slider ".track")
+            b (.getLayoutBounds track)
+            x (* fraction (.getWidth b))
+            y (/ (.getHeight b) 2.0)
+            scene (.localToScene track x y)
+            screen (.localToScreen track x y)]
+        (doseq [t [MouseEvent/MOUSE_PRESSED MouseEvent/MOUSE_RELEASED]]
+          (Event/fireEvent track (MouseEvent. t (.getX scene) (.getY scene) (.getX screen) (.getY screen)
+                                              MouseButton/PRIMARY 1 false false false false
+                                              (= t MouseEvent/MOUSE_PRESSED) false false
+                                              false false false nil)))))
+    (ui/sync-fx!)))
+
+(defn- lock! [locked?]
+  (events/dispatch! {:event/type :vibe/set-show-lock :locked? locked?})
+  (ui/wait-for! #(= locked? (true? (get-in (app-state) [:ui :show-lock?])))))
+
+(defn- open-numeric!
+  "The cue at A1, \"Beams\", with pattern (its id pattern-id), in its
+   pattern window in Numeric mode (all its parameters), once selector
+   shows."
+  [pattern selector]
+  (lasers! 3)
+  (events/write-state! #(-> %
+                            (assoc-in [:chains :cue-chains [0 0] :name] "Beams")
+                            (assoc-in [:chains :cue-chains [0 0] :zone-patterns] [(assoc pattern :id pattern-id)])))
+  (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
+  (ui/wait-for! window-open?)
+  (events/dispatch! {:event/type :chain/set-ui-mode :domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]
+                     :mode :numeric})
+  (ui/wait-for! #(some? (ui/query selector))))
+
+(deftest locked-numeric-controls-show-applied-values-test
+  ;; Reactivity plan 13b: the shared parameter controls, in the pattern
+  ;; window's Numeric mode, show what applies after the lock refuses them
+  (let [robot (ui/robot)
+        param #(get-in (cue-pattern) [:params %])
+        undo-depth #(count (get-in (app-state) [:history :undo-stack]))
+        wave {:type :triangle :active? true :min -2.0 :max 2.0 :period 2.0}]
+    (open-numeric! (assoc-in (zone-patterns/preset-instance :alternate :cue) [:params :offset] wave)
+                   "#modulator-offset-period")
+    (lock! true)
+    (let [depth (undo-depth)]
+      (testing "a parameter's slider"
+        (attempt! :chain/update-param #(ui/slide! robot "#param-rate-slider" 3.0))
+        (is (= "Zone pattern edit refused" (get-in (app-state) [:ui :show-lock-notice :text])))
+        (is (= 1.0 (param :rate)))
+        (ui/wait-for! #(== 1.0 (value-of "#param-rate-slider"))))
+      (testing "a choice"
+        (attempt! :chain/update-param #(ui/select! robot "#param-step-on-choice" ":hit"))
+        (is (= :clock (param :step-on)))
+        (ui/wait-for! #(= :clock (value-of "#param-step-on-choice"))))
+      (testing "a choice that may follow a modulator"
+        (attempt! :chain/update-param #(ui/select! robot "#choice-path" ":bounce"))
+        (is (= :loop (param :path)))
+        (ui/wait-for! #(= :loop (value-of "#choice-path"))))
+      (testing "a parameter's ∿"
+        (ui/scroll-into-view! "#modulate-rate")
+        (attempt! :modulator/toggle #(ui/click! robot "#modulate-rate"))
+        (is (= 1.0 (param :rate)))
+        (ui/wait-for! #(false? (ticked "#modulate-rate"))))
+      (testing "a modulator's field, and its type"
+        (attempt! :modulator/update-param #(click-track! "#modulator-offset-period" 0.6))
+        (is (= wave (param :offset)))
+        (ui/wait-for! #(== 2.0 (value-of "#modulator-offset-period")))
+        (attempt! :modulator/update-param #(ui/select! robot "#modulator-offset-time-unit" ":seconds"))
+        (ui/wait-for! #(= :beats (value-of "#modulator-offset-time-unit")))
+        (attempt! :modulator/set-type #(ui/select! robot "#modulator-type-offset" "Sine"))
+        (is (= wave (param :offset)))
+        (ui/wait-for! #(= :triangle (:id (value-of "#modulator-type-offset")))))
+      (is (= depth (undo-depth)) "no undo step"))
+    (testing "unlocked, each edit applies once"
+      (lock! false)
+      (let [depth (undo-depth)
+            once! (fn [act! applied?]
+                    (let [before (undo-depth)]
+                      (act!)
+                      (ui/wait-for! applied?)
+                      (is (events/flush!))
+                      (is (= (inc before) (undo-depth)))))]
+        (once! #(ui/slide! robot "#param-rate-slider" 3.0)
+               #(and (= 3.0 (param :rate)) (== 3.0 (value-of "#param-rate-slider"))))
+        (once! #(ui/select! robot "#param-step-on-choice" ":hit")
+               #(and (= :hit (param :step-on)) (= :hit (value-of "#param-step-on-choice"))))
+        (once! #(ui/select! robot "#choice-path" ":bounce")
+               #(and (= :bounce (param :path)) (= :bounce (value-of "#choice-path"))))
+        (once! #(click-track! "#modulator-offset-period" 0.6)
+               #(let [period (:period (param :offset))]
+                  (and (not= 2.0 period) (== period (value-of "#modulator-offset-period")))))
+        (once! #(ui/select! robot "#modulator-type-offset" "Sine")
+               #(and (= :sine (:type (param :offset))) (= :sine (:id (value-of "#modulator-type-offset")))))
+        (ui/scroll-into-view! "#modulate-rate")
+        (once! #(ui/click! robot "#modulate-rate")
+               #(and (map? (param :rate)) (true? (ticked "#modulate-rate"))))
+        (is (= (+ depth 6) (undo-depth)))))))
+
+(deftest locked-keyframe-settings-show-applied-values-test
+  ;; Reactivity plan 13b: with the pattern's keyframes on, its keyframe
+  ;; settings, the selected keyframe's Interp and its values in the Numeric
+  ;; list. (A pattern's first parameter, Style, isn't a number: it has no
+  ;; Value spinner; Period is this panel's spinner.)
+  (let [robot (ui/robot)
+        pattern (zone-patterns/preset-instance :alternate :cue)
+        kf #(get-in (cue-pattern) [:keyframe-modulator %])
+        frame-rate #(get-in (cue-pattern) [:keyframe-modulator :keyframes 1 :params :rate])
+        undo-depth #(count (get-in (app-state) [:history :undo-stack]))
+        spin! (fn [] (ui/on-fx-thread #(.increment ^Spinner (ui/query "#keyframe-period"))))]
+    (open-numeric! (assoc pattern :keyframe-modulator
+                          {:enabled? true :driver :time :period 4.0 :time-unit :beats :loop-mode :loop
+                           :selected-keyframe 1
+                           :keyframes [{:position 0.0 :params (:params pattern) :interpolation :linear}
+                                       {:position 1.0 :params (assoc (:params pattern) :rate 2.0) :interpolation :linear}]})
+                   "#keyframe-interp")
+    (ui/wait-for! #(== 2.0 (value-of "#param-rate-slider")))
+    (lock! true)
+    (let [depth (undo-depth)]
+      (testing "Period, its spinner"
+        (attempt! :keyframe/update-setting spin!)
+        (is (= 4.0 (kf :period)))
+        (ui/wait-for! #(== 4.0 (value-of "#keyframe-period"))))
+      (testing "Restart on"
+        (attempt! :keyframe/update-setting #(ui/select! robot "#keyframe-restart-on" ":hit"))
+        (is (nil? (kf :restart-on)))
+        (ui/wait-for! #(= :own (value-of "#keyframe-restart-on"))))
+      (testing "the selected keyframe's Interp"
+        (attempt! :keyframe/set-interpolation #(ui/select! robot "#keyframe-interp" ":exp-grow"))
+        (is (= :linear (get-in (cue-pattern) [:keyframe-modulator :keyframes 1 :interpolation])))
+        (ui/wait-for! #(= :linear (value-of "#keyframe-interp"))))
+      (testing "the selected keyframe's value, in the Numeric list"
+        (attempt! :keyframe/update-param #(click-track! "#param-rate-slider" 0.8))
+        (is (= 2.0 (frame-rate)))
+        (ui/wait-for! #(== 2.0 (value-of "#param-rate-slider"))))
+      (testing "Enable"
+        (attempt! :keyframe/toggle-enabled #(ui/click! robot "#keyframe-enabled"))
+        (is (true? (kf :enabled?)))
+        (ui/wait-for! #(true? (ticked "#keyframe-enabled"))))
+      (is (= depth (undo-depth)) "no undo step"))
+    (testing "unlocked, each edit applies once"
+      (lock! false)
+      (let [depth (undo-depth)
+            once! (fn [act! applied?]
+                    (let [before (undo-depth)]
+                      (act!)
+                      (ui/wait-for! applied?)
+                      (is (events/flush!))
+                      (is (= (inc before) (undo-depth)))))]
+        (once! spin! #(and (= 4.25 (kf :period)) (== 4.25 (value-of "#keyframe-period"))))
+        (once! #(ui/select! robot "#keyframe-restart-on" ":hit")
+               #(and (= :hit (kf :restart-on)) (= :hit (value-of "#keyframe-restart-on"))))
+        (once! #(ui/select! robot "#keyframe-interp" ":exp-grow")
+               #(and (= :exp-grow (get-in (cue-pattern) [:keyframe-modulator :keyframes 1 :interpolation]))
+                     (= :exp-grow (value-of "#keyframe-interp"))))
+        (once! #(click-track! "#param-rate-slider" 0.8)
+               #(let [rate (frame-rate)]
+                  (and (not= 2.0 rate) (== rate (value-of "#param-rate-slider")))))
+        (once! #(ui/click! robot "#keyframe-enabled")
+               #(and (false? (kf :enabled?)) (false? (ticked "#keyframe-enabled"))))
+        (is (= (+ depth 5) (undo-depth)))))))
+
+;; Stored, not playing: a disabled pattern or Map cycle still shows its pads
+;; (plans/2026-11-23-cljfx-reactivity/11 §7)
+
+(deftest stored-pattern-and-cycle-show-pads-without-running-test
+  (let [nested {:active? true
+                :items [{:id #uuid "00000000-0000-0000-0000-0000000000e1" :type :group :name "Outer"
+                         :items [{:id #uuid "00000000-0000-0000-0000-0000000000e2" :type :group :name "Off" :enabled? false
+                                  :items [(assoc (zone-patterns/preset-instance :chase :cell)
+                                                 :id #uuid "00000000-0000-0000-0000-0000000000e3")
+                                          {:id #uuid "00000000-0000-0000-0000-0000000000e4" :effect-id :scale :params {}}]}]}]}
+        cycle {:active? true
+               :items [(assoc (zone-patterns/cycle-instance) :id #uuid "00000000-0000-0000-0000-0000000000e5" :enabled? false)]}
+        grid-tab! #(do (events/dispatch! {:event/type :ui/set-active-tab :tab-id :grid})
+                       (ui/wait-for! (fn [] (some? (ui/query "#grid-cell-0-0")))))]
+    (is (not (ui/visible? "#zone-map-strip")) "a new show: no pads")
+    (testing "a pattern in a disabled group: the pattern and map pads, CYCLE dim"
+      (events/write-state! assoc-in [:chains :effect-chains [2 1]] nested)
+      (ui/wait-for! #(and (ui/visible? "#pattern-strip") (ui/visible? "#zone-map-strip")))
+      (is (has-class? "#zone-map-chip-cycle" "zone-map-pad-dim"))
+      (open-perform!)
+      (ui/wait-for! #(and (ui/visible? "#pattern-row") (ui/visible? "#zone-map-row")))
+      (is (has-class? "#zone-map-pad-cycle" "zone-map-pad-dim")))
+    (testing "a disabled Map cycle instead: the map pads only, CYCLE still dim"
+      (events/write-state! assoc-in [:chains :effect-chains [2 1]] cycle)
+      (ui/wait-for! #(not (ui/visible? "#pattern-row")))
+      (is (ui/visible? "#zone-map-row"))
+      (is (has-class? "#zone-map-pad-cycle" "zone-map-pad-dim"))
+      (is (= "Switch on a Map cycle cell on the Effects grid" (tooltip-of "#zone-map-pad-cycle")))
+      (grid-tab!)
+      (ui/wait-for! #(not (ui/visible? "#pattern-strip")))
+      (is (ui/visible? "#zone-map-strip"))
+      (is (has-class? "#zone-map-chip-cycle" "zone-map-pad-dim")))
+    (testing "removed: neither"
+      (events/write-state! update-in [:chains :effect-chains] dissoc [2 1])
+      (ui/wait-for! #(not (ui/visible? "#zone-map-strip")))
+      (is (not (ui/visible? "#pattern-strip")))
+      (open-perform!)
+      (is (not (ui/visible? "#zone-map-row")))
+      (is (not (ui/visible? "#pattern-row"))))))

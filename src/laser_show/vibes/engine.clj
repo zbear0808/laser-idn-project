@@ -149,14 +149,16 @@
     state))
 
 (defn- release-pulses
-  "Every role's pulse that a press from only held (all with nil) let go."
-  [state only]
-  (reduce (fn [s role]
-            (if (or (nil? only) (= only (get-in s [:playback :pulses role :src])))
-              (pulse-release s role)
-              s))
-          state
-          [:hit :accent :flash]))
+  "Every role's pulse that a press from only held (all with nil) let go;
+   with roles, those roles' only."
+  ([state only] (release-pulses state only nil))
+  ([state only roles]
+   (reduce (fn [s role]
+             (if (or (nil? only) (= only (get-in s [:playback :pulses role :src])))
+               (pulse-release s role)
+               s))
+           state
+           (cond->> [:hit :accent :flash] roles (filter roles)))))
 
 
 ;; Entering and leaving a vibe's look: its bed and its FX set
@@ -570,17 +572,21 @@
             state)})
 
 (defn release-all
-  "Let go of every held role whose :src is only (all with nil): HIT and
-   ACCENT stop now unless they sustain, FLASH lets go, and a held VIBE
-   neither switches nor locks (:vibe/release-all). The pulses those
-   presses held, and those of presses that played nothing, are let go too."
-  [state {:keys [only] :as event}]
+  "Let go of every held role whose :src is only (all with nil), and with
+   :roles (a set) only those roles: HIT and ACCENT stop now unless they
+   sustain, FLASH lets go, and a held VIBE neither switches nor locks
+   (:vibe/release-all; :roles is the trigger runtime's, for the keys of an
+   input that can't send their releases any more, events/handlers/
+   triggers.clj). The pulses those presses held, and those of presses that
+   played nothing, are let go too."
+  [state {:keys [only roles] :as event}]
   (let [t (event-time event)
-        roles (sort-by #(= :flash %)
-                       (for [[role {:keys [src]}] (get-in state [:vibe-runtime :held])
-                             :when (or (nil? only) (= only src))]
-                         role))]
-    {:state (reduce #(let-go-of-hold %1 %2 t) (release-pulses state only) roles)}))
+        roles-held (sort-by #(= :flash %)
+                            (for [[role {:keys [src]}] (get-in state [:vibe-runtime :held])
+                                  :when (and (or (nil? only) (= only src))
+                                             (or (nil? roles) (contains? roles role)))]
+                              role))]
+    {:state (reduce #(let-go-of-hold %1 %2 t) (release-pulses state only roles) roles-held)}))
 
 (defn release-unbound
   "state with each role a key holds (:src :input: the engine's hold, or the

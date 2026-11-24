@@ -19,7 +19,6 @@
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
-            [laser-show.animation.chains :as chains]
             [laser-show.subs :as subs]
             [laser-show.events.core :as events]
             [laser-show.routing.zone-patterns :as zone-patterns]
@@ -79,11 +78,12 @@
 
 (defn effects-label
   "Display text for an effects cell, as a cue cell's: the custom name if set,
-   otherwise the first effect, plus \"+n\" for the others."
-  [{:keys [name first-effect-id effect-count]}]
+   otherwise the first effect, plus \"+n\" for the others; \"Groups only\"
+   for a cell that holds groups and no effect."
+  [{:keys [name first-effect-id effect-count has-content?]}]
   (cond
     (seq name) name
-    (nil? first-effect-id) ""
+    (nil? first-effect-id) (if has-content? "Groups only" "")
     (= effect-count 1) (effect-text first-effect-id)
     :else (str (effect-text first-effect-id) " +" (dec effect-count))))
 
@@ -109,9 +109,11 @@
    - :display-data - Map with cell state (:active?, :has-content?, :selected?)
    - :size - [width height] of the cell (default [80 60])
    - :font-size - Optional size in px of its label (default: the stylesheet's)
-   - :on-click - Event map for click handling
+   - :on-click - Event map for a single primary click (augmented with :col,
+     :row only: its handler reads what the cell holds when it handles it)
    - :on-right-click - Event map for right-click (augmented with :col, :row)
-   - :drag-config - Map with :drag-type and :on-drop event
+   - :drag-config - Map with :drag-type and :on-drop event; without it the
+     cell has no drag handlers at all (the Vibes picker's)
    - :label-fn - Function (fn [display-data] -> string)
    - :tooltip-fn - Optional (fn [display-data] -> string or nil): the cell's
      tooltip, on the label that carries its context menu
@@ -123,7 +125,7 @@
     :col 0 :row 0
     :cell-type :grid
     :display-data {:active? true :has-content? true}
-    :on-click {:event/type :grid/cell-clicked}
+    :on-click {:event/type :grid/trigger-cell}
     :on-right-click {:event/type :cue-chain/open-editor}
     :drag-config {:drag-type :grid-cell
                   :on-drop {:event/type :grid/move-cell}}
@@ -137,7 +139,6 @@
         label-text (label-fn display-data)
         tooltip-text (when tooltip-fn (tooltip-fn display-data))
         style-classes (build-style-classes cell-type display-data)
-        ;; Create drag handlers with current values (re-created on each render)
         drag-type (:drag-type drag-config)
         on-drop (:on-drop drag-config)
         has-context-menu? (boolean (seq context-menu-items))
@@ -173,29 +174,7 @@
 
                                       ;; Single left-click: dispatch click event (trigger / select)
                                       (= button MouseButton/PRIMARY)
-                                      (events/dispatch! (assoc on-click
-                                                               :col col :row row
-                                                               :has-content? has-content?)))))
-
-              ;; Drag handlers - use inline handlers that are re-created on each render
-              ;; This ensures has-content? and other values are always current
-              :on-drag-detected (when drag-config
-                                  (drag-drop/make-drag-detected-handler
-                                   {:drag-type drag-type
-                                    :col col
-                                    :row row
-                                    :has-content? has-content?}))
-
-              :on-drag-over (when drag-config
-                              (drag-drop/make-drag-over-handler
-                               {:drag-type drag-type}))
-
-              :on-drag-dropped (when drag-config
-                                 (drag-drop/make-drag-dropped-handler
-                                  {:drag-type drag-type
-                                   :col col
-                                   :row row
-                                   :on-drop on-drop}))
+                                      (events/dispatch! (assoc on-click :col col :row row)))))
 
               :children (filterv some?
                                  [{:fx/type :v-box
@@ -230,7 +209,26 @@
                                                                                  :id (format "%s-cell-warning-%d-%d" (name cell-type) col row)
                                                                                  :text "⚠"
                                                                                  :style-class "grid-cell-warning-indicator"})])})])}
-                                  badge])}]
+                                  badge])}
+        ;; The drag's four handlers on the one node, or none (cljfx can't take
+        ;; a nil handler): the cell starts a drag only while it holds
+        ;; something, and takes a drop and ends its own drag either way.
+        ;; Re-created each render, so they have current values.
+        node (cond-> node
+               drag-config
+               (assoc :on-drag-detected (drag-drop/make-drag-detected-handler
+                                         {:drag-type drag-type
+                                          :col col
+                                          :row row
+                                          :has-content? has-content?})
+                      :on-drag-done (drag-drop/make-drag-done-handler)
+                      :on-drag-over (drag-drop/make-drag-over-handler
+                                     {:drag-type drag-type})
+                      :on-drag-dropped (drag-drop/make-drag-dropped-handler
+                                        {:drag-type drag-type
+                                         :col col
+                                         :row row
+                                         :on-drop on-drop})))]
     (if has-context-menu?
       (cond-> {:fx/type :label
                :content-display :graphic-only
@@ -293,15 +291,12 @@
    - Drop on cell: Move cell content"
   [{:keys [fx/context col row size font-size]}]
   (let [display-data (fx/sub-ctx context subs/cell-display-data col row)
-        trigger-map (fx/sub-ctx context subs/input-trigger-map)
-        learning-target (fx/sub-ctx context subs/input-learning-target)
+        ;; The show a Learn starts in (reactivity plan 24)
+        document-id (fx/sub-ctx context subs/document-id)
         has-content? (:has-content? display-data)
         timeline? (:timeline? display-data)
-        has-trigger? (boolean (some (fn [[_ v]]
-                                      (and (= (:type v) :trigger-cue)
-                                           (= (:target v) [col row])))
-                                    trigger-map))
-        learning? (= learning-target {:type :trigger-cue :target [col row]})
+        has-trigger? (fx/sub-ctx context subs/cell-has-trigger? :trigger-cue col row)
+        learning? (fx/sub-ctx context subs/cell-learning? :trigger-cue col row)
         ;; In play while Stop blacks the output out: held, not playing
         held? (and (:active? display-data) (fx/sub-ctx context subs/output-held?))
         ;; Too heavy for a laser, while it plays (zones plan Z3)
@@ -356,11 +351,14 @@
                                      (if learning?
                                        {:fx/type :menu-item
                                         :text "Cancel Learning Trigger"
-                                        :on-action {:event/type :input/cancel-learn}}
+                                        ;; Only the cell that waits reads the attempt its Cancel names
+                                        :on-action (merge {:event/type :input/cancel-learn}
+                                                          (fx/sub-ctx context subs/learn-for-target {:type :trigger-cue :target [col row]}))}
                                        {:fx/type :menu-item
                                         :text "Learn Trigger..."
                                         :on-action {:event/type :input/start-learn
-                                                    :target-action {:type :trigger-cue :target [col row]}}})
+                                                    :target-action {:type :trigger-cue :target [col row]}
+                                                    :document-id document-id}})
                                      (when has-trigger?
                                        {:fx/type :menu-item
                                         :text "Clear Triggers"
@@ -381,7 +379,7 @@
      :font-size font-size
      :cell-type :grid
      :display-data cell-display-data
-     :on-click {:event/type :grid/cell-clicked}
+     :on-click {:event/type :grid/trigger-cell}
      :on-right-click open-editor-event
      :drag-config {:drag-type :grid-cell
                    :on-drop {:event/type :grid/move-cell}}
@@ -442,11 +440,11 @@
                  :on-action {:event/type :zone-patterns/new-cell :col col :row row :style :map-cycle}})})
 
 (defn- effect-lines
-  "An effects cell's tooltip lines when it holds a zone pattern or a Map
-   cycle (zones plan Z5): each effect in chain order, those two saying what
-   they do; nil otherwise."
+  "An effects cell's tooltip lines when it stores a zone pattern or a Map
+   cycle (zones plan Z5), on or off: each effect it stores in chain order
+   (subs/stored-effect-cell), those two saying what they do; nil otherwise."
   [context col row]
-  (let [effects (chains/flatten-chain (:items (fx/sub-ctx context subs/effect-cell-chain col row)))]
+  (let [effects (:leaves (fx/sub-ctx context subs/stored-effect-cell col row))]
     (when (some #(contains? zone-patterns/zone-stage-ids (:effect-id %)) effects)
       (let [names (fx/sub-ctx context subs/names-ctx)
             zone-maps (fx/sub-val context :zone-maps)]
@@ -473,17 +471,16 @@
    - Drop on cell: Move effects"
   [{:keys [fx/context col row size font-size]}]
   (let [display-data (fx/sub-ctx context subs/effect-cell-display-data col row)
-        trigger-map (fx/sub-ctx context subs/input-trigger-map)
-        learning-target (fx/sub-ctx context subs/input-learning-target)
+        ;; The show a Learn starts in (reactivity plan 24)
+        document-id (fx/sub-ctx context subs/document-id)
         has-effects? (:has-effects? display-data)
-        has-trigger? (boolean (some (fn [[_ v]]
-                                      (and (= (:type v) :trigger-effect)
-                                           (= (:target v) [col row])))
-                                    trigger-map))
-        learning? (= learning-target {:type :trigger-effect :target [col row]})
+        ;; Holds anything (effects or groups, on or off): not a slot to fill
+        has-content? (:has-content? display-data)
+        has-trigger? (fx/sub-ctx context subs/cell-has-trigger? :trigger-effect col row)
+        learning? (fx/sub-ctx context subs/cell-learning? :trigger-effect col row)
         adapted-data {:active? (:active? display-data)
                       :selected? (:selected? display-data)
-                      :has-content? has-effects?
+                      :has-content? has-content?
                       :effect-count (:effect-count display-data)
                       :first-effect-id (:first-effect-id display-data)
                       :effect-ids (:effect-ids display-data)
@@ -503,19 +500,22 @@
                                      {:fx/type :menu-item
                                       :text "Edit Effect Chain..."
                                       :on-action {:event/type :effect-chain/open-editor :col col :row row}}
-                                     (when-not has-effects?
+                                     (when-not has-content?
                                        (new-reaction-menu col row))
-                                     (when-not has-effects?
+                                     (when-not has-content?
                                        (new-zone-pattern-menu col row))
                                      {:fx/type :separator-menu-item}
                                      (if learning?
                                        {:fx/type :menu-item
                                         :text "Cancel Learning Trigger"
-                                        :on-action {:event/type :input/cancel-learn}}
+                                        ;; Only the cell that waits reads the attempt its Cancel names
+                                        :on-action (merge {:event/type :input/cancel-learn}
+                                                          (fx/sub-ctx context subs/learn-for-target {:type :trigger-effect :target [col row]}))}
                                        {:fx/type :menu-item
                                         :text "Learn Trigger..."
                                         :on-action {:event/type :input/start-learn
-                                                    :target-action {:type :trigger-effect :target [col row]}}})
+                                                    :target-action {:type :trigger-effect :target [col row]}
+                                                    :document-id document-id}})
                                      (when has-trigger?
                                        {:fx/type :menu-item
                                         :text "Clear Triggers"

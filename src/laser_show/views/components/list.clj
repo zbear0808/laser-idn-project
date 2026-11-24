@@ -19,6 +19,8 @@
    Required props:
    - :on-change-event + :on-change-params - Event to dispatch when items change
    - :items-path - Path to items in state (for handlers to read current items)
+   With :component-id they are the list's command address: its keys, clicks
+   and drops act on the list it shows when they come (list-address).
    What a list copies and pastes comes from its :component-id
    (state.clipboard/list-type).
    
@@ -45,9 +47,12 @@
 ;; State Access Helpers
 
 (defn- get-ui-state
-  "Get the list-ui state for a component."
+  "The list-ui state of component-id in the app map as it is now
+   (state/get-raw-state): for a callback, read when its input comes. A
+   snapshot, no subscription: the list's render subscribes through its
+   context (subs/list-ui-state)."
   [component-id]
-  (state/get-in-state [:list-ui component-id]))
+  (get-in (state/get-raw-state) [:list-ui component-id]))
 
 (defn- get-selected-ids
   "Get selected IDs set from component state."
@@ -55,27 +60,29 @@
   (or (:selected-ids (get-ui-state component-id)) #{}))
 
 
-;; The list's latest props, for its key filter and its row clicks, which
-;; JavaFX calls between renders (keyboard plan 03, D7 A). One writer,
-;; list-sidebar, each render, with :ordered-ids; the entry goes when the
-;; list editor's node does. FX thread only; not app state.
+;; The list's command address: which list a key, click or drop is for,
+;; {:component-id :items-path :on-change-event :on-change-params}. It is the
+;; list editor's :user-data, which each render sets. The listeners are
+;; installed once, on nodes a later render can give to another list (the
+;; Effects editor shows another cell in the same nodes, the item effects
+;; list another preset's effects), so they read it when the input comes
+;; (reactivity plan 04).
 
-(defonce ^:private !component-handler-props (atom {}))
+(defn- list-address
+  "The command address of the list editor node is in, or is: as the last
+   render set it. nil when node is in no list."
+  [^javafx.scene.Node node]
+  (loop [^javafx.scene.Node n node]
+    (when n
+      (or (::address (.getUserData n))
+          (recur (.getParent n))))))
 
-(defn- update-props-atom!
-  "Keep props as component-id's latest."
-  [component-id props]
-  (swap! !component-handler-props assoc component-id props))
-
-(defn- remove-props-atom!
-  "Forget component-id's props: its list editor is gone."
-  [component-id]
-  (swap! !component-handler-props dissoc component-id))
-
-(defn- get-handler-props
-  "component-id's latest props, or nil while it has no list on screen."
-  [component-id]
-  (get @!component-handler-props component-id))
+(defn- event-address
+  "The command address of the list the source of e is in when e comes."
+  [^javafx.event.Event e]
+  (let [source (.getSource e)]
+    (when (instance? javafx.scene.Node source)
+      (list-address source))))
 
 
 ;; JavaFX Event Handler Helper
@@ -93,25 +100,21 @@
   "Handle selection based on click modifiers.
    Dispatches selection event to handler to resolve directly from application state.
    Supports single click, Ctrl+click toggle, Shift+click range, and Ctrl+Shift+click range add."
-  ([component-id item-id ctrl? shift? items-path]
-   (handle-selection! component-id item-id ctrl? shift? items-path nil))
-  ([component-id item-id ctrl? shift? items-path all-ids]
-   (let [mode (cond
-                (and ctrl? shift?) :ctrl-shift
-                shift? :shift
-                ctrl? :ctrl
-                :else :single)]
-     (events/dispatch!
-      (u/->map& component-id item-id mode items-path all-ids
-                :event/type :list/select-item)))))
+  [component-id item-id ctrl? shift? items-path]
+  (let [mode (cond
+               (and ctrl? shift?) :ctrl-shift
+               shift? :shift
+               ctrl? :ctrl
+               :else :single)]
+    (events/dispatch!
+     (u/->map& component-id item-id mode items-path
+               :event/type :list/select-item))))
 
 (defn- select-all!
   "Select all items in the component by delegating to event handler with items-path."
-  ([component-id items-path]
-   (select-all! component-id items-path nil))
-  ([component-id items-path all-ids]
-   (events/dispatch! (u/->map& component-id items-path all-ids
-                               :event/type :list/select-all))))
+  [component-id items-path]
+  (events/dispatch! (u/->map& component-id items-path
+                              :event/type :list/select-all)))
 
 (defn- clear-selection!
   "Clear selection and cancel rename."
@@ -121,12 +124,13 @@
 
 
 ;; Item Operations - All dispatch events to handlers/list.clj
-;; Handlers read items from state using :items-path to avoid stale closures
+;; Handlers read items from state using :items-path to avoid stale closures.
+;; Each takes the list's command address (list-address).
 
 (defn- dispatch-delete-selected!
   "Dispatch :list/delete-selected event."
-  [props]
-  (let [{:keys [component-id items-path on-change-event on-change-params]} props]
+  [address]
+  (let [{:keys [component-id items-path on-change-event on-change-params]} address]
     (events/dispatch! {:event/type :list/delete-selected
                        :component-id component-id
                        :items-path items-path
@@ -135,16 +139,16 @@
 
 (defn- dispatch-copy-selected!
   "Dispatch :list/copy-selected event."
-  [props]
-  (let [{:keys [component-id items-path]} props]
+  [address]
+  (let [{:keys [component-id items-path]} address]
     (events/dispatch! {:event/type :list/copy-selected
                        :component-id component-id
                        :items-path items-path})))
 
 (defn- dispatch-cut-selected!
   "Dispatch :list/cut-selected event: copy and delete in one step."
-  [props]
-  (let [{:keys [component-id items-path on-change-event on-change-params]} props]
+  [address]
+  (let [{:keys [component-id items-path on-change-event on-change-params]} address]
     (events/dispatch! {:event/type :list/cut-selected
                        :component-id component-id
                        :items-path items-path
@@ -153,8 +157,8 @@
 
 (defn- dispatch-paste-items!
   "Dispatch :list/paste-items event."
-  [props]
-  (let [{:keys [component-id items-path on-change-event on-change-params]} props]
+  [address]
+  (let [{:keys [component-id items-path on-change-event on-change-params]} address]
     (events/dispatch! {:event/type :list/paste-items
                        :component-id component-id
                        :items-path items-path
@@ -166,8 +170,8 @@
 
 (defn- dispatch-create-empty-group!
   "Dispatch :list/create-empty-group event."
-  [props]
-  (let [{:keys [component-id items-path on-change-event on-change-params]} props]
+  [address]
+  (let [{:keys [component-id items-path on-change-event on-change-params]} address]
     (events/dispatch! {:event/type :list/create-empty-group
                        :component-id component-id
                        :items-path items-path
@@ -176,8 +180,8 @@
 
 (defn- dispatch-group-selected!
   "Dispatch :list/group-selected event."
-  [props]
-  (let [{:keys [component-id items-path on-change-event on-change-params]} props]
+  [address]
+  (let [{:keys [component-id items-path on-change-event on-change-params]} address]
     (events/dispatch! {:event/type :list/group-selected
                        :component-id component-id
                        :items-path items-path
@@ -186,8 +190,8 @@
 
 (defn- dispatch-ungroup!
   "Dispatch :list/ungroup event."
-  [props group-id]
-  (let [{:keys [component-id items-path on-change-event on-change-params]} props]
+  [address group-id]
+  (let [{:keys [component-id items-path on-change-event on-change-params]} address]
     (events/dispatch! {:event/type :list/ungroup
                        :component-id component-id
                        :items-path items-path
@@ -197,8 +201,8 @@
 
 (defn- dispatch-toggle-collapse!
   "Dispatch :list/toggle-collapse event."
-  [props group-id]
-  (let [{:keys [items-path on-change-event on-change-params]} props]
+  [address group-id]
+  (let [{:keys [items-path on-change-event on-change-params]} address]
     (events/dispatch! {:event/type :list/toggle-collapse
                        :items-path items-path
                        :item-id group-id
@@ -222,8 +226,8 @@
 
 (defn- dispatch-commit-rename!
   "Dispatch :list/commit-rename event."
-  [props item-id new-name]
-  (let [{:keys [component-id items-path on-change-event on-change-params]} props]
+  [address item-id new-name]
+  (let [{:keys [component-id items-path on-change-event on-change-params]} address]
     (events/dispatch! {:event/type :list/commit-rename
                        :component-id component-id
                        :items-path items-path
@@ -234,8 +238,8 @@
 
 (defn- dispatch-set-enabled!
   "Dispatch :list/set-enabled event."
-  [props item-id enabled?]
-  (let [{:keys [items-path on-change-event on-change-params]} props]
+  [address item-id enabled?]
+  (let [{:keys [items-path on-change-event on-change-params]} address]
     (events/dispatch! {:event/type :list/set-enabled
                        :items-path items-path
                        :item-id item-id
@@ -324,43 +328,80 @@
 ;; Shared UI Helpers - Click Handler
 
 (defn- setup-click-handler!
-  "Setup click handler on a node for selection and double-click rename."
-  [^javafx.scene.Node node component-id item-id items-path]
+  "Setup click handler on a node for selection and double-click rename, in
+   the list the node is in when the click comes (list-address)."
+  [^javafx.scene.Node node item-id]
   (.setOnMouseClicked node
                       (on-fx-event
                        (fn [event]
-                         (let [button (.getButton event)
-                               click-count (.getClickCount event)
-                               ctrl? (or (.isShortcutDown event) (.isControlDown event))
-                               shift? (.isShiftDown event)
-                               dynamic-props (get-handler-props component-id)
-                               effective-path (or items-path (:items-path dynamic-props))
-                               all-ids (:ordered-ids dynamic-props)
-                               selected-ids (get-selected-ids component-id)]
-                           (cond
-                             (= button MouseButton/PRIMARY)
-                             (do
-                               (if (= click-count 2)
-                                 (start-rename! component-id item-id)
-                                 (handle-selection! component-id item-id ctrl? shift? effective-path all-ids))
-                               (request-list-focus! node)
-                               (.consume event))
+                         (when-let [{:keys [component-id items-path]} (list-address node)]
+                           (let [button (.getButton event)
+                                 click-count (.getClickCount event)
+                                 ctrl? (or (.isShortcutDown event) (.isControlDown event))
+                                 shift? (.isShiftDown event)]
+                             (cond
+                               (= button MouseButton/PRIMARY)
+                               (do
+                                 (if (= click-count 2)
+                                   (start-rename! component-id item-id)
+                                   (handle-selection! component-id item-id ctrl? shift? items-path))
+                                 (request-list-focus! node)
+                                 (.consume event))
 
-                             (= button MouseButton/SECONDARY)
-                             (do
-                               ;; If item not already selected, select it on right-click
-                               (when-not (contains? (or selected-ids #{}) item-id)
-                                 (handle-selection! component-id item-id false false effective-path all-ids))
-                               (request-list-focus! node))))))))
+                               (= button MouseButton/SECONDARY)
+                               (do
+                                 ;; If item not already selected, select it on right-click
+                                 (when-not (contains? (get-selected-ids component-id) item-id)
+                                   (handle-selection! component-id item-id false false items-path))
+                                 (request-list-focus! node)))))))))
+
+
+;; The toolbars' buttons: each acts on the list it is in when it's clicked
+;; (event-address), with one handler the same every render
+
+(defn- list-action
+  "An :on-action handler doing (dispatch! address) for the list its button
+   is in when it's clicked."
+  [dispatch!]
+  (fn [e]
+    (when-let [address (event-address e)]
+      (dispatch! address))))
+
+(def ^:private copy-action (list-action dispatch-copy-selected!))
+(def ^:private cut-action (list-action dispatch-cut-selected!))
+(def ^:private paste-action (list-action dispatch-paste-items!))
+(def ^:private delete-action (list-action dispatch-delete-selected!))
+(def ^:private new-group-action (list-action dispatch-create-empty-group!))
+(def ^:private group-action (list-action dispatch-group-selected!))
+
+(defn- enable-action
+  "The :on-action of item-id's On box: the item on or off as the box is
+   now, in the list it is in then."
+  [item-id]
+  (fn [^javafx.event.ActionEvent e]
+    (when-let [address (event-address e)]
+      (dispatch-set-enabled! address item-id (.isSelected ^javafx.scene.control.CheckBox (.getSource e))))))
 
 
 ;; Shared UI Helpers - Rename Text Field
 
+(defn- cancel-rename-in!
+  "Cancel rename mode in the list node is in, if it is in one."
+  [node]
+  (some-> (list-address node) :component-id cancel-rename!))
+
 (defn- rename-text-field
-  "Create a text field for inline renaming with auto-focus and select-all."
-  [{:keys [component-id props item-id current-name style-class]}]
+  "A text field for inline renaming, focused with its text selected. Its
+   Enter, Escape and losing the focus act on the list it is in then
+   (list-address)."
+  [{:keys [item-id current-name style-class]}]
   {:fx/type fx/ext-on-instance-lifecycle
    :on-created (fn [^javafx.scene.control.TextField node]
+                 (.addListener (.focusedProperty node)
+                               (reify javafx.beans.value.ChangeListener
+                                 (changed [_ _ _ focused?]
+                                   (when-not focused?
+                                     (cancel-rename-in! node)))))
                  (javafx.application.Platform/runLater
                   (fn []
                     (.requestFocus node)
@@ -369,31 +410,84 @@
           :text (or current-name "Untitled")
           :style-class style-class
           :on-action (fn [^javafx.event.ActionEvent e]
-                       (dispatch-commit-rename! props item-id
-                                                (.getText ^javafx.scene.control.TextField (.getSource e))))
+                       (when-let [address (event-address e)]
+                         (dispatch-commit-rename! address item-id
+                                                  (.getText ^javafx.scene.control.TextField (.getSource e)))))
           :on-key-pressed (fn [^javafx.scene.input.KeyEvent e]
                             (when (= (.getCode e) javafx.scene.input.KeyCode/ESCAPE)
-                              (cancel-rename! component-id)))
-          :on-focused-changed (fn [focused?]
-                                (when-not focused?
-                                  (cancel-rename! component-id)))}})
+                              (cancel-rename-in! (.getSource e))))}})
+
+
+;; Labels and menus: a function, or [f & args], a top-level function and
+;; plain data, which stays equal from render to render as a closure made in
+;; a render doesn't (reactivity plan 34)
+
+(defn- call-spec
+  "(f x) for spec f, a function; for [f & args], (apply f (conj args x))."
+  [spec x]
+  (if (vector? spec)
+    (apply (first spec) (conj (subvec spec 1) x))
+    (spec x)))
+
+(defn- row-text
+  "What item's row says, from labels (the list editor's label props): a
+   group's :get-group-label, else its name; an item's :get-item-label, else
+   its :name, its registry entry's (:item-registry-fn of its :item-id-key)
+   or :fallback-label."
+  [{:keys [get-item-label get-group-label item-id-key item-registry-fn fallback-label]} item]
+  (if (chains/group? item)
+    (if get-group-label (call-spec get-group-label item) (or (:name item) "Group"))
+    (cond
+      get-item-label (call-spec get-item-label item)
+      (and item-id-key item-registry-fn) (or (:name item)
+                                             (:name (item-registry-fn (get item item-id-key)))
+                                             fallback-label)
+      :else (or (:name item) fallback-label))))
+
+
+;; A row's ui state: the list's selection, drag and rename as far as they
+;; concern the row and, for a group, the rows inside it, so a change for
+;; another row leaves its description as it was
+
+(defn- list-ui
+  "The list's :list-ui entry as rows take it: {:selected :dragging (sets of
+   ids) :drop [id position] :renaming id}."
+  [{:keys [selected-ids dragging-ids drop-target-id drop-position renaming-id]}]
+  {:selected (set selected-ids)
+   :dragging (set dragging-ids)
+   :drop (when (some? drop-target-id) [drop-target-id drop-position])
+   :renaming renaming-id})
+
+(defn- row-ids
+  "item's id and, for a group, every id inside it."
+  [item]
+  (into #{(:id item)} (mapcat row-ids) (when (chains/group? item) (:items item))))
+
+(defn- ui-within
+  "ui (list-ui's, or a part of it) for the rows of ids: each key only when
+   it concerns one of them."
+  [{:keys [selected dragging drop renaming]} ids]
+  (cond-> {}
+    (some ids selected) (assoc :selected (into #{} (filter ids) selected))
+    (some ids dragging) (assoc :dragging (into #{} (filter ids) dragging))
+    (and drop (contains? ids (first drop))) (assoc :drop drop)
+    (and (some? renaming) (contains? ids renaming)) (assoc :renaming renaming)))
 
 
 ;; Group Header Component
 
 (defn- group-header
   "Header for a group showing collapse toggle, name, and item count."
-  [{:keys [component-id items props group depth selected? dragging?
-           drop-target-id drop-position renaming? parent-disabled?]}]
+  [{:keys [group label depth selected? dragging? drop-position renaming? parent-disabled?
+           show-enable-toggle? menus]}]
   (let [group-id (:id group)
         enabled? (:enabled? group true)
         effectively-disabled? (or (not enabled?) parent-disabled?)
         collapsed? (:collapsed? group false)
         item-count (chains/count-items-recursive (:items group []))
-        drop-target? (= group-id drop-target-id)
-        drop-before? (and drop-target? (= drop-position :before))
-        drop-into? (and drop-target? (= drop-position :into))
-        drop-after? (and drop-target? (= drop-position :after))
+        drop-before? (= drop-position :before)
+        drop-into? (= drop-position :into)
+        drop-after? (= drop-position :after)
 
         header-classes (group-header-style-classes
                         (u/->map depth selected? dragging? drop-before? drop-into? drop-after? effectively-disabled?))
@@ -401,10 +495,10 @@
                       (u/->map depth selected? effectively-disabled?))
         header-node {:fx/type fx/ext-on-instance-lifecycle
                      :on-created (fn [node]
-                                   (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
-                                     (dnd/setup-drag-source! node group-id component-id (:items-path props))
-                                     (dnd/setup-drag-target! node group-id true component-id drop-props)
-                                     (setup-click-handler! node component-id group-id (:items-path props))))
+                                   (let [address #(list-address node)]
+                                     (dnd/setup-drag-source! node group-id address)
+                                     (dnd/setup-drag-target! node group-id true address)
+                                     (setup-click-handler! node group-id)))
                      :desc {:fx/type :h-box
                             :style-class header-classes
                             :alignment :center-left
@@ -417,25 +511,20 @@
                                                   :style-class "group-collapse-icon"}
                                         :style-class "group-collapse-btn"
                                         :tooltip {:fx/type :tooltip :text (if collapsed? "Expand" "Collapse")}
-                                        :on-action (fn [_] (dispatch-toggle-collapse! props group-id))}
+                                        :on-action (fn [e] (some-> (event-address e) (dispatch-toggle-collapse! group-id)))}
 
-                                       (when (:show-enable-toggle? props true)
+                                       (when show-enable-toggle?
                                          {:fx/type :check-box
                                           :selected enabled?
-                                          :on-selected-changed (fn [new-enabled?]
-                                                                 (dispatch-set-enabled! props group-id new-enabled?))})
+                                          :on-action (enable-action group-id)})
 
                                        (if renaming?
                                          {:fx/type rename-text-field
-                                          :component-id component-id
-                                          :props props
                                           :item-id group-id
                                           :current-name (:name group)
                                           :style-class "group-name-input"}
                                          {:fx/type :label
-                                          :text (if-let [label-fn (:get-group-label props)]
-                                                  (label-fn group)
-                                                  (or (:name group) "Group"))
+                                          :text label
                                           :style-class name-classes})
 
                                        {:fx/type :label
@@ -448,10 +537,8 @@
                                         :text "⊗"
                                         :style-class "group-ungroup-btn"
                                         :tooltip {:fx/type :tooltip :text "Ungroup: keep the items, lose the group"}
-                                        :on-action (fn [_] (dispatch-ungroup! props group-id))}])}}
-        cm-fn (or (:get-group-context-menu props)
-                  (:get-context-menu props))
-        context-menu (when cm-fn (cm-fn group))]
+                                        :on-action (fn [e] (some-> (event-address e) (dispatch-ungroup! group-id)))}])}}
+        context-menu (some-> (:group menus) (call-spec group))]
     (if context-menu
       {:fx/type :label
        :content-display :graphic-only
@@ -469,18 +556,17 @@
 
 (defn- list-item-card
   "A single item in the list with drag-and-drop support."
-  [{:keys [component-id items props item item-label depth selected? dragging?
-           drop-target-id drop-position renaming? parent-disabled?]}]
+  [{:keys [item label depth selected? dragging? drop-position renaming? parent-disabled?
+           show-enable-toggle? menus]}]
   (let [item-id (:id item)
         enabled? (:enabled? item true)
         effectively-disabled? (or (not enabled?) parent-disabled?)
-        drop-target? (= item-id drop-target-id)
 
         item-classes (list-item-style-classes
                       {:depth depth
                        :selected? selected?
                        :dragging? dragging?
-                       :drop-target? drop-target?
+                       :drop-target? (some? drop-position)
                        :drop-position drop-position
                        :effectively-disabled? effectively-disabled?})
         name-classes (list-item-name-style-classes
@@ -488,32 +574,28 @@
                        :effectively-disabled? effectively-disabled?})
         card-node {:fx/type fx/ext-on-instance-lifecycle
                    :on-created (fn [node]
-                                 (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
-                                   (dnd/setup-drag-source! node item-id component-id (:items-path props))
-                                   (dnd/setup-drag-target! node item-id false component-id drop-props)
-                                   (setup-click-handler! node component-id item-id (:items-path props))))
+                                 (let [address #(list-address node)]
+                                   (dnd/setup-drag-source! node item-id address)
+                                   (dnd/setup-drag-target! node item-id false address)
+                                   (setup-click-handler! node item-id)))
                    :desc {:fx/type :h-box
                           :style-class item-classes
                           :children (filterv
                                      some?
-                                     [(when (:show-enable-toggle? props true)
+                                     [(when show-enable-toggle?
                                         {:fx/type :check-box
                                          :selected enabled?
-                                         :on-selected-changed (fn [new-enabled?]
-                                                                (dispatch-set-enabled! props item-id new-enabled?))})
+                                         :on-action (enable-action item-id)})
 
-                                     (if renaming?
-                                       {:fx/type rename-text-field
-                                        :component-id component-id
-                                        :props props
-                                        :item-id item-id
-                                        :current-name item-label
-                                        :style-class "list-item-name-input"}
-                                       {:fx/type :label
-                                        :text (or item-label "Unknown")
-                                        :style-class name-classes})])}}
-        context-menu (when-let [cm-fn (:get-context-menu props)]
-                       (cm-fn item))]
+                                      (if renaming?
+                                        {:fx/type rename-text-field
+                                         :item-id item-id
+                                         :current-name label
+                                         :style-class "list-item-name-input"}
+                                        {:fx/type :label
+                                         :text (or label "Unknown")
+                                         :style-class name-classes})])}}
+        context-menu (some-> (:item menus) (call-spec item))]
     (if context-menu
       {:fx/type :label
        :content-display :graphic-only
@@ -527,51 +609,65 @@
 
 ;; Recursive List Item Renderer
 
+(declare render-list-item)
+
+(defn- row
+  "The description of item's row (render-list-item): what the row shows,
+   so a change to another row leaves it equal, keyed by the item's id, so
+   an insert or a reorder keeps the rows' nodes. From the list's :labels,
+   :ui (list-ui's, or the part of it for the rows around),
+   :show-enable-toggle? and :menus, and the row's :depth and
+   :parent-disabled?."
+  [{:keys [labels ui show-enable-toggle? menus depth parent-disabled?]} item]
+  (cond-> {:fx/type render-list-item
+           :fx/key (:id item)
+           :item item
+           :depth depth
+           :parent-disabled? parent-disabled?
+           :label (row-text labels item)
+           :ui (ui-within ui (row-ids item))
+           :show-enable-toggle? show-enable-toggle?
+           :menus menus}
+    ;; A group's rows show its items' labels
+    (chains/group? item) (assoc :labels labels)))
+
 (defn- render-list-item
-  "Recursively render a list item (leaf item or group)."
-  [{:keys [component-id items props item depth selected-ids dragging-ids
-           drop-target-id drop-position renaming-id parent-disabled? get-item-label]}]
+  "A row (row's props): an item's card, or a group's header with its
+   items' rows under it unless it is collapsed, those disabled with it."
+  [{:keys [item depth parent-disabled? label ui show-enable-toggle? menus labels]}]
   (let [item-id (:id item)
-        selected? (contains? (or selected-ids #{}) item-id)
-        dragging? (contains? (or dragging-ids #{}) item-id)
-        common-props (u/->map component-id items props depth selected? dragging?
-                              drop-target-id drop-position parent-disabled?)]
+        {:keys [selected dragging drop renaming]} ui
+        own {:depth depth
+             :label label
+             :selected? (contains? selected item-id)
+             :dragging? (contains? dragging item-id)
+             :drop-position (when (and drop (= item-id (first drop))) (second drop))
+             :renaming? (and (some? renaming) (= item-id renaming))
+             :parent-disabled? parent-disabled?
+             :show-enable-toggle? show-enable-toggle?
+             :menus menus}]
     (if (chains/group? item)
-      (let [collapsed? (:collapsed? item false)
-            children-items (:items item [])
-            enabled? (:enabled? item true)
-            effectively-disabled? (or (not enabled?) parent-disabled?)]
+      (let [rows-props {:labels labels :ui ui :show-enable-toggle? show-enable-toggle? :menus menus
+                        :depth (inc depth)
+                        :parent-disabled? (or (not (:enabled? item true)) parent-disabled?)}]
         {:fx/type :v-box
          :spacing 2
-         :children (into
-                    [(assoc common-props
-                            :fx/type group-header
-                            :fx/key [item-id :header]
-                            :group item
-                            :renaming? (= item-id renaming-id))]
-                    (when-not collapsed?
-                      (u/mapv-indexed
-                       (fn [idx child]
-                         (u/->map&
-                          component-id items props selected-ids dragging-ids drop-target-id
-                          drop-position renaming-id effectively-disabled? get-item-label
-                          :fx/type render-list-item
-                          :fx/key [(:id child) idx]
-                          :depth (inc depth)
-                          :item child))
-                       children-items)))})
-      (assoc common-props
+         :children (into [(assoc own
+                                 :fx/type group-header
+                                 :fx/key [item-id :header]
+                                 :group item)]
+                         (when-not (:collapsed? item false)
+                           (mapv #(row rows-props %) (:items item []))))})
+      (assoc own
              :fx/type list-item-card
-             :item item
-             :item-label (get-item-label item)
-             :renaming? (= item-id renaming-id)))))
+             :item item))))
 
 
 ;; Group Toolbar
 
 (defn- group-toolbar
   "Toolbar with group-related buttons."
-  [{:keys [props selection-count can-create-group?]}]
+  [{:keys [selection-count can-create-group?]}]
   {:fx/type :h-box
    :spacing 4
    :children [{:fx/type :button
@@ -580,7 +676,7 @@
                :graphic {:fx/type fa/icon :name :folder-open :size 8}
                :style-class "chain-toolbar-btn"
                :tooltip {:fx/type :tooltip :text "New empty group"}
-               :on-action (fn [_] (dispatch-create-empty-group! props))}
+               :on-action new-group-action}
               {:fx/type :button
                :id "chain-group-selection"
                :text "Group"
@@ -589,82 +685,68 @@
                :style-class "chain-toolbar-btn"
                :tooltip {:fx/type :tooltip
                          :text (str "Group the selected items (" (shortcuts/shortcut-text :g) ")")}
-               :on-action (fn [_] (dispatch-group-selected! props))}]})
+               :on-action group-action}]})
 
 
 ;; Main Sidebar Component
 
+(defn- setup-background-drop!
+  "A drop on the list's background, its empty text or the space around its
+   rows, puts the dragged items at the end of the list node is in then."
+  [node]
+  (dnd/setup-container-drop-target! node #(list-address node)))
+
 (defn- list-sidebar
   "INTERNAL: Low-level list rendering component.
    External code should use list-editor instead, which wraps this
-   with keyboard handling and proper state management.
+   with keyboard handling and proper state management. It reads the
+   list's selection, drag and rename state, and gives each row its part
+   of it (row).
    
    When :compact? is true, the header/toolbar chrome is hidden.
    When :scrollable? is false, the items VBox is rendered directly
    (parent manages scrolling)."
-  [{:keys [fx/context items get-item-label
-           header-label empty-text allow-groups?
-           component-id on-change-event on-change-params items-path
+  [{:keys [fx/context items labels menus show-enable-toggle?
+           header-label empty-text allow-groups? component-id
            compact? scrollable?]
     :or {header-label "LIST"
          empty-text "No items"
          allow-groups? true
          compact? false
-         scrollable? true}
-    :as props}]
-  (let [ordered-ids (fx/sub-ctx context subs/list-ordered-ids component-id items-path)
-        sidebar-props (assoc props :ordered-ids ordered-ids)
-        _ (update-props-atom! component-id sidebar-props)
-        ui-state (fx/sub-ctx context subs/list-ui-state component-id)
-        {:keys [selected-ids dragging-ids drop-target-id drop-position renaming-id]} ui-state
-        selection-count (count selected-ids)
+         scrollable? true}}]
+  (let [ui-state (fx/sub-ctx context subs/list-ui-state component-id)
+        selection-count (count (:selected-ids ui-state))
         chain-depth (chains/nesting-depth items)
         can-create-group? (and allow-groups? (< chain-depth chains/max-nesting-depth))
         ;; The clipboard says, for this list's type (keyboard plan D13 B,
         ;; D9 A); a list without a type pastes nothing
         list-type (clipboard/list-type component-id)
         can-paste? (and (some? list-type) (fx/sub-ctx context subs/can-paste? list-type))
+        rows-props {:labels labels
+                    :ui (list-ui ui-state)
+                    :show-enable-toggle? show-enable-toggle?
+                    :menus menus
+                    :depth 0
+                    :parent-disabled? false}
         items-vbox {:fx/type :v-box
                     :spacing 4
-                    :children (u/mapv-indexed
-                               (fn [idx item]
-                                 {:fx/type render-list-item
-                                  :fx/key [(:id item) idx]
-                                  :component-id component-id
-                                  :items items
-                                  :props sidebar-props
-                                  :item item
-                                  :depth 0
-                                  :selected-ids selected-ids
-                                  :dragging-ids dragging-ids
-                                  :drop-target-id drop-target-id
-                                  :drop-position drop-position
-                                  :renaming-id renaming-id
-                                  :parent-disabled? false
-                                  :get-item-label get-item-label})
-                               items)}
-        drop-props (select-keys sidebar-props [:on-change-event :on-change-params :items-path])
-        items-content (if (empty? items)
-                        {:fx/type fx/ext-on-instance-lifecycle
-                         :v-box/vgrow :always
-                         :on-created (fn [node]
-                                       (dnd/setup-container-drop-target! node component-id drop-props))
-                         :desc {:fx/type :label
-                                :text empty-text
-                                :style-class "chain-empty-text"}}
-                        (let [pane-desc (if scrollable?
-                                          {:fx/type :scroll-pane
-                                           :fit-to-width true
-                                           :fit-to-height false
-                                           :hbar-policy :as-needed
-                                           :style-class "scroll-pane-base"
-                                           :content items-vbox}
-                                          items-vbox)]
-                          {:fx/type fx/ext-on-instance-lifecycle
-                           :v-box/vgrow :always
-                           :on-created (fn [node]
-                                         (dnd/setup-container-drop-target! node component-id drop-props))
-                           :desc pane-desc}))]
+                    :children (mapv #(row rows-props %) items)}
+        ;; Emptying or filling the list puts a new node here: its drops too
+        items-content {:fx/type fx/ext-on-instance-lifecycle
+                       :v-box/vgrow :always
+                       :on-created setup-background-drop!
+                       :on-advanced (fn [_ node] (setup-background-drop! node))
+                       :desc (cond
+                               (empty? items) {:fx/type :label
+                                               :text empty-text
+                                               :style-class "chain-empty-text"}
+                               scrollable? {:fx/type :scroll-pane
+                                            :fit-to-width true
+                                            :fit-to-height false
+                                            :hbar-policy :as-needed
+                                            :style-class "scroll-pane-base"
+                                            :content items-vbox}
+                               :else items-vbox)}]
     {:fx/type :v-box
      :style-class "chain-sidebar"
      :children
@@ -688,7 +770,6 @@
 
         (when allow-groups?
           {:fx/type group-toolbar
-           :props sidebar-props
            :selection-count selection-count
            :can-create-group? can-create-group?})
 
@@ -702,7 +783,7 @@
                      :style-class "chain-toolbar-btn"
                      :tooltip {:fx/type :tooltip
                                :text (str "Copy the selected items (" (shortcuts/shortcut-text :c) ")")}
-                     :on-action (fn [_] (dispatch-copy-selected! sidebar-props))}
+                     :on-action copy-action}
                     {:fx/type :button
                      :id "chain-cut-selection"
                      :text "Cut"
@@ -711,7 +792,7 @@
                      :style-class "chain-toolbar-btn"
                      :tooltip {:fx/type :tooltip
                                :text (str "Cut the selected items (" (shortcuts/shortcut-text :x) ")")}
-                     :on-action (fn [_] (dispatch-cut-selected! sidebar-props))}
+                     :on-action cut-action}
                     {:fx/type :button
                      :id "chain-paste-items"
                      :text "Paste"
@@ -720,7 +801,7 @@
                      :style-class "chain-toolbar-btn"
                      :tooltip {:fx/type :tooltip
                                :text (str "Paste after the selection (" (shortcuts/shortcut-text :v) ")")}
-                     :on-action (fn [_] (dispatch-paste-items! sidebar-props))}
+                     :on-action paste-action}
                     {:fx/type :button
                                 :id "chain-delete-selection"
                                 :text "Delete"
@@ -728,21 +809,8 @@
                      :disable (zero? selection-count)
                      :style-class "chain-toolbar-btn-danger"
                      :tooltip {:fx/type :tooltip :text "Delete the selected items (Delete)"}
-                     :on-action (fn [_] (dispatch-delete-selected! sidebar-props))}]}
+                     :on-action delete-action}]}
         items-content])}))
-
-
-;; Label Function Factories
-
-(defn- make-registry-label
-  "INTERNAL: Create a get-item-label function that looks up names from a registry.
-   Always uses :name key for registry lookup since all registries use :name."
-  [id-key lookup-fn fallback]
-  (fn [item]
-    (or (:name item)
-        (:name (lookup-fn (get item id-key)))
-        fallback)))
-
 
 
 ;; Keyboard Handler Setup
@@ -750,9 +818,9 @@
 (defn- setup-keyboard-handlers!
   "Handle the list's keys while the focus is anywhere inside it (on a
    toolbar button or a row's box too), except in its rename field
-   (keys/list-key-target?). The props are read when a key comes, so they are
-   the last render's."
-  [^javafx.scene.Node node component-id]
+   (keys/list-key-target?). The list a key is for is the one node shows
+   when it comes (list-address)."
+  [^javafx.scene.Node node]
   (keys/claim-keys! node #{:delete :escape})
   (.addEventFilter
    node
@@ -762,27 +830,27 @@
       (when (keys/list-key-target? node event)
         (let [code (.getCode event)
               ctrl? (or (.isShortcutDown event) (.isControlDown event))
-              props (get-handler-props component-id)
+              {:keys [component-id items-path] :as address} (list-address node)
               handled? (cond
-                         (nil? props) false
+                         (nil? address) false
 
                          (and ctrl? (= code javafx.scene.input.KeyCode/C))
-                         (do (dispatch-copy-selected! props) true)
+                         (do (dispatch-copy-selected! address) true)
 
                          (and ctrl? (= code javafx.scene.input.KeyCode/V))
-                         (do (dispatch-paste-items! props) true)
+                         (do (dispatch-paste-items! address) true)
 
                          (and ctrl? (= code javafx.scene.input.KeyCode/X))
-                         (do (dispatch-cut-selected! props) true)
+                         (do (dispatch-cut-selected! address) true)
 
                          (and ctrl? (= code javafx.scene.input.KeyCode/A))
-                         (do (select-all! component-id (:items-path props) (:ordered-ids props)) true)
+                         (do (select-all! component-id items-path) true)
 
                          (and ctrl? (= code javafx.scene.input.KeyCode/G))
-                         (do (dispatch-group-selected! props) true)
+                         (do (dispatch-group-selected! address) true)
 
                          (= code javafx.scene.input.KeyCode/DELETE)
-                         (do (dispatch-delete-selected! props) true)
+                         (do (dispatch-delete-selected! address) true)
 
                          (= code javafx.scene.input.KeyCode/ESCAPE)
                          (do (clear-selection! component-id) true)
@@ -802,13 +870,18 @@
    read via subs/list-ui-state subscription.
    
    Props:
-   - :fx/context - cljfx context (required)
    - :items - Vector of items (required)
    - :component-id - Unique ID for state isolation (required)
    
    Label configuration (one of):
    - :get-item-label - Custom function item -> string
    - :item-id-key + :item-registry-fn - For registry lookup (always uses :name)
+   
+   Each label and menu function here (:get-item-label, :get-group-label,
+   :get-context-menu, :get-group-context-menu) is a top-level function, or
+   [f & args], called (f args... item): plain data with it, never a closure
+   made in the caller's render, so the list's description stays equal while
+   its inputs do and its rows don't render again.
    
    Event dispatch:
    - :on-change-event - Event type for items changed
@@ -822,8 +895,10 @@
    - :fallback-label - Label for unknown items (default \"Unknown\")
    - :compact? - If true, hide toolbar/header chrome (default false)
    - :scrollable? - If true, wrap items in ScrollPane (default true)
-   - :show-enable-toggle? - If false, rows have no enable checkbox (default true)"
-  [{:keys [fx/context items component-id
+   - :show-enable-toggle? - If false, rows have no enable checkbox (default true)
+   - :get-context-menu - item -> its context menu's description, or nil
+   - :get-group-context-menu - The same for a group (default :get-context-menu)"
+  [{:keys [items component-id
            get-item-label get-group-label
            get-context-menu get-group-context-menu
            item-id-key item-registry-fn
@@ -837,37 +912,27 @@
          compact? false
          scrollable? true
          show-enable-toggle? true}}]
-  (let [label-fn (cond
-                   get-item-label
-                   get-item-label
-
-                   (and item-id-key item-registry-fn)
-                   (make-registry-label item-id-key item-registry-fn fallback-label)
-
-                   :else
-                   (fn [item] (or (:name item) fallback-label)))]
-    {:fx/type fx/ext-on-instance-lifecycle
-     ;; The props the keys and clicks read are list-sidebar's, written each
-     ;; render with :ordered-ids (keyboard plan 03, D7 A); they go with the list
-     :on-created (fn [^javafx.scene.Node node]
-                   (setup-keyboard-handlers! node component-id)
-                   ;; Focus comes from a click on a row (request-list-focus!),
-                   ;; never on creation: the Cue Chain Editor has two lists
-                   (.setFocusTraversable node true))
-     :on-deleted (fn [_] (remove-props-atom! component-id))
-     :desc {:fx/type :v-box
-            :id (str "list-editor-"
-                     (str/join "-"
-                               (map #(if (keyword? %) (name %) (str %))
-                                    (if (sequential? component-id)
-                                      component-id
-                                      [component-id]))))
-            :children [(u/->map&
-                        items header-label
-                        empty-text allow-groups? component-id on-change-event on-change-params items-path
-                        compact? scrollable? get-group-label get-context-menu get-group-context-menu
-                        show-enable-toggle?
-                        :fx/type list-sidebar
-                        :fx/context context
-                        :v-box/vgrow :always
-                        :get-item-label label-fn)]}}))
+  {:fx/type fx/ext-on-instance-lifecycle
+   ;; The keys, clicks and drops installed once read the list's command
+   ;; address from the node's :user-data when they come (list-address)
+   :on-created (fn [^javafx.scene.Node node]
+                 (setup-keyboard-handlers! node)
+                 ;; Focus comes from a click on a row (request-list-focus!),
+                 ;; never on creation: the Cue Chain Editor has two lists
+                 (.setFocusTraversable node true))
+   :desc {:fx/type :v-box
+          :id (str "list-editor-"
+                   (str/join "-"
+                             (map #(if (keyword? %) (name %) (str %))
+                                  (if (sequential? component-id)
+                                    component-id
+                                    [component-id]))))
+          :user-data {::address (u/->map component-id items-path on-change-event on-change-params)}
+          :children [(u/->map&
+                      items header-label empty-text allow-groups? component-id
+                      compact? scrollable? show-enable-toggle?
+                      :fx/type list-sidebar
+                      :v-box/vgrow :always
+                      :labels (u/->map get-item-label get-group-label item-id-key item-registry-fn fallback-label)
+                      :menus {:item get-context-menu
+                              :group (or get-group-context-menu get-context-menu)})]}})

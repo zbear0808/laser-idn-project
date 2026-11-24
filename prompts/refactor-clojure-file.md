@@ -82,17 +82,17 @@ Prefer these eager versions over lazy equivalents:
 
 ### cljfx-Specific Guidelines (for UI files)
 
-- Use `fx/sub-val` for simple data access from context
-- Use `fx/sub-ctx` for computed/derived values
-- Don't return lazy sequences from subscription or component functions
+- In a component, subscribe through its **supplied `:fx/context`**. Use `fx/sub-val` for cheap, narrow lookups and `fx/sub-ctx` with stable functions and arguments for derived values. A global state helper or atom deref is not a render dependency.
+- Finish subscription reads before the function returns. Don't let a lazy sequence, event handler or timer read a captured bound context later. Children declared with `:fx/type` receive their own context; give them IDs and ordinary props, not the parent's context.
+- Keep rendering pure. A cached description may be reused without running its function. For a native listener that outlives a render, read the current target from the node's declarative `:user-data` and clean up with the node.
 - Use `fx/ext-let-refs` and `fx/ext-get-ref` for shared component instances
 - Prefer custom style classes over default JavaFX classes
 
 ### State Management
 
-- Keep state consolidated - don't create independent component state
-- Read from the main database/state atom
-- Only use local state for short-lived UI state (e.g., dialog tabs)
+- Send an event with the entity ID and the value the user changed. Resolve current data in the handler's `:state` co-effect and return `:state`/effects. Use a map as the cljfx listener or explicitly dispatch from a function listener. Extract plain values from native events on the FX thread; don't store a JavaFX event or replace an entity from a rendered snapshot.
+- Only the event pipeline writes the app database. Workers publish completion events matched to their request. Shared UI and document state belong in the database; node-local gestures and high-frequency frame/device data can stay with their owners. Services and REPL diagnostics may use `state/get-raw-state` with pure extractors.
+- See [Reactive state in this app](../docs/CLJFX_STATE_MANAGEMENT.md#reactive-state-in-this-app).
 
 ## Instructions
 

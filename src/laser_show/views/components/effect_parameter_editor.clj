@@ -12,7 +12,6 @@
    
    Usage in effect chain editor:
    {:fx/type effect-parameter-editor
-    :fx/context context
     :domain :effect-chains
     :entity-key [col row]
     :effect-path [0]               ; direct path to effect in chain
@@ -22,7 +21,6 @@
    
    Usage in cue chain editor:
    {:fx/type effect-parameter-editor
-    :fx/context context
     :domain :cue-chains
     :entity-key [col row]
     :effect-path [0]               ; path within item's :effects
@@ -59,7 +57,6 @@
   "Internal custom param renderer with keyframe-aware event routing.
    
    Props:
-   - :fx/context - cljfx context
    - :entity-key - [col row]
    - :full-effect-path - Full computed path to effect
    - :effect-def - Effect definition with :ui-hints
@@ -72,12 +69,14 @@
    - :selected-kf-idx - Selected keyframe index (used for canvas key when keyframe mode active)
    - :on-change-event - Event for parameter changes
    - :on-text-event - Event for text input changes
-   - :spatial-event-template - Event for spatial editor updates"
-  [{:keys [fx/context entity-key full-effect-path effect-def current-params
+   - :spatial-event-template - Event for spatial editor updates
+   - :modulator-event-base - Base of the modulator events, nil while
+     keyframe mode is active"
+  [{:keys [entity-key full-effect-path effect-def current-params
            ui-mode params-map dialog-data domain keyframe-enabled? selected-kf-idx
-           on-change-event on-text-event spatial-event-template on-color-change-event]}]
+           on-change-event on-text-event spatial-event-template on-color-change-event
+           modulator-event-base]}]
   {:fx/type effect-param-ui/custom-param-renderer
-   :fx/context context
    :effect-def effect-def
    :current-params current-params
    :ui-mode ui-mode
@@ -93,6 +92,7 @@
    :spatial-event-keys {:domain domain
                         :entity-key entity-key
                         :effect-path full-effect-path
+                        :effect-instance-id (:effect-instance-id on-change-event)
                         :keyframe-idx (when keyframe-enabled? selected-kf-idx)}
 
    ;; Event templates for param controls
@@ -103,10 +103,7 @@
                           :entity-key entity-key
                           :effect-path full-effect-path}
    ;; Modulator event base (disabled when keyframe mode active)
-   :modulator-event-base (when-not keyframe-enabled?
-                           {:domain domain
-                            :entity-key entity-key
-                            :effect-path full-effect-path})
+   :modulator-event-base modulator-event-base
 
    ;; RGB curves props
    :rgb-domain domain
@@ -124,18 +121,20 @@
    Works for both effect chains and cue chains.
    
    Props:
-   - :fx/context - cljfx context (required)
    - :domain - :effect-chains or :cue-chains (required)
    - :entity-key - [col row] grid coordinates (required)
    - :effect-path - Path to effect (required)
      - For effect chains: direct path like [0]
      - For cue chains: path within item's :effects like [0]
    - :item-path - Path to parent item (required for cue chains only)
+   - :owner-id - The :id of the item, clip, track or folder that owns the
+     effect (cue chains and the timeline's): with the effect's own :id, how
+     the modulator's field edits find it (reactivity plan 07)
    - :effect - The effect instance map (required)
    - :effect-def - Effect definition from registry (required)
    - :dialog-data - Dialog state data for UI modes, etc. (required)
    - :current-phase - Current playback phase for timeline preview (optional)"
-  [{:keys [fx/context domain entity-key effect-path item-path
+  [{:keys [domain entity-key effect-path item-path owner-id
            effect effect-def dialog-data current-phase]}]
   (let [;; Compute full effect path based on domain
         full-effect-path (compute-full-effect-path domain item-path effect-path)
@@ -166,17 +165,20 @@
                            :entity-key entity-key
                            :effect-path full-effect-path}
 
-        ;; Choose event types based on keyframe mode
+        ;; Choose event types based on keyframe mode; both name the instance
+        ;; (the step grid window opens on it, from Edit grid…)
         on-change-event (if keyframe-enabled?
                           {:event/type :keyframe/update-param
                            :domain domain
                            :entity-key entity-key
                            :effect-path full-effect-path
+                           :effect-instance-id (:id effect)
                            :keyframe-idx selected-kf-idx}
                           {:event/type :chain/update-param
                            :domain domain
                            :entity-key entity-key
-                           :effect-path full-effect-path})
+                           :effect-path full-effect-path
+                           :effect-instance-id (:id effect)})
 
         on-text-event (if keyframe-enabled?
                         {:event/type :keyframe/update-param
@@ -213,7 +215,14 @@
                                  {:event/type :chain/update-spatial-params
                                   :domain domain
                                   :entity-key entity-key
-                                  :effect-path full-effect-path})]
+                                  :effect-path full-effect-path})
+
+        ;; Modulator event base, none while keyframes are on: the toggle finds
+        ;; the effect at its path, the modulator's field edits by its id and
+        ;; owner's, wherever it is when they arrive (reactivity plan 07)
+        modulator-event-base (when-not keyframe-enabled?
+                               (cond-> (assoc base-event-params :effect-instance-id (:id effect))
+                                 (some? owner-id) (assoc :owner-id owner-id)))]
 
     {:fx/type :v-box
      :spacing 8
@@ -223,7 +232,6 @@
                         [;; Keyframe modulator panel (always shown for effects that could use it)
                          (when effect-def
                            {:fx/type keyframe-panel/keyframe-modulator-panel
-                            :fx/context context
                             :keyframe-modulator keyframe-mod
                             :domain domain
                             :entity-key entity-key
@@ -254,7 +262,6 @@
                                 :style-class "scroll-pane-base"
                                 :v-box/vgrow :always
                                 :content {:fx/type custom-param-renderer-internal
-                                          :fx/context context
                                           :entity-key entity-key
                                           :full-effect-path full-effect-path
                                           :effect-def effect-def
@@ -268,7 +275,8 @@
                                           :on-change-event on-change-event
                                           :on-text-event on-text-event
                                           :on-color-change-event on-color-change-event
-                                          :spatial-event-template spatial-event-template}})
+                                          :spatial-event-template spatial-event-template
+                                          :modulator-event-base modulator-event-base}})
 
                              ;; Standard parameters - use modulatable param controls
                              ;; Disable modulators when in keyframe mode (keyframes replace modulators)
@@ -283,8 +291,7 @@
                                         :on-text-event on-text-event
                                         ;; Disable per-param modulators when keyframe mode is on
                                         :enable-modulators? (not keyframe-enabled?)
-                                        :modulator-event-base (when-not keyframe-enabled?
-                                                                base-event-params)}})
+                                        :modulator-event-base modulator-event-base}})
 
                            ;; No effect selected
                            {:fx/type :label

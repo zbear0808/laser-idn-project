@@ -1,9 +1,17 @@
 (ns laser-show.ui-test.settings-test
-  "The Settings tab: its cards, the MIDI card's buttons and fields, and the
-   OSC and keyboard switches. Nothing here opens a device or a socket:
-   the connected and listening states are put in the state by hand."
+  "The Settings tab: its cards, the MIDI card's buttons and fields, the OSC
+   and keyboard switches, and each card's Identify (reactivity plan 24).
+   Nothing here opens a device or a socket:
+   the connected and listening states are put in the state by hand, or the
+   device worker (input.devices) finds a fake MIDI input or opens a stand-in
+   OSC server."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.input.devices :as devices]
+            [laser-show.input.fixtures :as input-fixtures]
+            [laser-show.input.midi :as midi]
+            [laser-show.input.osc :as osc-input]
+            [laser-show.input.router :as router]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
@@ -27,6 +35,23 @@
                                (fn [^Parent p] (seq (.getChildrenUnmodifiable p)))
                                (.getRoot (.getScene ^Node (first (ui/query-all "#osc-server-button")))))))]
     (set (keep #(when (instance? Labeled %) (ui/on-fx-thread (fn [] (.getText ^Labeled %)))) nodes))))
+
+(defn- button
+  "The button on the Settings tab whose text is text, or nil."
+  [text]
+  (ui/on-fx-thread
+   #(->> (tree-seq (fn [n] (instance? Parent n))
+                   (fn [^Parent p] (seq (.getChildrenUnmodifiable p)))
+                   (.getRoot (.getScene ^Node (first (ui/query-all "#osc-server-button")))))
+         (filter (fn [n] (and (instance? Button n) (= text (.getText ^Button n)))))
+         first)))
+
+(defn- fire!
+  "Fire the button whose text is text, as a click does. Fired, not clicked:
+   the card can be below the tab's scrolled view."
+  [text]
+  (ui/wait-for! #(some? (button text)))
+  (ui/on-fx-thread #(.fire ^Button (button text))))
 
 (defn- fill-hex
   "A region's background colour as #RRGGBB, with its CSS applied, or nil."
@@ -87,6 +112,26 @@
     (ui/assert-enabled! "#midi-disconnect-all-button")
     (is (= "#505050" (fill-hex "#midi-disconnect-all-button")) "Auto-Connect's look")))
 
+(deftest refresh-and-connect-go-through-the-device-worker-test
+  ;; The device worker lists one fake input; nothing real is opened
+  (let [pad (input-fixtures/midi-source "Pad")
+        midi-status #(get-in (state/get-raw-state) [:backend :input :midi])]
+    (with-redefs [midi/list-devices (constantly [pad])]
+      (open-settings!)
+      (fire! "Refresh")
+      (ui/wait-for! #(= ["Pad"] (:available-devices (midi-status))))
+      (testing "the input's row, with Connect"
+        (fire! "Connect")
+        (ui/wait-for! #(= #{"Pad"} (:connected-devices (midi-status))))
+        (ui/wait-for! #(some? (button "Disconnect")))
+        (is (nil? (button "Connect")) "its row's button says Disconnect now")
+        (ui/assert-enabled! "#midi-disconnect-all-button"))
+      (testing "and Disconnect closes it"
+        (fire! "Disconnect")
+        (ui/wait-for! #(empty? (:connected-devices (midi-status))))
+        (ui/wait-for! #(some? (button "Connect")))
+        (is (empty? (get-in (state/get-raw-state) [:backend :input :midi :requests])) "every request answered")))))
+
 (deftest midi-channel-filter-commits-test
   (let [robot (ui/robot)
         channels #(get-in (state/get-raw-state) [:backend :input :midi :channel-filter])]
@@ -120,3 +165,164 @@
       (ui/wait-for! #(false? (:server-running? (osc))))
       (is (false? (:enabled? (osc))))
       (ui/wait-for! #(= "Start Server" (button-text "#osc-server-button"))))))
+
+
+;; The OSC port field and Start Server (reactivity plan 09)
+
+(defn- with-fake-osc-server
+  "(f opened): f with the device worker's server stood in for at
+   osc/open-server! and close-server! (no socket), the ports opened in
+   opened. Whatever f leaves listening is stopped while they stand in."
+  [f]
+  (let [opened (atom [])]
+    (with-redefs [osc-input/open-server! (fn [port _handler] (swap! opened conj port) {::port port})
+                  osc-input/close-server! identity]
+      (try
+        (f opened)
+        (finally
+          (when (:server-running? (osc))
+            (ui/on-fx-thread #(.fire ^Button (first (ui/query-all "#osc-server-button"))))
+            (ui/wait-for! #(and (false? (:server-running? (osc))) (nil? (:osc (devices/open-ports)))))))))))
+
+(defn- port-text [] (ui/node-text "#osc-port-field"))
+
+(deftest typed-port-then-start-listens-on-it-test
+  (with-fake-osc-server
+    (fn [opened]
+      (let [robot (ui/robot)]
+        (open-settings!)
+        (ui/fill! robot "#osc-port-field" "9100")
+        (is (= 9000 (:port (osc))) "typed, not applied yet")
+        ;; A click takes the focus first: the field applies what it shows
+        ;; before the button's action
+        (ui/scroll-into-view! "#osc-server-button")
+        (ui/click! robot "#osc-server-button")
+        (ui/wait-for! #(:server-running? (osc)))
+        (is (= [9100] @opened) "the server was asked for the port typed, not the one Start was drawn with")
+        (is (= 9100 (:port (osc))))
+        (ui/wait-for! #(= "Stop Server" (button-text "#osc-server-button")))
+        (is (= "9100" (port-text)))
+        (is (not (ui/enabled? "#osc-port-field")) "listening: the port can't be edited")))))
+
+(deftest port-field-takes-only-a-port-test
+  (let [robot (ui/robot)]
+    (open-settings!)
+    (is (= "9000" (port-text)))
+    (testing "Enter applies a port"
+      (ui/fill! robot "#osc-port-field" "9200")
+      (ui/submit! robot "#osc-port-field")
+      (ui/wait-for! #(= 9200 (:port (osc))))
+      (is (= "9200" (port-text))))
+    (testing "so does the field losing focus"
+      (ui/fill! robot "#osc-port-field" "9300")
+      (ui/focus! robot "#osc-server-button")
+      (ui/wait-for! #(= 9300 (:port (osc))))
+      (is (= "9300" (port-text))))
+    (doseq [typed ["abc" "0" "70000" ""]]
+      (testing (str (pr-str typed) ": no port, so the field shows the port that is set again, and nothing changes")
+        (ui/fill! robot "#osc-port-field" typed)
+        (ui/submit! robot "#osc-port-field")
+        (ui/wait-for! #(= "9300" (port-text)))
+        (ui/fill! robot "#osc-port-field" typed)
+        (ui/focus! robot "#osc-server-button")
+        (ui/wait-for! #(= "9300" (port-text)))
+        (is (events/flush!))
+        (is (= 9300 (:port (osc))))
+        (is (nil? (get-in (state/get-raw-state) [:ui :notice])))))))
+
+
+;; Identify MIDI input / Identify OSC input (reactivity plan 24, case 1)
+
+(defn- identify-text [source] (ui/node-text (str "#" (name source) "-identify-button")))
+(defn- waiting? [source] (ui/visible? (str "#" (name source) "-identify-waiting")))
+(defn- result-text [source] (ui/node-text (str "#" (name source) "-identify-result")))
+
+(defn- identify! [source]
+  ;; Fired, not clicked: the card can be below the tab's scrolled view
+  (ui/on-fx-thread #(.fire ^Button (ui/query (str "#" (name source) "-identify-button")))))
+
+(defn- probe [] (get-in (state/get-raw-state) [:ui :input-learn :active]))
+
+(defn- devices-up!
+  "MIDI with an input connected and OSC listening, as the device worker
+   reports them (no device or socket)."
+  []
+  (events/write-state! #(-> %
+                            (assoc-in [:backend :input :midi :connected-devices] #{"Pad"})
+                            (update-in [:backend :input :osc] assoc :enabled? true :server-running? true))))
+
+(deftest identify-input-finishes-on-the-matching-source-test
+  (open-settings!)
+  (testing "nothing to identify from: MIDI with no input, OSC not listening"
+    (is (= "Identify MIDI input" (identify-text :midi)))
+    (is (not (ui/enabled? "#midi-identify-button")))
+    (is (not (ui/enabled? "#osc-identify-button"))))
+  (devices-up!)
+  (ui/assert-enabled! "#midi-identify-button")
+  (ui/assert-enabled! "#osc-identify-button")
+  (let [bindings (get-in (state/get-raw-state) [:config :input])
+        history (get-in (state/get-raw-state) [:history])
+        osc-mappings (get-in (state/get-raw-state) [:backend :input :osc :address-mappings])
+        push (fn [] (run! router/dispatch! (osc-input/osc-msg->events (input-fixtures/osc-msg "/1/push1" (float 1.0)) {})))
+        note-60 (fn [] (router/dispatch! (midi/midi-msg->event (input-fixtures/note-on 1 60 127))))]
+    (testing "MIDI: an OSC message doesn't finish it; MIDI channel 2's note 60 does"
+      (identify! :midi)
+      (ui/wait-for! #(= "Cancel" (identify-text :midi)))
+      (is (waiting? :midi))
+      (ui/assert-text! "#midi-identify-waiting .label" "Waiting for MIDI input...")
+      (push)
+      (is (events/flush!))
+      (is (= :midi (:source (probe))) "the other source's message: still waiting")
+      (is (waiting? :midi))
+      (note-60)
+      (ui/wait-for! #(= "Detected MIDI Ch 2 Note 60" (result-text :midi)))
+      (is (= "Identify MIDI input" (identify-text :midi)))
+      (is (not (waiting? :midi)))
+      (is (nil? (probe))))
+    (testing "OSC: the unmapped /1/push1"
+      (identify! :osc)
+      (ui/wait-for! #(= "Cancel" (identify-text :osc)))
+      (is (waiting? :osc))
+      (push)
+      (ui/wait-for! #(= "Detected OSC /1/push1" (result-text :osc)))
+      (is (= "Identify OSC input" (identify-text :osc)))
+      (is (not (waiting? :osc))))
+    (testing "later inputs, and an unrelated change, change neither card"
+      (note-60)
+      (router/dispatch! (midi/midi-msg->event (input-fixtures/note-on 0 61 127)))
+      (push)
+      (events/write-state! assoc-in [:timing :bpm] 133.0)
+      (is (events/flush!))
+      (is (= "Detected MIDI Ch 2 Note 60" (result-text :midi)))
+      (is (= "Detected OSC /1/push1" (result-text :osc)))
+      (is (= ["Identify MIDI input" "Identify OSC input"] [(identify-text :midi) (identify-text :osc)])))
+    (testing "identifying bound, mapped and saved nothing"
+      (is (= bindings (get-in (state/get-raw-state) [:config :input])) "no trigger or fader binding")
+      (is (= osc-mappings (get-in (state/get-raw-state) [:backend :input :osc :address-mappings])) "no OSC address mapping")
+      (is (= history (get-in (state/get-raw-state) [:history])) "no undo step")
+      (is (false? (get-in (state/get-raw-state) [:project :dirty?]))))
+    (testing "OSC's identify started while MIDI's waits: MIDI's card is ready again"
+      (identify! :midi)
+      (ui/wait-for! #(waiting? :midi))
+      (is (nil? (result-text :midi)) "a new identify starts with nothing on its card")
+      (identify! :osc)
+      (ui/wait-for! #(and (waiting? :osc) (not (waiting? :midi))))
+      (is (= "Identify MIDI input" (identify-text :midi))))
+    (testing "MIDI going leaves OSC's identify waiting; OSC stopping ends it"
+      (events/dispatch! {:event/type :input/midi-disable})
+      (is (events/flush!))
+      (is (waiting? :osc))
+      (is (not (ui/enabled? "#midi-identify-button")) "no MIDI to identify from")
+      (events/dispatch! {:event/type :input/osc-stop-server})
+      (ui/wait-for! #(not (waiting? :osc)))
+      (is (nil? (probe))))
+    (testing "leaving Settings ends the identify waiting"
+      (events/dispatch! {:event/type :input/midi-enable})
+      (ui/wait-for! #(ui/enabled? "#midi-identify-button"))
+      (identify! :midi)
+      (ui/wait-for! #(waiting? :midi))
+      (ui/click! (ui/robot) "#grid-tab")
+      (ui/wait-for! #(nil? (probe)))
+      (open-settings!)
+      (ui/wait-for! #(= "Identify MIDI input" (identify-text :midi)))
+      (is (not (waiting? :midi))))))

@@ -10,16 +10,19 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.input :as input]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.events :as input-events]
+            [laser-show.input.learn :as learn]
             [laser-show.input.router :as input-router]
             [laser-show.input.store :as store]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]
-            [laser-show.vibes.faders :as faders])
+            [laser-show.vibes.faders :as faders]
+            [laser-show.views.components.applied-value :as applied-value])
   (:import [javafx.scene Node Parent]
-           [javafx.scene.control Labeled MenuButton MenuItem]))
+           [javafx.scene.control CheckBox Labeled MenuButton MenuItem]))
 
 (defn- with-input-mapper
   "start-test! doesn't start the input mapper (app.clj:252); Learn all's
@@ -42,7 +45,7 @@
 (defn- edited [] (get-in (app-state) [:ui :vibes :selected]))
 (defn- undo-stack [] (get-in (app-state) [:history :undo-stack]))
 (defn- undo-label [] (:description (peek (undo-stack))))
-(defn- learning-target [] (get-in (app-state) [:backend :input :learning-target]))
+(defn- learning-target [] (input/learning-target (app-state)))
 (defn- fx-on? [cell] (true? (get-in (app-state) [:chains :effect-chains cell :active?])))
 
 (defn- open-vibes! [robot]
@@ -202,7 +205,8 @@
                      (is (events/flush!)))]
     (open-vibes! robot)
     (learn-all!)
-    (is (nil? (get-in (app-state) [:ui :vibes :wizard])) "invariant 8: it ends, nothing left learning")
+    (is (nil? (input/active-learn (app-state))) "invariant 8: it ends, nothing left learning")
+    (is (nil? (input-router/learn-listener-id)) "and no listener")
     (ui/wait-for! #(not (ui/visible? "#vibe-wizard-status")))
     (ui/assert-text! "#vibe-control-hit-keys" "MIDI Ch 1 Note 36")
     (ui/assert-text! "#vibe-control-blackout-keys" "MIDI Ch 1 Note 40")
@@ -213,6 +217,76 @@
       (is (empty? (rt :held)))
       (is (zero? (rt :started)) "no HIT, ACCENT or FLASH played")
       (is (false? (rt :blackout?)) "BLACKOUT's own key didn't black the room out"))))
+
+(deftest old-learn-callback-cannot-disarm-next-step-test
+  ;; Case 2 (reactivity plan 24 §7): before, HIT's router callback
+  ;; delivered, then unregistered the one shared key, so once Learn all had
+  ;; begun ACCENT's learn, the late unregister took ACCENT's listener away:
+  ;; the wizard waited for ACCENT with no listener
+  (let [robot (ui/robot)
+        entered (promise)
+        resume (promise)
+        deliveries (atom 0)
+        deliver-capture learn/deliver-capture!
+        attempt #(input/active-learn (app-state))
+        status #(ui/node-text "#vibe-wizard-status")
+        press! (fn [n]
+                 (input-router/dispatch! (note :note-on n))
+                 (input-router/dispatch! (note :note-off n)))]
+    (with-redefs [learn/deliver-capture! (fn [gate event]
+                                           (deliver-capture gate event)
+                                           ;; HIT's callback: delivered, not returned yet
+                                           (when (= 1 (swap! deliveries inc))
+                                             (deliver entered true)
+                                             (deref resume 5000 nil)))]
+      (try
+        (open-vibes! robot)
+        (ui/click! robot "#vibe-learn-all")
+        (ui/wait-for! #(and (= {:type :vibe :role :hit} (learning-target))
+                            (= (:learn-id (attempt)) (input-router/learn-listener-id))))
+        (let [hit-attempt (:learn-id (attempt))
+              ;; A controller's thread: its note 36 goes to HIT's listener
+              input-thread (future (input-router/dispatch! (note :note-on 36)))]
+          (is (deref entered 2000 false) "HIT's callback delivered, and is held before it returns")
+          (ui/wait-for! #(and (= {:type :vibe :role :accent} (learning-target))
+                              (= (:learn-id (attempt)) (input-router/learn-listener-id))))
+          (let [accent-attempt (:learn-id (attempt))]
+            (is (not= hit-attempt accent-attempt))
+            (deliver resume true)
+            (is (deref input-thread 2000 false) "HIT's callback returned")
+            (input-router/dispatch! (note :note-off 36))
+            (is (events/flush!))
+            (is (= accent-attempt (input-router/learn-listener-id)) "ACCENT's listener survives HIT's callback")
+            (ui/assert-text! "#vibe-wizard-status" "Press the key for ACCENT (2 of 5)")
+            (testing "36 again: HIT's already, the same step waits again, as an attempt of its own"
+              (press! 36)
+              (ui/wait-for! #(= "Press the key for ACCENT (2 of 5) · that key is HIT's already" (status)))
+              (is (= :hit (get-in (attempt) [:wizard :refused])))
+              (is (not= accent-attempt (:learn-id (attempt))))
+              (is (= (:learn-id (attempt)) (input-router/learn-listener-id)))
+              (is (= {(note-key 36) {:type :vibe :role :hit}} (get-in (app-state) [:config :input :trigger-map])) "no edit")
+              (is (= 1 (count (undo-stack)))))
+            (testing "37 binds ACCENT and FLASH's step listens"
+              (press! 37)
+              (ui/wait-for! #(and (= {:type :vibe :role :flash} (learning-target))
+                                  (= (:learn-id (attempt)) (input-router/learn-listener-id))))
+              (is (= {:type :vibe :role :accent} (get-in (app-state) [:config :input :trigger-map (note-key 37)])))
+              (ui/assert-text! "#vibe-wizard-status" "Press the key for FLASH (3 of 5)"))
+            (doseq [[n role] [[38 :flash] [39 :vibe] [40 :blackout]]]
+              (ui/wait-for! #(= {:type :vibe :role role} (learning-target)))
+              (press! n)
+              (ui/wait-for! #(= {:type :vibe :role role} (get-in (app-state) [:config :input :trigger-map (note-key n)]))))
+            (ui/wait-for! #(nil? (attempt)))
+            (is (events/flush!))
+            (is (nil? (input-router/learn-listener-id)) "no listener left")
+            (is (= (zipmap (map note-key [36 37 38 39 40]) (map #(hash-map :type :vibe :role %) [:hit :accent :flash :vibe :blackout]))
+                   (get-in (app-state) [:config :input :trigger-map])))
+            (is (= (repeat 5 "Learn Trigger") (map :description (undo-stack))) "five changed bindings, five steps")
+            (is (empty? (rt :held)))
+            (is (zero? (rt :started)) "no learning press played a role")
+            (ui/wait-for! #(not (ui/visible? "#vibe-wizard-status")))))
+        (finally
+          (deliver resume true))))))
 
 (deftest learn-a-fader-binds-a-slot-test
   (let [robot (ui/robot)
@@ -465,3 +539,89 @@
     (is (some #(re-find #"HIT does nothing" %) (texts ".vibe-lint-row")) "the error the badge counts")
     (events/dispatch! {:event/type :vibe/toggle-cell :vibe :vibe-1 :slot :hit :cell [0 0]})
     (ui/wait-for! #(= "Vibes" (tab-text)))))
+
+
+;; A refused edit (plans/2026-11-23-cljfx-reactivity/13): the control shows
+;; what applies
+
+(defn- notice-id [] (get-in (app-state) [:ui :notice :id]))
+
+(defn- ticked
+  "Whether the check box selector finds is ticked, on the FX thread; nil
+   when there is none (ui/selected? says false for a missing node too)."
+  [selector]
+  (when-let [box (ui/query selector)]
+    (ui/on-fx-thread #(.isSelected ^CheckBox box))))
+
+(defn- attempt!
+  "(act!), then wait for the show lock's new refusal of an event of type."
+  [type act!]
+  (let [before (notice-id)]
+    (act!)
+    (ui/wait-for! #(and (some? (notice-id)) (not= before (notice-id))
+                        (= type (get-in (app-state) [:ui :show-lock-notice :event]))))))
+
+(deftest locked-vibe-options-and-name-show-applied-values-test
+  (let [robot (ui/robot)
+        shapes #(vibes :library :vibe-1)
+        lock! (fn [locked?]
+                (events/dispatch! {:event/type :vibe/set-show-lock :locked? locked?})
+                (ui/wait-for! #(= locked? (true? (get-in (app-state) [:ui :show-lock?])))))]
+    (open-vibes! robot)
+    (ui/assert-text! "#vibe-name-field" "Shapes")
+    (lock! true)
+    (let [depth (count (undo-stack))]
+      (testing "Allow audience cells"
+        (attempt! :vibe/set-option #(ui/click! robot "#vibe-allow-audience"))
+        (is (false? (:allow-audience? (shapes))))
+        (ui/wait-for! #(false? (ticked "#vibe-allow-audience"))))
+      (doseq [slot [:flash-cue :flash-fx]]
+        (testing (str "Solo, on " (name slot))
+          (ui/click! robot (str "#vibe-slot-" (name slot)))
+          (ui/wait-for! #(= slot (get-in (app-state) [:ui :vibes :slot])))
+          (ui/wait-for! #(true? (ticked "#vibe-solo")))
+          (attempt! :vibe/set-option #(ui/click! robot "#vibe-solo"))
+          (is (true? (get-in (shapes) [:flash :solo?])))
+          (ui/wait-for! #(true? (ticked "#vibe-solo")))))
+      (testing "another name"
+        (ui/fill! robot "#vibe-name-field" "Warm-up")
+        (attempt! :vibe/rename #(ui/submit! robot "#vibe-name-field"))
+        (is (= "Shapes" (:name (shapes))))
+        (ui/assert-text! "#vibe-name-field" "Shapes"))
+      (is (= depth (count (undo-stack))) "no undo step"))
+    (testing "unlocked, the boxes take real clicks"
+      (lock! false)
+      (ui/click! robot "#vibe-allow-audience")
+      (ui/wait-for! #(true? (:allow-audience? (shapes))))
+      (ui/wait-for! #(true? (ticked "#vibe-allow-audience")))
+      (ui/click! robot "#vibe-solo")
+      (ui/wait-for! #(false? (get-in (shapes) [:flash :solo?])))
+      (ui/wait-for! #(false? (ticked "#vibe-solo"))))
+    (testing "the name it has, spelled otherwise: no notice, and the stored spelling"
+      (let [before (notice-id)
+            depth (count (undo-stack))]
+        (ui/fill! robot "#vibe-name-field" " Shapes ")
+        (ui/submit! robot "#vibe-name-field")
+        (is (events/flush!))
+        (ui/wait-for! #(= "Shapes" (ui/node-text "#vibe-name-field")))
+        (ui/focus! robot "#vibe-add")
+        (is (events/flush!))
+        (is (= "Shapes" (ui/node-text "#vibe-name-field")) "and leaving the field sends nothing")
+        (is (= "Shapes" (:name (shapes))))
+        (is (= before (notice-id)))
+        (is (= depth (count (undo-stack))))))))
+
+(deftest applied-boxes-go-with-their-node-test
+  ;; A box's listener and timer belong to its node: Solo's go with its slot,
+  ;; and another vibe's box replaces the last one's
+  (let [robot (ui/robot)]
+    (open-vibes! robot)
+    (ui/click! robot "#vibe-slot-flash-cue")
+    (ui/wait-for! #(some? (ui/query "#vibe-solo")))
+    (let [with-solo (applied-value/attached-count)]
+      (ui/click! robot "#vibe-slot-hit")
+      (ui/wait-for! #(nil? (ui/query "#vibe-solo")))
+      (is (= (dec with-solo) (applied-value/attached-count)))
+      (ui/click! robot "#vibe-card-vibe-2")
+      (ui/assert-text! "#vibe-name-field" "Lines")
+      (is (= (dec with-solo) (applied-value/attached-count)) "Allow audience: one box, Lines'"))))

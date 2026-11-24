@@ -506,7 +506,8 @@
   "Simple zone group selector dropdown.
 
    Props:
-   - :fx/context - cljfx context (required for zone groups subscription)
+   - :fx/context - from cljfx, which gives every component its own; the
+     zone groups are read through it (no caller gives it)
    - :current-params - {:target-zone :all}
    - :event-template - Base event with :domain, :entity-key, :effect-path"
   [{:keys [fx/context current-params event-template]}]

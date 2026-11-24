@@ -5,6 +5,8 @@
    from chain.clj. Effects-specific operations use :effects/*."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [laser-show.animation.effects :as registry]
+   [laser-show.animation.effects.shape]
    [laser-show.events.handlers.effects :as effects]
    [laser-show.events.handlers.chain :as chain]
    [laser-show.state.domains :refer [build-initial-state]]))
@@ -235,3 +237,28 @@
                             [:chains :effect-chains [2 1] :name])))
       (let [off (assoc-in s0 [:chains :effect-chains [2 1]] {:items [{:effect-id :scale :enabled? false}] :active? false})]
         (is (= off (new-reaction off 2 1 :flip)))))))
+
+
+;; The effect bank (reactivity plan 17): a click carries the effect's id, and
+;; the handler reads its definition when it runs
+
+(deftest add-effect-from-bank-reads-the-registry-test
+  (let [scale (registry/get-effect :scale)
+        add (fn [event]
+              (effects/handle (merge {:event/type :effect-chain/add-effect-from-bank :col 2 :row 1 :state base-state} event)))]
+    (try
+      (registry/register-effect! (assoc-in scale [:parameters 0 :default] 7.0))
+      (let [{:keys [state dispatch]} (add {:item-id :scale :item scale})
+            [added & more] (get-in state [:chains :effect-chains [2 1] :items])]
+        (is (= :scale (:effect-id added)))
+        (is (= {:x-scale 7.0 :y-scale 1.0 :uniform? false} (:params added))
+            "the definition registered when the click is handled, not one the event carries")
+        (is (nil? more))
+        (is (uuid? (:id added)))
+        (is (false? (get-in state [:chains :effect-chains [2 1] :active?])) "a new cell, off")
+        (is (= {:event/type :list/select-item :component-id [:effect-chain 2 1] :item-id (:id added) :mode :single}
+               dispatch)))
+      (finally
+        (registry/register-effect! scale)))
+    (is (= {:state base-state} (add {:item-id :no-such-effect})) "an id no effect has: nothing")
+    (is (= {:state base-state} (add {:item scale})) "no id: nothing, whatever definition the event carries")))

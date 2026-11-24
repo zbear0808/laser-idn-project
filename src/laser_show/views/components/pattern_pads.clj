@@ -19,6 +19,7 @@
             [laser-show.animation.show-time :as show-time]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.subs :as subs]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.clock-view :as clock-view]
             [laser-show.views.components.trigger-bank :as trigger-bank]
             [laser-show.views.components.vibe-pads :as vibe-pads]
@@ -27,6 +28,11 @@
 
 
 ;; What a pad says
+
+(defn- learn-target
+  "What learning pad's control binds: STEP's the Zone step key."
+  [pad]
+  (if (= :step pad) {:type :zone-step} {:type :pattern-pad :target pad}))
 
 (def ^:private tooltips
   "Each pad's tooltip (07 §7.4's words)."
@@ -69,27 +75,33 @@
 
 (defn- pad-menu
   "A pad's menu: Switch on the bar (not STEP's: a press is at once), its
-   control."
-  [node-id pad {:keys [bar? learning? bindings]}]
+   control. Switch on the bar shows the pad's setting, after a refused
+   click too (applied-value). Learn sends the show it is in
+   (:document-id), Cancel the learn it shows (:learn)."
+  [node-id pad {:keys [bar? learning? bindings learn document-id]}]
   {:fx/type :context-menu
    :items (into (if (= :step pad)
                   []
-                  [{:fx/type :check-menu-item
-                    :id (str node-id "-bar")
-                    :text "Switch on the bar"
-                    :selected (boolean bar?)
-                    :on-action {:event/type :pattern-pads/set-pad-bar :pad pad :bar? (not bar?)}}
+                  [{:fx/type applied-value/applied-control
+                    :property :selected
+                    :address [:pattern-pad pad :bar?]
+                    :value bar?
+                    :on-change (fn [on?] {:event/type :pattern-pads/set-pad-bar :pad pad :bar? on?})
+                    :desc {:fx/type :check-menu-item
+                           :id (str node-id "-bar")
+                           :text "Switch on the bar"}}
                    {:fx/type :separator-menu-item}])
                 [{:fx/type :menu-item
                   :id (str node-id "-learn")
                   :text "Learn control…"
                   :on-action {:event/type :input/start-learn
-                              :target-action (if (= :step pad) {:type :zone-step} {:type :pattern-pad :target pad})}}
+                              :target-action (learn-target pad)
+                              :document-id document-id}}
                  {:fx/type :menu-item
                   :id (str node-id "-cancel-learn")
                   :text "Cancel learning"
                   :disable (not learning?)
-                  :on-action {:event/type :input/cancel-learn}}
+                  :on-action (merge {:event/type :input/cancel-learn} learn)}
                  {:fx/type :menu-item
                   :id (str node-id "-clear")
                   :text "Clear control"
@@ -139,13 +151,16 @@
    waiting)."
   [{:keys [fx/context pad size]}]
   (let [{:keys [name active? pending learning? bindings] :as data} (fx/sub-ctx context subs/pattern-pad pad)
+        menu-data (assoc data
+                         :learn (fx/sub-ctx context subs/learn-for-target (learn-target pad))
+                         :document-id (fx/sub-ctx context subs/document-id))
         large? (= :large size)
         id (node-id pad large?)
         desc (-> (shell id pad (cond-> []
                                  active? (conj "pattern-pad-active")
                                  pending (conj "pattern-pad-pending")
                                  learning? (conj "pattern-pad-learning"))
-                        data large?)
+                        menu-data large?)
                  (assoc :user-data (some? pending)
                         :tooltip {:fx/type :tooltip :text (tooltip pad bindings)}))]
     {:fx/type clock-view/ext-clock-redraw
@@ -191,9 +206,12 @@
    presses counted and its control, and both flash on each press."
   [{:keys [fx/context size]}]
   (let [{:keys [learning? bindings] :as data} (fx/sub-ctx context subs/step-pad)
+        menu-data (assoc data
+                         :learn (fx/sub-ctx context subs/learn-for-target (learn-target :step))
+                         :document-id (fx/sub-ctx context subs/document-id))
         large? (= :large size)
         id (node-id :step large?)
-        desc (assoc (shell id :step (cond-> ["pattern-step-pad"] learning? (conj "pattern-pad-learning")) data large?)
+        desc (assoc (shell id :step (cond-> ["pattern-step-pad"] learning? (conj "pattern-pad-learning")) menu-data large?)
                     :tooltip {:fx/type :tooltip :text (tooltip :step bindings)})]
     (if large?
       (large desc [{:fx/type :label :text "STEP" :style-class ["label" "pattern-pad-name"]}

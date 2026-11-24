@@ -33,7 +33,7 @@
    :active-tab (or active-bank-tab :shape)
    :on-tab-change {:event/type :ui/update-dialog-data
                    :dialog-id :effect-chain-editor}
-   ;; Data-driven event template - handler will receive :item-id and :item
+   ;; Data-driven event template - the handler receives :item-id, the effect's id
    :item-event-template {:event/type :effect-chain/add-effect-from-bank
                          :col col
                          :row row}
@@ -46,16 +46,15 @@
 
 (defn- parameter-editor
   "Parameter editor for the selected effect using the shared component.
-   Supports keyframe modulation and custom renderers."
-  [{:keys [fx/context col row selected-effect-path effect-chain dialog-data]}]
-  (let [selected-effect (when selected-effect-path
-                          (get-in effect-chain (vec selected-effect-path)))
-        effect-def (when selected-effect
+   Supports keyframe modulation and custom renderers. Props: :col :row,
+   :selected-effect-path and :selected-effect (its effect, nil when none or
+   several are selected), :dialog-data."
+  [{:keys [col row selected-effect-path selected-effect dialog-data]}]
+  (let [effect-def (when selected-effect
                      (effects/get-effect (:effect-id selected-effect)))]
     (if selected-effect
       ;; Use shared effect parameter editor component
       {:fx/type param-editor/effect-parameter-editor
-       :fx/context context
        :domain :effect-chains
        :entity-key [col row]
        :effect-path selected-effect-path
@@ -85,8 +84,8 @@
         ;; Read selection from canonical list-ui state instead of dialog-data
         list-state (fx/sub-ctx context subs/list-ui-state [:effect-chain col row])
         selected-ids (:selected-ids list-state #{})
-        chains-state (fx/sub-val context :chains)
-        cell-data (get-in chains-state [:effect-chains [col row]])
+        ;; This cell's chain only: another cell's edit leaves the editor as it is
+        cell-data (fx/sub-ctx context subs/effect-cell-chain col row)
         effect-chain (:items cell-data [])
         active? (:active? cell-data false)
         ;; For parameter editor - use first selected ID if single select
@@ -127,7 +126,6 @@
                 :children [;; Left sidebar - chain list with drag-and-drop
                            ;; Using list-editor with built-in keyboard handling
                            {:fx/type list/list-editor
-                            :fx/context context
                             :h-box/hgrow :always
                             :items effect-chain
                             :component-id [:effect-chain col row]
@@ -153,10 +151,10 @@
 
                                         ;; Parameter editor (bottom)
                                         {:fx/type parameter-editor
-                                         :fx/context context
                                          :col col :row row
                                          :selected-effect-path first-selected-path
-                                         :effect-chain effect-chain
+                                         :selected-effect (when first-selected-path
+                                                            (get-in effect-chain first-selected-path))
                                          :dialog-data dialog-data}])}]}
                
                ;; Footer with Active checkbox, triggers button, and close button

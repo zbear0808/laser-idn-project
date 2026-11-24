@@ -67,13 +67,15 @@
 
 (defn- show-zip!
   "Write a show to this test's folder as name, made on the rig of lasers
-   ({id projector}) with cues (cue-chains); return its path."
-  [name lasers cues & {:keys [groups]}]
+   ({id projector}) with cues (cue-chains), and effects (effect-chains);
+   return its path."
+  [name lasers cues & {:keys [groups effects]}]
   (let [path (str (io/file *dir* name))
         show (cond-> (-> (domains/build-initial-state)
                          (assoc :projectors lasers)
                          (assoc-in [:chains :cue-chains] cues))
-               groups (update :zone-groups merge groups))]
+               groups (update :zone-groups merge groups)
+               effects (assoc-in [:chains :effect-chains] effects))]
     (persistent/write-project! path (persistent/project-files show))
     path))
 
@@ -217,7 +219,33 @@
                       (mapv (fn [cell] (get-in (app-state) [:chains :cue-chains cell :target])) [[0 0] [1 0]])))
     (ui/wait-for! #(nil? (ui/query "#rig-report-pin-projector-10-0-0-9-1")))
     (is (true? (get-in (app-state) [:project :dirty?])) "a show edit: unsaved")
-    (is (= "Re-pin Cues" (get-in (app-state) [:history :undo-stack 0 :description])))))
+    (is (= "Re-pin References" (get-in (app-state) [:history :undo-stack 0 :description])))))
+
+(deftest effect-only-missing-pin-is-visible-and-repairable-test
+  ;; plans/2026-11-23-cljfx-reactivity/28 §7.5: the show's only warning is an
+  ;; inactive effect cell's pattern, pinned to Balcony, which isn't on this rig
+  (let [robot (ui/robot)
+        keyframes #(get-in (app-state) [:chains :effect-chains [2 1] :items 0 :keyframe-modulator :keyframes])
+        show (show-zip! "balcony.zip" {:projector-10-0-0-5-1 (laser "Laser L" "10.0.0.5")
+                                       :gone (laser "Balcony" "10.0.0.66")}
+                        {}
+                        :effects {[2 1] {:active? false
+                                         :items [{:id (random-uuid) :effect-id :zone-pattern :enabled? true
+                                                  :params {:zones [:zone/f :auto.laser/gone]}
+                                                  :keyframe-modulator {:enabled? true
+                                                                       :keyframes [{:position 0.0
+                                                                                    :params {:steps [[:zone/c] [:auto.laser/gone] []]}}]}}]}})]
+    (start-on-laser-l!)
+    (open! show)
+    (ui/assert-text! "#rig-report-title" "balcony.zip on this rig")
+    (ui/assert-text! "#rig-report-pin-gone" "⚠ Balcony, which isn't on this rig, is referenced by 1 effect cell.")
+    (ui/click! robot "#rig-report-pin-to-gone")
+    (ui/click! robot "#rig-report-pin-gone-to-projector-10-0-0-5-1")
+    (ui/wait-for! #(= [{:position 0.0 :params {:steps [[:zone/c] [:auto.laser/projector-10-0-0-5-1] []]}}] (keyframes)))
+    (is (= [:zone/f :auto.laser/projector-10-0-0-5-1] (get-in (app-state) [:chains :effect-chains [2 1] :items 0 :params :zones])))
+    (ui/wait-for! #(nil? (ui/query "#rig-report-pin-gone")))
+    (is (false? (get-in (app-state) [:chains :effect-chains [2 1] :active?])) "repinned, not switched on")
+    (is (true? (get-in (app-state) [:project :dirty?])) "a show edit: unsaved")))
 
 
 ;; Closing the window after the rig file couldn't be written

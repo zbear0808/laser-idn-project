@@ -12,6 +12,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.input :as input]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.events :as input-events]
             [laser-show.input.router :as input-router]
@@ -20,7 +21,8 @@
             [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
-            [laser-show.ui-test.testfx :as ui])
+            [laser-show.ui-test.testfx :as ui]
+            [laser-show.vibes.reactions :as reactions])
   (:import [com.sun.javafx.stage WindowHelper]
            [com.sun.javafx.tk.quantum WindowStage]
            [javafx.event Event]
@@ -56,6 +58,11 @@
   (ui/click! robot "#perform-tab")
   (ui/wait-for! #(= :perform (get-in (app-state) [:ui :active-tab])))
   (ui/assert-visible! "#vibe-pad-row"))
+
+(defn- open-vibes! [robot]
+  (ui/click! robot "#vibes-tab")
+  (ui/wait-for! #(= :vibes (get-in (app-state) [:ui :active-tab])))
+  (ui/assert-visible! "#vibe-editor"))
 
 (defn- note [type n]
   {:type type :source :midi :channel 0 :note n :velocity (if (= :note-on type) 1.0 0.0)
@@ -220,7 +227,7 @@
       (is (zero? (rt :started))))
     (ui/right-click-node! robot (ui/query "#vibe-pad-hit"))
     (ui/click! robot "#vibe-pad-hit-learn")
-    (ui/wait-for! #(= {:type :vibe :role :hit} (get-in (app-state) [:backend :input :learning-target])))
+    (ui/wait-for! #(= {:type :vibe :role :hit} (input/learning-target (app-state))))
     (ui/assert-text! "#vibe-pad-hit-badge" "LEARN")
     (ui/assert-text! "#vibe-learn-prompt" "Press the key for HIT")
     (is (ui/has-style-class? "#vibe-pad-hit" "vibe-pad-learning"))
@@ -555,6 +562,55 @@
       (ui/click! robot "#vibe-chip-vibe-2")
       (ui/wait-for! #(not (ui/visible? "#vibe-header-audience")))
       (is (not (ui/visible? "#vibe-pad-hit-audience"))))))
+
+(deftest audience-indicators-follow-the-checkbox-test
+  ;; plans/2026-11-23-cljfx-reactivity/12 §7 on Shapes: its one HIT cue
+  ;; reaches the crowd only through :balcony, a custom group its zone pattern
+  ;; names and only the scanner is in
+  (let [robot (ui/robot)
+        allowed? #(get-in (app-state) [:config :vibes :library :vibe-1 :allow-audience?])
+        with-ids (fn [items] (mapv #(assoc % :id (random-uuid)) items))
+        pattern (assoc-in (zone-patterns/preset-instance :alternate :cue) [:params :zones] [:auto.laser/main :balcony])]
+    (events/write-state! #(-> %
+                              (assoc-in [:rig :order] [:main :aud])
+                              (assoc :projectors {:main {:name "Main" :host "10.0.0.1" :enabled? true :zone-groups []}
+                                                  :aud {:name "Aud" :host "10.0.0.2" :enabled? false :exclude-from-all? true
+                                                        :tags #{:crowd-scanning} :zone-groups [:balcony]}})
+                              (assoc-in [:zone-groups :balcony] {:id :balcony :name "Balcony" :color "#123456"})
+                              (assoc-in [:chains :cue-chains [0 0]] {:target :auto.laser/main
+                                                                     :items (with-ids [{:type :preset :preset-id :circle}])
+                                                                     :zone-patterns (with-ids [pattern])})
+                              (assoc-in [:chains :effect-chains [1 3]] (update (reactions/reaction-cell :energy-size "Shapes") :items with-ids))
+                              (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [[0 0]])
+                              (assoc-in [:config :vibes :library :vibe-1 :fx] [[1 3]])))
+    (open-vibes! robot)
+    (ui/assert-text! "#vibe-pick-0-0-roles" "audience")
+    (open-perform! robot)
+    (ui/assert-text! "#vibe-pad-hit-now" "Effects only")
+    (ui/assert-text! "#vibe-pad-hit-reactions" "Energy size")
+    (is (not (ui/visible? "#vibe-pad-hit-audience")) "Shapes never plays its cue: no badge")
+    (is (not (ui/visible? "#vibe-header-audience")))
+    (testing "Allow audience cells ticked: the picker's block goes; Perform marks HIT, and it plays a cue again"
+      (open-vibes! robot)
+      (ui/click! robot "#vibe-allow-audience")
+      (ui/wait-for! #(true? (allowed?)))
+      (ui/assert-text! "#vibe-pick-0-0-roles" "")
+      (is (not (ui/has-style-class? "#vibe-pick-0-0-roles" "vibe-pick-blocked")))
+      (open-perform! robot)
+      (ui/assert-visible! "#vibe-pad-hit-audience")
+      (ui/assert-text! "#vibe-pad-hit-audience" "AUDIENCE")
+      (ui/assert-visible! "#vibe-header-audience")
+      (ui/assert-text! "#vibe-header-audience" "AUDIENCE ALLOWED")
+      (ui/assert-text! "#vibe-pad-hit-now" "–"))
+    (testing "unticked: as it was"
+      (open-vibes! robot)
+      (ui/click! robot "#vibe-allow-audience")
+      (ui/wait-for! #(false? (allowed?)))
+      (ui/assert-text! "#vibe-pick-0-0-roles" "audience")
+      (open-perform! robot)
+      (ui/assert-text! "#vibe-pad-hit-now" "Effects only")
+      (is (not (ui/visible? "#vibe-pad-hit-audience")))
+      (is (not (ui/visible? "#vibe-header-audience"))))))
 
 (deftest stuck-pad-shows-its-problem-test
   (let [robot (ui/robot)]

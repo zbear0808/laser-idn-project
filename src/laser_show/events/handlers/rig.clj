@@ -221,8 +221,9 @@
   {:state (rig-file/adopt-group state group-id from)})
 
 (defn- handle-repin
-  "Pin them to… (a laser here) or Send them to All: the cues pinned to
-   from, a laser that isn't here, go to to. The show's: undoable, unsaved."
+  "Pin them to… (a laser here) or Send them to All: every reference to
+   from, a laser that isn't here (cues' targets, the zone patterns of cues
+   and effect cells), goes to to. The show's: undoable, unsaved."
   [{:keys [from to state]}]
   {:state (rig-file/repin state from to)})
 
@@ -287,28 +288,27 @@
 
 (defn- handle-request-forget
   "A disabled card's Forget this laser…: the shared confirm, in the rig's
-   words, with Z2's choice of where pinned cues go (04 S-13). Forget goes on
-   to :rig/forget-projector."
+   words, with Z2's choice of what replaces its references, when cues are
+   pinned to it or an effect cell's zone pattern names it (04 S-13).
+   Forget goes on to :rig/forget-projector."
   [{:keys [projector-id state]}]
   (if-not (contains? (:projectors state) projector-id)
     {:state state}
     (let [pin (rig/laser-ref projector-id)
-          cues (refs/cues-using (get-in state [:chains :cue-chains]) pin)]
+          cues (refs/cues-using (get-in state [:chains :cue-chains]) pin)
+          cells (refs/effect-cells-using (get-in state [:chains :effect-chains]) pin)
+          pinned (zone-groups/pinned-text (count cues) (count cells))]
       {:state (assoc-in state [:ui :dialogs :confirm]
                         (cond-> {:open? true
                                  :title (str "Forget " (rig/projector-name state projector-id) "?")
                                  :message (str "Its calibration and safety zone leave the rig. A scan that finds it again adds it as a new laser."
-                                               (when (seq cues)
-                                                 (str " " (zone-groups/plural (count cues) "cue" "cues")
-                                                      (if (= 1 (count cues)) " is" " are") " pinned to it.")))
+                                               (when pinned (str " " pinned)))
                                  :confirm-label "Forget"
                                  :danger? true
                                  :confirm-event {:event/type :rig/forget-projector :projector-id projector-id}}
-                          (seq cues) (assoc :details (zone-groups/cue-list-text state cues)
-                                            :choice {:key :retarget-to
-                                                     :label "Send its cues to:"
-                                                     :options (zone-groups/retarget-options state pin)}
-                                            :choice-value :all)))})))
+                          (seq cues) (assoc :details (zone-groups/cue-list-text state cues))
+                          pinned (assoc :choice (zone-groups/retarget-choice state pin)
+                                        :choice-value :all)))})))
 
 (defn- handle-forget-projector
   "Forget: Z0's :projectors/remove (the projector, its calibration, list and

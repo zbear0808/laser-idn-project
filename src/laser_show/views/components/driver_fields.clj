@@ -14,15 +14,10 @@
      it loses focus (commit-field), and only text driver/coerce-field takes;
      any other is put back."
   (:require [cljfx.api :as fx]
-            [laser-show.events.core :as events]
             [laser-show.output.driver :as driver]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.commit-field :as commit-field])
-  (:import [javafx.animation PauseTransition]
-           [javafx.beans.value ChangeListener ObservableValue]
-           [javafx.event EventHandler]
-           [javafx.scene Node]
-           [javafx.scene.control CheckBox ComboBox TextField]
-           [javafx.util Duration]))
+  (:import [javafx.scene.control TextField]))
 
 (defn- field-id [k]
   (str "driver-field-" (name k)))
@@ -30,66 +25,36 @@
 (defn- text-of [v]
   (if (nil? v) "" (str v)))
 
-(def ^:private settle-ms
-  "How long after a change a choice or check box waits for the applied value
-   to come back before it shows what applies again (commit-field's too)."
-  300)
-
-(defn- show-applied-after-changes!
-  "After each change of node's value (read by value-of), once settle-ms has
-   passed: if what applies (its :user-data :value, which a render updates)
-   isn't what it shows, show what applies (set-value!). A change that applies
-   renders its own value; one the app refused (the show lock) changes
-   nothing, so the control would go on showing a value that isn't applied."
-  [^Node node ^ObservableValue property value-of set-value!]
-  (.addListener property
-                (reify ChangeListener
-                  (changed [_ _ _ _]
-                    (doto (PauseTransition. (Duration/millis settle-ms))
-                      (.setOnFinished (reify EventHandler
-                                        (handle [_ _]
-                                          (let [{applied :value} (.getUserData node)]
-                                            (when (not= applied (value-of node))
-                                              (set-value! node applied))))))
-                      (.play))))))
-
 (defn- control
   [{:keys [spec value mode event disable]}]
   (let [{k :key type :type :keys [options hint]} spec
         id (field-id k)
-        with-value (fn [v] (assoc event :key k :value v))
-        ;; a value put back to what applies isn't a change
-        changed (fn [v] (when (not= v value) (events/dispatch! (with-value v))))]
+        with-value (fn [v] (assoc event :key k :value v))]
     (case type
-      :choice {:fx/type fx/ext-on-instance-lifecycle
-               :on-created (fn [^ComboBox c]
-                             (show-applied-after-changes! c (.valueProperty c)
-                                                          #(.getValue ^ComboBox %)
-                                                          #(.setValue ^ComboBox %1 %2)))
+      ;; A choice or a box the app refused (the show lock) shows what
+      ;; applies again (applied-value)
+      :choice {:fx/type applied-value/applied-control
+               :property :value
+               :address [event k]
+               :value value
+               :on-change with-value
                :desc {:fx/type :combo-box
                       :id id
                       ;; as wide as its column, as the text fields are
                       :max-width Double/MAX_VALUE
                       :items (mapv first options)
-                      :value value
-                      :user-data {:value value}
                       :disable (boolean disable)
                       :button-cell (fn [v] {:text (str (or (some #(when (= v (first %)) (second %)) options) ""))})
                       :cell-factory {:fx/cell-type :list-cell
-                                     :describe (fn [v] {:text (str (or (some #(when (= v (first %)) (second %)) options) ""))})}
-                      :on-value-changed changed}}
-      :boolean (let [value (true? value)]
-                 {:fx/type fx/ext-on-instance-lifecycle
-                  :on-created (fn [^CheckBox c]
-                                (show-applied-after-changes! c (.selectedProperty c)
-                                                             #(.isSelected ^CheckBox %)
-                                                             #(.setSelected ^CheckBox %1 (boolean %2))))
-                  :desc {:fx/type :check-box
-                         :id id
-                         :selected value
-                         :user-data {:value value}
-                         :disable (boolean disable)
-                         :on-selected-changed (fn [v] (when (not= v value) (events/dispatch! (with-value v))))}})
+                                     :describe (fn [v] {:text (str (or (some #(when (= v (first %)) (second %)) options) ""))})}}}
+      :boolean {:fx/type applied-value/applied-control
+                :property :selected
+                :address [event k]
+                :value (true? value)
+                :on-change with-value
+                :desc {:fx/type :check-box
+                       :id id
+                       :disable (boolean disable)}}
       (if (= :live mode)
         ;; The field owns its text while it is typed into: a controlled
         ;; :text would put back an older value that arrives after a newer

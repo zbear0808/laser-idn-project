@@ -120,3 +120,20 @@
         (is (= values (faders/with-faders stale {})) "nothing learned: no slot")
         (is (= values (faders/with-faders stale {[:midi 0 5] :slider-1})) "learned on a control that hasn't moved"))
       (is (identical? values (faders/with-faders values {})) "nothing to derive: the same map, no garbage a tick"))))
+
+(deftest tick-inputs-share-one-lookup-test
+  (testing "reactivity plan 27 §7 cases 4 and 5: the meters' levels and the modulators' input values, together"
+    (is (= {:faders {:slider-1 0.75}
+            :input-values {[:gamepad 0 :trigger-left] 0.75 [:macro :slider-1] 0.75}}
+           (faders/tick-inputs {[:gamepad 0 :trigger-left] 0.75} {[:gamepad 0 :trigger-left] :slider-1})))
+    (is (= {:faders {} :input-values {[:gamepad 0 :trigger-left] 0.75}}
+           (faders/tick-inputs {[:gamepad 0 :trigger-left] 0.75 [:macro :slider-1] 0.0} {}))
+        "nothing learned: no level, and the store's stale slot gone")
+    (is (= {:faders {:slider-1 0.0} :input-values {[:midi 0 7] 0.0 [:macro :slider-1] 0.0}}
+           (faders/tick-inputs {[:midi 0 7] 0.0} {[:midi 0 7] :slider-1}))
+        "a fader at 0 is a level")
+    (let [values {[:midi 0 7] 0.3}]
+      (is (identical? values (:input-values (faders/tick-inputs values nil))) "a project from before the faders: the same map")
+      (is (= (faders/with-faders values {[:midi 0 7] :slider-1})
+             (:input-values (faders/tick-inputs values {[:midi 0 7] :slider-1})))
+          "with-faders is its :input-values"))))

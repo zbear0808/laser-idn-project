@@ -37,6 +37,8 @@
             [laser-show.animation.chains :as chains]
             [laser-show.animation.presets :as presets]
             [laser-show.animation.safety :as safety]
+            [laser-show.events.handlers.chain.helpers :as chain-helpers]
+            [laser-show.events.handlers.input :as input]
             [laser-show.output.driver :as driver]
             [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
@@ -186,6 +188,45 @@
   (fx/sub-val context get-in [:config :cue :trigger-mode] :default))
 
 
+;; Learning an input (reactivity plan 24): every control that can be
+;; learned reads the one attempt waiting to bind a control through
+;; binding-learn, so only its own result changes when another one's learn
+;; starts or ends. Its Start sends the show it is in (document-id); its
+;; Cancel the attempt it shows (learn-for-target).
+
+(defn document-id
+  "The open show's identity ([:project :document-id]), which a control that
+   starts work for the show (a learn) sends with its event."
+  [context]
+  (fx/sub-val context get-in [:project :document-id]))
+
+(defn- binding-learn
+  "The learn waiting to bind a control (handlers.input/binding-attempt):
+   {:target :learn-id :document-id}, or nil."
+  [context]
+  (fx/sub-val context input/binding-attempt))
+
+(defn input-learning-target
+  "The target of the learn waiting to bind a control (handlers.input/
+   learn-target: {:type :target}, {:type :role}, {:type :slot}), or nil."
+  [context]
+  (:target (fx/sub-ctx context binding-learn)))
+
+(defn learn-for-target
+  "The learn waiting for target ({:type :trigger-cue :target [0 0]},
+   {:type :vibe :role :hit}, ...) as its Cancel names it: {:learn-id
+   :document-id}, or nil."
+  [context target]
+  (let [attempt (fx/sub-ctx context binding-learn)]
+    (when (and attempt (= target (:target attempt)))
+      (dissoc attempt :target))))
+
+(defn- learning?
+  "Is a learn waiting for target?"
+  [context target]
+  (some? (fx/sub-ctx context learn-for-target target)))
+
+
 ;; Level 2: Computed Subscriptions
 ;; These compose multiple Level 1 subscriptions or perform computations.
 ;; Memoized via fx/sub-ctx, only recalculated when dependencies change.
@@ -193,6 +234,17 @@
 ;; Level 2: Computed Grid Cell Subscriptions
 ;; These compose from simpler subscriptions for better cache reuse.
 
+
+(defn cell-selected?
+  "Is [col row] its grid's selected cell: the cue grid's
+   (selected-grid-cell) for action-type :trigger-cue, the effects grid's
+   (selected-effects-cell) for :trigger-effect? true or false, false while
+   none is. The cells' display data read this, not the selection, so a
+   move rebuilds only the old cell's and the new one's."
+  [context action-type col row]
+  (= [col row] (case action-type
+                 :trigger-cue (fx/sub-ctx context selected-grid-cell)
+                 :trigger-effect (fx/sub-ctx context selected-effects-cell))))
 
 (defn cue-cell-chain
   "Cue chain stored at [col row], or {:items []} when the cell is empty.
@@ -253,7 +305,7 @@
    Depends on:
    - cue-cell-chain (this cell's cue chain)
    - cue-cell-active? (whether this cell is playing)
-   - selected-grid-cell
+   - cell-selected? (whether this cell is the selected one)
    
    Returns map with:
    - :col, :row - position
@@ -264,31 +316,18 @@
    - :active? - is this cell playing?
    - :selected? - is this cell currently selected?
    - :timeline? - is this a timeline cue?
-   - :has-content? - does cell have any presets or timeline configuration?"
+   - :has-content? - does cell have any presets or timeline configuration?
+   The presets, :timeline? and :has-content? are cue-chains/grid-content's,
+   the rule a press of the cell follows too."
   [context col row]
-  (let [cue-chain-data (fx/sub-ctx context cue-cell-chain col row)
-        items (:items cue-chain-data [])
-        active? (fx/sub-ctx context cue-cell-active? col row)
-        selected? (= (fx/sub-ctx context selected-grid-cell) [col row])
-        ;; Flatten to get all presets (excluding groups)
-        flat-items (filterv #(= :preset (:type %))
-                            (tree-seq #(= :group (:type %))
-                                      #(:items % [])
-                                      {:type :group :items items}))
-        first-preset (first flat-items)
-        preset-count (count flat-items)
-        timeline? (cue-chains/timeline-cue? cue-chain-data)
-        has-content? (or (pos? preset-count) timeline?)]
-    {:col col
-     :row row
-     :name (:name cue-chain-data)
-     :cue-chain cue-chain-data
-     :preset-count preset-count
-     :first-preset-id (:preset-id first-preset)
-     :active? active?
-     :selected? selected?
-     :timeline? timeline?
-     :has-content? has-content?}))
+  (let [cue-chain-data (fx/sub-ctx context cue-cell-chain col row)]
+    (merge {:col col
+            :row row
+            :name (:name cue-chain-data)
+            :cue-chain cue-chain-data
+            :active? (fx/sub-ctx context cue-cell-active? col row)
+            :selected? (fx/sub-ctx context cell-selected? :trigger-cue col row)}
+           (cue-chains/grid-content cue-chain-data))))
 
 (defn- held-count [state]
   (if (ex/playing? state) 0 (count (ex/active-cues state))))
@@ -307,22 +346,40 @@
   [context]
   (pos? (fx/sub-ctx context held-cue-count)))
 
+(defn cue-label-data
+  "What the cue at [col row] shows as its label (views/components/
+   grid_cell.clj cell-label's keys, and :has-content?): {:name
+   :first-preset-id :preset-count :timeline? :has-content?}, all but :name
+   cue-chains/grid-content's. Only that cell's chain: not whether it plays,
+   nor the grid's selection."
+  [context col row]
+  (let [cue (fx/sub-ctx context cue-cell-chain col row)]
+    (assoc (cue-chains/grid-content cue) :name (:name cue))))
+
+(defn active-cue-cells
+  "The cells with an intent ([:playback :active-cues]), as a set. A pause,
+   a seek or a new run inside an intent leaves it equal."
+  [context]
+  (set (keys (fx/sub-val context ex/active-cues))))
+
 (defn- cue-cells-in-grid-order
-  "The cells with an intent, row by row as the grid reads: A1, A2 … B1 …"
-  [state]
-  (vec (sort-by (fn [[col row]] [row col]) (keys (ex/active-cues state)))))
+  "The cells with an intent (active-cue-cells), row by row as the grid
+   reads: A1, A2 … B1 … Sorted again only when that set changes."
+  [context]
+  (vec (sort-by (fn [[col row]] [row col]) (fx/sub-ctx context active-cue-cells))))
 
 (defn playing-cues
   "The cues that play, in grid order, each as what its cell's label is made
-   from (views/components/grid_cell.clj cell-label):
-   {:col :row :name :first-preset-id :preset-count :timeline?}. None while
-   Stop holds them (output-held?): nothing is drawn then."
+   from (cue-label-data): {:col :row :name :first-preset-id :preset-count
+   :timeline?}. None while Stop holds them (output-held?): nothing is drawn
+   then."
   [context]
   (if (fx/sub-ctx context playing?)
     (mapv (fn [[col row]]
-            (select-keys (fx/sub-ctx context cell-display-data col row)
-                         [:col :row :name :first-preset-id :preset-count :timeline?]))
-          (fx/sub-val context cue-cells-in-grid-order))
+            (-> (fx/sub-ctx context cue-label-data col row)
+                (select-keys [:name :first-preset-id :preset-count :timeline?])
+                (assoc :col col :row row)))
+          (fx/sub-ctx context cue-cells-in-grid-order))
     []))
 
 ;; Level 2: Computed Effect Cell Subscriptions
@@ -334,53 +391,107 @@
   [context col row]
   (fx/sub-val context get-in [:chains :effect-chains [col row]]))
 
+(defn stored-effect-cell
+  "What the effects cell at [col row] stores, on or off
+   (chains/stored-effect-content of its saved :items): {:has-content?
+   :leaves}. Only depends on that cell's items."
+  [context col row]
+  (chains/stored-effect-content (fx/sub-val context get-in [:chains :effect-chains [col row] :items])))
+
 (defn effect-cell-display-data
   "Computed display data for an effects grid cell.
    
-   Depends on: effect-cell-chain (this cell's effect chain)
+   Depends on: effect-cell-chain (this cell's effect chain),
+   stored-effect-cell (what it stores) and cell-selected? (whether it is
+   the selected one)
    
    Returns map with:
    - :col, :row - position
    - :name - custom name for the effect chain (nil if not set)
-   - :effect-count - number of actual effects in chain (flattened, excludes groups)
+   - :effect-count - number of effects it stores (in groups too, enabled or not)
    - :first-effect-id - id of first effect (not group)
-   - :effect-ids - ids of the effects, in chain order (flattened)
+   - :effect-ids - ids of the effects, in chain order
    - :active? - is effect chain active?
    - :selected? - is effect chain cell selected?
-   - :has-effects? - does cell have any effects?
+   - :has-effects? - does cell store any effects?
+   - :has-content? - does cell hold anything, effects or groups? A cell
+     that doesn't is empty: New offers to fill it, and it can't be dragged
    - :display-text - text to display in the cell"
   [context col row]
   (let [cell-data (fx/sub-ctx context effect-cell-chain col row)
-        ;; Effect chain items are stored under :items key
-        effect-chain (:items cell-data [])
-        ;; Flatten the chain to get actual effects (not groups)
-        flattened-effects (chains/flatten-chain effect-chain)
-        first-effect (first flattened-effects)
-        effect-count (count flattened-effects)
-        selected? (= (fx/sub-ctx context selected-effects-cell) [col row])]
+        {:keys [has-content? leaves]} (fx/sub-ctx context stored-effect-cell col row)
+        first-effect (first leaves)
+        effect-count (count leaves)
+        selected? (fx/sub-ctx context cell-selected? :trigger-effect col row)]
     {:col col
      :row row
      :name (:name cell-data)
      :effect-count effect-count
      :first-effect-id (:effect-id first-effect)
-     :effect-ids (mapv :effect-id flattened-effects)
+     :effect-ids (mapv :effect-id leaves)
      :active? (:active? cell-data false)
      :selected? selected?
      :has-effects? (pos? effect-count)
+     :has-content? has-content?
      :display-text (when first-effect
                      (str (name (:effect-id first-effect))
                           (when (> effect-count 1)
                             (str " +" (dec effect-count)))))}))
 
 (defn effects-grid-empty?
-  "True while no effects cell has an effect in it (groups don't count), as
-   effect-cell-display-data's :has-effects? would say for every cell; but
-   for Masters, by the Master rule: a cell that is a Master and nothing more
+  "True while no effects cell stores an effect, on or off (groups don't
+   count), but for Masters: a cell whose one stored effect is a Master
    (vibes.faders/master-only?) doesn't count, so a new project's grid, which
-   has one, still says what effect cells are for."
+   has one, still says what effect cells are for. A Master with a disabled
+   effect beside it, or disabled itself, counts. Only the Effects tab's
+   hint follows it."
   [context]
-  (not-any? #(and (seq (chains/flatten-chain (:items % []))) (not (faders/master-only? %)))
+  (not-any? (fn [cell]
+              (let [leaves (:leaves (chains/stored-effect-content (:items cell)))]
+                (and (seq leaves)
+                     (not (and (= 1 (count leaves)) (faders/master-only? cell))))))
             (vals (fx/sub-val context get-in [:chains :effect-chains]))))
+
+
+;; Level 2: The effect and modulator registries, as data
+;; (laser-show.animation.registries, plans/2026-11-23-cljfx-reactivity/17)
+
+
+(defn effect-descriptors
+  "{id descriptor} of every registered effect, its definition without its
+   functions, as :registries/published last put them in [:backend
+   :registries :effects]: at start and after a code reload."
+  [context]
+  (fx/sub-val context get-in [:backend :registries :effects] {}))
+
+(defn modulator-descriptors
+  "{type descriptor} of every registered modulator type, without its
+   evaluator, as :registries/published last put them in [:backend
+   :registries :modulators]."
+  [context]
+  (fx/sub-val context get-in [:backend :registries :modulators] {}))
+
+(defn- offered?
+  "Does a bank of scope (:item or :global) offer the effect described by d:
+   one without a :scope is offered in both, a zone-stage effect (:scope
+   #{:global}) only on the effects grid (zones plan Z5)."
+  [scope d]
+  (let [s (:scope d)]
+    (or (nil? s) (contains? s scope))))
+
+(defn effect-bank-categories
+  "What an effect bank of scope offers (:item, a cue's items and the
+   timeline's; :global, the effects grid's), by tab: {category [descriptor
+   …]} from effect-descriptors. An effect is in each of its categories but
+   :calibration (projector-only); a :hidden? one (the Zone Selector, zones
+   plan Z4) is in none. A re-registered effect shows as it is now once it is
+   published."
+  [context scope]
+  (reduce (fn [acc d]
+            (let [cat (:category d)]
+              (reduce #(update %1 %2 (fnil conj []) d) acc (disj (if (set? cat) cat #{cat}) :calibration))))
+          {}
+          (filter #(offered? scope %) (remove :hidden? (vals (fx/sub-ctx context effect-descriptors))))))
 
 
 ;; Level 2: Computed Project Subscriptions
@@ -479,44 +590,62 @@
         item (assoc :item-name item)))))
 
 (defn connection-status
-  "Streaming status for the toolbar.
+  "Streaming status for the toolbar, from one published status.
    
    Depends on: [:backend :streaming :running?] (the operator's intent, which
-   picks the button) and the output runtime's status (what actually streams).
+   picks the button) and the output runtime's status (what each output
+   reports: :streaming, :starting or :error). Only a :streaming report
+   counts: a drained command queue doesn't mean an output streams. The
+   rig's names only label the errors.
    
    Returns map with:
    - :running? - streaming is on
-   - :state - :stopped, :stopping, :starting, :streaming, :error or :idle
-     (on, with no enabled projectors)
-   - :status-text - e.g. \"Streaming to 2 of 3 · 1 error\", or \"No
-     projectors enabled\" (:idle)
-   - :errors - [\"<projector name>: <error>\" …]"
+   - :state - :stopped, :stopping, :starting, :mixed (some outputs stream,
+     the others still start), :streaming (every wanted output streams),
+     :error or :idle (on, with no enabled projectors)
+   - :status-text - e.g. \"Streaming to 1 of 2 · 1 starting\", \"0 of 2
+     streaming · 1 error\", \"Updating outputs…\" or \"No projectors
+     enabled\" (:idle). It says N of M only of a settled status: nothing
+     pending, and a report for each of the M wanted outputs, none for an
+     engine still being retired
+   - :errors - [\"<projector name>: <error>\" …], by projector id"
   [context]
   (let [running? (boolean (fx/sub-val context get-in [:backend :streaming :running?]))
         {:keys [engines wanted pending? projectors] :as status} (fx/sub-ctx context streaming-status)
         names (fx/sub-val context :projectors)
-        streaming (count (filter #(= :streaming (:state %)) (vals projectors)))
+        wanted (or wanted 0)
+        {streaming :streaming starting :starting :or {streaming 0 starting 0}}
+        (frequencies (map :state (vals projectors)))
         errors (vec (for [[id {:keys [state error]}] (sort-by key projectors)
                           :when (= :error state)]
                       (str (or (get-in names [id :name]) (name id)) ": " error)))
+        settled? (and (some? status) (not pending?) (= wanted (count projectors)))
+        ratio (when (and settled? (pos? wanted))
+                (str (if (pos? streaming)
+                       (str "Streaming to " streaming " of " wanted)
+                       (str "0 of " wanted " streaming"))
+                     (when (pos? starting) (str " · " starting " starting"))))
         state (cond
                 (not running?) (if (pos? (or engines 0)) :stopping :stopped)
-                (or (nil? status) pending?) :starting
                 (seq errors) :error
-                (zero? (or wanted 0)) :idle
-                :else :streaming)]
+                (not settled?) :starting
+                (zero? wanted) :idle
+                (= streaming wanted) :streaming
+                (and (pos? streaming) (= wanted (+ streaming starting))) :mixed
+                :else :starting)]
     {:running? running?
      :state state
      :errors errors
      :status-text (case state
                     :stopped "Not streaming"
                     :stopping "Stopping…"
-                    :starting "Starting…"
                     :idle "No projectors enabled"
-                    (str "Streaming to " streaming " of " wanted
-                         (when (zero? wanted) " (no enabled projectors)")
-                         (when (seq errors)
-                           (str " · " (count errors) (if (= 1 (count errors)) " error" " errors")))))}))
+                    :starting (if (or (pos? streaming) (> (count projectors) wanted))
+                                "Updating outputs…"
+                                "Starting…")
+                    (:mixed :streaming) ratio
+                    :error (str (or ratio "Updating outputs…")
+                                " · " (count errors) (if (= 1 (count errors)) " error" " errors")))}))
 
 
 ;; Level 2: Computed UI State Subscriptions
@@ -605,13 +734,15 @@
   (:active-projector (fx/sub-val context :projector-ui)))
 
 (defn active-projector
-  "Get the full config of the currently selected projector.
+  "Get the full config of the currently selected projector, with its :id;
+   nil when none is selected or the selected id has no projector (an undo
+   took it away), so the inspector shows no selection.
    Depends on: projector-ui domain and projectors domain"
   [context]
   (let [active-id (:active-projector (fx/sub-val context :projector-ui))
-        projectors (fx/sub-val context :projectors)]
-    (when active-id
-      (assoc (get projectors active-id) :id active-id))))
+        projector (when active-id (get (fx/sub-val context :projectors) active-id))]
+    (when projector
+      (assoc projector :id active-id))))
 
 (defn discovered-devices
   "Get the devices from the last scan.
@@ -859,21 +990,6 @@
         :drop-position nil
         :renaming-id nil}))
 
-(defn list-ordered-ids
-  "Get the ordered vector of item IDs for a hierarchical list component or items-path.
-   Calculates visual document-order IDs directly from the state context.
-   Returns an eager vector of UUIDs in document order."
-  ([context component-id]
-   (list-ordered-ids context component-id nil))
-  ([context component-id items-path]
-   (let [target (or items-path (ex/resolve-items-path component-id))]
-     (if (and (vector? target) (= :chains (first target)))
-       (let [chains (fx/sub-val context :chains)
-             sub-path (subvec target 1)]
-         (chains/collect-all-ids (get-in chains sub-path [])))
-       (let [state (fx/sub-val context identity)]
-         (ex/chain-ordered-ids state (or target component-id)))))))
-
 
 ;; Level 2: Virtual Projector Subscriptions
 
@@ -1024,8 +1140,10 @@
   (zone-maps/map-by-id {:zone-maps (fx/sub-val context :zone-maps)} id))
 
 (defn active-zone-map
-  "The map in use, as the UI shows it (06 SQ-7): [:zone-map :active], Left
-   / Right for an id that is no map."
+  "The manual map (06 SQ-7): [:zone-map :active] as the UI shows it, Left
+   / Right for an id that is no map. A state fact, not the map a tick
+   routes by: a due switch or a running Map cycle's pick comes first
+   (routing.zone-maps/effective-map-id)."
   [context]
   (or (fx/sub-ctx context zone-map (fx/sub-val context get-in [:zone-map :active]))
       (fx/sub-ctx context zone-map zone-maps/default-map-id)))
@@ -1040,12 +1158,28 @@
   [context]
   (fx/sub-val context get-in [:config :default-target]))
 
-(defn zones-in-use
-  "Every zone the show draws into (Z4-Q1): those a cue names anywhere, a
-   column's default and the show's, sorted."
+(defn effect-ref-inputs
+  "The effect cells' chains as their stored references read them
+   (routing.refs/chain-ref-usage: the zone catalogue, the rig report):
+   {cell {:items items}} for each cell with items, so switching a cell on or
+   off leaves it equal."
   [context]
-  (let [cues (fx/sub-val context get-in [:chains :cue-chains])
-        refs (concat (mapcat refs/cue-refs (remove nil? (vals cues)))
+  (into {}
+        (keep (fn [[cell chain]]
+                (when (and (map? chain) (seq (:items chain)))
+                  [cell {:items (:items chain)}])))
+        (fx/sub-val context get-in [:chains :effect-chains])))
+
+(defn zones-in-use
+  "Every zone the show names (Z4-Q1): in a cue (routing.refs/cue-refs, its
+   zone patterns too), in an effect cell's zone patterns (a place, a source
+   or a lit step, a keyframe's too, the pattern on or off), a column's
+   default and the show's, sorted. Not a zone a label, a map's override or
+   the preview alone names."
+  [context]
+  (let [usage (refs/chain-ref-usage (fx/sub-val context get-in [:chains :cue-chains])
+                                    (fx/sub-ctx context effect-ref-inputs))
+        refs (concat (keys usage)
                      (mapcat targets/target-refs (vals (fx/sub-val context get-in [:grid :column-targets])))
                      (targets/target-refs (fx/sub-ctx context default-target)))]
     (vec (sort-by targets/zone-index (into #{} (filter targets/zone-ref?) refs)))))
@@ -1089,26 +1223,36 @@
        vec))
 
 (defn map-cycle-running?
-  "Does a Map cycle pick the map (zones plan Z5): a Map cycle cell is on,
-   and no map pad's press paused it?"
+  "Is a Map cycle enabled and unpaused (zones plan Z5): an enabled Map
+   cycle in a cell that is on, and no switch that landed paused it? A
+   state fact: it says nothing of the map a tick picks, which can be none."
   [context]
   (and (zone-maps/cycle-on? {:chains {:effect-chains (fx/sub-val context get-in [:chains :effect-chains])}})
        (not (fx/sub-val context get-in [:zone-map :cycle-paused?]))))
 
+(defn manual-map-marker-id
+  "The map the Manual mark is on, the map editor's list's and the pads'
+   alike: the manual map's id (active-zone-map), or nil while a Map cycle
+   runs (map-cycle-running?). nil means no manual mark, not no map routed."
+  [context]
+  (when-not (fx/sub-ctx context map-cycle-running?)
+    (:id (fx/sub-ctx context active-zone-map))))
+
 (defn map-pad
   "One zone map pad, its booleans and keys only (06 §4.5): {:id :name
-   :active? (the map in use, as the UI shows it; none while a Map cycle
-   picks it, zones plan Z5) :pending (nil, or :beat or :bar while a switch
-   to it waits) :bar? (its Switch on the bar) :learning? :bindings}."
+   :active? (the Manual mark is on it, manual-map-marker-id: on none while
+   a Map cycle runs, zones plan Z5) :pending (nil, or :beat or :bar while
+   a switch to it waits) :bar? (its Switch on the bar) :learning?
+   :bindings}."
   [context id]
-  (let [pending (fx/sub-val context get-in [:zone-map :pending])]
+  (let [pending (fx/sub-val context get-in [:zone-map :pending])
+        marker (fx/sub-ctx context manual-map-marker-id)]
     {:id id
      :name (:name (fx/sub-ctx context zone-map id))
-     :active? (and (= id (:id (fx/sub-ctx context active-zone-map)))
-                   (not (fx/sub-ctx context map-cycle-running?)))
+     :active? (and (some? marker) (= id marker))
      :pending (when (= id (:map pending)) (if (:bar? pending) :bar :beat))
      :bar? (true? (fx/sub-val context get-in [:config :zone-map-pads id :bar?]))
-     :learning? (= {:type :zone-map :target id} (fx/sub-val context get-in [:backend :input :learning-target]))
+     :learning? (learning? context {:type :zone-map :target id})
      :bindings (fx/sub-ctx context map-pad-bindings id)}))
 
 (defn- cue-ref-sets
@@ -1134,13 +1278,32 @@
   (vec (sort-by targets/zone-index (into #{:zone/a :zone/b} (fx/sub-ctx context zones-in-use)))))
 
 (defn selected-zone-map-id
-  "The map the map editor shows: the one selected while it is there, else
-   the one in use."
+  "The map the map editor shows, and its Use now chooses: the one selected
+   while it is there, else the manual map (active-zone-map). Selecting one
+   switches nothing."
   [context]
   (let [id (fx/sub-val context get-in [:ui :zone-maps :selected])]
     (if (and id (fx/sub-ctx context zone-map id))
       id
       (:id (fx/sub-ctx context active-zone-map)))))
+
+(defn editor-map-switch
+  "What the map editor says of how the map is chosen, editing map id
+   (plans/2026-11-23-cljfx-reactivity/29): {:mode (:manual while the
+   Manual mark shows, manual-map-marker-id; :cycle while a Map cycle runs)
+   :manual-name (the manual map's, active-zone-map) :queued? (a switch
+   waits: [:zone-map :pending], CYCLE's too) :can-use-now? (would Use now
+   change anything: id is a map, and a Map cycle runs, a switch waits, or
+   the stored manual id isn't id, a dangling one too)}. State facts only:
+   never the map a tick routed by, which it can't know."
+  [context id]
+  (let [cycle? (nil? (fx/sub-ctx context manual-map-marker-id))
+        queued? (some? (fx/sub-val context get-in [:zone-map :pending]))]
+    {:mode (if cycle? :cycle :manual)
+     :manual-name (:name (fx/sub-ctx context active-zone-map))
+     :queued? queued?
+     :can-use-now? (boolean (and (fx/sub-ctx context zone-map id)
+                                 (or cycle? queued? (not= id (fx/sub-val context get-in [:zone-map :active])))))}))
 
 (defn cue-target-explain
   "How each level of the cue at [col row] resolves, its column's and the
@@ -1172,9 +1335,9 @@
       nil)))
 
 (defn pattern-world
-  "What a pattern's fold, lane and warnings read of the show
+  "What a pattern's lane and warnings read of the show
    (routing.zone-patterns): the rig, the groups, the maps and the map in
-   use, the keys learned."
+   use, the keys learned. Its fold line reads less: pattern-fold-world."
   [context]
   {:projectors (fx/sub-val context :projectors)
    :rig (fx/sub-val context :rig)
@@ -1183,16 +1346,60 @@
    :zone-map (fx/sub-val context :zone-map)
    :config {:input {:trigger-map (fx/sub-val context get-in [:config :input :trigger-map])}}})
 
+(def ^:private fold-projector-keys
+  "What a fold line reads of a projector: its name, where one with no place
+   yet goes in the order (routing.rig/placement-key: its host and service),
+   its switches and its groups."
+  [:name :host :service-id :enabled? :exclude-from-all? :zone-groups])
+
+(defn- fold-map-id
+  "The map a fold line says: a tick's at beat 0 without a Map cycle's pick
+   (routing.zone-maps/effective-map-id), as routing.zone-patterns/fold-text
+   works it out."
+  [state]
+  (zone-maps/effective-map-id state 0.0 nil))
+
+(defn pattern-fold-world
+  "What a pattern's fold line reads of the show (routing.zone-patterns/
+   fold-text), as a state: the projectors' names, order, switches and
+   groups (fold-projector-keys); the rig's order and middle laser; the
+   groups' names; and the map the line says (fold-map-id: a switch due by
+   beat 0, else the manual map, Left / Right for one that is gone) as
+   [:zone-map :active], with its name, lanes and overrides when it is
+   yours. Not the keys learned, the zones' labels, a Map cycle, nor what
+   else a projector or a map holds."
+  [context]
+  (let [map-id (fx/sub-val context fold-map-id)]
+    {:projectors (into {} (map (fn [[id p]] [id (select-keys p fold-projector-keys)])) (fx/sub-val context :projectors))
+     :rig (select-keys (fx/sub-val context :rig) [:order :middle])
+     :zone-groups (into {} (map (fn [[id g]] [id (select-keys g [:name])])) (fx/sub-val context :zone-groups))
+     :zone-maps (if (zone-maps/built-in? map-id)
+                  {}
+                  {map-id (select-keys (fx/sub-ctx context zone-map map-id) [:name :lanes :overrides])})
+     :zone-map {:active map-id}}))
+
+(defn- fold-names
+  "What a fold line names refs by (routing.targets/names of
+   pattern-fold-world's target groups). It says a zone by its letters, so
+   no labels."
+  [context]
+  (targets/names (rig/target-groups (fx/sub-ctx context pattern-fold-world)) {}))
+
 (defn pattern-fold
-  "How a pattern (params) folds onto this rig under the map in use, the
-   pattern window's ⓘ line (routing.zone-patterns/fold-text)."
-  [context params]
-  (zone-patterns/fold-text (fx/sub-ctx context pattern-world) params (fx/sub-ctx context names-ctx)))
+  "How a pattern whose lane is zones folds onto this rig under the map in
+   use, the ⓘ line of the pattern window and of the step grid window
+   (routing.zone-patterns/fold-text, which reads a pattern's lane alone).
+   zones: the lane as the window shows it, in order. Keyed by it, over
+   pattern-fold-world: the pattern's rate or steps, a key learned or a
+   zone's label leave the line be."
+  [context zones]
+  (zone-patterns/fold-text (fx/sub-ctx context pattern-fold-world) {:zones zones} (fx/sub-ctx context fold-names)))
 
 (defn- holds-effect?
-  "Does an effects cell's chain hold an effect-id, on or off?"
+  "Does an effects cell's chain store an effect-id, on or off, in a
+   disabled group or not (chains/stored-effect-content)?"
   [effect-id chain]
-  (boolean (some #(= effect-id (:effect-id %)) (chains/flatten-chain (:items chain)))))
+  (boolean (some #(= effect-id (:effect-id %)) (:leaves (chains/stored-effect-content (:items chain))))))
 
 (defn zone-patterns-in-use?
   "Does the show have a zone pattern anywhere, on or off: on a cue, or in
@@ -1242,7 +1449,7 @@
      :pending (when (and pending (= pad (zone-patterns/style-pad (:style pending))))
                 (if (:bar? pending) :bar :beat))
      :bar? (true? (fx/sub-val context get-in [:config :pattern-pads pad :bar?]))
-     :learning? (= {:type :pattern-pad :target pad} (fx/sub-val context get-in [:backend :input :learning-target]))
+     :learning? (learning? context {:type :pattern-pad :target pad})
      :bindings (fx/sub-ctx context pattern-pad-bindings pad)}))
 
 (defn step-pad
@@ -1250,7 +1457,7 @@
    it shows is the newest tick's."
   [context]
   {:bindings (fx/sub-ctx context pattern-pad-bindings :step)
-   :learning? (= {:type :zone-step} (fx/sub-val context get-in [:backend :input :learning-target]))})
+   :learning? (learning? context {:type :zone-step})})
 
 (defn map-cycle-state
   "The CYCLE pad (07 §7.4): {:on? (a Map cycle cell is on) :running? (it
@@ -1270,7 +1477,7 @@
      :paused? (and on? paused?)
      :pending (when (= :cycle (:map pending)) (if (:bar? pending) :bar :beat))
      :bar? (true? (fx/sub-val context get-in [:config :zone-map-pads :cycle :bar?]))
-     :learning? (= {:type :zone-map :target :cycle} (fx/sub-val context get-in [:backend :input :learning-target]))
+     :learning? (learning? context {:type :zone-map :target :cycle})
      :bindings (fx/sub-ctx context map-pad-bindings :cycle)
      :maps (if running-cycle
              (into [] (keep #(:name (zone-maps/map-by-id state %))) (:maps (:params running-cycle)))
@@ -1323,17 +1530,21 @@
 
 (defn step-grid
   "The step grid window's grid at target ({:domain :entity-key
-   :effect-path}, a cue's zone pattern or an effects cell's), or nil when it
-   holds no zone pattern: {:id (the pattern's, for the playhead) :params
+   :effect-instance-id}: the zone pattern with that id among a cue's
+   patterns or an effects cell's items, wherever it is among them now,
+   routing.step-grid/locate-pattern), or nil when they hold no zone pattern
+   with that id: {:id (the pattern's, for the playhead) :params
    (the grid as it shows, routing.step-grid/as-grid: a pattern that isn't
    one yet shows the grid it becomes) :grid? (it is one already) :rows
    [{:ref :text}] (each row and where it goes under the map in use) :lit
    (each step's refs, as sets) :length :cursor [row step] :keyframes? (its
    keyframes are on: the grid is greyed out) :locked? (the show lock is on)
    :wrap-note (S-5) :every-laser-note (S-4, once it became zones)}."
-  [context {:keys [domain entity-key effect-path] :as target}]
-  (let [fx (fx/sub-ctx context zone-pattern-at domain entity-key effect-path)]
-    (when (= :zone-pattern (:effect-id fx))
+  [context {:keys [domain entity-key effect-instance-id] :as target}]
+  (let [items-path (chain-helpers/zone-pattern-items-path domain entity-key)
+        fx (when items-path
+             (:instance (step-grid/locate-pattern (fx/sub-val context get-in items-path) effect-instance-id)))]
+    (when fx
       (let [world (fx/sub-ctx context pattern-world)
             params (step-grid/as-grid (:params fx) (count (rig/e-order (rig/rig-inputs world))))
             names (fx/sub-ctx context names-ctx)
@@ -1525,11 +1736,17 @@
   [context]
   (fx/sub-val context get-in [:backend :input :midi :channel-filter]))
 
-(defn midi-learning?
-  "Check if MIDI learn mode is active.
-   Depends on: backend domain"
-  [context]
-  (boolean (fx/sub-val context get-in [:backend :input :midi :learn-mode])))
+(defn settings-learn
+  "Settings' identify of an input of source (:midi, :osc; reactivity plan
+   24), for its card: {:learn-id (while it waits, the one its Cancel
+   names; else nil) :result (what it identified last, {:status :captured
+   :input-event} or {:status :timeout|:failed}; nil when ready)
+   :available? (the source can send one now: MIDI on with an input
+   connected, OSC on and listening)}."
+  [context source]
+  {:learn-id (fx/sub-val context input/identify-id source)
+   :result (fx/sub-val context get-in [:ui :input-learn :settings source])
+   :available? (fx/sub-val context input/source-available? source)})
 
 (defn osc-config
   "Get the complete OSC configuration.
@@ -1561,12 +1778,6 @@
   [context]
   (fx/sub-val context get-in [:backend :input :osc :address-mappings]))
 
-(defn osc-learning?
-  "Check if OSC learn mode is active.
-   Depends on: backend domain"
-  [context]
-  (boolean (fx/sub-val context get-in [:backend :input :osc :learn-mode])))
-
 
 ;; Level 2: Generic Input Subscriptions
 
@@ -1577,11 +1788,44 @@
   [context]
   (fx/sub-val context get-in [:config :input :trigger-map] {}))
 
-(defn input-learning-target
-  "Get the current learning target for generalized inputs, if any.
-   Depends on: backend domain"
+(defn trigger-editor-behavior
+  "The behaviour the trigger editor shows for the cell target, :momentary
+   or :follow (handlers.input/cell-behavior: the learn's waiting for it,
+   else its first binding's, else the editor's choice)."
+  [context target]
+  (fx/sub-val context input/cell-behavior target))
+
+(def ^:private cell-action-types
+  "The actions that trigger a grid cell: a cue cell, an effects cell."
+  #{:trigger-cue :trigger-effect})
+
+(defn cell-trigger-targets
+  "The grid cells an input triggers, #{[action-type [col row]]}: an entry
+   for each cell a :trigger-cue or :trigger-effect binding of the trigger
+   map names, whatever its key and :behavior, and whether the cell plays
+   or holds anything. Both grids share it, so a change to the trigger map
+   walks it once; each cell reads its own entry (cell-has-trigger?). Only
+   the cells' ⚡ reads it: the trigger editor lists the keys themselves,
+   and the resolver plays the bindings."
   [context]
-  (fx/sub-val context get-in [:backend :input :learning-target]))
+  (into #{}
+        (keep (fn [{:keys [type target]}]
+                (when (contains? cell-action-types type) [type target])))
+        (vals (fx/sub-ctx context input-trigger-map))))
+
+(defn cell-has-trigger?
+  "Does an input trigger the cell [col row] of action-type's grid
+   (cell-trigger-targets)? true or false, so another cell's bindings
+   changing, or a binding's :behavior, leaves it be."
+  [context action-type col row]
+  (contains? (fx/sub-ctx context cell-trigger-targets) [action-type [col row]]))
+
+(defn cell-learning?
+  "Is a learn waiting for the input of the cell [col row] of action-type's
+   grid (input-learning-target)? true or false: a learn for anything else,
+   or none, is false, so one starting or ending leaves the other cells be."
+  [context action-type col row]
+  (= {:type action-type :target [col row]} (fx/sub-ctx context input-learning-target)))
 
 (defn trigger-definitions
   "Get configured internal trigger definitions."
@@ -1715,8 +1959,8 @@
 
 (defn- learning-role
   "The vibe role a learn is for, or nil."
-  [state]
-  (let [{:keys [type role]} (get-in state [:backend :input :learning-target])]
+  [context]
+  (let [{:keys [type role]} (fx/sub-ctx context input-learning-target)]
     (when (= :vibe type) role)))
 
 (defn vibe-header
@@ -1738,7 +1982,7 @@
                (zero? lit) "BLACKOUT"
                (= 1 lit) "BLACKOUT · vibe keys off · a grid cue is playing"
                :else (str "BLACKOUT · vibe keys off · " lit " grid cues are playing"))
-     :learning (fx/sub-val context learning-role)}))
+     :learning (fx/sub-ctx context learning-role)}))
 
 (defn vibe-rotation
   "The Perform tab's auto-advance (vibes.rotation): {:auto? (the switch, or
@@ -1779,8 +2023,10 @@
     (when (and run (= run (get-in state [:playback :active-cues cell :run])))
       cell)))
 
-(defn- vibe-learning? [state role]
-  (= role (learning-role state)))
+(defn- vibe-learning?
+  "Is a learn waiting for role's control?"
+  [context role]
+  (learning? context {:type :vibe :role role}))
 
 (defn- vibe-problem
   "Why role's last press had nothing to play (:empty-pool), until the next
@@ -1795,41 +2041,105 @@
 (defn- vibe-locked? [state]
   (= :locked (get-in state [:vibe-runtime :rotation])))
 
-(defn- reaction-inputs
-  "What the cells that react to a press depend on (vibes.reactions/reactions
-   and what may play: the audience rule reads the rig's order, and since
-   zones plan Z4 the zone maps and the column and show defaults)."
-  [state]
-  (-> (select-keys state [:chains :projectors :virtual-projectors :rig :zone-maps])
-      (assoc :grid (select-keys (:grid state) [:column-targets])
-             :config (select-keys (:config state) [:default-target]))))
+;; Who a cue can reach (vibes.library's audience rule, V6; zones plans Z4,
+;; Z5), as the pads and the Vibes tab's picker read it: one routing
+;; projection, so they agree with each other and with the full state.
+
+(defn- audience-rig-inputs
+  "What the audience groups are folded from (vibes.library/audience-groups):
+   the projectors, the virtual projectors (one counts when it or its
+   projector scans the crowd) and the rig (the automatic groups a scanner
+   is in follow the order)."
+  [context]
+  {:projectors (fx/sub-val context :projectors)
+   :virtual-projectors (fx/sub-val context :virtual-projectors)
+   :rig (fx/sub-val context :rig)})
+
+(defn vibe-audience-groups
+  "The refs that reach the audience (vibes.library/audience-groups), from
+   audience-rig-inputs alone: a zone map or a default changing leaves them
+   be."
+  [context]
+  (library/audience-groups (fx/sub-ctx context audience-rig-inputs)))
+
+(defn vibe-audience-routing
+  "What the audience rule reads besides the cue or effect cell it asks
+   about (vibes.library/audience-cue?, unplayable, playable-cells,
+   audience-fx?), as a state: audience-rig-inputs, the group definitions
+   (a zone pattern's lane drops a group that isn't one, zones plan Z5), the
+   zone maps, and the column defaults and the show's (zones plan Z4). The
+   pads and the picker add the chains they ask about, so they re-run when
+   one of these changes, and only then: not for the map in use or the show
+   clock's status."
+  [context]
+  (assoc (fx/sub-ctx context audience-rig-inputs)
+         :zone-groups (fx/sub-val context :zone-groups)
+         :zone-maps (fx/sub-val context :zone-maps)
+         :grid {:column-targets (fx/sub-val context get-in [:grid :column-targets])}
+         :config {:default-target (fx/sub-val context get-in [:config :default-target])}))
+
+(defn- slot-chains
+  "{cell chain} of the cues at cells (cue-cell-chain), each read now."
+  [context cells]
+  (into {} (map (fn [[col row :as cell]] [cell (fx/sub-ctx context cue-cell-chain col row)])) cells))
+
+(defn- with-modulators
+  "state, a selector's input to vibes.reactions, with the modulator types
+   as published (modulator-descriptors) at [:backend :registries
+   :modulators]. vibes.reactions reads a type's category and default source
+   from the registry these copy, so a re-registration that changes them,
+   once published, runs the selector again (reactivity plan 17)."
+  [context state]
+  (assoc-in state [:backend :registries :modulators] (fx/sub-ctx context modulator-descriptors)))
 
 (defn- vibe-reactions
-  "The current vibe's tap reactions by role (vibes.reactions/reactions), and
-   :quiet, the roles whose press plays no cue: HIT or ACCENT with nothing
-   playable in its pool, FLASH without a playable cue. Recomputed when the
-   chains, the vibes, the projectors or the current vibe change."
+  "The current vibe's tap reactions by role (vibes.reactions/reactions): its
+   FX set, its flash FX, the effects grid's cells that are on and the cues
+   its slots name, whether those play or not; {} without vibes. Recomputed
+   when the vibe, those cues, the effects grid or the modulator types
+   (with-modulators) change."
   [context]
-  (let [id (fx/sub-ctx context vibe-current-id)
-        {:keys [library]} (fx/sub-ctx context vibe-config)
-        state (assoc-in (fx/sub-val context reaction-inputs) [:config :vibes] {:library library})
-        vibe (get library id)]
-    {:by-role (if vibe (reactions/reactions state id) {})
-     :quiet (set (for [role [:hit :accent :flash]
-                       :let [cells (if (= :flash role)
-                                     (keep identity [(get-in vibe [:flash :cue])])
-                                     (get-in vibe [role :cells]))]
-                       :when (empty? (library/playable-cells state vibe cells))]
-                   role))}))
+  (let [id (fx/sub-ctx context vibe-current-id)]
+    (if-let [vibe (fx/sub-val context library/vibe id)]
+      (reactions/reactions (with-modulators context
+                             {:config {:vibes {:library {id vibe}}}
+                              :chains {:effect-chains (fx/sub-val context get-in [:chains :effect-chains])
+                                       :cue-chains (slot-chains context (into [] (mapcat #(library/slot-cells vibe %))
+                                                                              library/cue-slots))}})
+                           id)
+      {})))
+
+(def ^:private cue-slot
+  "The slot whose cues a role's press may start (vibes.library/slot-cells)."
+  {:hit :hit :accent :accent :flash :flash-cue})
+
+(defn- vibe-pad-cue-status
+  "What role's press can start, for its pad: {:quiet? (no cue: none of its
+   cues is one the vibe that plays may start, vibes.library/playable-cells)
+   :audience? (the vibe allows audience cells, and one it may start can
+   reach the crowd, vibes.library/audience-cell?)}. HIT's and ACCENT's
+   pools and FLASH's cue, over vibe-audience-routing with their chains
+   alone; FLASH's effects never mark it. Both false for VIBE and BLACKOUT;
+   a cue role with no cue, or no vibe, is quiet."
+  [context role]
+  (if-let [slot (cue-slot role)]
+    (let [vibe (fx/sub-val context library/vibe (fx/sub-ctx context vibe-current-id))
+          cells (library/slot-cells vibe slot)
+          state (assoc (fx/sub-ctx context vibe-audience-routing) :chains {:cue-chains (slot-chains context cells)})
+          playable (library/playable-cells state vibe cells)
+          groups (when (:allow-audience? vibe) (fx/sub-ctx context vibe-audience-groups))]
+      {:quiet? (empty? playable)
+       :audience? (boolean (and groups (some #(library/audience-cell? state % groups) playable)))})
+    {:quiet? false :audience? false}))
 
 (defn- vibe-pad-reactions
   "role's pad: the names of its reactions, and :effects-only? when its
-   press plays no cue but moves some."
+   press plays no cue (vibe-pad-cue-status) but moves some."
   [context role]
-  (let [{:keys [by-role quiet]} (fx/sub-ctx context vibe-reactions)
-        names (mapv :name (get by-role role))]
+  (let [names (mapv :name (get (fx/sub-ctx context vibe-reactions) role))
+        {:keys [quiet?]} (fx/sub-ctx context vibe-pad-cue-status role)]
     {:reactions names
-     :effects-only? (boolean (and (contains? quiet role) (seq names)))}))
+     :effects-only? (boolean (and quiet? (seq names)))}))
 
 (defn vibe-pad
   "One of the Perform tab's five pads: {:role :label :bindings (trigger-map
@@ -1846,7 +2156,7 @@
              :bindings (fx/sub-ctx context vibe-role-bindings role)
              :held? (fx/sub-val context vibe-held? role)
              :playing (fx/sub-val context vibe-playing-cell role)
-             :learning? (fx/sub-val context vibe-learning? role)
+             :learning? (vibe-learning? context role)
              :problem (fx/sub-val context vibe-problem role)
              :dim? (or (not (fx/sub-val context vibes?))
                        (and blackout? (not= :blackout role)))
@@ -1911,15 +2221,6 @@
   [context grid col row]
   (fx/sub-ctx context indexed-cell-vibes grid col row))
 
-(defn vibe-audience-groups
-  "The refs that reach the audience (vibes.library/audience-groups), from
-   the projectors and the rig (the automatic groups a scanner is in follow
-   the order)."
-  [context]
-  (library/audience-groups {:projectors (fx/sub-val context :projectors)
-                            :virtual-projectors (fx/sub-val context :virtual-projectors)
-                            :rig (fx/sub-val context :rig)}))
-
 (defn map-warnings
   "What the map editor says of map id (routing.zone-maps/map-warnings): its
    empty lanes, the ones with no projector or that reach the audience, the
@@ -1930,19 +2231,6 @@
                                :zones (fx/sub-ctx context map-zones)
                                :reach (fx/sub-ctx context ref-reach)
                                :audience (fx/sub-ctx context vibe-audience-groups)})))
-
-(defn vibe-audience-routing
-  "What the audience rule reads besides a cue and the audience groups
-   (vibes.library/audience-cue?, zones plan Z4): the zone maps, the column
-   defaults and the show's, and for a zone pattern's lane the rig (zones
-   plan Z5); so the picker re-runs when one changes, and only then."
-  [context]
-  {:zone-maps (fx/sub-val context :zone-maps)
-   :grid {:column-targets (fx/sub-val context get-in [:grid :column-targets])}
-   :config {:default-target (fx/sub-val context get-in [:config :default-target])}
-   :projectors (fx/sub-val context :projectors)
-   :rig (fx/sub-val context :rig)
-   :zone-groups (fx/sub-val context :zone-groups)})
 
 (defn- edited-allows-audience? [state]
   (boolean (:allow-audience? (library/vibe state (library/edited-id state)))))
@@ -2013,57 +2301,124 @@
         (str (char (+ 65 row)) (inc col) (if (contains? kinds :zone-pattern) " (Zone pattern)" " (Map cycle)")
              " can reach the crowd: tick Allow audience cells in this vibe")))))
 
-(defn- pick-label [context col row]
-  (select-keys (fx/sub-ctx context cell-display-data col row)
-               [:name :first-preset-id :preset-count :timeline? :has-content?]))
-
 (defn vibe-pick-label
-  "What a cue cell of the picker shows of its cue (views/components/
-   grid_cell.clj cell-label's keys, and :has-content?): not whether it
-   plays, nor the grid's selection."
+  "What a cue cell of the picker shows of its cue (cue-label-data: views/
+   components/grid_cell.clj cell-label's keys, and :has-content?): not
+   whether it plays, nor the grid's selection."
   [context col row]
-  (fx/sub-ctx context pick-label col row))
+  (fx/sub-ctx context cue-label-data col row))
 
 (defn- pick-fx-label [context col row]
-  (let [data (fx/sub-ctx context effect-cell-display-data col row)]
-    (assoc (select-keys data [:name :first-effect-id :effect-count :effect-ids])
-           :has-content? (:has-effects? data))))
+  (select-keys (fx/sub-ctx context effect-cell-display-data col row)
+               [:name :first-effect-id :effect-count :effect-ids :has-content?]))
 
 (defn vibe-pick-fx-label
-  "What an effect cell of the picker shows of its effects (grid_cell.clj
+  "What an effect cell of the picker shows of what it stores (grid_cell.clj
    effects-label's keys, and :has-content?): not whether it is on."
   [context col row]
   (fx/sub-ctx context pick-fx-label col row))
 
+;; What the lint, the checklist and the Vibes tab's tap reactions read
+;; (plans/2026-11-23-cljfx-reactivity/37): a vibe's slots and the cells
+;; they name, not which cell is on, so an effect cell switched on or off
+;; (by hand, or by a vibe as it plays) runs none of them again. One lint
+;; serves the tab's badge and its rows. The tap reactions also follow the
+;; modulator types as published (with-modulators, plan 17).
+
+(defn- lint-vibe
+  "What the lint reads of a vibe (vibes.library/lint): its id, name and
+   :allow-audience?, and the cells its slots name."
+  [vibe]
+  (if (map? vibe)
+    (cond-> (select-keys vibe [:id :name :allow-audience? :bed :fx])
+      (contains? vibe :hit) (assoc :hit (select-keys (:hit vibe) [:cells]))
+      (contains? vibe :accent) (assoc :accent (select-keys (:accent vibe) [:cells]))
+      (contains? vibe :flash) (assoc :flash (select-keys (:flash vibe) [:cue :fx])))
+    vibe))
+
+(defn lint-vibes
+  "The vibes as their lint, checklist and tap reactions read them: :order
+   as it is, a repeat too, and every vibe of the library (lint-vibe), one
+   :order leaves out too. Not a vibe's colour, energy or play options, nor
+   the vibe settings."
+  [context]
+  (let [{:keys [order library]} (fx/sub-ctx context vibe-config)]
+    {:order order
+     :library (some-> library (update-vals lint-vibe))}))
+
+(defn vibe-fx-content
+  "The effects cell at [col row] as a vibe's lint and tap reactions read
+   it: its chain without its live switch (:active?, its own, not a
+   modulator's), nil without one. Switching the cell on or off leaves it
+   equal."
+  [context col row]
+  (let [chain (fx/sub-ctx context effect-cell-chain col row)]
+    (if (map? chain) (dissoc chain :active?) chain)))
+
+(defn vibe-owned-chains
+  "The chains of the cells the vibe with vibe-id names, as its lint and its
+   own tap reactions (vibes.reactions/reactions :own?) read them:
+   {:cue-chains {cell cue} (its pools', FLASH cue's and BED's,
+   cue-cell-chain: an empty cell's reads as one without items)
+   :effect-chains {cell chain} (its FX set's and FLASH effects',
+   vibe-fx-content)}. Follows those cells alone: a cell it doesn't name,
+   or one of its effect cells switched on or off, leaves it equal."
+  [context vibe-id]
+  (let [vibe (fx/sub-val context library/vibe vibe-id)
+        cells (fn [slots] (into [] (comp (mapcat #(library/slot-cells vibe %)) (distinct)) slots))]
+    {:cue-chains (slot-chains context (cells library/cue-slots))
+     :effect-chains (into {} (map (fn [[col row :as cell]] [cell (fx/sub-ctx context vibe-fx-content col row)]))
+                          (cells library/fx-slots))}))
+
 (defn- lint-world
-  "What the lint, the checklist and the Vibes tab's tap reactions read
-   (vibes.library/lint): with the zone maps, the map in use, the zones'
-   labels and the column and show defaults, which say where a zone or a
-   zone pattern goes (zones plans Z4, Z5)."
-  [state]
-  {:config {:vibes (get-in state [:config :vibes])
-            :input {:trigger-map (get-in state [:config :input :trigger-map])}
-            :default-target (get-in state [:config :default-target])}
-   :chains (select-keys (:chains state) [:cue-chains :effect-chains])
-   :projectors (:projectors state)
-   :virtual-projectors (:virtual-projectors state)
-   :zone-groups (:zone-groups state)
-   :rig (:rig state)
-   :zone-maps (:zone-maps state)
-   :zone-map {:active (get-in state [:zone-map :active])}
-   :zones {:labels (get-in state [:zones :labels])}
-   :grid {:column-targets (get-in state [:grid :column-targets])}})
+  "What the lint reads (vibes.library/lint), as a state: lint-vibes, the
+   chains every vibe of the library names (vibe-owned-chains), the
+   audience routing (vibe-audience-routing: the projectors, virtual
+   projectors, rig, groups, zone maps, column and show defaults), the keys
+   learned, the zones' labels, the manual map ([:zone-map :active]: the
+   rows say what the map the show is on does, not one a switch waits for)
+   and the modulator types its tap reactions follow (with-modulators). A
+   cell switched on or off, a cell no vibe names, a cue that plays and the
+   show clock's status leave it equal."
+  [context]
+  (let [vibes (fx/sub-ctx context lint-vibes)]
+    (with-modulators context
+      (-> (fx/sub-ctx context vibe-audience-routing)
+          (update :config assoc
+                  :vibes vibes
+                  :input {:trigger-map (fx/sub-ctx context input-trigger-map)})
+          (assoc :chains (reduce (fn [chains id] (merge-with merge chains (fx/sub-ctx context vibe-owned-chains id)))
+                                 {:cue-chains {} :effect-chains {}}
+                                 (keys (:library vibes)))
+                 :zone-map {:active (fx/sub-val context get-in [:zone-map :active])}
+                 :zones {:labels (fx/sub-ctx context zone-labels)})))))
 
 (defn vibe-lint
-  "What to fix before the show, worst first (vibes.library/lint)."
+  "What to fix before the show, worst first (vibes.library/lint of
+   lint-world): the Vibes tab's rows, and the errors its badge counts
+   (vibes-tab-label)."
   [context]
-  (library/lint (fx/sub-val context lint-world)))
+  (library/lint (fx/sub-ctx context lint-world)))
+
+(defn- edited-reactions-world
+  "What the tap reactions of the vibe the Vibes tab edits read: {:id :state
+   (its lint-vibes entry and its vibe-owned-chains, as a state, with the
+   modulator types: with-modulators)}."
+  [context]
+  (let [id (fx/sub-ctx context vibe-edited-id)]
+    {:id id
+     :state (with-modulators context
+              {:config {:vibes {:library {id (get-in (fx/sub-ctx context lint-vibes) [:library id])}}}
+               :chains (fx/sub-ctx context vibe-owned-chains id)})}))
 
 (defn vibe-edited-reactions
   "The tap reactions of the vibe the Vibes tab edits, by role: its own cells
-   (vibes.reactions/reactions :own?), as its lint counts them."
+   (vibes.reactions/reactions :own?), as its lint counts them. Not the
+   effects grid's cells that are on: those are the Perform pads'
+   (vibe-reactions)."
   [context]
-  (reactions/reactions (fx/sub-val context lint-world) (fx/sub-ctx context vibe-edited-id) :own? true))
+  (let [{:keys [id state]} (fx/sub-ctx context edited-reactions-world)]
+    (reactions/reactions state id :own? true)))
 
 (defn vibe-tap-hints
   "Why the Vibes tab's Tap reactions menus grey a zone reaction (vibe Phase
@@ -2082,10 +2437,21 @@
                     [kind hint])))
           reactions/templates)))
 
-(defn vibe-checklist
-  "What is left to set up (vibes.library/checklist)."
+(defn- checklist-world
+  "What the checklist reads (vibes.library/checklist), as a state:
+   lint-vibes, the audience routing, the keys learned and the whole cue
+   grid (Make cues counts a cue no vibe names). No effect cell."
   [context]
-  (library/checklist (fx/sub-val context lint-world)))
+  (-> (fx/sub-ctx context vibe-audience-routing)
+      (update :config assoc
+              :vibes (fx/sub-ctx context lint-vibes)
+              :input {:trigger-map (fx/sub-ctx context input-trigger-map)})
+      (assoc :chains {:cue-chains (fx/sub-val context get-in [:chains :cue-chains])})))
+
+(defn vibe-checklist
+  "What is left to set up (vibes.library/checklist of checklist-world)."
+  [context]
+  (library/checklist (fx/sub-ctx context checklist-world)))
 
 (defn vibe-control
   "A row of the Vibes tab's Controls panel: {:role :label :bindings
@@ -2094,17 +2460,24 @@
   {:role role
    :label (vibe-role-labels role)
    :bindings (fx/sub-ctx context vibe-role-bindings role)
-   :learning? (fx/sub-val context vibe-learning? role)})
+   :learning? (vibe-learning? context role)})
+
+(defn- learn-all-attempt
+  "The learn attempt of Learn all while it waits, or nil."
+  [state]
+  (let [attempt (input/active-learn state)]
+    (when (= :learn-all (:owner attempt))
+      (select-keys attempt [:target-action :wizard]))))
 
 (defn vibe-wizard
   "Learn all, while it waits for a key: {:role (the one learned now) :step
    (from 1) :of :refused (the role a key pressed for it is already)}; nil
-   otherwise."
+   otherwise. All of it is its learn attempt's ([:ui :input-learn
+   :active]); its Cancel names the attempt (learn-for-target)."
   [context]
-  (let [{:keys [queue done refused]} (fx/sub-val context get-in [:ui :vibes :wizard])
-        learning (fx/sub-val context learning-role)]
-    (when (and (seq queue) (= learning (first queue)))
-      {:role learning :step (inc (count done)) :of (+ (count queue) (count done)) :refused refused})))
+  (when-let [{:keys [target-action wizard]} (fx/sub-val context learn-all-attempt)]
+    (let [{:keys [queue done refused]} wizard]
+      {:role (:role target-action) :step (inc (count done)) :of (+ (count queue) (count done)) :refused refused})))
 
 
 ;; The faders (plans/2026-11-18-vibe-mode/05): the Controls panel's fader
@@ -2124,9 +2497,6 @@
        (sort-by pr-str)
        vec))
 
-(defn- fader-learning? [state slot]
-  (= {:type :macro :slot slot} (get-in state [:backend :input :learning-target])))
-
 (defn vibe-fader-control
   "A fader row of the Vibes tab's Controls panel: {:slot :label :bindings
    (input store keys) :learning?}."
@@ -2134,7 +2504,7 @@
   {:slot slot
    :label (fader-labels slot)
    :bindings (fx/sub-ctx context vibe-fader-bindings slot)
-   :learning? (fx/sub-val context fader-learning? slot)})
+   :learning? (learning? context {:type :macro :slot slot})})
 
 (defn vibe-meter
   "A meter of the Perform tab: {:slot :label :wired?}, :wired? while
@@ -2206,15 +2576,9 @@
 (defn vibe-pad-audience?
   "Can role's press start a cue that reaches the audience: the vibe that
    plays allows audience cells, and one its role may play is one
-   (vibes.library/audience-cell?): HIT's or ACCENT's pool, FLASH's cue."
+   (vibe-pad-cue-status): HIT's or ACCENT's pool, FLASH's cue."
   [context role]
-  (boolean
-   (when (and (#{:hit :accent :flash} role) (fx/sub-ctx context vibe-audience?))
-     (let [vibe (get (:library (fx/sub-ctx context vibe-config)) (fx/sub-ctx context vibe-current-id))
-           state (fx/sub-val context reaction-inputs)
-           cells (if (= :flash role) (keep identity [(get-in vibe [:flash :cue])]) (get-in vibe [role :cells]))
-           groups (library/audience-groups state)]
-       (some #(library/audience-cell? state % groups) (library/playable-cells state vibe cells))))))
+  (:audience? (fx/sub-ctx context vibe-pad-cue-status role)))
 
 (defn vibes-tab-label
   "The Vibes tab's label: \"Vibes\", and the lint's error count while it

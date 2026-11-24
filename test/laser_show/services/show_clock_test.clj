@@ -15,10 +15,12 @@
             [laser-show.events.core :as events]
             [laser-show.events.handlers.input :as input-handlers]
             [laser-show.events.handlers.input-mapper :as mapper]
+            [laser-show.events.handlers.menu :as menu]
             [laser-show.events.handlers.projector :as projector-handlers]
             [laser-show.events.handlers.timing :as timing]
             [laser-show.idn.fake-dac :as dac]
             [laser-show.input.events :as ie]
+            [laser-show.input.learn :as learn]
             [laser-show.input.mtc :as mtc]
             [laser-show.input.router :as router]
             [laser-show.input.store :as input-store]
@@ -34,7 +36,9 @@
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
             [laser-show.state.persistent :as persistent]
-            [laser-show.state.templates :as templates]))
+            [laser-show.state.templates :as templates]
+            [laser-show.vibes.faders :as faders]
+            [laser-show.views.components.slider-meters :as meters]))
 
 (defn- sine [lo hi period] {:type :sine :min lo :max hi :period period})
 
@@ -409,7 +413,8 @@
           k ::zone-map]
       (add-watch (state/get-context-atom) k
                  (fn [_ _ old new]
-                   (when (not= (get-in old [:cljfx.context/m :zone-map]) (get-in new [:cljfx.context/m :zone-map]))
+                   (when (not= (:zone-map (state/root-context->snapshot old))
+                               (:zone-map (state/root-context->snapshot new)))
                      (swap! writes inc))))
       (try
         (with-redefs [events/dispatch! (fn [_])]
@@ -562,8 +567,8 @@
         strip #(reduce (fn [m p] (assoc-in m p nil)) % status-paths)]
     (add-watch (state/get-context-atom) k
                (fn [_ _ old new]
-                 (let [o (:cljfx.context/m old)
-                       n (:cljfx.context/m new)]
+                 (let [o (state/root-context->snapshot old)
+                       n (state/root-context->snapshot new)]
                    (swap! writes conj (cond-> (set (filter #(not= (get-in o %) (get-in n %)) status-paths))
                                         (not= (strip o) (strip n)) (conj :other))))))
     (try (f) (finally (remove-watch (state/get-context-atom) k)))
@@ -792,6 +797,7 @@
                          (templates/apply-starter-effects)
                          (assoc-in [:timing :bpm] 120.0)
                          (assoc-in [:config :input :macro-map] macro-map)
+                         (persistent/begin-document)
                          (history/mark-clean)))
   (show-time/reset-runtime!)
   (input-store/clear-continuous-values!)
@@ -802,6 +808,7 @@
       (trigger! 0 0)
       (f))
     (finally
+      (learn/retire!)
       (mapper/stop-mapper!)
       (mapper/set-dispatch-fn! nil)
       (router/clear-handlers!)
@@ -816,10 +823,18 @@
 
 (defn- cc! [control v] (router/dispatch! (ie/control-change :midi 0 control v)))
 
+(defn- start-fader-learn!
+  "Start the learn for the fader slot, from the show open now, through the
+   pipeline: its listener goes in the router's slot (:input/sync-learn)."
+  [slot]
+  (events/event-handler {:event/type :input/start-learn :target-action {:type :macro :slot slot} :capture :continuous
+                         :document-id (get-in (state/get-raw-state) [:project :document-id])}))
+
 (defn- learn! [slot control]
-  (state/swap-state! assoc-in [:backend :input :learning-target] {:type :macro :slot slot})
-  (events/event-handler {:event/type :input/learn-captured :target-action {:type :macro :slot slot}
-                         :input-event (assoc (ie/control-change :midi 0 control 0.5) :store-key [:midi 0 control])}))
+  (start-fader-learn! slot)
+  (let [{:keys [learn-id document-id]} (input-handlers/active-learn (state/get-raw-state))]
+    (events/event-handler {:event/type :input/learn-captured :learn-id learn-id :document-id document-id
+                           :input-event (assoc (ie/control-change :midi 0 control 0.5) :store-key [:midi 0 control])})))
 
 (defn- macro-map [] (get-in (state/get-raw-state) [:config :input :macro-map]))
 
@@ -856,17 +871,18 @@
           (is (close? (* 0.5 full) (first (tick-faders))))
           (cc! 7 1.0)
           (is (= [true {:slider-1 0.5}] ((juxt #(close? (* 0.5 full) (first %)) second) (tick-faders)))))
-        (testing "learned for real, the catcher and the mapper both listening: the slot is where the control was left, at once"
-          (let [{s :state {p :promise} :input/await-learn}
-                (input-handlers/handle {:event/type :input/start-learn :target-action {:type :macro :slot :slider-1}
-                                        :capture :continuous :state (state/get-raw-state)})]
-            (state/reset-state! s)
-            (cc! 11 0.1)
-            (cc! 11 0.25)
-            (events/event-handler {:event/type :input/learn-captured :target-action {:type :macro :slot :slider-1}
-                                   :input-event (deref p 1000 nil)})
-            (is (= {[:midi 0 11] :slider-1} (macro-map)))
-            (is (close? (* 0.25 full) (first (tick-faders))) "no move needed after the learn")))))))
+        (testing "learned for real, the listener and the mapper both on the router: the slot is where the control was left, at once"
+          (start-fader-learn! :slider-1)
+          (cc! 11 0.1)
+          (cc! 11 0.25)
+          ;; The listener's waiter sends the capture through the pipeline
+          (is (loop [n 0]
+                (cond
+                  (= {[:midi 0 11] :slider-1} (macro-map)) true
+                  (< n 200) (do (Thread/sleep 10) (recur (inc n)))
+                  :else false)))
+          (is (nil? (input-handlers/active-learn (state/get-raw-state))))
+          (is (close? (* 0.25 full) (first (tick-faders))) "no move needed after the learn"))))))
 
 (deftest undone-learn-leaves-the-master-full-test
   (with-faders {}
@@ -1084,8 +1100,9 @@
 ;; Zones plan Z6: a step grid on the clock (08 §8)
 
 (deftest zone-steps-follow-a-grid-test
-  (let [grid (-> (zone-patterns/preset-instance :steps :cue)
-                 (assoc :id :g1)
+  (let [g1 #uuid "00000000-0000-0000-0000-0000000006f1"
+        grid (-> (zone-patterns/preset-instance :steps :cue)
+                 (assoc :id g1)
                  (assoc-in [:params :steps] [[:zone/a] [] [:zone/b] [:zone/a :zone/b]]))]
     (init! {[0 0] (assoc (cue :circle) :zone-patterns [grid])})
     (two-lasers!)
@@ -1097,8 +1114,8 @@
             [one-half n3] (ticks-to! (+ n2 100000000) 1.5)
             [two n4] (ticks-to! (+ n3 100000000) 2.0)]
         (testing "the snapshot has the grid's step, 2 a beat from the cue's start (Z6-Q1 A)"
-          (is (= {:g1 0} (:zone-steps first-tick)))
-          (is (= [1 2 3 4] (mapv #(get-in % [:zone-steps :g1]) [half one one-half two]))
+          (is (= {g1 0} (:zone-steps first-tick)))
+          (is (= [1 2 3 4] (mapv #(get-in % [:zone-steps g1]) [half one one-half two]))
               "the step goes on: the playhead is step mod 4"))
         (testing "each step lights its own zones; a rest lights none"
           (is (= #{:zone/a} (drawn-keys first-tick)))
@@ -1107,7 +1124,216 @@
           (is (= #{[:zone/a :zone/b]} (drawn-keys one-half)) "A and B: one frame under both")
           (is (= #{:zone/a} (drawn-keys two)) "step 4 is step 0 again"))
         (testing "a grid edited while it plays shows from the next tick (08 invariant 8)"
-          (events/event-handler {:event/type :step-grid/toggle
-                                 :target {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]}
-                                 :row :zone/b :step 0})
+          (let [target {:domain :cue-zone-patterns :entity-key [0 0] :effect-instance-id g1}]
+            (events/event-handler {:event/type :step-grid/open :target target})
+            (events/event-handler {:event/type :step-grid/toggle :target target :row :zone/b :step 0}))
           (is (= #{[:zone/a :zone/b]} (drawn-keys (show-clock/tick! (+ n4 16666667))))))))))
+
+
+;; Reactivity plan 15: a timecode report of the show that was open changes
+;; nothing in the next one, which reports its own (§7 example 4, §8)
+
+(deftest new-show-rejects-old-chase-reports-test
+  (let [c [2 0]
+        follower {:editor-type :timeline
+                  :tracks [{:id :t :type :track}]
+                  :items [{:id :a :type :preset :preset-id :circle :track-id :t :enabled? true :effects []
+                           :timeline/start 0.0 :timeline/duration 16.0}]
+                  :timeline/chase :mtc :timeline/tc-start 3600.0 :timeline/tempo-bpm 120.0 :timeline/length 64.0}
+        file "/no-such-folder/show.zip"
+        sent (atom [])
+        tick-at! (fn [ms seconds]
+                   (reset! sent [])
+                   (with-redefs [mtc/current (constantly (if seconds
+                                                           {:state :running :seconds seconds :fps 25}
+                                                           {:state :stopped :seconds nil :fps nil}))
+                                 events/dispatch! #(swap! sent conj %)]
+                     (show-clock/tick! (* ms 1000000))))
+        chases #(filterv (comp #{:show-clock/chase} :event/type) @sent)
+        now #(state/get-raw-state)
+        doc #(get-in (now) [:project :document-id])
+        marker (fn [report] {:chasing? true :timeline? true :chase-id (:chase-id report)})
+        unchanged-by? (fn [reports]
+                        (every? (fn [report]
+                                  (let [before (now)]
+                                    (events/event-handler report)
+                                    (identical? before (now))))
+                                reports))]
+    (init! {c follower})
+    (state/swap-state! #(-> % persistent/begin-document (assoc-in [:project :current-file] file) history/mark-clean))
+    (let [d1 (doc)
+          saved (persistent/project-files (now))
+          _ (tick-at! 0 3605.55)
+          [on1 :as ons] (chases)]
+      (is (= [d1 0 :none] ((juxt :document-id :source-version :expected-owner) on1)))
+      (run! events/event-handler ons)
+      (is (= (marker on1) (get-in (now) [:playback :active-cues c])) "the clock's own runtime confirms its On")
+      (tick-at! 100 nil)
+      (let [[off1] (chases)
+            _ (tick-at! 200 3605.75)
+            [on2] (chases)
+            held [off1 on2]]
+        (is (= [false [:chase (:chase-id on1)]] ((juxt :active? :expected-owner) off1)) "timecode stopped: its Off, held")
+        (is (= [true [:chase (:chase-id on1)]] ((juxt :active? :expected-owner) on2)) "and came back: another episode's On, held")
+        (testing "File > New: the old show's reports change nothing, and its starter cue at C, an ordinary one, isn't chased"
+          (events/event-handler {:event/type :file/new-project :force? true})
+          (is (not= d1 (doc)))
+          (is (unchanged-by? held))
+          (let [s (tick-at! 210 3605.77)]
+            (is (= [[] nil] [(:cues s) (get (:positions s) c)]))
+            (is (= [] (chases)))))
+        (testing "File > Open of the same file, with the same cue at the same cell"
+          (with-redefs [persistent/read-project (fn [path] (when (= file path) saved))]
+            (events/event-handler (assoc (get-in (menu/handle {:event/type :file/open :state (now)})
+                                                 [:fx/show-file-chooser :on-result])
+                                         :file-path file)))
+          (let [d3 (doc)]
+            (is (= file (get-in (now) [:project :current-file])) "it opened")
+            (is (not-any? #{d3} [nil d1]))
+            (is (= (get-in saved ["content.edn" :chains :cue-chains c]) (get-in (now) [:chains :cue-chains c])))
+            (is (unchanged-by? held) "even the old show's On for that cue changes nothing")
+            (let [s (tick-at! 220 3605.79)
+                  [on3 :as ons3] (chases)]
+              (is (= [] (:cues s)) "a show opens stopped")
+              (is (close? 11.58 (get (:positions s) c)) "its own episode, at the timecode")
+              (is (= [d3 0 :none {:restart nil :allowed? true}]
+                     ((juxt :document-id :source-version :expected-owner :start) on3))
+                  "its own On, at once: 20 ms after the old show's, another report")
+              (is (= d3 (first (:chase-id on3))))
+              (run! events/event-handler ons3)
+              (is (= (marker on3) (get-in (now) [:playback :active-cues c])))
+              (is (true? (get-in (now) [:playback :playing?])))
+              (is (= [c] (map :cell (:cues (tick-at! 240 3605.81))))))))))))
+
+
+;; Reactivity plan 27: the Map cycle reads the tick's input values, as its
+;; cues and the meters do, so its Offset can follow a fader (§7 cases 4, 5)
+
+(defn- fader-cue
+  "A circle whose Intensity follows fader 1 over 0..1, full until the fader
+   first moves."
+  []
+  {:destination-zone {:zone-group-id :all}
+   :items [(preset :circle [:intensity {:amount {:type :macro :active? true :slot :slider-1
+                                                 :min 0.0 :max 1.0 :default 1.0}}])]})
+
+(defn- still-cycle!
+  "cycle-cell!'s Map cycle at rate 0, its Offset following fader 1 over
+   0..2 steps, at default (0..1) until the fader first moves."
+  [default]
+  (cycle-cell!)
+  (state/swap-state! update-in [:chains :effect-chains [1 1] :items 0 :params] assoc
+                     :rate 0.0
+                     :offset {:type :macro :active? true :slot :slider-1 :min 0.0 :max 2.0 :default default}))
+
+(defn- learned! [macro-map] (state/swap-state! assoc-in [:config :input :macro-map] macro-map))
+
+(defn- counted-tick!
+  "show-clock/tick! at at-ns with the input store holding raw (the
+   controls' own keys, as the input mapper writes them): [snapshot calls
+   offset]. calls: how often the tick read app state and the store and
+   looked the faders up (faders/fader-values) on this thread; offset: the
+   Map cycle's Offset as resolved for its pick (nil: no cycle)."
+  [at-ns raw]
+  (let [me (Thread/currentThread)
+        calls (atom {:app-state 0 :input-store 0 :fader-values 0})
+        offsets (atom [])
+        counted (fn [k f] (fn [& args]
+                            (when (identical? me (Thread/currentThread))
+                              (swap! calls update k inc))
+                            (apply f args)))
+        get-raw-state state/get-raw-state
+        fader-values faders/fader-values
+        cycle-pick zone-patterns/cycle-pick
+        s (with-redefs [state/get-raw-state (counted :app-state get-raw-state)
+                        input-store/get-all-continuous-values (counted :input-store (constantly raw))
+                        faders/fader-values (counted :fader-values fader-values)
+                        zone-patterns/cycle-pick (fn [params & more]
+                                                   (swap! offsets conj (:offset params))
+                                                   (apply cycle-pick params more))]
+            (show-clock/tick! at-ns))]
+    [s @calls (peek @offsets)]))
+
+(def ^:private once
+  "A tick's reads: app state and the input store once each, the faders looked up once."
+  {:app-state 1 :input-store 1 :fader-values 1})
+
+(defn- picked
+  "The map the snapshot's Map cycle picked and the map its routing is by."
+  [snapshot]
+  [(get-in snapshot [:routing :cycle :map]) (get-in snapshot [:routing :map])])
+
+(deftest map-cycle-offset-shares-the-ticks-input-test
+  (init! {[0 0] (fader-cue)})
+  (two-lasers!)
+  (still-cycle! 0.0)
+  (learned! {[:gamepad 0 :trigger-left] :slider-1})
+  (state/assoc-in-state! [:zone-map :active] :map/unison)
+  (trigger! 0 0)
+  (with-redefs [mtc/current (constantly {:state :stopped})
+                events/dispatch! (fn [_])]
+    (let [raw {[:gamepad 0 :trigger-left] 0.75}
+          [ref ref-calls ref-offset] (counted-tick! 0 {})
+          full (brightness ref)]
+      (testing "the trigger not seen yet: the cue full, the Offset at its default, step 0"
+        (is (pos? full))
+        (is (= [{} 0.0 [:map/left-right :map/left-right]] [(:faders ref) ref-offset (picked ref)]))
+        (is (= once ref-calls)))
+      (testing "§7 case 4: at 0.75, the meter, the cue and the cycle all have it in the same tick"
+        (let [[s calls offset] (counted-tick! 16666667 raw)]
+          (is (= {:slider-1 0.75} (:faders s)) "the meter")
+          (is (close? (* 0.75 full) (brightness s)) "the cue at 0.75 of full")
+          (is (close? 1.5 offset) "the Offset 0.75 of 0..2 steps")
+          (is (= {:cell [1 1] :map :map/odd-even :paused? false} (get-in s [:routing :cycle])) "step 1: Odd / Even")
+          (is (= [:map/odd-even [:auto/odd :auto/even]] ((juxt :map :lanes) (:routing s)))
+              "and the routing is by it, not by Unison")
+          (is (= {[:gamepad 0 :trigger-left] 0.75 [:macro :slider-1] 0.75} (get-in s [:projector-ctx :input-values]))
+              "calibration has the control's own key and the fader's")
+          (is (not (contains? (:projector-ctx s) :pulses)))
+          (is (= once calls))))
+      (testing "no cue playing: the same pick and meter"
+        (trigger! 0 0)
+        (is (false? (get-in (state/get-raw-state) [:playback :playing?])))
+        (let [[s calls offset] (counted-tick! 33333334 raw)]
+          (is (= [[] nil] ((juxt :cues :projector-ctx) s)))
+          (is (= {:slider-1 0.75} (:faders s)))
+          (is (close? 1.5 offset))
+          (is (= [:map/odd-even :map/odd-even] (picked s)))
+          (is (= once calls)))))))
+
+(deftest starter-and-unseen-slot-use-their-own-defaults-test
+  (with-faders {}
+    (fn []
+      (with-redefs [mtc/current (constantly {:state :stopped})]
+        (let [next-ns (let [n (atom -1)] #(* (swap! n inc) 16666667))
+              stale {[:gamepad 0 :trigger-left] 0.75 [:macro :slider-1] 0.0}
+              meter #(meters/meter-text "Intensity" (get-in % [:faders :slider-1]) true)
+              [ref] (counted-tick! (next-ns) {})
+              full (brightness ref)]
+          (is (pos? full))
+          (testing "§7 case 5: a new show, nothing learned, the store with a stale slot at 0"
+            (let [[s calls offset] (counted-tick! (next-ns) stale)]
+              (is (close? full (brightness s)) "the Master at its default: full")
+              (is (= [{} "Intensity –"] [(:faders s) (meter s)]) "no fader value: –, not 100 %")
+              (is (= [nil nil :map/left-right] [offset (get-in s [:routing :cycle]) (get-in s [:routing :map])])
+                  "no Map cycle on the starter: a new show's map")
+              (is (= once calls))))
+          (testing "a Map cycle whose Offset follows fader 1, 0.75 of 0..2 steps until it moves"
+            (still-cycle! 0.75)
+            (doseq [[label macro-map] [["nothing learned" {}]
+                                       ["learned on a control the store hasn't seen" {[:midi 0 7] :slider-1}]]]
+              (testing label
+                (learned! macro-map)
+                (let [[s _ offset] (counted-tick! (next-ns) stale)]
+                  (is (close? 1.5 offset) "its default, not the stale slot's 0")
+                  (is (= [:map/odd-even :map/odd-even] (picked s)))
+                  (is (close? full (brightness s)) "the Master full")
+                  (is (= {} (:faders s)))))))
+          (testing "learned on the trigger, at 0: the Offset 0, Left / Right, the meter at 0, the cue dark"
+            (learned! {[:gamepad 0 :trigger-left] :slider-1})
+            (let [[s calls offset] (counted-tick! (next-ns) {[:gamepad 0 :trigger-left] 0.0})]
+              (is (= 0.0 offset))
+              (is (= [:map/left-right :map/left-right] (picked s)))
+              (is (= [{:slider-1 0.0} "Intensity 0 %"] [(:faders s) (meter s)]))
+              (is (zero? (brightness s)))
+              (is (= once calls)))))))))

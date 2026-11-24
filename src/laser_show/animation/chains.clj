@@ -195,6 +195,27 @@
    items))
 
 
+;; What a cell stores
+
+
+(defn stored-effect-content
+  "What an effects cell's saved items store, on or off: {:has-content?
+   :leaves}. :has-content? is true when items holds anything, a group (even
+   an empty one) or an effect: a cell with no items is empty, whatever its
+   name or switch. :leaves are its effects, the maps with an :effect-id, in
+   document order and as stored, enabled or not, in enabled groups or not;
+   only groups' :items are looked in, never an effect's params. What plays
+   is flatten-chain's, which leaves out what is disabled."
+  [items]
+  (letfn [(leaves [items]
+            (mapcat #(cond
+                       (group? %) (leaves (:items % []))
+                       (some? (:effect-id %)) [%])
+                    items))]
+    {:has-content? (boolean (seq items))
+     :leaves (vec (leaves items))}))
+
+
 
 (defn create-group
   "Create a new group with the given items.

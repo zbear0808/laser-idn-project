@@ -39,22 +39,13 @@ Dev mode is controlled by the `laser-show.dev` system property:
 
 The `laser-show.dev-config/dev-mode?` function checks this property.
 
-### 3. Conditional Lifecycle
+### 3. Which tools are actually active?
 
-In `laser-show.app/create-renderer`, the lifecycle is conditionally selected:
+The REPL help and `explain-desc` below are usable with `:dev`. With `:dev`, [`app/create-app`](../src/laser_show/app.clj) also installs `laser-show.dev-renderer/middleware` ([`dev/laser_show/dev_renderer.clj`](../dev/laser_show/dev_renderer.clj)) as the renderer's `:renderer-middleware`. That adds automatic validation, cljfx component stacks in render errors and the F12 inspector around the app's own type->lifecycle. Without `:dev` the middleware is `identity`. In every mode the app's error handler is passed as `:renderer-error-handler`, the option [cljfx 1.10.6](https://github.com/cljfx/cljfx/blob/1.10.6/src/cljfx/api.clj#L584-L613) `create-app` reads. If the middleware can't be loaded, one warning is logged and rendering continues without it.
 
-```clojure
-(if (dev-config/dev-mode?)
-  ;; Dev mode: Use validating lifecycle with better errors
-  @(requiring-resolve 'cljfx.dev/type->lifecycle)
-  ;; Prod mode: Use standard lifecycle
-  #(or (fx/keyword->lifecycle %)
-       (fx/fn->lifecycle-with-context %)))
-```
+`dev_renderer.clj` re-registers three cljfx.dev specs that reject descriptions cljfx 1.10.6 renders: `ext-many` children with `:fx/key`, and string collections as `:style-class` on menu items and split menu buttons. `laser-show.renderer-wiring-test` pins both sides; after a cljfx/dev upgrade, drop a correction and rerun that test. Validation runs on every render, so dev mode renders more slowly; take performance or cache measurements without `:dev`.
 
-### 4. Error Handler Integration
-
-A custom error handler logs errors and integrates with dev tools. In dev mode, this shows component stacks from cljfx.dev.
+If changing that wiring, preserve the [context-aware rendering and event pipeline](CLJFX_STATE_MANAGEMENT.md#reactive-state-in-this-app). Keep the single app-instance dispatcher. Verify what reaches the renderer: the startup message alone is not evidence that the inspector is active.
 
 ## Tools and Usage
 
@@ -115,7 +106,7 @@ Invoking this fn will open a window with props and types reference.
 
 ### Improved error messages with spec
 
-The application is configured to use the validating type->lifecycle opt in dev mode. This validates all cljfx component descriptions using spec and properly describes the errors.
+With `:dev`, invalid component descriptions produce errors like the one below, with the cljfx component stack. You can also use `explain-desc` directly to validate a description.
 
 Example of an error in the REPL:
 
@@ -156,13 +147,13 @@ You can also validate individual descriptions while developing using `explain-de
 
 ### Cljfx component inspector
 
-Using the same dev type->lifecycle opt, you also get cljfx component tree inspector that can be opened by pressing **F12** while the application is focused.
+With `:dev`, **F12** opens the component tree inspector while the application is focused. The [plorer skill](../.agents/skills/plorer/SKILL.md) inspects the live JavaFX scene graph independently of it.
 
 Inspector shows a live tree of components and their props.
 
 ## CSS Hot-Reload Integration
 
-The dev tools work seamlessly with the project's CSS hot-reload:
+CSS hot-reload works independently of the inspector:
 
 ```clojure
 ;; Enable CSS watching
@@ -170,8 +161,7 @@ The dev tools work seamlessly with the project's CSS hot-reload:
 
 ;; Now edit src/laser_show/css/title_bar.clj
 ;; Eval the (def menu-theme ...) form
-;; UI updates instantly with new styles!
-;; Dev tools will validate the new CSS descriptions
+;; The watch dispatches :dev/reloaded; the next render picks up the new CSS URL.
 ```
 
 ## Production Builds
@@ -181,7 +171,7 @@ Dev tools are automatically disabled in production:
 1. The `:dev` alias is not used in production builds
 2. The `laser-show.dev` system property is not set
 3. `dev-config/dev-mode?` returns `false`
-4. Standard cljfx lifecycle is used (no validation overhead)
+4. The renderer middleware is `identity`: the standard cljfx lifecycle, no validation overhead
 
 ## References
 

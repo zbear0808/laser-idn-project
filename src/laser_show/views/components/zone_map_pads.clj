@@ -22,6 +22,7 @@
             [clojure.string :as str]
             [laser-show.animation.show-time :as show-time]
             [laser-show.subs :as subs]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.clock-view :as clock-view]
             [laser-show.views.components.trigger-bank :as trigger-bank])
   (:import [javafx.css PseudoClass]
@@ -91,25 +92,37 @@
          :else (str "Switch to " name " on the next " (if bar? "bar" "beat (Shift: the bar)")))
        (when (seq bindings) (str " · " (keys-text bindings)))))
 
+(defn- bar-item
+  "Switch on the bar, for the pad of map-id (:cycle for CYCLE): a check
+   menu item that shows the pad's setting, after a refused click too
+   (applied-value)."
+  [node-id map-id bar?]
+  {:fx/type applied-value/applied-control
+   :property :selected
+   :address [:zone-map-pad map-id :bar?]
+   :value bar?
+   :on-change (fn [on?] {:event/type :zone-map/set-pad-bar :map map-id :bar? on?})
+   :desc {:fx/type :check-menu-item
+          :id (str node-id "-bar")
+          :text "Switch on the bar"}})
+
 (defn- pad-menu
-  "A pad's menu: Switch on the bar, its control, Edit maps…."
-  [node-id {:keys [id bar? learning? bindings]}]
+  "A pad's menu: Switch on the bar, its control, Edit maps…. Learn sends
+   the show it is in (document-id), Cancel the learn it shows (learn)."
+  [node-id {:keys [id bar? learning? bindings]} learn document-id]
   {:fx/type :context-menu
-   :items [{:fx/type :check-menu-item
-            :id (str node-id "-bar")
-            :text "Switch on the bar"
-            :selected (boolean bar?)
-            :on-action {:event/type :zone-map/set-pad-bar :map id :bar? (not bar?)}}
+   :items [(bar-item node-id id bar?)
            {:fx/type :separator-menu-item}
            {:fx/type :menu-item
             :id (str node-id "-learn")
             :text "Learn control…"
-            :on-action {:event/type :input/start-learn :target-action {:type :zone-map :target id}}}
+            :on-action {:event/type :input/start-learn :target-action {:type :zone-map :target id}
+                        :document-id document-id}}
            {:fx/type :menu-item
             :id (str node-id "-cancel-learn")
             :text "Cancel learning"
             :disable (not learning?)
-            :on-action {:event/type :input/cancel-learn}}
+            :on-action (merge {:event/type :input/cancel-learn} learn)}
            {:fx/type :menu-item
             :id (str node-id "-clear")
             :text "Clear control"
@@ -128,6 +141,8 @@
    don't take the mouse, so a press reaches the pad itself."
   [{:keys [fx/context map-id size]}]
   (let [{:keys [name active? pending learning? bindings] :as pad} (fx/sub-ctx context subs/map-pad map-id)
+        learn (fx/sub-ctx context subs/learn-for-target {:type :zone-map :target map-id})
+        document-id (fx/sub-ctx context subs/document-id)
         large? (= :large size)
         node-id (str (if large? "zone-map-pad-" "zone-map-chip-") (clojure.core/name map-id))
         pointer {:event/type :zone-map/pointer :map map-id}
@@ -145,7 +160,7 @@
                                learning? (conj "zone-map-pad-learning"))
                 :on-mouse-pressed pointer
                 :on-touch-pressed pointer
-                :context-menu (pad-menu node-id pad)}]
+                :context-menu (pad-menu node-id pad learn document-id)}]
     {:fx/type clock-view/ext-clock-redraw
      :redraw! #'redraw-blink!
      :every-ms 40
@@ -200,24 +215,21 @@
        (when (seq bindings) (str " · " (keys-text bindings)))))
 
 (defn- cycle-menu
-  "CYCLE's menu: Switch on the bar, its control."
-  [node-id {:keys [bar? learning? bindings]}]
+  "CYCLE's menu: Switch on the bar, its control (as pad-menu's)."
+  [node-id {:keys [bar? learning? bindings]} learn document-id]
   {:fx/type :context-menu
-   :items [{:fx/type :check-menu-item
-            :id (str node-id "-bar")
-            :text "Switch on the bar"
-            :selected (boolean bar?)
-            :on-action {:event/type :zone-map/set-pad-bar :map :cycle :bar? (not bar?)}}
+   :items [(bar-item node-id :cycle bar?)
            {:fx/type :separator-menu-item}
            {:fx/type :menu-item
             :id (str node-id "-learn")
             :text "Learn control…"
-            :on-action {:event/type :input/start-learn :target-action {:type :zone-map :target :cycle}}}
+            :on-action {:event/type :input/start-learn :target-action {:type :zone-map :target :cycle}
+                        :document-id document-id}}
            {:fx/type :menu-item
             :id (str node-id "-cancel-learn")
             :text "Cancel learning"
             :disable (not learning?)
-            :on-action {:event/type :input/cancel-learn}}
+            :on-action (merge {:event/type :input/cancel-learn} learn)}
            {:fx/type :menu-item
             :id (str node-id "-clear")
             :text "Clear control"
@@ -230,6 +242,8 @@
    a press carries the cycle on (:zone-map/pointer :map :cycle)."
   [{:keys [fx/context size]}]
   (let [{:keys [on? running? paused? pending learning? bindings] :as state} (fx/sub-ctx context subs/map-cycle-state)
+        learn (fx/sub-ctx context subs/learn-for-target {:type :zone-map :target :cycle})
+        document-id (fx/sub-ctx context subs/document-id)
         large? (= :large size)
         node-id (if large? "zone-map-pad-cycle" "zone-map-chip-cycle")
         pointer {:event/type :zone-map/pointer :map :cycle}
@@ -246,7 +260,7 @@
                 :on-mouse-pressed pointer
                 :on-touch-pressed pointer
                 :tooltip {:fx/type :tooltip :text (cycle-tooltip state)}
-                :context-menu (cycle-menu node-id state)}]
+                :context-menu (cycle-menu node-id state learn document-id)}]
     {:fx/type clock-view/ext-clock-redraw
      :redraw! #'redraw-blink!
      :every-ms 40

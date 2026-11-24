@@ -129,9 +129,20 @@
   "The browser drop on this row, or nil. The row's cell and track are in its
    userData (set every render, so they're never stale)."
   [^Node node ^DragEvent e]
-  (when-let [payload (dd/read-payload (.getDragboard e) :bank-item drop/valid-payload?)]
+  (when-let [payload (dd/read-payload e :bank-item drop/valid-payload?)]
     (let [{:keys [col row track-id]} (.getUserData node)]
       (drop/drop-target payload {:type :header :track-id track-id} {:col col :row row}))))
+
+(defn- track-list
+  "The list drag-and-drop's command address for the tracks of the cell in
+   node's userData (set every render): a row or the column the editor keeps
+   when it shows another cell reorders that cell's tracks."
+  [^Node node]
+  (when-let [{:keys [col row]} (.getUserData node)]
+    {:component-id [:timeline-tracks col row]
+     :items-path [:chains :cue-chains [col row] :tracks]
+     :on-change-event :timeline/update-tracks
+     :on-change-params {:col col :row row}}))
 
 (defn- bank-drop-target!
   "Make a header row a drop target for browser drags. Uses addEventHandler:
@@ -160,19 +171,16 @@
                (.consume e)))))))
 
 (defn- header-row
-  [{:keys [col row selected-track-id items-path] :as props} idx r]
+  [{:keys [col row selected-track-id swap-state] :as props} idx r]
   (let [folder? (= :folder (:kind r))
         selected? (= selected-track-id (:id r))
-        track-id (:id r)
-        drop-props {:on-change-event :timeline/update-tracks
-                    :on-change-params {:col col :row row}
-                    :items-path items-path}
-        component-id [:timeline-tracks col row]]
+        track-id (:id r)]
     {:fx/type fx/ext-on-instance-lifecycle
      :fx/key track-id
      :on-created (fn [node]
-                   (dnd/setup-drag-source! node track-id component-id items-path)
-                   (dnd/setup-drag-target! node track-id folder? component-id drop-props)
+                   (let [address #(track-list node)]
+                     (dnd/setup-drag-source! node track-id address)
+                     (dnd/setup-drag-target! node track-id folder? address))
                    (bank-drop-target! node))
      ;; A graphic-only Label hosts the row: only Controls take :context-menu
      :desc
@@ -192,10 +200,12 @@
                      selected? (conj "tl-header-row-selected"))
       :min-height (:h r) :pref-height (:h r) :max-height (:h r)
       :min-width (:header-w layout/metrics) :pref-width (:header-w layout/metrics)
+      ;; The listener keeps the updater and the track, not props, which
+      ;; has the column's context (reactivity plan 33)
       :on-mouse-clicked (fn [^MouseEvent e]
                           (when (= MouseButton/PRIMARY (.getButton e))
                             (if (= 2 (.getClickCount e))
-                              ((:swap-state props) assoc :renaming-id track-id)
+                              (swap-state assoc :renaming-id track-id)
                               (events/dispatch! {:event/type :timeline/select-track
                                                  :col col :row row :track-id track-id}))))
       :children
@@ -237,9 +247,7 @@
    the cue's levels resolve: subs/cue-target-explain) :renaming-id
    :swap-state :on-scroll"
   [{:keys [fx/context rows view col row on-scroll] :as props}]
-  (let [items-path [:chains :cue-chains [col row] :tracks]
-        props (assoc props :items-path items-path
-                     :menu-ctx (target-control/menu-context context))]
+  (let [props (assoc props :menu-ctx (target-control/menu-context context))]
     {:fx/type :v-box
      :style-class "tl-header-column"
      :children
@@ -261,14 +269,11 @@
                        (.bind (.widthProperty clip) (.widthProperty pane))
                        (.bind (.heightProperty clip) (.heightProperty pane))
                        (.setClip pane clip))
-                     (dnd/setup-container-drop-target!
-                      pane [:timeline-tracks col row]
-                      {:on-change-event :timeline/update-tracks
-                       :on-change-params {:col col :row row}
-                       :items-path items-path}))
+                     (dnd/setup-container-drop-target! pane #(track-list pane)))
        :desc {:fx/type :pane
               :min-height 0
               :pref-height 0
+              :user-data {:col col :row row}
               :on-scroll on-scroll
               :children [{:fx/type :v-box
                           :spacing (:row-gap layout/metrics)

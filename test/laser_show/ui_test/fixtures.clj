@@ -62,10 +62,11 @@
   "Call (f at-ms) while a thread ticks the show clock every 16 ms, as the
    real clock does: at show time t0 + @at-ms (the test moves it), or, without
    t0, at the wall clock's time, so the clock's status (the beat, the cue
-   warnings) keeps coming. app/start-test! runs no clock. A cell or a
-   thumbnail draws only a tick newer than STALE_MS, and an engine sends only
-   one, so the clock has to keep ticking while a test reads them: on a loaded
-   machine one read can take longer than that (the macOS CI runner)."
+   warnings) keeps coming. app/start-test! runs no clock. A cell draws only
+   a tick newer than STALE_MS, and an engine sends only one (else an empty
+   frame, which is then what its card's thumbnail shows), so the clock has
+   to keep ticking while a test reads them: on a loaded machine one read can
+   take longer than that (the macOS CI runner)."
   ([f] (with-clock nil f))
   ([t0 f]
    (let [at-ms (atom 0)

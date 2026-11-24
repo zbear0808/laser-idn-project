@@ -106,16 +106,54 @@
                       (pos? more) (conj (str "and " more " more"))))))
 
 (defn retarget-options
-  "Where the cues of a group or laser that goes (ref) can go: every target
-   the pickers list (routing.rig/target-groups: All first, the automatic
-   groups, each laser, your groups by name), and Nothing (they inherit).
-   Never ref itself."
+  "Where the references to a group or laser that goes (ref) can go: every
+   target the pickers list (routing.rig/target-groups: All first, the
+   automatic groups, each laser, your groups by name), and Clear references
+   (a target inherits, a zone pattern drops it: :inherit). Never ref
+   itself."
   [state ref]
   (-> (into []
             (comp (remove #(= ref (:id %)))
                   (map (fn [g] {:value (:id g) :text (:name g)})))
             (rig/target-groups state))
-      (conj {:value :inherit :text "Nothing (they inherit)"})))
+      (conj {:value :inherit :text "Clear references"})))
+
+(defn retarget-choice
+  "The confirm's choice of where the references to ref go, when a group or
+   a laser goes: retarget-options, kept in :retarget-to."
+  [state ref]
+  {:key :retarget-to
+   :label "Replace references with:"
+   :options (retarget-options state ref)})
+
+(defn owners-text
+  "\"2 cues\", \"1 effect cell\", \"2 cues and 1 effect cell\": the cues and
+   the effect cells that store a reference; nil for none."
+  [cue-count cell-count]
+  (let [parts (cond-> []
+                (pos? cue-count) (conj (plural cue-count "cue" "cues"))
+                (pos? cell-count) (conj (plural cell-count "effect cell" "effect cells")))]
+    (when (seq parts)
+      (str/join " and " parts))))
+
+(defn pinned-text
+  "What removing or forgetting a laser says refers to it: \"2 cues are
+   pinned to it.\", and with effect cells \"2 cues and 1 effect cell refer
+   to it.\" (a pattern's place or source pins no cue); nil for none."
+  [cue-count cell-count]
+  (cond
+    (pos? cell-count) (str (owners-text cue-count cell-count) (if (= 1 (+ cue-count cell-count)) " refers" " refer") " to it.")
+    (pos? cue-count) (str (plural cue-count "cue" "cues") (if (= 1 cue-count) " is" " are") " pinned to it.")))
+
+(defn replaced-text
+  "What a notice says became of the references owners (owners-text) had to
+   a group or laser that went: \"references in 2 cues now name Graphics\";
+   cleared (target nil), \"references in 2 cues cleared: targets inherit,
+   patterns drop it\" (routing.refs/replace-refs)."
+  [state owners target]
+  (if target
+    (str "references in " owners " now name " (rig/ref-name state target))
+    (str "references in " owners " cleared: targets inherit, patterns drop it")))
 
 (defn columns-using
   "The grid columns whose default target names ref (zones plan Z4), in
@@ -139,16 +177,19 @@
               (:zone-maps state))))
 
 (defn uses-text
-  "What a delete's question says uses a group: \"3 cues, column 3, the show
-   default, the map Crowd sweep and 2 projectors use it.\", \"1 cue uses
-   it.\", \"Nothing uses it.\" (cues, the columns using it, whether the
-   show default does, the names of the zone maps using it, how many outputs
-   are in it)."
+  "What a delete's question says uses a group: \"3 cues, 1 effect cell,
+   column 3, the show default, the map Crowd sweep and 2 projectors use
+   it.\", \"1 cue uses it.\", \"Nothing uses it.\" (cues, effect cells whose
+   zone patterns name it, the columns using it, whether the show default
+   does, the names of the zone maps using it, how many outputs are in it)."
   ([cue-count cols default? outputs]
-   (uses-text cue-count cols default? [] outputs))
+   (uses-text cue-count 0 cols default? [] outputs))
   ([cue-count cols default? maps outputs]
+   (uses-text cue-count 0 cols default? maps outputs))
+  ([cue-count cell-count cols default? maps outputs]
    (let [parts (cond-> []
                  (pos? cue-count) (conj (plural cue-count "cue" "cues"))
+                 (pos? cell-count) (conj (plural cell-count "effect cell" "effect cells"))
                  (seq cols) (conj (if (next cols)
                                     (str "columns " (and-list (map #(str (inc %)) cols)))
                                     (str "column " (inc (first cols)))))
@@ -158,28 +199,30 @@
                                     (str "the map " (first maps))))
                  (pos? outputs) (conj (plural outputs "projector" "projectors")))
          one? (and (= 1 (count parts))
-                   (or (= 1 cue-count) (= 1 (count cols)) default? (= 1 (count maps)) (= 1 outputs)))]
+                   (or (= 1 cue-count) (= 1 cell-count) (= 1 (count cols)) default? (= 1 (count maps)) (= 1 outputs)))]
      (if (empty? parts)
        "Nothing uses it."
        (let [text (and-list parts)]
          (str (str/upper-case (subs text 0 1)) (subs text 1) (if one? " uses it." " use it.")))))))
 
 (defn- handle-zone-groups-request-remove
-  "Ask before deleting a zone group: which cues, grid columns, the show
-   default, zone maps (zones plan Z4) and projectors use it, and, when
-   anything routes to it, where to send it (All by default; Nothing leaves
-   a map's lane empty, 06 SQ-13). :all can't be deleted: for :all
-   or an unknown group, state is returned as it is."
+  "Ask before deleting a zone group: which cues, effect cells (their zone
+   patterns), grid columns, the show default, zone maps (zones plan Z4) and
+   projectors use it, and, when anything stores a reference to it, what
+   replaces the references (All by default; Clear references leaves a map's
+   lane empty, 06 SQ-13). The details list the cues only. :all can't be
+   deleted: for :all or an unknown group, state is returned as it is."
   [{:keys [group-id state]}]
   (if (or (= :all group-id) (not (contains? (:zone-groups state) group-id)))
     {:state state}
     (let [cues (refs/cues-using (get-in state [:chains :cue-chains]) group-id)
+          cells (refs/effect-cells-using (get-in state [:chains :effect-chains]) group-id)
           cols (columns-using state group-id)
           default? (boolean (some #{group-id} (targets/target-refs (get-in state [:config :default-target]))))
           maps (maps-using state group-id)
           outputs (count (filter #(some #{group-id} (:zone-groups %))
                                  (concat (vals (:projectors state)) (vals (:virtual-projectors state)))))
-          message (uses-text (count cues) cols default? maps outputs)]
+          message (uses-text (count cues) (count cells) cols default? maps outputs)]
       {:state (assoc-in state [:ui :dialogs :confirm]
                         (cond-> {:open? true
                                  :title (str "Delete \"" (group-name state group-id) "\"?")
@@ -188,18 +231,16 @@
                                  :danger? true
                                  :confirm-event {:event/type :zone-groups/remove :group-id group-id}}
                           (seq cues) (assoc :details (cue-list-text state cues))
-                          (or (seq cues) (seq cols) default? (seq maps))
-                          (assoc :choice {:key :retarget-to
-                                          :label "Send its cues to:"
-                                          :options (retarget-options state group-id)}
+                          (or (seq cues) (seq cells) (seq cols) default? (seq maps))
+                          (assoc :choice (retarget-choice state group-id)
                                  :choice-value :all)))})))
 
 (defn retarget-value
   "Where the references to ref (a group or laser that goes) go:
    :retarget-to, All when it's absent, ref itself or nothing a cue can be
    sent to (routing.rig/known-ref?: All, an automatic group, a laser that
-   exists, a stored group); nil (they inherit) for :inherit or an explicit
-   nil."
+   exists, a stored group); nil (Clear references: a target inherits, a
+   zone pattern drops it) for :inherit or an explicit nil."
   [state ref event]
   (let [target (get event :retarget-to :all)]
     (cond
@@ -209,14 +250,16 @@
 
 (defn- handle-zone-groups-remove
   "Delete a zone group: it leaves every projector and virtual projector, and
-   every cue, effect and preview reference to it goes to :retarget-to (see
-   retarget-value). One event, so one undo step. :all can't be deleted:
+   every cue, effect cell (its zone patterns) and preview reference to it
+   goes to :retarget-to (see retarget-value), with a notice that says what
+   became of them. One event, so one undo step. :all can't be deleted:
    for :all or an unknown group, state is returned as it is."
   [{:keys [group-id state] :as event}]
   (if (or (= :all group-id) (not (contains? (:zone-groups state) group-id)))
     {:state state}
     (let [target (retarget-value state group-id event)
-          cue-count (count (refs/cues-using (get-in state [:chains :cue-chains]) group-id))
+          owners (owners-text (count (refs/cues-using (get-in state [:chains :cue-chains]) group-id))
+                              (count (refs/effect-cells-using (get-in state [:chains :effect-chains]) group-id)))
           deleted-name (group-name state group-id)
           selected (get-in state [:zone-group-ui :selected-group])
           new-state (-> state
@@ -225,9 +268,7 @@
                         (update :zone-groups dissoc group-id)
                         (assoc-in [:zone-group-ui :selected-group] (when-not (= selected group-id) selected)))
           notice (str "Deleted " deleted-name
-                      (when (pos? cue-count)
-                        (str " · " (plural cue-count "cue" "cues") " now "
-                             (if target (str "go to " (group-name state target)) "inherit"))))]
+                      (when owners (str " · " (replaced-text state owners target))))]
       (h/show-notice new-state notice :info))))
 
 

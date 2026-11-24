@@ -9,8 +9,8 @@
    
    The show clock (services/show_clock.clj) calls it once per playing cue per
    tick, with the cue's timing context and the tick's render context
-   (render-context), read once per tick; the engines and the preview take
-   their frames from that tick.
+   (render-context-with-inputs), made once per tick; the engines and the
+   preview take their frames from that tick.
    
    Cue Chain Support:
    - Cue chains are sequential lists of presets
@@ -65,9 +65,12 @@
 ;; Frame Generation
 
 
-;; NOTE: All these functions use get-raw-state instead of get-state because
-;; they are called from the show clock's thread, not the UI thread. Using
-;; fx/sub-val from a background thread causes assertion errors.
+;; NOTE: App state here is a snapshot, read when a frame is due, not a
+;; subscription. The show clock samples it once per tick and passes the
+;; tick's render inputs (render-context-with-inputs); the two-argument
+;; generate-frames-by-zone samples them itself (state/get-raw-state, the
+;; input store, the show clock: render-context), as get-preview-zone-filter
+;; does.
 
 (defn get-preview-zone-filter
   "Get the current preview zone group filter from state.
@@ -156,13 +159,15 @@
   [state beats]
   (zone-ctx (rig/routing (rig/routing-inputs state nil)) (zone-patterns/live-style state beats)))
 
-(defn render-context
+(defn render-context-with-inputs
   "What every cue's render in one tick shares. The show clock makes it once
    per tick, from the tick's app state, input values, global clock and
-   presses (show-time/pulse-view, nil without):
-   - :input-values: the input store's values, and each fader's at [:macro
-     slot]: the value of the control learned for it now ([:config :input
-     :macro-map], vibes.faders/with-faders), never a stored copy;
+   presses (show-time/pulse-view, nil without) and what the zone stage
+   reads (zone-ctx):
+   - :input-values: input-values, used as they are, so already as the Fader
+     modulators read them: the input store's values and each fader's at
+     [:macro slot] (vibes.faders/tick-inputs, the clock's, which its Map
+     cycle reads too; render-context makes them from the store's own);
    - :pulses: the presses, which the clock puts on each cue's timing context;
    - :global-effects: the effects grid's active point chain in state, or nil;
    - :zone-effects: its zone patterns that run, in reading order
@@ -175,23 +180,34 @@
      and the presses, at the global BPM. Each cue's render puts its own tempo
      on it, so a timeline with a locked tempo runs the global effects at that
      tempo."
+  [state input-values global-clock pulses zone-ctx]
+  {:input-values input-values
+   :pulses pulses
+   :column-targets (get-in state [:grid :column-targets])
+   :show-target (get-in state [:config :default-target])
+   :global-effects (get-active-global-effects state)
+   :zone-effects (get-active-zone-effects state)
+   :zone-ctx zone-ctx
+   :global-ctx (assoc (cue-timing/get-global-timing-context global-clock (get-in state [:timing :bpm]))
+                      :input-values input-values
+                      :pulses pulses)})
+
+(defn render-context
+  "render-context-with-inputs from the input store's own values
+   (input-values), each fader's added at [:macro slot] from the control
+   learned for it now ([:config :input :macro-map], vibes.faders/
+   with-faders), never a stored copy; without pulses, none; without
+   zone-ctx, what the zone stage reads from app state's routing at
+   global-clock's beats. For a render the show clock didn't set up (the
+   two-argument generate-frames-by-zone)."
   ([state input-values global-clock]
    (render-context state input-values global-clock nil))
   ([state input-values global-clock pulses]
    (render-context state input-values global-clock pulses
                    (state-zone-ctx state (double (or (:effective-beats global-clock) 0.0)))))
   ([state input-values global-clock pulses zone-ctx]
-   (let [input-values (faders/with-faders input-values (get-in state [:config :input :macro-map]))]
-     {:input-values input-values
-      :pulses pulses
-      :column-targets (get-in state [:grid :column-targets])
-      :show-target (get-in state [:config :default-target])
-      :global-effects (get-active-global-effects state)
-      :zone-effects (get-active-zone-effects state)
-      :zone-ctx zone-ctx
-      :global-ctx (assoc (cue-timing/get-global-timing-context global-clock (get-in state [:timing :bpm]))
-                         :input-values input-values
-                         :pulses pulses)})))
+   (render-context-with-inputs state (faders/with-faders input-values (get-in state [:config :input :macro-map]))
+                               global-clock pulses zone-ctx)))
 
 ;; Cue Chain Rendering
 ;;
@@ -453,8 +469,9 @@
    - timing-ctx: The cue's timing context (cue-timing/get-cue-timing-context),
      which every modulator, keyframe and clip window reads. Its :bpm is the
      cue's tempo.
-   - render-ctx: What the tick's cues share (render-context). Without it, it
-     is made from app state, the input store and the show clock as they are.
+   - render-ctx: What the tick's cues share (render-context-with-inputs).
+     Without it, render-context makes it from app state, the input store and
+     the show clock as they are.
      :column-target and :show-target are the cue's column's default and the
      show's; :zone-effects and :zone-ctx the effects grid's zone patterns and
      what their stage reads (zone-ctx). With :item-points? true (the show

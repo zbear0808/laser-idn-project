@@ -1,9 +1,32 @@
 # cljfx State Management: Contexts vs Atoms
 
-This guide covers state management approaches in cljfx, including thread safety considerations and patterns for async operations.
+## Reactive state in this app
+
+The app owns **one atom containing a cljfx context**. [`fx/create-app` in `app.clj`](../src/laser_show/app.clj) mounts it; [the event pipeline](../src/laser_show/events/core.clj) commits the next state while preserving the context cache. The rules below apply to project code and agent workflows. The later comparisons with standalone cljfx apps illustrate other designs.
+
+- **Render reads:** subscribe through the component's supplied `:fx/context`. Use `fx/sub-val` for a cheap, narrow lookup and `fx/sub-ctx` for a derived selector with stable arguments. Finish all subscription reads before returning; a lazy sequence or callback that reads the bound context later is too late. `state/get-raw-state`, the deprecated `get-state`/`get-in-state` snapshot wrappers and ordinary atom derefs do not register dependencies on the rendering component. [`state/root-context->snapshot`](../src/laser_show/state/core.clj) is the only reader of cljfx's internal context map; never call it from a view.
+- **Child components:** return `{:fx/type child :id id}` and let cljfx supply the child's context. Don't forward the parent's context, even inside a props map or a captured callback: the incoming description is part of the cache key, and a forwarded context keeps old generations alive. A helper called synchronously during render may use the parent's context. Pass label and menu builders as top-level functions or `[f & args]` data, so equal inputs give equal descriptions. Keep render functions pure; a cache hit can skip their bodies completely.
+- **Cache size:** the app's LRU keeps 4096 entries ([`state/core.clj` `cache-factory`](../src/laser_show/state/core.clj)), chosen from measured working sets (the busiest measured screen used 1036). A view must subscribe to everything it shows; it can't rely on eviction to refresh it. Re-measure view calls on a representative tree before changing the size.
+- **Renderer options:** [`app/create-app`](../src/laser_show/app.clj) passes `:renderer-error-handler` in every mode and, in dev mode only, `:renderer-middleware` (`laser-show.dev-renderer/middleware`: cljfx.dev validation, component stacks and F12). Its `:event-handler` is one app instance's handler (`events/instance-handler`); middleware must not wrap or replace that single dispatcher. In [cljfx 1.10.6 `create-app`](https://github.com/cljfx/cljfx/blob/1.10.6/src/cljfx/api.clj#L584-L613), `:opts` and `:error-handler` are ignored `create-renderer` options.
+- **Events:** send a stable entity ID and what the user changed. A handler resolves the entity from its current `:state` co-effect, validates the value and returns `{:state new-state}` and/or named effects. For text fields, Enter supplies a JavaFX `ActionEvent`, not the text or a number. Extract the input on the FX thread; only plain data belongs in the document or undo history. Install an event map directly on a control, or have its function listener call `events/dispatch!`; merely returning a map from a native listener does not dispatch it.
+- **Workers:** a service can read one immutable snapshot via `state/get-raw-state` and pure extractors. Have the effect hand blocking I/O to a worker that dispatches the result back. When work can outlive a request, editor or document, include its identity and ignore superseded completions. Neither a worker nor an FX callback writes the app atom directly.
+- **Identities for late results:** a result is checked against the owner it was started for, and a mismatch returns `{}` (no commit, no notice). The owners in use:
+  - **App instance:** `events/instance-handler` drops a stopped app's events and effects, and `init-state!` starts a new context epoch.
+  - **Open show:** `[:project :document-id]` changes only when New or Open goes ahead. Stamp the event with `h/for-document` and check it with `h/same-document?`. Anything that would discard the show re-checks its authorization (`may-discard?` in `handlers/menu.clj`).
+  - **Learn attempt:** `[:ui :input-learn :active]` and its `:learn-id`.
+  - **Device request:** request ids per kind (`input/devices.clj`).
+  - **Scan:** `[:projector-ui :scan-id]`.
+  - **Editor and gesture:** an editor's `:editor-id`, and a gesture's press id (`:history/gesture-id`).
+  - **Timecode chase:** a chase episode's `:chase-id`.
+- **Lifetimes:** shared UI state lives in the database; node dimensions and gesture state can be local; device handles and frame-rate data belong to their runtime owner. For example, `input/devices.clj` owns MIDI ports and the OSC server, `input/learn.clj` owns the learn listener, and a drag's fallback payload lives on its Scene. Publish immutable status for declarative views, or sample the runtime snapshot in a lifecycle-managed painter. An `:on-created` listener runs for that instance: read the current target from declarative `:user-data` when the input arrives and clean up with the node. `:on-advanced` on `ext-on-instance-lifecycle` means the instance was replaced, not that its props changed.
+- **Refused native edits:** JavaFX changes a checkbox, combo, slider or spinner before the handler decides. Wrap such a control in `applied-value/applied-control` ([`views/components/applied_value.clj`](../src/laser_show/views/components/applied_value.clj)), which puts the applied value back after a refusal. Text fields commit through `commit-field`, which restores the applied text.
+- **Verification:** `events/flush!` from a test or REPL waits for events queued ahead of its marker. It does not wait for a future completion or a JavaFX render. Wait for the expected state **and** re-query the visible control when the check is about UI behavior.
+
+The [BPM field](../src/laser_show/views/toolbar.clj#L116-L135) shows the loop: `subs/bpm` reads through the supplied context; committing text produces `{:event/type :timing/set-bpm :bpm new-bpm}`; [the handler](../src/laser_show/events/handlers/timing.clj#L40-L43) updates the current state. See the pinned [cljfx 1.10.6 subscription docs](https://github.com/cljfx/cljfx/blob/1.10.6/README.md#subscriptions-and-contexts) and [event-handling example](https://github.com/cljfx/cljfx/blob/1.10.6/examples/e18_pure_event_handling.clj).
 
 ## Table of Contents
 
+- [Reactive state in this app](#reactive-state-in-this-app)
 - [Overview: Atoms vs Contexts](#overview-atoms-vs-contexts)
 - [Regular Atoms](#regular-atoms)
 - [Contexts](#contexts)
@@ -200,18 +223,15 @@ Contexts wrap your state and provide memoized subscription functions:
   (fx/sub-val ctx :data))  ;; Mutates internal cache!
 ```
 
-The cache is designed for the render cycle, not concurrent access. For worker threads, extract the specific data you need on the main thread first:
+The restriction on a **bound render context** is its lifetime: do not call `sub-*` on it after the component or subscription returns. A worker in this app takes plain data from its effect payload or reads one service snapshot; it need not ask the FX thread for a fresh context:
 
 ```clojure
-;; SAFE: Extract specific data before spawning worker
-(let [ctx @*state
-      data (fx/sub-val ctx :document)
-      settings (fx/sub-val ctx :settings)]
-  ;; Pass extracted data to worker - it's just immutable data
-  (future (process-data data settings)))
+;; A service that needs configuration at the start of an operation
+(let [snapshot (state/get-raw-state)]
+  (get-in snapshot [:timing :bpm]))
 ```
 
-> **Note:** Avoid calling `fx/sub-val` or `fx/sub-ctx` from within worker threads. Extract all needed data on the FX thread before spawning the worker.
+> An out-of-band snapshot is appropriate for a worker or a REPL inspection. Inside a render it would leave the view unaware of subsequent changes.
 
 ### Modifying State from Other Threads
 
@@ -225,7 +245,7 @@ The cache is designed for the render cycle, not concurrent access. For worker th
 **With contexts — use `fx/swap-context`:**
 
 ```clojure
-;; From ANY thread - safe
+;; Standalone atom design; the laser show app dispatches an event instead.
 (swap! *state fx/swap-context update :counter inc)
 ```
 
@@ -257,7 +277,7 @@ Worker Thread          Atom              Renderer           JavaFX Thread
 
 The renderer:
 1. Watches your atom
-2. **Batches rapid updates** — 10 quick updates = 1 render with final state
+2. **Coalesces queued updates** — a render can use the latest of several pending descriptions
 3. **Always renders on FX thread** — safe for JavaFX
 
 ---
@@ -581,6 +601,8 @@ For maximum testability, use the effects system. cljfx provides helper functions
 
 ## Best Practices
 
+The direct-atom examples below concern standalone apps. For the laser show app, use [Reactive state in this app](#reactive-state-in-this-app), including for errors, cancellation and progress.
+
 ### 1. Extract Data Before Spawning Threads
 
 ```clojure
@@ -592,12 +614,12 @@ For maximum testability, use the effects system. cljfx provides helper functions
     (future
       (export-to-file data format))))
 
-;; ❌ Avoid - reading context in worker
+;; Avoid: rereading the global state in the worker can export a different version
 (defn handle-export [_]
   (future
     (let [ctx @*state]  ;; State might have changed!
       (export-to-file 
-        (fx/sub-val ctx :export-data)   ;; Cache mutation on wrong thread
+        (fx/sub-val ctx :export-data)
         (fx/sub-val ctx :export-format)))))
 ```
 
@@ -676,16 +698,13 @@ For data that updates very frequently (60+ fps), consider keeping it outside the
 
 ## Summary
 
+For this application:
+
 | Task | Approach |
 |------|----------|
-| Simple state update from UI | Direct `swap!` (atoms) or `swap! fx/swap-context` (contexts) |
-| Async operation from handler | Spawn `future`, update state when complete |
-| Read state in worker thread | Extract data on FX thread first, pass to worker |
-| Expensive computation | Use `fx/sub-ctx` subscriptions for memoization |
-| Testable async handlers | Use effects system with `wrap-effects` |
-| Progress updates | Update state periodically from worker thread |
-| Debounced input | Executor + cancellable futures |
-
-The key insight: **Clojure atoms handle thread safety. The renderer handles getting updates onto the FX thread. You just need to use `fx/swap-context` for contexts.**
-
-In this app, though, only the event pipeline writes app state; see the "In this app" note under [Modifying State from Other Threads](#modifying-state-from-other-threads).
+| Display shared state | Read through the supplied `:fx/context`; use `sub-val` for cheap access and `sub-ctx` for derived values |
+| Change app state | Dispatch an intent; the handler returns `:state` computed from its co-effect |
+| Async work, progress or debounce | Use an effect and dispatch results; match them to the current request |
+| Read state in a service | Use the effect's data or a single `state/get-raw-state` snapshot and pure extractors |
+| Draw a frame or meter | Sample the runtime owner's snapshot in the painter; keep per-frame data out of the global database |
+| Inspect a UI change | Wait for the model and the displayed value; an event-queue flush alone doesn't establish both |

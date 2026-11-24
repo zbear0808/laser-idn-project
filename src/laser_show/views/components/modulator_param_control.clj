@@ -21,15 +21,40 @@
    ```
    
    Also provides visual-editor-modulator-header for embedding modulator controls
-   directly in single-parameter visual editors (rotation dial, hue slider, etc)."
+   directly in single-parameter visual editors (rotation dial, hue slider, etc).
+   
+   A control that edits one field of a parameter's modulator (its type, a
+   field, or the static value while it is off) sends that field only, for
+   the effect named by its instance (field-event): the handler edits what is
+   stored now, so two edits from one render both stay (reactivity plan 07).
+   :current-value is what the controls show. After a change the app refused
+   (the show lock) or that changed nothing, each control shows the value
+   that applies again (applied-value; the text fields, commit-field)."
   (:require [clj-font-awesome.core :as fa]
             [clojure.string :as str]
             [laser-show.animation.modulator-registry :as reg]
+            [laser-show.views.components.applied-value :as applied-value]
+            [laser-show.views.components.commit-field :as commit-field]
+            [laser-show.views.components.gesture :as gesture]
             [laser-show.views.components.parameter-controls :as param-controls]))
 
 
 ;; UI Components
 
+
+(defn- field-event
+  "What a control that edits one field of a parameter's modulator sends
+   (event-type :modulator/set-type, :modulator/update-param or
+   :modulator/update-static-value) for param-key: base's address of the
+   effect, its :domain, :entity-key and instance (:effect-instance-id, and
+   :owner-id for an effect an item, a clip or a track owns), and :dialog-id
+   when the controls are a window's. Never the modulator as rendered, nor
+   the effect's place: another edit may change either before this one is
+   handled."
+  [base event-type param-key]
+  (assoc (select-keys base [:domain :entity-key :effect-instance-id :owner-id :dialog-id])
+         :event/type event-type
+         :param-key param-key))
 
 (defn- modulator-cell-desc
   "Build cell description for a modulator item.
@@ -53,26 +78,30 @@
     (= :projector-effects domain) (remove #(= :pulse (:category %)))))
 
 (defn- modulator-type-selector
-  "Dropdown to select modulator type.
+  "Dropdown to select modulator type; after a type the app refused (the
+   show lock), it shows the one that applies (applied-value).
    
    Props:
    - :current-type - Current modulator type keyword
-   - :on-select-event - Event template for type selection (receives :mod-type);
-     its :domain picks the types (modulator-choices), its :param-key names it
-     (id modulator-type-<param>)"
+   - :on-select-event - Event template for type selection, sent with the
+     selected type's id as :mod-type; its :domain picks the types
+     (modulator-choices), its :param-key names it (id modulator-type-<param>)"
   [{:keys [current-type on-select-event]}]
   (let [all-types (modulator-choices (:domain on-select-event))
         current-info (reg/get-modulator current-type)]
-    {:fx/type :combo-box
-     :id (str "modulator-type-" (some-> (:param-key on-select-event) name))
-     :pref-width 140
+    {:fx/type applied-value/applied-control
+     :property :value
+     :address [on-select-event :type]
      :value (or current-info (first all-types))
-     :items (vec all-types)
-     :button-cell (fn [item] (modulator-cell-desc item))
-     :cell-factory {:fx/cell-type :list-cell
-                    :describe (fn [item] (modulator-cell-desc item))}
-     ;; Event map pattern: merge event template with :mod-type
-     :on-value-changed (assoc on-select-event :mod-type-item? true)}))
+     ;; The item is the registry's entry (its evaluator too): send its id
+     :on-change (fn [item] (when-let [id (:id item)] (assoc on-select-event :mod-type id)))
+     :desc {:fx/type :combo-box
+            :id (str "modulator-type-" (some-> (:param-key on-select-event) name))
+            :pref-width 140
+            :items (vec all-types)
+            :button-cell (fn [item] (modulator-cell-desc item))
+            :cell-factory {:fx/cell-type :list-cell
+                           :describe (fn [item] (modulator-cell-desc item))}}}))
 
 (defn- param-id
   "A modulator param control's id: modulator-<param>-<modulator param>."
@@ -80,7 +109,9 @@
   (str "modulator-" (some-> (:param-key on-change-event) name) "-" (name key)))
 
 (defn- modulator-param-slider
-  "Slider for a single modulator parameter with editable text field.
+  "Slider for a single modulator parameter with editable text field; both
+   show the value that applies after a change the app refused (the show
+   lock) too: applied-value, commit-field.
    
    Uses same pattern as parameter-controls/param-slider for consistency.
    
@@ -88,7 +119,9 @@
    - :param-def - Parameter definition map with :key, :label, :min, :max, :default
    - :current-value - Current value for this parameter
    - :on-change-event - Event template for slider value changes (receives :mod-param-key)
-   - :on-text-event - Event template for text field changes (receives :mod-param-key, :mod-text-field? true)"
+   - :on-text-event - Event template for the text field (receives
+     :mod-param-key, :mod-text-field? true, its bounds and the typed :text:
+     param-controls/number-field)"
   [{:keys [param-def current-value on-change-event on-text-event]}]
   (let [{:keys [key label min max default]} param-def
         ;; Handle invalid values defensively - only use current-value if it's a number
@@ -106,32 +139,36 @@
                  :pref-width 90
                  :style-class ["text-small"]
                  :style "-fx-text-fill: #909090;"}
-                {:fx/type :slider
-                 :id (param-id on-change-event key)
-                 :min min
-                 :max max
+                ;; A drag is one press, one undo step (reactivity plan 16):
+                ;; gesture/slider sends its value events (the template with
+                ;; mod-param-key); after one the app refused (the show lock),
+                ;; it shows the value that applies (applied-value)
+                {:fx/type applied-value/applied-control
+                 :property :value
+                 :address [on-change-event key]
                  :value (double value)
-                 :pref-width 80
-                 ;; Event map pattern: add mod-param-key to template
-                 :on-value-changed (assoc on-change-event :mod-param-key key)
-                 :on-mouse-pressed {:event/type :history/begin-transaction
-                                    :label (str "Adjust " (or label (name key)))
-                                    :source-id [:modulator-slider key]}
-                 :on-mouse-released {:event/type :history/commit-transaction
-                                     :source-id [:modulator-slider key]}}
-                {:fx/type :text-field
+                 :desc {:fx/type gesture/slider
+                        :id (param-id on-change-event key)
+                        :min min
+                        :max max
+                        :pref-width 80
+                        :gesture {:label (str "Adjust " (or label (name key)))
+                                  :source-id [:modulator-slider key]
+                                  :on-value-changed (assoc on-change-event :mod-param-key key)}}}
+                {:fx/type param-controls/number-field
+                 :id (str (param-id on-change-event key) "-field")
                  :text (format "%.2f" (double value))
                  :pref-width 50
-                 :style-class ["text-field" "param-text-field"]
                  :style "-fx-font-size: 10; -fx-padding: 2 4;"
                  ;; Text field event includes mod-param-key and text field marker
-                 :on-action (assoc text-event
-                                   :mod-param-key key
-                                   :mod-param-min min
-                                   :mod-param-max max)}]}))
+                 :event (assoc text-event
+                               :mod-param-key key
+                               :mod-param-min min
+                               :mod-param-max max)}]}))
 
 (defn- modulator-param-choice
-  "Choice dropdown for a modulator parameter.
+  "Choice dropdown for a modulator parameter; after a choice the app
+   refused, it shows the one that applies (applied-value).
    
    Props:
    - :param-def - Parameter definition map with :key, :label, :choices, :default,
@@ -150,16 +187,18 @@
                  :pref-width 90
                  :style-class ["text-small"]
                  :style "-fx-text-fill: #909090;"}
-                {:fx/type :combo-box
-                 :id (param-id on-change-event key)
-                 :items (vec choices)
+                {:fx/type applied-value/applied-control
+                 :property :value
+                 :address [on-change-event key]
                  :value value
-                 :pref-width (if labels 170 100)
-                 :button-cell (fn [item] {:text (text item)})
-                 :cell-factory {:fx/cell-type :list-cell
-                                :describe (fn [item] {:text (text item)})}
-                 ;; Event map pattern: add mod-param-key to template
-                 :on-value-changed (assoc on-change-event :mod-param-key key)}]}))
+                 :on-change (fn [v] (when (some? v) (assoc on-change-event :mod-param-key key :fx/event v)))
+                 :desc {:fx/type :combo-box
+                        :id (param-id on-change-event key)
+                        :items (vec choices)
+                        :pref-width (if labels 170 100)
+                        :button-cell (fn [item] {:text (text item)})
+                        :cell-factory {:fx/cell-type :list-cell
+                                       :describe (fn [item] {:text (text item)})}}}]}))
 
 (defn- number-list-text
   "A palette as it is typed: \"200 215 320\"."
@@ -170,14 +209,16 @@
 
 (defn- modulator-param-number-list
   "Text field for a list of numbers (the Step's palette), typed as \"200 215
-   320\" (commas too). Enter sends it; empty clears it.
+   320\" (commas too). Enter, or leaving the field, sends what was typed as
+   :text (commit-field reads it on the FX thread); empty clears it.
    
    Props:
    - :param-def - Parameter definition map with :key, :label
    - :current-value - The numbers
    - :on-change-event - Event template for value changes (receives :mod-param-key)"
   [{:keys [param-def current-value on-change-event]}]
-  (let [{:keys [key label]} param-def]
+  (let [{:keys [key label]} param-def
+        event (assoc on-change-event :mod-param-key key :text-field? true)]
     {:fx/type :h-box
      :spacing 6
      :alignment :center-left
@@ -186,20 +227,19 @@
                  :pref-width 90
                  :style-class ["text-small"]
                  :style "-fx-text-fill: #909090;"}
-                {:fx/type :text-field
+                {:fx/type commit-field/commit-field
                  :id (param-id on-change-event key)
                  :text (number-list-text current-value)
                  :prompt-text "200 215 320"
                  :pref-width 140
                  :style-class ["text-field" "param-text-field"]
                  :style "-fx-font-size: 10; -fx-padding: 2 4;"
-                 :on-action (assoc on-change-event
-                                   :mod-param-key key
-                                   :text-field-type :number-list
-                                   :text-field? true)}]}))
+                 :on-commit (fn [typed] (assoc event :text typed))}]}))
 
 (defn- modulator-param-text
-  "Text field for a modulator parameter (e.g., step values).
+  "Text field for a modulator parameter (e.g., step values). Enter, or
+   leaving the field, sends what was typed as :text (commit-field reads it
+   on the FX thread).
    
    Props:
    - :param-def - Parameter definition map with :key, :label, :default
@@ -207,7 +247,8 @@
    - :on-change-event - Event template for value changes (receives :mod-param-key)"
   [{:keys [param-def current-value on-change-event]}]
   (let [{:keys [key label default]} param-def
-        value (or current-value default)]
+        value (or current-value default)
+        event (assoc on-change-event :mod-param-key key :text-field? true)]
     {:fx/type :h-box
      :spacing 6
      :alignment :center-left
@@ -215,19 +256,17 @@
                  :text label
                  :pref-width 90
                  :style "-fx-text-fill: #909090; -fx-font-size: 10;"}
-                {:fx/type :text-field
+                {:fx/type commit-field/commit-field
+                 :id (param-id on-change-event key)
                  :text (str value)
                  :pref-width 100
                  :style-class ["text-field" "param-text-field"]
                  :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 10;"
-                 ;; Event map pattern: add mod-param-key to template
-                 :on-action (assoc on-change-event
-                                   :mod-param-key key
-                                   :text-field-type :text
-                                   :text-field? true)}]}))
+                 :on-commit (fn [typed] (assoc event :text typed))}]}))
 
 (defn- modulator-param-boolean
-  "Checkbox for a boolean modulator parameter.
+  "Checkbox for a boolean modulator parameter; after a change the app
+   refused, it shows the value that applies (applied-value).
    
    Props:
    - :param-def - Parameter definition map with :key, :label, :default
@@ -244,11 +283,13 @@
                  :pref-width 90
                  :style-class ["text-small"]
                  :style "-fx-text-fill: #909090;"}
-                {:fx/type :check-box
-                 :id (param-id on-change-event key)
-                 :selected (boolean value)
-                 ;; Event map pattern: add mod-param-key to template
-                 :on-selected-changed (assoc on-change-event :mod-param-key key)}]}))
+                {:fx/type applied-value/applied-control
+                 :property :selected
+                 :address [on-change-event key]
+                 :value value
+                 :on-change (fn [on?] (assoc on-change-event :mod-param-key key :fx/event on?))
+                 :desc {:fx/type :check-box
+                        :id (param-id on-change-event key)}}]}))
 
 (defn- modulator-params-editor
   "Editor for modulator-specific parameters.
@@ -331,6 +372,19 @@
 ;; Reusable component for embedding modulator controls in single-param visual editors
 
 
+(defn- modulate-toggle
+  "The ∿ toggle of param-key (#modulate-<param>): desc's toggle button
+   (text, tooltip, style) on while modulated?, sending toggle-event with
+   the state it was clicked to (:fx/event). After a click the app refused
+   (the show lock) it shows the state that applies (applied-value)."
+  [desc modulator-event-base param-key modulated? toggle-event]
+  {:fx/type applied-value/applied-control
+   :property :selected
+   :address [modulator-event-base param-key :modulate]
+   :value modulated?
+   :on-change (fn [on?] (assoc toggle-event :fx/event on?))
+   :desc (assoc desc :fx/type :toggle-button :id (str "modulate-" (name param-key)))})
+
 (defn visual-editor-modulator-header
   "Modulator toggle header for visual editors.
   
@@ -343,7 +397,8 @@
   - :param-spec - Parameter specification map with :min, :max, :default, :label
   - :current-value - Current param value (number or modulator config map)
   - :modulator-event-base - Base event template for modulator operations
-                            (must have :domain, :entity-key, :effect-path)"
+                            (must have :domain, :entity-key, :effect-path, and
+                            the effect's :effect-instance-id for the type)"
   [{:keys [param-key param-spec current-value modulator-event-base]}]
   (let [is-modulated? (reg/active-modulator? current-value)
         display-label (or (:label param-spec) (name param-key))
@@ -352,24 +407,19 @@
                             :event/type :modulator/toggle
                             :param-key param-key
                             :param-spec param-spec)
-        set-type-event (assoc modulator-event-base
-                              :event/type :modulator/set-type
-                              :param-key param-key
-                              :param-spec param-spec
-                              :current-value current-value)]
+        set-type-event (assoc (field-event modulator-event-base :modulator/set-type param-key)
+                              :param-spec param-spec)]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
      :style-class ["visual-editor-modulator-header"]
      :children (filterv some?
                         [;; Modulate toggle button
-                         {:fx/type :toggle-button
-                          :text (if is-modulated? "∿ Modulating" "∿ Modulate")
-                          :selected is-modulated?
-                          :style-class [(if is-modulated?
-                                          "visual-editor-modulator-active"
-                                          "visual-editor-modulator-toggle")]
-                          :on-selected-changed toggle-event}
+                         (modulate-toggle {:text (if is-modulated? "∿ Modulating" "∿ Modulate")
+                                           :style-class [(if is-modulated?
+                                                           "visual-editor-modulator-active"
+                                                           "visual-editor-modulator-toggle")]}
+                                          modulator-event-base param-key is-modulated? toggle-event)
 
                          ;; Type selector (only shown when modulated)
                          (when is-modulated?
@@ -390,10 +440,7 @@
   - :current-value - Current modulator config map
   - :modulator-event-base - Base event template for modulator operations"
   [{:keys [param-key param-spec current-value modulator-event-base]}]
-  (let [update-mod-param-event (assoc modulator-event-base
-                                      :event/type :modulator/update-param
-                                      :param-key param-key
-                                      :current-value current-value)
+  (let [update-mod-param-event (field-event modulator-event-base :modulator/update-param param-key)
         retrigger-event (assoc modulator-event-base
                                :event/type :modulator/retrigger
                                :param-key param-key)]
@@ -418,8 +465,14 @@
    - :param-spec - Parameter specification {:min :max :default :type :label ...}
    - :current-value - Current value (number or modulator config map)
    - :on-change-event - Event template for static value changes
-   - :on-text-event - Event template for text field changes
-   - :modulator-event-base - Base event template for modulator events (contains :domain, :entity-key, :effect-path)
+   - :on-text-event - Event template for the text field, which adds
+     :param-key, :min, :max, :is-int? and the typed :text
+     (param-controls/number-field). While a modulator is off, the slider and
+     the field set its static value instead (:modulator/update-static-value)
+   - :modulator-event-base - Base event template for modulator events
+     (contains :domain, :entity-key, :effect-path for the toggle, and the
+     effect's :effect-instance-id, with :owner-id for an owned effect, for
+     its fields: field-event)
    - :label-width - Optional label width (default 80)"
   [{:keys [param-key param-spec current-value on-change-event on-text-event modulator-event-base label-width]}]
   (let [{:keys [min max label]} param-spec
@@ -436,25 +489,22 @@
                             :event/type :modulator/toggle
                             :param-key param-key
                             :param-spec param-spec)
-        set-type-event (assoc modulator-event-base
-                              :event/type :modulator/set-type
-                              :param-key param-key
-                              :param-spec param-spec
-                              :current-value current-value)
-        update-mod-param-event (assoc modulator-event-base
-                                      :event/type :modulator/update-param
-                                      :param-key param-key
-                                      :current-value current-value)
+        set-type-event (assoc (field-event modulator-event-base :modulator/set-type param-key)
+                              :param-spec param-spec)
+        update-mod-param-event (field-event modulator-event-base :modulator/update-param param-key)
         retrigger-event (assoc modulator-event-base
                                :event/type :modulator/retrigger
                                :param-key param-key)
         ;; When there's an inactive modulator, use the special event that preserves the config
         static-change-event (if has-inactive-modulator?
-                              (assoc modulator-event-base
-                                     :event/type :modulator/update-static-value
-                                     :param-key param-key
-                                     :current-value current-value)
-                              (assoc on-change-event :param-key param-key))]
+                              (field-event modulator-event-base :modulator/update-static-value param-key)
+                              (assoc on-change-event :param-key param-key))
+        ;; The field's typed text goes to the same inactive modulator, else on-text-event
+        static-text-event (assoc (if has-inactive-modulator? static-change-event on-text-event)
+                                 :param-key param-key
+                                 :min min
+                                 :max max
+                                 :is-int? is-int?)]
     {:fx/type :v-box
      :spacing 4
      ;; Use filterv to remove nil values - the modulator params editor is only shown when modulated
@@ -469,53 +519,46 @@
                                       :pref-width label-w
                                       :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
 
-                                     ;; Modulate toggle button - uses event map
-                                     {:fx/type :toggle-button
-                                      :text "∿"
-                                      :selected is-modulated?
-                                      :style-class [(if is-modulated?
-                                                      "modulator-toggle-active"
-                                                      "modulator-toggle")]
-                                      :tooltip {:fx/type :tooltip
-                                                :text (if is-modulated? "Stop modulating" "Modulate")}
-                                      :on-selected-changed toggle-event}
+                                     ;; Modulate toggle button
+                                     (modulate-toggle {:text "∿"
+                                                       :style-class [(if is-modulated?
+                                                                       "modulator-toggle-active"
+                                                                       "modulator-toggle")]
+                                                       :tooltip {:fx/type :tooltip
+                                                                 :text (if is-modulated? "Stop modulating" "Modulate")}}
+                                                      modulator-event-base param-key is-modulated? toggle-event)
 
                                      ;; Value display (static) or type selector (modulated)
                                      (if is-modulated?
                                        {:fx/type modulator-type-selector
                                         :current-type (:type current-value)
                                         :on-select-event set-type-event}
-                                       ;; Static mode: slider + text field
+                                       ;; Static mode: slider + text field, which show the
+                                       ;; value that applies after a refused change too
                                        {:fx/type :h-box
                                         :spacing 6
                                         :alignment :center-left
-                                        :children [{:fx/type :slider
-                                                    :min min
-                                                    :max max
+                                        :children [{:fx/type applied-value/applied-control
+                                                    :property :value
+                                                    :address [static-change-event :static]
                                                     :value (double static-value)
-                                                    :pref-width 120
-                                                    :snap-to-ticks is-int?
-                                                    :major-tick-unit (if is-int? 1.0 (/ (- max min) 10.0))
-                                                    ;; Use static-change-event to preserve inactive modulator config
-                                                    :on-value-changed static-change-event}
-                                                   {:fx/type :text-field
+                                                    ;; static-change-event preserves an inactive modulator config
+                                                    :on-change (fn [v] (assoc static-change-event :fx/event v))
+                                                    :desc {:fx/type :slider
+                                                           :id (str "param-" (name param-key) "-slider")
+                                                           :min min
+                                                           :max max
+                                                           :pref-width 120
+                                                           :snap-to-ticks is-int?
+                                                           :major-tick-unit (if is-int? 1.0 (/ (- max min) 10.0))}}
+                                                   {:fx/type param-controls/number-field
+                                                    :id (str "param-" (name param-key) "-field")
                                                     :text (if is-int?
                                                             (str (int static-value))
                                                             (format "%.2f" (double static-value)))
                                                     :pref-width 50
-                                                    :style-class ["text-field" "param-text-field"]
                                                     :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 2 4;"
-                                                    ;; Text field also needs to preserve inactive modulator config
-                                                    :on-action (if has-inactive-modulator?
-                                                                 (assoc modulator-event-base
-                                                                        :event/type :modulator/update-static-value
-                                                                        :param-key param-key
-                                                                        :current-value current-value)
-                                                                 (assoc on-text-event
-                                                                        :param-key param-key
-                                                                        :min min
-                                                                        :max max
-                                                                        :is-int? is-int?))}]})]}
+                                                    :event static-text-event}]})]}
 
                          ;; Modulator parameters (only shown when modulated)
                          (when is-modulated?
@@ -576,27 +619,32 @@
                                       :text (or (:label param-spec) (name param-key))
                                       :pref-width (or label-width 80)
                                       :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
-                                     {:fx/type :toggle-button
-                                      :text "∿"
-                                      :selected modulated?
-                                      :focus-traversable false
-                                      :style-class [(if modulated? "modulator-toggle-active" "modulator-toggle")]
-                                      :tooltip {:fx/type :tooltip :text (if modulated? "Stop modulating" "Follow a modulator")}
-                                      :on-selected-changed (event :modulator/toggle :param-spec spec)}
+                                     (modulate-toggle {:text "∿"
+                                                       :focus-traversable false
+                                                       :style-class [(if modulated? "modulator-toggle-active" "modulator-toggle")]
+                                                       :tooltip {:fx/type :tooltip :text (if modulated? "Stop modulating" "Follow a modulator")}}
+                                                      modulator-event-base param-key modulated?
+                                                      (event :modulator/toggle :param-spec spec))
                                      (if modulated?
                                        {:fx/type modulator-type-selector
                                         :current-type (:type current-value)
-                                        :on-select-event (event :modulator/set-type :param-spec spec :current-value current-value)}
-                                       {:fx/type :combo-box
-                                        :id (str "choice-" (name param-key))
-                                        :items (vec (:choices param-spec))
-                                        :value (choice-value param-spec current-value)
-                                        :pref-width 150
-                                        :button-cell (fn [item] {:text (text item)})
-                                        :cell-factory {:fx/cell-type :list-cell :describe (fn [item] {:text (text item)})}
-                                        :on-value-changed (if inactive?
-                                                            (event :modulator/update-static-value :current-value current-value)
-                                                            (assoc on-change-event :param-key param-key))})]}
+                                        :on-select-event (assoc (field-event modulator-event-base :modulator/set-type param-key)
+                                                                :param-spec spec)}
+                                       (let [choose (if inactive?
+                                                      (field-event modulator-event-base :modulator/update-static-value param-key)
+                                                      (assoc on-change-event :param-key param-key))]
+                                         ;; after a choice the app refused, the one that applies
+                                         {:fx/type applied-value/applied-control
+                                          :property :value
+                                          :address [choose :choice]
+                                          :value (choice-value param-spec current-value)
+                                          :on-change (fn [c] (when (some? c) (assoc choose :fx/event c)))
+                                          :desc {:fx/type :combo-box
+                                                 :id (str "choice-" (name param-key))
+                                                 :items (vec (:choices param-spec))
+                                                 :pref-width 150
+                                                 :button-cell (fn [item] {:text (text item)})
+                                                 :cell-factory {:fx/cell-type :list-cell :describe (fn [item] {:text (text item)})}}}))]}
                          (when modulated?
                            {:fx/type :label
                             :text (index-labels param-spec)
@@ -606,7 +654,7 @@
                          (when modulated?
                            {:fx/type modulator-params-editor
                             :modulator-config current-value
-                            :on-param-change-event (event :modulator/update-param :current-value current-value)
+                            :on-param-change-event (field-event modulator-event-base :modulator/update-param param-key)
                             :on-retrigger-event (event :modulator/retrigger)
                             :param-spec spec})])}))
 
@@ -624,8 +672,9 @@
    Props: same as modulator-param-control plus support for non-numeric types."
   [{:keys [param-spec] :as props}]
   (case (if (and (= :choice (:type param-spec)) (:modulatable? param-spec)) :modulatable-choice (:type param-spec :float))
-    ;; A choice that may follow a modulator (zones plan Z5)
-    :modulatable-choice (assoc props :fx/type modulator-choice-control)
+    ;; A choice that may follow a modulator (zones plan Z5), given the props
+    ;; without this component's context: cljfx gives it its own
+    :modulatable-choice (assoc (dissoc props :fx/context) :fx/type modulator-choice-control)
     ;; Numeric types: use modulator-capable control
     (:float :int) {:fx/type modulator-param-control
                    :param-key (:param-key props)

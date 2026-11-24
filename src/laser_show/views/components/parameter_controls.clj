@@ -27,10 +27,14 @@
     :on-change-event {:event/type :my/update-param}}
    ```"
   (:require [cljfx.api :as fx]
+            [clojure.string :as str]
             [laser-show.animation.modulator-registry :as reg]
             [laser-show.events.core :as events]
             [laser-show.routing.targets :as targets]
             [laser-show.subs :as subs]
+            [laser-show.views.components.applied-value :as applied-value]
+            [laser-show.views.components.commit-field :as commit-field]
+            [laser-show.views.components.gesture :as gesture]
             [laser-show.views.components.target-control :as target-control]))
 
 
@@ -54,6 +58,21 @@
 ;; Basic Parameter Controls
 
 
+(defn number-field
+  "The text field beside a numeric parameter's slider, showing text. On
+   Enter, or when it loses focus, it dispatches event with what was typed as
+   :text (commit-field reads it on the FX thread), which the handler parses
+   and clamps (events.helpers/parse-number-text); text that sets nothing is
+   put back. Props: :id, :text, :event, :pref-width, :style."
+  [{:keys [id text event pref-width style]}]
+  {:fx/type commit-field/commit-field
+   :id id
+   :text text
+   :pref-width pref-width
+   :style-class ["text-field" "param-text-field"]
+   :style style
+   :on-commit (fn [typed] (assoc event :text typed))})
+
 (defn param-slider
   "Slider control for numeric parameters with editable text field.
    
@@ -63,12 +82,16 @@
    Defensively handles modulator config maps by extracting static values.
    This can happen in edge cases where keyframes/modulation state gets out of sync.
    
+   The slider and the field show the value that applies after a change the
+   app refused (the show lock) too: applied-value, commit-field.
+   
    Props:
    - :param-key - Parameter key (e.g., :x-scale)
    - :param-spec - Parameter specification {:min :max :default :type :label ...}
    - :current-value - Current parameter value (should be numeric, but handles maps defensively)
    - :on-change-event - Event template with :param-key and :fx/event added for slider changes
-   - :on-text-event - Event template with :param-key, :min, :max added for text field
+   - :on-text-event - Event template with :param-key, :min, :max, :is-int?
+     and the typed :text added for the text field (number-field)
    - :label-width - Optional label width (default 80)"
   [{:keys [param-key param-spec current-value on-change-event on-text-event label-width]}]
   (let [{:keys [min max label]} param-spec
@@ -89,31 +112,35 @@
                  :text display-label
                  :pref-width label-w
                  :style-class ["label-secondary"]}
-                {:fx/type :slider
-                 :min min
-                 :max max
+                ;; A drag is one press, one undo step (reactivity plan 16):
+                ;; gesture/slider sends its changes; after one the app refused
+                ;; (the show lock), it shows the value that applies (applied-value)
+                {:fx/type applied-value/applied-control
+                 :property :value
+                 :address [on-change-event param-key]
                  :value (double value)
-                 :pref-width 150
-                 :snap-to-ticks is-int?
-                 :major-tick-unit (if is-int? 1.0 (/ (- max min) 10.0))
-                 :on-value-changed (assoc on-change-event :param-key param-key)
-                 :on-mouse-pressed {:event/type :history/begin-transaction
-                                    :label (str "Adjust " display-label)
-                                    :source-id [:slider param-key]}
-                 :on-mouse-released {:event/type :history/commit-transaction
-                                     :source-id [:slider param-key]}}
-                {:fx/type :text-field
+                 :desc {:fx/type gesture/slider
+                        :id (str "param-" (name param-key) "-slider")
+                        :min min
+                        :max max
+                        :pref-width 150
+                        :snap-to-ticks is-int?
+                        :major-tick-unit (if is-int? 1.0 (/ (- max min) 10.0))
+                        :gesture {:label (str "Adjust " display-label)
+                                  :source-id [:slider param-key]
+                                  :on-value-changed (assoc on-change-event :param-key param-key)}}}
+                {:fx/type number-field
+                 :id (str "param-" (name param-key) "-field")
                  :text (if is-int?
                          (str (int value))
                          (format "%.2f" (double value)))
                  :pref-width 55
-                 :style-class ["text-field" "param-text-field"]
                  :style "-fx-font-size: 11; -fx-padding: 2 4;"
-                 :on-action (assoc on-text-event
-                                   :param-key param-key
-                                   :min min
-                                   :max max
-                                   :is-int? is-int?)}]}))
+                 :event (assoc on-text-event
+                               :param-key param-key
+                               :min min
+                               :max max
+                               :is-int? is-int?)}]}))
 
 (defn choice-text
   "A choice as its param says it: its :labels' text, else its name."
@@ -121,7 +148,8 @@
   (if (some? item) (get (:labels param-spec) item (name item)) ""))
 
 (defn param-choice
-  "Combo-box for choice parameters.
+  "Combo-box for choice parameters; after a choice the app refused (the
+   show lock), it shows the one that applies (applied-value).
    
    Props:
    - :param-key - Parameter key
@@ -130,7 +158,7 @@
    - :current-value - Current parameter value
    - :on-change-event - Event template with :param-key added
    - :label-width - Optional label width (default 80)
-   - :id - Optional id of the combo box"
+   - :id - Optional id of the combo box (default param-<key>-choice)"
   [{:keys [param-key param-spec current-value on-change-event label-width id]}]
   (let [{:keys [choices label labels]} param-spec
         value (if (keyword? current-value) current-value (:default param-spec))
@@ -144,18 +172,24 @@
                  :text display-label
                  :pref-width label-w
                  :style-class ["label-secondary"]}
-                (cond-> {:fx/type :combo-box
-                         :items (vec (or choices []))
-                         :value value
-                         :pref-width (if labels 180 150)
-                         :button-cell (fn [item] {:text (text item)})
-                         :cell-factory {:fx/cell-type :list-cell
-                                        :describe (fn [item] {:text (text item)})}
-                         :on-value-changed (assoc on-change-event :param-key param-key)}
-                  id (assoc :id id))]}))
+                {:fx/type applied-value/applied-control
+                 :property :value
+                 :address [on-change-event param-key]
+                 :value value
+                 ;; no choice (the items changed under it) is no edit
+                 :on-change (fn [v] (when (some? v) (assoc on-change-event :param-key param-key :fx/event v)))
+                 :desc {:fx/type :combo-box
+                        :id (or id (str "param-" (name param-key) "-choice"))
+                        :items (vec (or choices []))
+                        :pref-width (if labels 180 150)
+                        :button-cell (fn [item] {:text (text item)})
+                        :cell-factory {:fx/cell-type :list-cell
+                                       :describe (fn [item] {:text (text item)})}}}]}))
 
 (defn param-checkbox
-  "Checkbox for boolean parameters.
+  "Checkbox for boolean parameters (#param-<key>-check, without a ?);
+   after a change the app refused (the show lock), it shows the value that
+   applies (applied-value).
    
    Props:
    - :param-key - Parameter key
@@ -169,10 +203,14 @@
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
-     :children [{:fx/type :check-box
-                 :text display-label
-                 :selected value
-                 :on-selected-changed (assoc on-change-event :param-key param-key)}]}))
+     :children [{:fx/type applied-value/applied-control
+                 :property :selected
+                 :address [on-change-event param-key]
+                 :value value
+                 :on-change (fn [on?] (assoc on-change-event :param-key param-key :fx/event on?))
+                 :desc {:fx/type :check-box
+                        :id (str "param-" (str/replace (name param-key) "?" "") "-check")
+                        :text display-label}}]}))
 
 (defn param-color-picker
   "Color picker for RGB color parameters.
@@ -400,8 +438,8 @@
 
 (defn param-step-list
   "A step grid's steps (:step-list), in the numeric list: how many there
-   are, and Edit grid… to draw them in the step grid window (its address
-   is on-change-event's :domain, :entity-key and :effect-path)."
+   are, and Edit grid… to draw them in the step grid window (its target is
+   on-change-event's :domain, :entity-key and :effect-instance-id)."
   [{:keys [param-key param-spec current-value on-change-event label-width]}]
   {:fx/type :h-box
    :spacing 8
@@ -421,7 +459,7 @@
                :focus-traversable false
                :style-class ["button-secondary"]
                :on-action {:event/type :step-grid/open
-                           :target (select-keys on-change-event [:domain :entity-key :effect-path])}}]})
+                           :target (select-keys on-change-event [:domain :entity-key :effect-instance-id])}}]})
 
 
 ;; Parameter Control Router

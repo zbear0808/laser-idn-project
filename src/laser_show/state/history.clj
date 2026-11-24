@@ -5,10 +5,15 @@
    - Extracting document-only subtrees from global state
    - The document policy: which document data is undoable, which only marks
      the project unsaved, and which is live (neither)
-   - Capturing immutable snapshots
+   - Capturing immutable snapshots: the document, and beside it the
+     definitions of the groups only the rig's copy defines that its
+     membership lists (:rig-only-group-definitions, reactivity plan 23)
    - Pushing/popping undo and redo stacks
-   - Transaction boundary management (mouse-down -> continuous drag -> mouse-up)
-   - Restoring snapshots while keeping live state and preferences
+   - Gesture transactions (press -> continuous drag -> release): one open
+     whole-document baseline at a time, owned by one press, its
+     :gesture-id (reactivity plan 16)
+   - Restoring snapshots while keeping live state and preferences, the rig's
+     group copy with the restored membership (restore-snapshot)
    - Deriving the unsaved-changes flag by comparing against the saved document
    
    Document policy (see plans/2026-11-08-undo-history-boundary.md):
@@ -30,7 +35,8 @@
    Everything above is still written when the project is saved; the rig
    also has a file of its own, saved by itself (zones plan ZR, state.rig-file)."
   (:require [clojure.walk :as walk]
-            [laser-show.common.util :as u]))
+            [laser-show.common.util :as u]
+            [laser-show.state.rig-file :as rig-file]))
 
 (def default-max-depth
   "Default maximum number of history snapshots to retain."
@@ -41,8 +47,10 @@
   1000)
 
 (def stale-transaction-ms
-  "An open transaction older than this is committed automatically
-   (guards against a missed mouse-up disabling undo)."
+  "A gesture's deadline: an open transaction with no activity from its own
+   press for this long is sealed (guards against a missed mouse-up disabling
+   undo). The event pipeline arms a wake-up for it (:history/gesture-alarm),
+   so it is sealed even while nothing else happens."
   60000)
 
 (def prefs-config-keys
@@ -265,16 +273,35 @@
 (defn- item-id-set [entry]
   (not-empty (set (keep :id (:items entry)))))
 
-(defn- restored-effect-active
-  "On/off state for a restored effect cell: the current cell's state; for a cell
-   that doesn't exist now, the state of the current cell holding the same items
-   (it was moved), otherwise off."
+(defn- effect-source
+  "The current effect cell a restored one (k, restored-entry) takes its
+   on/off from: the cell at k; for a cell that doesn't exist now, the cell
+   holding the same items (it was moved); otherwise none (nil)."
   [current-cells k restored-entry]
-  (if-let [current (get current-cells k)]
-    (boolean (:active? current))
-    (let [ids (item-id-set restored-entry)
-          moved (when ids (some (fn [[_ e]] (when (= ids (item-id-set e)) e)) current-cells))]
-      (boolean (:active? moved)))))
+  (if (get current-cells k)
+    k
+    (when-let [ids (item-id-set restored-entry)]
+      (some (fn [[ck e]] (when (= ids (item-id-set e)) ck)) current-cells))))
+
+(defn- restored-effect-active
+  "On/off state for a restored effect cell: its effect-source's state, off
+   without one."
+  [current-cells k restored-entry]
+  (boolean (:active? (get current-cells (effect-source current-cells k restored-entry)))))
+
+(defn effect-cell-sources
+  "{restored cell -> cell of state} for restoring document-state into state
+   (restore-document): for each restored effect cell, the current one whose
+   on/off it takes (effect-source). A restored cell without one comes back
+   off and isn't a key. Live state that names effect cells uses it to follow
+   them as their on/off does (vibes.refs/restore-fx)."
+  [state document-state]
+  (let [current-cells (get-in state [:chains :effect-chains])]
+    (into {}
+          (keep (fn [[k entry]]
+                  (when-let [source (and (map? entry) (effect-source current-cells k entry))]
+                    [k source])))
+          (get-in document-state [:chains :effect-chains]))))
 
 (defn- graft-live-chains
   [current-chains restored-chains]
@@ -313,6 +340,21 @@
         (assoc-in [:zones :labels] (or (:labels zones) {}))
         (assoc :rig (or rig {}))
         (assoc :chains (graft-live-chains (:chains state) (or chains {}))))))
+
+(defn restore-snapshot
+  "Restore snapshot into state: its document (restore-document), and the
+   rig's copy of the groups its lasers are in ([:rig-file :group-copy])
+   brought to the restored membership with the definitions the snapshot
+   kept (:rig-only-group-definitions) as its fallback, so the last member of
+   a group only the rig defines comes back with the definition. A present
+   {} is all there was; a snapshot without the field falls back on the copy
+   as it is. No other [:rig-file] field changes, and the copy keeps its map
+   when it is equal."
+  [state snapshot]
+  (rig-file/with-group-copy (restore-document state (:document-state snapshot))
+                            (if (contains? snapshot :rig-only-group-definitions)
+                              (:rig-only-group-definitions snapshot)
+                              (get-in state [:rig-file :group-copy]))))
 
 
 ;; Backfill
@@ -366,12 +408,23 @@
              (persisted-changed? (extract-document-state old-state)
                                  (extract-document-state new-state))))))
 
+(defn- rig-only-definitions
+  "The definitions of the groups state's projectors and virtual projectors
+   are in that its show doesn't define, as the rig's copy has them
+   (rig-file/group-copy): {id definition}, {} for none."
+  [state]
+  (apply dissoc (rig-file/group-copy state) (keys (:zone-groups state))))
+
 (defn make-snapshot
-  "Create a HistorySnapshot map from current state."
+  "Create a HistorySnapshot map from current state: its document and, beside
+   it, :rig-only-group-definitions (rig-only-definitions), what a restore of
+   its membership needs (restore-snapshot). Neither the document nor the
+   saved baseline holds them."
   [{:keys [state description ui-context timestamp]}]
   (let [document-state (extract-document-state state)
+        rig-only-group-definitions (rig-only-definitions state)
         snapshot-time (or timestamp (System/currentTimeMillis))]
-    (u/->map& document-state description ui-context
+    (u/->map& document-state rig-only-group-definitions description ui-context
               :timestamp snapshot-time)))
 
 (defn- cap-stack
@@ -429,14 +482,18 @@
   [history-state]
   (:description (peek (:redo-stack history-state))))
 
+(defn gesture-id
+  "The id of the press whose transaction is open, or nil."
+  [history-state]
+  (get-in history-state [:transaction :gesture-id]))
+
 (defn commit-transaction
-  "Commit a continuous interaction transaction on mouse-up.
-   Compares the current undoable content to the baseline snapshot.
-   If modified, pushes baseline snapshot to the undo stack.
-   Clears active transaction.
-   
-   Any mouse-up commits whatever transaction is open: if the mouse-up of the
-   control that opened it was missed, the next one closes it."
+  "Seal the open transaction, whichever press it is: compare the current
+   undoable content with its baseline snapshot, push the baseline onto the
+   undo stack if they differ, and clear the transaction. A net-zero
+   gesture leaves no step and keeps redo. For an interruption (another
+   undoable edit, expiry, Close, Undo); a press's own end goes through
+   finish-transaction, which needs its id."
   ([history-state current-state]
    (commit-transaction history-state current-state default-max-depth))
   ([history-state current-state max-depth]
@@ -450,51 +507,74 @@
          history-without-tx))
      history-state)))
 
+(defn finish-transaction
+  "A press's end (release, blur, disposal): its transaction sealed
+   (commit-transaction) when id is the open one's; nothing for a late end
+   or another press's."
+  [history-state current-state id]
+  (if (and (some? id) (= id (gesture-id history-state)))
+    (commit-transaction history-state current-state)
+    history-state))
+
 (defn begin-transaction
-  "Begin a continuous interaction transaction on mouse-down.
-   Captures a baseline document snapshot of the current state.
-   If a transaction from the same source is already open it is kept; one from
-   a different source (e.g. its mouse-up was missed) is committed first."
-  [history-state current-state {:keys [label source-id ui-context now]}]
-  (let [open-tx (:transaction history-state)]
-    (if (and open-tx (= source-id (:source-id open-tx)))
-      history-state
+  "A press's transaction, gesture-id (a fresh UUID, the press's own) its
+   owner: a baseline document snapshot of the current state, taken at now.
+   source-id describes the control, not the press. The same press again is
+   inert; another press seals the open transaction first, even on the same
+   control. Without a UUID nothing begins."
+  [history-state current-state {:keys [label gesture-id source-id ui-context now]}]
+  (let [open-tx (:transaction history-state)
+        now (or now (System/currentTimeMillis))]
+    (cond
+      (not (uuid? gesture-id)) history-state
+      (= gesture-id (:gesture-id open-tx)) history-state
+      :else
       (let [history-state (if open-tx
                             (commit-transaction history-state current-state)
                             history-state)
             baseline (make-snapshot {:state current-state
                                      :description label
-                                     :ui-context ui-context})]
+                                     :ui-context ui-context
+                                     :timestamp now})]
         (assoc history-state
-               :transaction (u/->map& label source-id
+               :transaction (u/->map& gesture-id label source-id
                                       :baseline-snapshot baseline
-                                      :start-time (or now (System/currentTimeMillis))))))))
+                                      :start-time now))))))
 
-(defn stale-transaction?
-  "True when an open transaction has had no activity (see touch-transaction)
-   for more than stale-transaction-ms before now."
-  [history-state now]
+(defn transaction-deadline
+  "When the open transaction is due: stale-transaction-ms after its press's
+   last undoable change (or its start); nil with none open."
+  [history-state]
   (when-let [tx (:transaction history-state)]
     (when-let [last-active (or (:last-activity tx) (:start-time tx))]
-      (> (- now last-active) stale-transaction-ms))))
+      (+ last-active stale-transaction-ms))))
+
+(defn stale-transaction?
+  "Is the open transaction due at now (its deadline reached)?"
+  [history-state now]
+  (when-let [deadline (transaction-deadline history-state)]
+    (>= now deadline)))
 
 (defn touch-transaction
-  "Record activity on the open transaction (a drag tick), so a long drag
-   isn't treated as stale."
-  [history-state now]
-  (if (:transaction history-state)
+  "Record activity on the open transaction when id is its press's (an
+   undoable change of that press's), so a long drag isn't sealed; nothing
+   for another press."
+  [history-state id now]
+  (if (and (some? id) (= id (gesture-id history-state)))
     (assoc-in history-state [:transaction :last-activity] now)
     history-state))
 
 (defn abort-transaction
-  "Abort an in-progress transaction without saving to undo stack.
-   Returns map with updated history state and the baseline snapshot to restore."
-  [history-state]
-  (if-let [tx (:transaction history-state)]
-    {:history (assoc history-state :transaction nil)
-     :baseline (:baseline-snapshot tx)}
-    {:history history-state
-     :baseline nil}))
+  "Abort id's transaction without saving it to the undo stack: {:history
+   (without it) :baseline (its snapshot, to restore)}; for another press,
+   or none open, {:history history-state :baseline nil}."
+  [history-state id]
+  (let [tx (:transaction history-state)]
+    (if (and tx (some? id) (= id (:gesture-id tx)))
+      {:history (assoc history-state :transaction nil)
+       :baseline (:baseline-snapshot tx)}
+      {:history history-state
+       :baseline nil})))
 
 (defn pop-undo
   "Pop the top snapshot from the undo stack to restore it.
