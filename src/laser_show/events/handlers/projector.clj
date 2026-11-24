@@ -733,31 +733,83 @@
   "state with projector-id's safety zone set to zone, asking first while its
    light is going out and zone would let light somewhere new (D-28). zone
    is normalized; one normalize can't read is refused. While the question is
-   open, another widening is dropped."
-  [state projector-id zone {:keys [confirmed?] :as event} message]
-  (let [old (get-in state [:projectors projector-id :safety])
-        new (try (safety/normalize zone) (catch clojure.lang.ExceptionInfo _ ::unreadable))]
-    (cond
-      (= ::unreadable new) {:state state}
+   open, another widening is dropped. With review, the plain intent of a
+   coordinate edit or Reset, the question is that intent's own
+   (guard/ask-review) and event's :confirmed? counts for nothing: only the
+   question's answer does (handle-reviewed-zone-edit)."
+  ([state projector-id zone event message]
+   (write-zone state projector-id zone event message nil))
+  ([state projector-id zone {:keys [confirmed?] :as event} message review]
+   (let [old (get-in state [:projectors projector-id :safety])
+         new (try (safety/normalize zone) (catch clojure.lang.ExceptionInfo _ ::unreadable))]
+     (cond
+       (= ::unreadable new) {:state state}
 
-      (and (not confirmed?)
-           (guard/outputting? state projector-id)
-           (safety/widens? old new))
-      (if (guard/asking? state)
-        {:state state}
-        {:state (guard/ask state {:message message :event event})})
+       (and (not (and confirmed? (nil? review)))
+            (guard/outputting? state projector-id)
+            (safety/widens? old new))
+       (cond
+         (guard/asking? state) {:state state}
+         review {:state (guard/ask-review state {:message message :intent review})}
+         :else {:state (guard/ask state {:message message :event event})})
 
-      :else {:state (assoc-in state [:projectors projector-id :safety] new)})))
+       :else {:state (assoc-in state [:projectors projector-id :safety] new)}))))
 
 (defn- live-message [state projector-id]
   (str (guard/projector-name state projector-id) " is on. Light can reach places it couldn't before."))
 
 (defn- handle-projectors-set-safety
-  "Set a projector's safety zone (the safety editor, Reset)."
+  "Set a projector's safety zone (a drag on the safety editor's canvas). A
+   zone stored now that can't be read stays as it is: only Reset
+   (:projectors/reset-safety) replaces one."
   [{:keys [projector-id safety state] :as event}]
-  (if-not (contains? (:projectors state) projector-id)
+  (if (or (not (contains? (:projectors state) projector-id))
+          (nil? (try (safety/normalize (get-in state [:projectors projector-id :safety]))
+                     (catch clojure.lang.ExceptionInfo _ nil))))
     {:state state}
     (write-zone state projector-id safety event (live-message state projector-id))))
+
+(def ^:private zone-changed-text "Safety zone changed; review the edit again")
+
+(defn- handle-reviewed-zone-edit
+  "A coordinate edit or Reset: the change guard/zone-edit-proposal finds
+   against the zone stored now, through write-zone, at once unless it would
+   let a live projector's light somewhere new: then it asks, in a question of
+   its own. Its Allow comes back with :review-id (and :confirmed? true,
+   which alone is no permission): it continues only its own open question,
+   and closes it whatever happens. The intent it asked about applies while
+   the zone is still the one it asked about; after any change to that zone
+   nothing is written, and a notice says to review the edit again."
+  [{:keys [state review-id] :as event}]
+  (if (some? review-id)
+    (if-let [{:keys [intent closed stale?]} (guard/review-answer state event)]
+      (let [{:keys [projector-id after same?] :as proposal}
+            (when-not stale? (guard/zone-edit-proposal closed intent))]
+        (cond
+          stale? (h/show-notice closed zone-changed-text :warning)
+          (and proposal (not same?)) (write-zone closed projector-id after {:confirmed? true} nil)
+          :else {:state closed}))
+      {:state state})
+    (let [intent (select-keys event [:event/type :projector-id :path :value :row-version])
+          {:keys [projector-id after same?] :as proposal} (guard/zone-edit-proposal state intent)]
+      (if (and proposal (not same?))
+        (write-zone state projector-id after intent (live-message state projector-id) intent)
+        {:state state}))))
+
+(defn- handle-projectors-set-safety-coordinate
+  "Set one number of a projector's safety zone (a coordinate field of the
+   safety editor): {:projector-id :path [:limit k] or [:blocked i k] :value}
+   and a blocked area's :row-version, set in the zone stored now, so two
+   fields committed from one render both apply (handle-reviewed-zone-edit)."
+  [event]
+  (handle-reviewed-zone-edit event))
+
+(defn- handle-projectors-reset-safety
+  "Reset a projector's safety zone to the whole range with nothing blocked
+   (the safety editor's Reset), even one that can't be read
+   (handle-reviewed-zone-edit)."
+  [event]
+  (handle-reviewed-zone-edit event))
 
 (def ^:const max-blocked-areas 8)
 
@@ -889,6 +941,8 @@
     :projectors/identify (handle-projectors-identify event)
     :projectors/identify-ended (handle-projectors-identify-ended event)
     :projectors/set-safety (handle-projectors-set-safety event)
+    :projectors/set-safety-coordinate (handle-projectors-set-safety-coordinate event)
+    :projectors/reset-safety (handle-projectors-reset-safety event)
     :projectors/add-blocked-area (handle-projectors-add-blocked-area event)
     :projectors/remove-blocked-area (handle-projectors-remove-blocked-area event)
     :projectors/copy-safety (handle-projectors-copy-safety event)

@@ -1043,9 +1043,168 @@
   (doseq [event [{:event/type :projectors/set-safety :projector-id :nope :safety small}
                  {:event/type :projectors/add-blocked-area :projector-id :nope}
                  {:event/type :projectors/remove-blocked-area :projector-id :nope :index 0}
-                 {:event/type :projectors/copy-safety :from :nope :to [:p1]}]]
+                 {:event/type :projectors/copy-safety :from :nope :to [:p1]}
+                 {:event/type :projectors/set-safety-coordinate :projector-id :nope :path [:limit 0] :value -0.4}
+                 {:event/type :projectors/reset-safety :projector-id :nope}]]
     (is (identical? outputting-state (:state (projectors/handle (assoc event :state outputting-state))))
         (str (:event/type event)))))
+
+(deftest a-drag-leaves-a-zone-that-cant-be-read-test
+  ;; plans/2026-11-23-cljfx-reactivity/08 §4: Reset is its own event now, so
+  ;; a whole zone from the canvas never replaces one that can't be read
+  (let [s (with-zone (assoc-in outputting-state [:backend :streaming :running?] false) :p1 {:limit [0 0]})]
+    (is (identical? s (:state (set-safety s :p1 small))))))
+
+
+;; One coordinate of a zone (plans/2026-11-23-cljfx-reactivity/08)
+
+
+(def ^:private two-rows
+  {:limit [-0.5 -0.5 0.5 0.5] :blocked [[-0.2 -0.2 0.2 0.2] [0.3 0.3 0.4 0.4]]})
+
+(defn- coord
+  "A coordinate field's edit of :p1's zone (more: :row-version, …)."
+  [path value & {:as more}]
+  (merge {:event/type :projectors/set-safety-coordinate :projector-id :p1 :path path :value value} more))
+
+(defn- handle-all
+  "state after each event, through the handler alone."
+  [state events]
+  (reduce #(:state (projectors/handle (assoc %2 :state %1))) state events))
+
+(defn- run-pipeline
+  "state after event and what it dispatches inline, through the real
+   pipeline, as the agent runs them."
+  [state event]
+  (let [effects (events/handle-event-pipeline (assoc event :state state :time 1000))
+        s (or (:state effects) state)]
+    (if-let [next-event (:dispatch effects)]
+      (run-pipeline s next-event)
+      s)))
+
+(deftest coordinate-intent-validates-current-zone-test
+  (let [off (assoc-in outputting-state [:backend :streaming :running?] false)
+        zone-of #(get-in % [:projectors :p1 :safety])]
+    (testing "two fields from one render: each is set in the zone stored then, in either order"
+      (doseq [[label s0 events expected]
+              [["the limit's x0 and y1" (with-zone off :p1 small)
+                [(coord [:limit 0] -0.4) (coord [:limit 3] 0.3)]
+                {:limit [-0.4 -0.5 0.5 0.3] :blocked []}]
+               ["the limit and a blocked area" (with-zone off :p1 two-rows)
+                [(coord [:limit 1] -0.4) (coord [:blocked 1 2] 0.45 :row-version 0)]
+                {:limit [-0.5 -0.4 0.5 0.5] :blocked [[-0.2 -0.2 0.2 0.2] [0.3 0.3 0.45 0.4]]}]
+               ["two fields of one row" (with-zone off :p1 two-rows)
+                [(coord [:blocked 0 0] -0.3 :row-version 0) (coord [:blocked 0 3] 0.25 :row-version 0)]
+                {:limit [-0.5 -0.5 0.5 0.5] :blocked [[-0.3 -0.2 0.2 0.25] [0.3 0.3 0.4 0.4]]}]]
+              order [identity reverse]]
+        (let [s (handle-all s0 (order events))]
+          (is (= expected (zone-of s)) label)
+          (is (= (get-in s0 [:projectors :p2]) (get-in s [:projectors :p2])) (str label ": the other projector stays")))))
+    (testing "the same field twice: the later one"
+      (is (= [-0.3 -0.5 0.5 0.5]
+             (:limit (zone-of (handle-all (with-zone off :p1 small) [(coord [:limit 0] -0.4) (coord [:limit 0] -0.3)]))))))
+    (testing "the value it has already: nothing happens"
+      (let [s (with-zone off :p1 small)]
+        (is (identical? s (:state (projectors/handle (assoc (coord [:limit 0] -0.5) :state s))))))
+      (testing "and a zone that is the default without being written isn't written"
+        (let [s (update-in off [:projectors :p1] dissoc :safety)]
+          (is (identical? s (:state (projectors/handle (assoc (coord [:limit 2] 1.0) :state s))))))))
+    (testing "a zone left as the default can be edited"
+      (is (= {:limit [-0.5 -1.0 1.0 1.0] :blocked []}
+             (zone-of (handle-all (update-in off [:projectors :p1] dissoc :safety) [(coord [:limit 0] -0.5)])))))
+    (testing "refused, the zone and everything else as it was"
+      (let [s (with-zone off :p1 two-rows)]
+        (doseq [[label event]
+                [["no vector" (coord '(:limit 0) -0.4)]
+                 ["a keyword" (coord :limit -0.4)]
+                 ["no path" (coord nil -0.4)]
+                 ["too short" (coord [:limit] -0.4)]
+                 ["one key too many" (coord [:limit 0 0] -0.4)]
+                 ["a blocked area's, too short" (coord [:blocked 0] -0.4 :row-version 0)]
+                 ["a blocked area's, too long" (coord [:blocked 0 0 0] -0.4 :row-version 0)]
+                 ["anywhere else in the state" (coord [:projectors :p2 :safety] -0.4)]
+                 ["another key of the zone" (coord [:limits 0] -0.4)]
+                 ["a fifth corner" (coord [:limit 4] -0.4)]
+                 ["a negative corner" (coord [:limit -1] -0.4)]
+                 ["a corner that isn't an integer" (coord [:limit 0.0] -0.4)]
+                 ["a corner as text" (coord [:limit "0"] -0.4)]
+                 ["the row after the last" (coord [:blocked 2 0] -0.4 :row-version 0)]
+                 ["a negative row" (coord [:blocked -1 0] -0.4 :row-version 0)]
+                 ["a row that isn't an integer" (coord [:blocked 0.0 0] -0.3 :row-version 0)]
+                 ["a blocked area's fifth corner" (coord [:blocked 0 4] -0.3 :row-version 0)]
+                 ["another row layout" (coord [:blocked 0 0] -0.3 :row-version 7)]
+                 ["no row layout" (coord [:blocked 0 0] -0.3)]
+                 ["text" (coord [:limit 0] "-0.4")]
+                 ["nil" (coord [:limit 0] nil)]
+                 ["NaN" (coord [:limit 0] ##NaN)]
+                 ["infinity" (coord [:limit 0] ##Inf)]
+                 ["minus infinity" (coord [:limit 0] ##-Inf)]
+                 ["past 1" (coord [:limit 2] 1.5)]
+                 ["past -1" (coord [:limit 0] -1.01)]
+                 ["x0 past x1: the edges would swap" (coord [:limit 0] 0.6)]
+                 ["a blocked area's y1 under its y0" (coord [:blocked 0 3] -0.3 :row-version 0)]
+                 ["a limit with no width: it can't be read" (coord [:limit 0] 0.5)]
+                 ["a limit with no height: it can't be read" (coord [:limit 3] -0.5)]
+                 ["a projector that isn't there" (assoc (coord [:limit 0] -0.4) :projector-id :nope)]]]
+          (is (identical? s (:state (projectors/handle (assoc event :state s)))) label)))
+      (testing "a zone that can't be read: only Reset replaces it"
+        (let [s (with-zone off :p1 {:limit [0 0]})]
+          (is (identical? s (:state (projectors/handle (assoc (coord [:limit 3] 0.3) :state s)))))
+          (is (= {:limit [-1.0 -1.0 1.0 1.0] :blocked []}
+                 (zone-of (handle-all s [{:event/type :projectors/reset-safety :projector-id :p1}])))))))
+    (testing "a ninth blocked area from an older rig stays, edited or not"
+      (let [nine {:limit [-1.0 -1.0 1.0 1.0] :blocked (vec (for [i (range 9)] [(* 0.1 i) 0.0 (+ 0.05 (* 0.1 i)) 0.05]))}
+            s (handle-all (with-zone off :p1 nine) [(coord [:blocked 8 3] 0.1 :row-version 0) (coord [:limit 0] -0.9)])]
+        (is (= 9 (count (:blocked (zone-of s)))))
+        (is (= [0.8 0.0 0.85 0.1] (mapv #(/ (Math/round (* % 1e9)) 1e9) (get-in (zone-of s) [:blocked 8]))))
+        (is (= (subvec (:blocked nine) 0 8) (subvec (:blocked (zone-of s)) 0 8)))))
+    (testing "through the pipeline: an old row's edit never lands on another row"
+      (let [s0 (with-zone off :p1 two-rows)
+            v0 (guard/rows-version s0 :p1)
+            old-edits [(coord [:blocked 0 0] -0.3 :row-version v0) (coord [:blocked 0 3] 0.25 :row-version v0)]
+            old-edit (first old-edits)
+            old-second-row (coord [:blocked 1 0] 0.35 :row-version v0)
+            untouched? (fn [s label]
+                         (doseq [event old-edits]
+                           (is (= s (run-pipeline s event)) (str label ": the old edit changes nothing")))
+                         (is (= s (run-pipeline s old-second-row)) (str label ": no row is made")))]
+        (testing "after Blocked 1 is removed (Blocked 2 is first now)"
+          (let [removed (run-pipeline s0 {:event/type :projectors/remove-blocked-area :projector-id :p1 :index 0})]
+            (is (= [[0.3 0.3 0.4 0.4]] (:blocked (zone-of removed))))
+            (untouched? removed "removed")
+            (is (= [[0.25 0.3 0.4 0.4]]
+                   (:blocked (zone-of (run-pipeline removed (coord [:blocked 0 0] 0.25 :row-version (guard/rows-version removed :p1))))))
+                "an edit from the editor as it is now lands")))
+        (testing "after a whole zone with as many rows"
+          (untouched? (run-pipeline s0 {:event/type :projectors/set-safety :projector-id :p1
+                                        :safety (update two-rows :blocked (comp vec reverse))})
+                      "replaced"))
+        (testing "after Undo puts back the rows"
+          (let [edited (run-pipeline s0 (coord [:blocked 1 2] 0.45 :row-version v0))
+                undone (run-pipeline edited {:event/type :edit/undo})]
+            (is (= v0 (guard/rows-version edited :p1)) "an edit of one number keeps the rows")
+            (is (= two-rows (zone-of undone)))
+            (untouched? undone "undone")))
+        (testing "a change to the limit only keeps the rows' layout"
+          (let [limited (run-pipeline s0 {:event/type :projectors/set-safety :projector-id :p1
+                                          :safety (assoc two-rows :limit [-0.6 -0.5 0.5 0.5])})]
+            (is (= v0 (guard/rows-version limited :p1)))
+            (is (not= (guard/geometry-version s0 :p1) (guard/geometry-version limited :p1)))
+            (is (= [[-0.3 -0.2 0.2 0.2] [0.3 0.3 0.4 0.4]] (:blocked (zone-of (run-pipeline limited old-edit))))
+                "an edit from before still lands on its row")))
+        (testing "a projector removed loses its versions; put back, it gets new ones"
+          (let [stamped (run-pipeline s0 (coord [:limit 0] -0.4))
+                gone (run-pipeline stamped {:event/type :projectors/remove :projector-id :p1})
+                back (run-pipeline gone {:event/type :edit/undo})]
+            (is (pos? (guard/geometry-version stamped :p1)))
+            (is (not (contains? (get-in gone [:projector-ui :safety-versions :by-id]) :p1)))
+            (is (< (guard/geometry-version stamped :p1) (guard/geometry-version back :p1)))
+            (is (not= v0 (guard/rows-version back :p1)))
+            (untouched? back "put back")))
+        (testing "a projector removed: nothing makes it again"
+          (let [gone (run-pipeline s0 {:event/type :projectors/remove :projector-id :p1})]
+            (doseq [event [old-edit (coord [:limit 0] -0.4) {:event/type :projectors/reset-safety :projector-id :p1}]]
+              (is (not (contains? (:projectors (run-pipeline gone event)) :p1)) (pr-str (:path event))))))))))
 
 
 ;; A projector Undo took away (reactivity plan 14): nothing selects it, and

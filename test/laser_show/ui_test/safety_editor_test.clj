@@ -8,8 +8,9 @@
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]
             [laser-show.views.keys :as keys])
-  (:import [javafx.event Event]
-           [javafx.scene Node]
+  (:import [javafx.event ActionEvent Event]
+           [javafx.scene Node Parent]
+           [javafx.scene.control TextField]
            [javafx.scene.input KeyCode MouseButton MouseEvent]))
 
 (use-fixtures :once fixtures/with-toolkit)
@@ -66,6 +67,22 @@
   [from [x1 y1 :as to]]
   (fire-press-and-drag! from to)
   (fire-canvas! MouseEvent/MOUSE_RELEASED x1 y1))
+
+(defn- in-one-render!
+  "(f find) on the FX thread in one go, find being (fn [selector] node) in
+   the main window: no render runs in between, so every field f commits
+   commits from the same render."
+  [f]
+  (let [window (ui/main-window)]
+    (ui/on-fx-thread #(let [^Parent root (.getRoot (.getScene window))]
+                        (f (fn [selector] (.lookup root selector)))))
+    (ui/sync-fx!)))
+
+(defn- enter!
+  "Type text into field and press Enter (its action), on the FX thread."
+  [^TextField field text]
+  (.setText field text)
+  (Event/fireEvent field (ActionEvent.)))
 
 (deftest drag-the-limit-in-test
   (with-projector! {:limit [-0.8 -0.8 0.8 0.8] :blocked []})
@@ -134,6 +151,54 @@
       (ui/wait-for! #(= "0.50" (ui/node-text "#safety-limit-x1")))
       (is (= 0.5 (get-in (zone) [:limit 2]))))))
 
+(deftest two-coordinate-commits-from-one-render-test
+  ;; plans/2026-11-23-cljfx-reactivity/08 §1: each field sends its own
+  ;; coordinate, so a second commit from the same render keeps the first
+  (let [undo-depth #(count (get-in (app-state) [:history :undo-stack]))]
+    (with-projector! {:limit [-0.5 -0.5 0.5 0.5] :blocked []})
+    (ui/click! (ui/robot) "#projectors-tab")
+    (ui/assert-text! "#safety-limit-x0" "-0.50")
+    (testing "Enter in x0, then in y1, before the editor shows the first"
+      (in-one-render! (fn [find]
+                        (enter! (find "#safety-limit-x0") "-0.4")
+                        (enter! (find "#safety-limit-y1") "0.3")))
+      (ui/wait-for! #(= {:limit [-0.4 -0.5 0.5 0.3] :blocked []} (zone)))
+      (ui/assert-text! "#safety-limit-x0" "-0.40")
+      (ui/assert-text! "#safety-limit-y1" "0.30")
+      (is (= 2 (undo-depth)) "one undo step each"))
+    (testing "leaving x1 commits it as Enter does, and Enter in y0 keeps it"
+      (in-one-render! (fn [find]
+                        (let [^TextField x1 (find "#safety-limit-x1")
+                              ^TextField y0 (find "#safety-limit-y0")]
+                          (.requestFocus x1)
+                          (.setText x1 "0.4")
+                          (.requestFocus y0)
+                          (enter! y0 "-0.3"))))
+      (ui/wait-for! #(= {:limit [-0.4 -0.3 0.4 0.3] :blocked []} (zone)))
+      (ui/assert-text! "#safety-limit-x1" "0.40")
+      (ui/assert-text! "#safety-limit-y0" "-0.30")
+      (ui/assert-text! "#safety-limit-x0" "-0.40")
+      (ui/assert-text! "#safety-limit-y1" "0.30")
+      (is (= 4 (undo-depth))))))
+
+(deftest blocked-area-fields-commit-from-one-render-test
+  ;; plans/2026-11-23-cljfx-reactivity/08 §7 example 2, after the rows moved:
+  ;; a blocked area's fields send the layout the editor shows now
+  (let [robot (ui/robot)]
+    (with-projector! {:limit [-0.5 -0.5 0.5 0.5]
+                      :blocked [[-0.45 -0.45 -0.35 -0.35] [-0.2 -0.2 0.2 0.2] [0.3 0.3 0.4 0.4]]})
+    (ui/click! robot "#projectors-tab")
+    (ui/click! robot "#safety-remove-blocked-0")
+    (ui/wait-for! #(= [[-0.2 -0.2 0.2 0.2] [0.3 0.3 0.4 0.4]] (:blocked (zone))))
+    (ui/assert-text! "#safety-blocked-0-x0" "-0.20")
+    (in-one-render! (fn [find]
+                      (enter! (find "#safety-blocked-0-x0") "-0.3")
+                      (enter! (find "#safety-blocked-0-y1") "0.25")))
+    (ui/wait-for! #(= {:limit [-0.5 -0.5 0.5 0.5] :blocked [[-0.3 -0.2 0.2 0.25] [0.3 0.3 0.4 0.4]]} (zone)))
+    (ui/assert-text! "#safety-blocked-0-x0" "-0.30")
+    (ui/assert-text! "#safety-blocked-0-y1" "0.25")
+    (ui/assert-text! "#safety-blocked-1-x0" "0.30")))
+
 (deftest growing-while-streaming-asks-test
   (let [robot (ui/robot)]
     (with-projector! {:limit [-0.8 -0.8 0.8 0.8] :blocked []} :running? true)
@@ -196,8 +261,47 @@
         (ui/fill! robot "#safety-limit-x0" "-0.9")
         (ui/press! robot KeyCode/ENTER)
         (ui/wait-for! #(and (some? (notice-id)) (not= before (notice-id))
-                            (= {:text "Larger safety zone refused" :event :projectors/set-safety}
+                            (= {:text "Larger safety zone refused" :event :projectors/set-safety-coordinate}
                                (get-in (app-state) [:ui :show-lock-notice]))))
         (is (= [-0.6 -0.8 0.8 0.8] (:limit (zone))))
         (ui/assert-text! "#safety-limit-x0" "-0.60")
         (is (= depth (undo-depth)) "no undo step")))))
+
+(deftest unreadable-coordinate-fields-require-reset-test
+  ;; plans/2026-11-23-cljfx-reactivity/08 §7 example 5: a zone that can't be
+  ;; read is drawn as the whole range, but only Reset replaces it
+  (let [robot (ui/robot)
+        bad {:limit [0 0]}
+        fields ["#safety-limit-x0" "#safety-limit-y0" "#safety-limit-x1" "#safety-limit-y1"]
+        question "Allow light in a larger area?"]
+    (with-projector! {:limit [-0.5 -0.5 0.5 0.5] :blocked []})
+    (ui/click! robot "#projectors-tab")
+    (ui/assert-enabled! "#safety-limit-y1")
+    (testing "an edit sent from the fields as they were, handled once the zone can't be read, leaves it as it is"
+      (in-one-render! (fn [find]
+                        (events/dispatch! {:event/type :dev/write-state :f assoc-in :args [[:projectors :a :safety] bad]})
+                        (enter! (find "#safety-limit-y1") "0.3")))
+      (ui/wait-for! #(some? (ui/query "#safety-unreadable")))
+      (doseq [field fields] (ui/assert-disabled! field))
+      (events/flush!)
+      (is (= bad (zone))))
+    (testing "streaming, Reset asks, and Cancel leaves the zone as it is"
+      (events/write-state! assoc-in [:backend :streaming :running?] true)
+      (ui/click! robot "#safety-reset-button")
+      (ui/wait-for! #(some #{question} (ui/window-titles)))
+      (ui/click! robot "#confirm-cancel")
+      (ui/wait-for! #(not (some #{question} (ui/window-titles))))
+      (is (= bad (zone)))
+      (is (some? (ui/query "#safety-unreadable")))
+      (ui/assert-disabled! "#safety-limit-x0"))
+    (testing "off, Reset puts the whole range, and the fields edit it"
+      (events/write-state! assoc-in [:backend :streaming :running?] false)
+      (ui/click! robot "#safety-reset-button")
+      (ui/wait-for! #(= {:limit [-1.0 -1.0 1.0 1.0] :blocked []} (zone)))
+      (ui/wait-for! #(nil? (ui/query "#safety-unreadable")))
+      (doseq [field fields] (ui/assert-enabled! field))
+      (ui/assert-text! "#safety-limit-x0" "-1.00")
+      (ui/fill! robot "#safety-limit-x0" "-0.8")
+      (ui/press! robot KeyCode/ENTER)
+      (ui/wait-for! #(= [-0.8 -1.0 1.0 1.0] (:limit (zone))))
+      (ui/assert-text! "#safety-limit-x0" "-0.80"))))

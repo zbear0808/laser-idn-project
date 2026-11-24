@@ -235,6 +235,8 @@
    :projectors/add-manual "Add Projector"
    :projectors/remove "Remove Projector"
    :projectors/set-safety "Change Safety Zone"
+   :projectors/set-safety-coordinate "Change Safety Zone"
+   :projectors/reset-safety "Reset Safety Zone"
    :projectors/add-blocked-area "Add Blocked Area"
    :projectors/remove-blocked-area "Remove Blocked Area"
    :projectors/copy-safety "Copy Safety Zone"
