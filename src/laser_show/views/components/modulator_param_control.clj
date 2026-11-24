@@ -418,7 +418,10 @@
    - :param-spec - Parameter specification {:min :max :default :type :label ...}
    - :current-value - Current value (number or modulator config map)
    - :on-change-event - Event template for static value changes
-   - :on-text-event - Event template for text field changes
+   - :on-text-event - Event template for the text field, which adds
+     :param-key, :min, :max, :is-int? and the typed :text
+     (param-controls/number-field). While a modulator is off, the slider and
+     the field set its static value instead (:modulator/update-static-value)
    - :modulator-event-base - Base event template for modulator events (contains :domain, :entity-key, :effect-path)
    - :label-width - Optional label width (default 80)"
   [{:keys [param-key param-spec current-value on-change-event on-text-event modulator-event-base label-width]}]
@@ -454,7 +457,13 @@
                                      :event/type :modulator/update-static-value
                                      :param-key param-key
                                      :current-value current-value)
-                              (assoc on-change-event :param-key param-key))]
+                              (assoc on-change-event :param-key param-key))
+        ;; The field's typed text goes to the same inactive modulator, else on-text-event
+        static-text-event (assoc (if has-inactive-modulator? static-change-event on-text-event)
+                                 :param-key param-key
+                                 :min min
+                                 :max max
+                                 :is-int? is-int?)]
     {:fx/type :v-box
      :spacing 4
      ;; Use filterv to remove nil values - the modulator params editor is only shown when modulated
@@ -490,6 +499,7 @@
                                         :spacing 6
                                         :alignment :center-left
                                         :children [{:fx/type :slider
+                                                    :id (str "param-" (name param-key) "-slider")
                                                     :min min
                                                     :max max
                                                     :value (double static-value)
@@ -498,24 +508,14 @@
                                                     :major-tick-unit (if is-int? 1.0 (/ (- max min) 10.0))
                                                     ;; Use static-change-event to preserve inactive modulator config
                                                     :on-value-changed static-change-event}
-                                                   {:fx/type :text-field
+                                                   {:fx/type param-controls/number-field
+                                                    :id (str "param-" (name param-key) "-field")
                                                     :text (if is-int?
                                                             (str (int static-value))
                                                             (format "%.2f" (double static-value)))
                                                     :pref-width 50
-                                                    :style-class ["text-field" "param-text-field"]
                                                     :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 2 4;"
-                                                    ;; Text field also needs to preserve inactive modulator config
-                                                    :on-action (if has-inactive-modulator?
-                                                                 (assoc modulator-event-base
-                                                                        :event/type :modulator/update-static-value
-                                                                        :param-key param-key
-                                                                        :current-value current-value)
-                                                                 (assoc on-text-event
-                                                                        :param-key param-key
-                                                                        :min min
-                                                                        :max max
-                                                                        :is-int? is-int?))}]})]}
+                                                    :event static-text-event}]})]}
 
                          ;; Modulator parameters (only shown when modulated)
                          (when is-modulated?

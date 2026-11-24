@@ -5,10 +5,12 @@
    These handlers follow the re-frame pattern: pure functions that receive
    state as part of the event map and return effect maps with :state key."
   (:require [clojure.test :refer [deftest is testing]]
+            [laser-show.animation.effects.intensity] ; :intensity's :amount is a :float
             [laser-show.state.history :as history]
             [laser-show.events.handlers.keyframe :as keyframe]
             [laser-show.events.handlers.chain :as chain]
-            [laser-show.common.util :as u]))
+            [laser-show.common.util :as u])
+  (:import [javafx.event ActionEvent]))
 
 
 ;; Test Fixtures
@@ -271,6 +273,53 @@
     (let [state (make-test-state [sample-effect-with-keyframes])
           result (keyframe/handle-update-keyframe-param state sample-config [0] 10 :x 0.8)]
       (is (= state result)))))
+
+
+(def keyframed-intensity
+  "An Intensity whose keyframes set its :amount (a :float, 0 to 3), and a
+   :look its definition doesn't have."
+  {:id #uuid "44444444-4444-4444-4444-444444444444"
+   :effect-id :intensity
+   :enabled? true
+   :params {:amount 1.0}
+   :keyframe-modulator {:enabled? true
+                        :selected-keyframe 1
+                        :keyframes [{:position 0.0 :params {:amount 0.3 :look :soft}}
+                                    {:position 1.0 :params {:amount 0.9 :look :soft}}]}})
+
+(deftest update-param-commits-only-numbers-to-numeric-params-test
+  (let [state (make-test-state [keyframed-intensity sample-effect-with-keyframes])
+        edit (fn [event]
+               (keyframe/handle (merge {:event/type :keyframe/update-param :domain :effect-chains :entity-key [0 0]
+                                        :effect-path [0] :keyframe-idx 1 :param-key :amount :state state}
+                                       event)))
+        frames (fn [result effect-idx]
+                 (mapv :params (get-in result [:state :chains :effect-chains [0 0] :items effect-idx :keyframe-modulator :keyframes])))
+        amounts #(mapv :amount (frames % 0))
+        typed {:min 0.0 :max 3.0 :is-int? false}]
+    (testing "a field's typed text (read on the FX thread): a number in the addressed keyframe, clamped"
+      (is (= [0.3 0.42] (amounts (edit (assoc typed :text "0.42")))))
+      (is (= [0.3 3.0] (amounts (edit (assoc typed :text "12")))))
+      (is (= [0.3 0.0] (amounts (edit (assoc typed :text "-1")))))
+      (is (= [0.3 2] (amounts (edit (assoc typed :text "1.7" :is-int? true)))) "a whole number for an :int")
+      (is (= 1.0 (get-in (edit (assoc typed :text "0.42")) [:state :chains :effect-chains [0 0] :items 0 :params :amount]))
+          "the effect's own value stays"))
+    (testing "text that isn't a finite number commits nothing"
+      (doseq [text ["abc" "" "NaN" "Infinity" nil]]
+        (is (= {} (edit (assoc typed :text text))) (pr-str text))))
+    (testing "a slider's number still commits, zero too"
+      (is (= [0.3 0.6] (amounts (edit {:fx/event 0.6}))))
+      (is (= [0.3 0.0] (amounts (edit {:value 0.0})))))
+    (testing "an ActionEvent or another non-number never lands in a numeric parameter"
+      (doseq [payload [(ActionEvent.) ##NaN ##Inf "0.4" :fast nil]]
+        (is (= {} (edit {:fx/event payload})) (str ":fx/event " (pr-str payload)))
+        (is (= {} (edit {:value payload})) (str ":value " (pr-str payload)))))
+    (testing "a parameter its definition doesn't have keeps the kind of value its keyframe holds"
+      (is (= [:soft :hard] (mapv :look (frames (edit {:param-key :look :fx/event :hard}) 0))))
+      (is (= {} (edit {:param-key :look :fx/event (ActionEvent.)})) "but never an ActionEvent")
+      (is (= [0.8 1.5 0.5] (mapv :x (frames (edit {:effect-path [1] :keyframe-idx 0 :param-key :x :value 0.8}) 1)))
+          "a number where the keyframe holds one")
+      (is (= {} (edit {:effect-path [1] :keyframe-idx 0 :param-key :x :value :fast}))))))
 
 
 ;; Main Handle Function Tests

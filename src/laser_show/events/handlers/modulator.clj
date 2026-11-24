@@ -9,6 +9,8 @@
    - :modulator/toggle - Toggle between static value and modulator
    - :modulator/set-type - Change modulator type
    - :modulator/update-param - Update a modulator sub-parameter
+   - :modulator/update-static-value - Set the static value of a modulator
+     that is off (a number, or a modulatable choice's choice)
    
    All events require:
    - :domain - The chain domain (:effect-chains, :cue-chains, :projector-effects)
@@ -21,6 +23,7 @@
    [clojure.tools.logging :as log]
    [laser-show.animation.modulation :as mod]
    [laser-show.animation.modulator-defs :as mod-defs]
+   [laser-show.events.helpers :as h]
    [laser-show.events.handlers.chain.helpers :as chain-helpers]
    [laser-show.events.handlers.chain.params :as params]
    [laser-show.events.handlers.keyframe :as keyframe]))
@@ -91,13 +94,10 @@
                     :value final-config}}))))
 
 (defn- parse-text-value
-  "Parse a text field value, clamping to min/max bounds."
+  "Parse a text field value, clamping to min/max bounds: nil unless it is a
+   finite number (h/parse-number-text)."
   [text-value min-val max-val]
-  (try
-    (let [parsed (Double/parseDouble (str text-value))]
-      (max (double min-val) (min (double max-val) parsed)))
-    (catch Exception _
-      nil)))
+  (h/parse-number-text (str text-value) min-val max-val false))
 
 (defn- parse-number-list
   "The numbers in text, split on commas and spaces, as doubles; what doesn't
@@ -177,12 +177,29 @@
   ;; Reset the playback accumulators using existing transport/retrigger handler
   {:dispatch {:event/type :transport/retrigger}})
 
+(defn- static-value
+  "The static value event sets, or nil for none. A field's typed :text is a
+   number (h/parse-number-text, with :min, :max and :is-int?). Otherwise
+   :value or :fx/event when it is a finite number (the slider's), or a
+   keyword the parameter's definition lists in its :choices (a modulatable
+   choice's combo box, params/param-spec); never anything else, such as the
+   ActionEvent a text field's Enter delivers."
+  [{:keys [state domain entity-key effect-path param-key] :as event}]
+  (if (contains? event :text)
+    (h/parse-number-text (:text event) (:min event) (:max event) (:is-int? event))
+    (let [value (h/first-some (:value event) (:fx/event event))]
+      (cond
+        (h/finite-number? value) value
+        (keyword? value) (some #{value} (:choices (params/param-spec state (chain-helpers/chain-config domain entity-key)
+                                                                     effect-path param-key)))))))
+
 (defn- handle-update-static-value
   "Handle updating the static value while preserving an inactive modulator config.
    
    When modulation is toggled off, we keep the modulator config with :active? false.
    When the user adjusts the static slider/text field, we need to update the :value
    field in the config (which is used as the static output) without losing the settings.
+   The new value is static-value's; without one, nothing changes.
    
    If the current value is:
    - A modulator config: update its :value field
@@ -190,21 +207,22 @@
    
    Returns a :dispatch effect to update the parameter via :chain/update-param."
   [{:keys [domain entity-key effect-path param-key current-value] :as event}]
-  (let [new-static-value (:fx/event event)
-        new-value (if (mod/modulator-config? current-value)
-                    ;; Preserve the modulator config, just update :value
-                    (assoc current-value :value new-static-value)
-                    ;; Plain number - just use new value
-                    new-static-value)]
-    (log/trace "modulator/update-static-value - param-key:" param-key
-               "new-value:" new-static-value
-               "has-config?:" (mod/modulator-config? current-value))
-    {:dispatch {:event/type :chain/update-param
-                :domain domain
-                :entity-key entity-key
-                :effect-path effect-path
-                :param-key param-key
-                :value new-value}}))
+  (if-some [new-static-value (static-value event)]
+    (let [new-value (if (mod/modulator-config? current-value)
+                      ;; Preserve the modulator config, just update :value
+                      (assoc current-value :value new-static-value)
+                      ;; Plain number - just use new value
+                      new-static-value)]
+      (log/trace "modulator/update-static-value - param-key:" param-key
+                 "new-value:" new-static-value
+                 "has-config?:" (mod/modulator-config? current-value))
+      {:dispatch {:event/type :chain/update-param
+                  :domain domain
+                  :entity-key entity-key
+                  :effect-path effect-path
+                  :param-key param-key
+                  :value new-value}})
+    {}))
 
 
 ;; Main Dispatcher

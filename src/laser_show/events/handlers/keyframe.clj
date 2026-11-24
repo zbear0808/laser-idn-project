@@ -28,7 +28,8 @@
    [clojure.tools.logging :as log]
    [laser-show.animation.modulator-registry :as reg]
    [laser-show.events.helpers :as h]
-   [laser-show.events.handlers.chain :as chain]))
+   [laser-show.events.handlers.chain :as chain]
+   [laser-show.events.handlers.chain.params :as params]))
 
 
 ;; Helper Functions
@@ -321,6 +322,31 @@
                                      assoc-in [:keyframes keyframe-idx :params param-key] value))
       state)))
 
+(defn- numeric-param?
+  "Does param-key of the effect at effect-path hold a number: :float or :int
+   in the effect's definition (params/param-spec), or, for a parameter the
+   effect registry doesn't define, a number in keyframe keyframe-idx now?"
+  [state config effect-path keyframe-idx param-key]
+  (if-let [spec (params/param-spec state config effect-path param-key)]
+    (params/numeric-spec? spec)
+    (number? (get-in (get-keyframe-modulator state config effect-path)
+                     [:keyframes keyframe-idx :params param-key]))))
+
+(defn- update-param-value
+  "What :keyframe/update-param writes, as [value], or nil to write nothing.
+   A field's typed :text is a number (h/parse-number-text, with :min, :max
+   and :is-int?). Otherwise :value or :fx/event, but never a JavaFX event
+   (what a text field's Enter delivers), and for a numeric parameter
+   (numeric-param?) only a finite number."
+  [state config {:keys [effect-path keyframe-idx param-key] :as event}]
+  (if (contains? event :text)
+    (some-> (h/parse-number-text (:text event) (:min event) (:max event) (:is-int? event)) vector)
+    (let [value (h/first-some (:value event) (:fx/event event))]
+      (when-not (or (instance? javafx.event.Event value)
+                    (and (numeric-param? state config effect-path keyframe-idx param-key)
+                         (not (h/finite-number? value))))
+        [value]))))
+
 (defn handle-update-spatial-params
   "Update keyframe params from spatial drag operation (translate, corner-pin).
    Converts point-id/x/y coordinates to params using param-map.
@@ -495,10 +521,12 @@
       {:state (handle-delete-keyframe state config effect-path (:keyframe-idx event))}
 
       :keyframe/update-param
-      {:state (handle-update-keyframe-param state config effect-path
-                                            (:keyframe-idx event)
-                                            (:param-key event)
-                                            (h/first-some (:value event) (:fx/event event)))}
+      (if-let [[value] (update-param-value state config event)]
+        {:state (handle-update-keyframe-param state config effect-path
+                                              (:keyframe-idx event)
+                                              (:param-key event)
+                                              value)}
+        {})
 
       :keyframe/update-spatial-params
       {:state (handle-update-spatial-params state config effect-path

@@ -63,8 +63,8 @@
    app's Undo and Redo (undo-filter).
    
    Props: :id, :text, :on-commit, :pref-width, :disable, :style-class
-   (default [\"text-field-dark\"])"
-  [{:keys [id text on-commit pref-width disable style-class]
+   (default [\"text-field-dark\"]), :style"
+  [{:keys [id text on-commit pref-width disable style-class style]
     :or {style-class ["text-field-dark"]}}]
   (let [commit! (fn [^TextField field]
                   (let [typed (.getText field)]
@@ -84,12 +84,13 @@
                                        (when-let [f (:commit! (.getUserData field))]
                                          (f field))))))
                    (.addEventFilter field KeyEvent/KEY_PRESSED (undo-filter)))
-     :desc {:fx/type :text-field
-            :id id
-            :text text
-            :pref-width pref-width
-            :disable (boolean disable)
-            :style-class style-class
-            :user-data {:commit! commit! :text text}
-            :on-action (fn [^javafx.event.ActionEvent e]
-                         (commit! (.getSource e)))}}))
+     :desc (cond-> {:fx/type :text-field
+                    :id id
+                    :text text
+                    :pref-width pref-width
+                    :disable (boolean disable)
+                    :style-class style-class
+                    :user-data {:commit! commit! :text text}
+                    :on-action (fn [^javafx.event.ActionEvent e]
+                                 (commit! (.getSource e)))}
+             style (assoc :style style))}))

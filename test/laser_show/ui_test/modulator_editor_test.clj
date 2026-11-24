@@ -4,7 +4,9 @@
    a press source and Restart on are called in it, the Step's palette, and
    none of that for calibration, which never sees a press
    (plans/2026-11-18-vibe-mode/04 §4, invariant 4). And the Fader, which
-   follows fader 1 or 2 (05)."
+   follows fader 1 or 2 (05). And a number typed into a parameter's field
+   with Enter, while its modulator is off or keyframes set it: a number is
+   stored, other text is put back."
   (:require [cljfx.api :as fx]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
@@ -13,7 +15,7 @@
             [laser-show.ui-test.testfx :as ui]
             [laser-show.views.components.modulator-param-control :as mod-param])
   (:import [javafx.scene Node Scene]
-           [javafx.scene.control CheckBox ComboBox ToggleButton]
+           [javafx.scene.control CheckBox ComboBox TextField ToggleButton]
            [javafx.stage Stage]))
 
 (use-fixtures :once fixtures/with-toolkit)
@@ -121,6 +123,86 @@
     (ui/fill! robot "#modulator-amount-values" "")
     (ui/submit! robot "#modulator-amount-values")
     (ui/wait-for! #(= [] (:values (amount))))))
+
+
+;; A number typed into a parameter's field (Enter)
+
+
+(def ^:private amount-field "#param-amount-field")
+(def ^:private amount-slider "#param-amount-slider")
+
+(defn- open-effect-editor!
+  "Effects cell [0 0] with effect as its one effect, in the effect chain
+   editor (it is selected as it opens), once the Amount field shows."
+  [effect]
+  (events/write-state! assoc-in [:chains :effect-chains [0 0]] {:active? false :items [effect]})
+  (events/dispatch! {:event/type :effect-chain/open-editor :col 0 :row 0})
+  (ui/wait-for! #(some? (node amount-field))))
+
+(defn- field-text
+  "What the Amount field shows now."
+  []
+  (let [^TextField field (node amount-field)]
+    (ui/on-fx-thread #(.getText field))))
+
+(defn- enter!
+  "Type text into the Amount field and press Enter."
+  [robot text]
+  (ui/fill! robot amount-field text)
+  (ui/submit! robot amount-field))
+
+(defn- refuses-bad-text!
+  "Enter each text that isn't a number: the field shows shown again, and
+   (stored) is still what it was."
+  [robot shown stored]
+  (let [before (stored)]
+    (doseq [text ["abc" "" "NaN" "Infinity"]]
+      (enter! robot text)
+      (is (ui/wait-for! #(= shown (field-text))) (str (pr-str text) " is put back"))
+      (events/flush!)
+      (is (= before (stored)) (str (pr-str text) " changes nothing")))))
+
+(deftest inactive-modulator-field-stores-a-typed-number-test
+  (let [robot (ui/robot)
+        config {:type :sine :active? false :value 0.2 :min 0.0 :max 1.0 :period 1.0}]
+    (open-effect-editor! {:id (random-uuid) :effect-id :intensity :enabled? true :params {:amount config}})
+    (is (= "0.20" (field-text)))
+    (enter! robot "0.42")
+    (is (ui/wait-for! #(and (= (assoc config :value 0.42) (amount)) (= "0.42" (field-text))))
+        "Enter stores the number in the modulator that is off, which keeps its settings")
+    (enter! robot "9")
+    (is (ui/wait-for! #(and (= (assoc config :value 3.0) (amount)) (= "3.00" (field-text))))
+        "clamped to Amount's Max")
+    (enter! robot "12")
+    (is (ui/wait-for! #(= "3.00" (field-text))) "the Max again: no change to show, so the field shows it again")
+    (refuses-bad-text! robot "3.00" amount)
+    (testing "one Undo takes back one typed number"
+      (events/dispatch! {:event/type :edit/undo})
+      (is (ui/wait-for! #(and (= (assoc config :value 0.42) (amount)) (= "0.42" (field-text))))))
+    (testing "the slider still sets it"
+      (ui/slide! robot amount-slider 0.5)
+      (is (ui/wait-for! #(and (= (assoc config :value 0.5) (amount)) (= "0.50" (field-text))))))))
+
+(deftest keyframe-field-stores-a-typed-number-test
+  (let [robot (ui/robot)
+        effect (fn [] (get-in (state/get-raw-state) [:chains :effect-chains [0 0] :items 0]))
+        frames (fn [] (mapv (comp :amount :params) (get-in (effect) [:keyframe-modulator :keyframes])))]
+    (open-effect-editor! {:id (random-uuid) :effect-id :intensity :enabled? true :params {:amount 1.0}
+                          :keyframe-modulator {:enabled? true :driver :time :period 4.0 :time-unit :beats
+                                               :loop-mode :loop :selected-keyframe 1
+                                               :keyframes [{:position 0.0 :params {:amount 0.3}}
+                                                           {:position 1.0 :params {:amount 0.9}}]}})
+    (is (= "0.90" (field-text)) "the selected keyframe's Amount")
+    (enter! robot "0.42")
+    (is (ui/wait-for! #(and (= [0.3 0.42] (frames)) (= "0.42" (field-text))))
+        "Enter stores the number in the selected keyframe")
+    (is (= 1.0 (amount)) "the effect's own Amount stays")
+    (enter! robot "-2")
+    (is (ui/wait-for! #(and (= [0.3 0.0] (frames)) (= "0.00" (field-text)))) "clamped to Amount's Min")
+    (refuses-bad-text! robot "0.00" frames)
+    (testing "the slider still sets it"
+      (ui/slide! robot amount-slider 1.5)
+      (is (ui/wait-for! #(and (= [0.3 1.5] (frames)) (= "1.50" (field-text))))))))
 
 (defn- mount!
   "The modulator control for an Intensity amount, as an editor of domain

@@ -385,6 +385,37 @@
     (is (= "Toggle Modulation" (history/redo-label (:history undone))))
     (is (= after (get-in (run undone {:event/type :edit/redo}) path)))))
 
+(deftest typed-number-is-one-undo-step-test
+  (let [path [:chains :effect-chains [1 0] :items 0]
+        field {:domain :effect-chains :entity-key [1 0] :effect-path [0] :param-key :amount
+               :min 0.0 :max 3.0 :is-int? false}
+        config {:type :sine :active? false :value 0.2 :min 0.0 :max 1.0 :period 1.0}
+        effect {:id #uuid "77777777-7777-7777-7777-777777777777" :effect-id :intensity :enabled? true}]
+    (doseq [[what params kf event read]
+            [["a plain field" {:amount 0.5} nil
+              (assoc field :event/type :chain/update-param-from-text)
+              #(get-in % (conj path :params :amount))]
+             ["a modulator's that is off" {:amount config} nil
+              (assoc field :event/type :modulator/update-static-value :current-value config)
+              #(get-in % (conj path :params :amount :value))]
+             ["a keyframe's" {:amount 1.0} {:enabled? true :keyframes [{:position 0.0 :params {:amount 0.3}}
+                                                                        {:position 1.0 :params {:amount 0.9}}]}
+              (assoc field :event/type :keyframe/update-param :keyframe-idx 1)
+              #(get-in % (conj path :keyframe-modulator :keyframes 1 :params :amount))]]]
+      (testing what
+        (let [initial (history/mark-clean (assoc-in (test-state) path (cond-> (assoc effect :params params)
+                                                                         kf (assoc :keyframe-modulator kf))))
+              typed (run initial (assoc event :text "0.42"))
+              undone (run typed {:event/type :edit/undo})
+              refused (run undone (assoc event :text "abc"))]
+          (is (= 0.42 (read typed)))
+          (is (= 1 (undo-count typed)) "one undo step")
+          (is (true? (get-in typed [:project :dirty?])))
+          (is (= (read initial) (read undone)) "Undo takes back the typed number")
+          (is (false? (get-in undone [:project :dirty?])))
+          (is (= (:history undone) (:history refused)) "text that isn't a number adds no step and keeps Redo")
+          (is (= 0.42 (read (run refused {:event/type :edit/redo})))))))))
+
 (deftest timeline-nudge-coalesces-test
   (let [base (-> (test-state)
                  (assoc-in [:chains :cue-chains [0 0] :items 0 :timeline/start] 0.0)

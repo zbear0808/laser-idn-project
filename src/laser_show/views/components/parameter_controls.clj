@@ -31,6 +31,7 @@
             [laser-show.events.core :as events]
             [laser-show.routing.targets :as targets]
             [laser-show.subs :as subs]
+            [laser-show.views.components.commit-field :as commit-field]
             [laser-show.views.components.target-control :as target-control]))
 
 
@@ -54,6 +55,21 @@
 ;; Basic Parameter Controls
 
 
+(defn number-field
+  "The text field beside a numeric parameter's slider, showing text. On
+   Enter, or when it loses focus, it dispatches event with what was typed as
+   :text (commit-field reads it on the FX thread), which the handler parses
+   and clamps (events.helpers/parse-number-text); text that sets nothing is
+   put back. Props: :id, :text, :event, :pref-width, :style."
+  [{:keys [id text event pref-width style]}]
+  {:fx/type commit-field/commit-field
+   :id id
+   :text text
+   :pref-width pref-width
+   :style-class ["text-field" "param-text-field"]
+   :style style
+   :on-commit (fn [typed] (assoc event :text typed))})
+
 (defn param-slider
   "Slider control for numeric parameters with editable text field.
    
@@ -68,7 +84,8 @@
    - :param-spec - Parameter specification {:min :max :default :type :label ...}
    - :current-value - Current parameter value (should be numeric, but handles maps defensively)
    - :on-change-event - Event template with :param-key and :fx/event added for slider changes
-   - :on-text-event - Event template with :param-key, :min, :max added for text field
+   - :on-text-event - Event template with :param-key, :min, :max, :is-int?
+     and the typed :text added for the text field (number-field)
    - :label-width - Optional label width (default 80)"
   [{:keys [param-key param-spec current-value on-change-event on-text-event label-width]}]
   (let [{:keys [min max label]} param-spec
@@ -90,6 +107,7 @@
                  :pref-width label-w
                  :style-class ["label-secondary"]}
                 {:fx/type :slider
+                 :id (str "param-" (name param-key) "-slider")
                  :min min
                  :max max
                  :value (double value)
@@ -102,18 +120,18 @@
                                     :source-id [:slider param-key]}
                  :on-mouse-released {:event/type :history/commit-transaction
                                      :source-id [:slider param-key]}}
-                {:fx/type :text-field
+                {:fx/type number-field
+                 :id (str "param-" (name param-key) "-field")
                  :text (if is-int?
                          (str (int value))
                          (format "%.2f" (double value)))
                  :pref-width 55
-                 :style-class ["text-field" "param-text-field"]
                  :style "-fx-font-size: 11; -fx-padding: 2 4;"
-                 :on-action (assoc on-text-event
-                                   :param-key param-key
-                                   :min min
-                                   :max max
-                                   :is-int? is-int?)}]}))
+                 :event (assoc on-text-event
+                               :param-key param-key
+                               :min min
+                               :max max
+                               :is-int? is-int?)}]}))
 
 (defn choice-text
   "A choice as its param says it: its :labels' text, else its name."
