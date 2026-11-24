@@ -30,10 +30,9 @@
             [laser-show.output.addons :as addons]
             [laser-show.output.driver :as driver]
             [laser-show.events.handlers.input-mapper :as input-mapper]
+            [laser-show.input.devices :as devices]
             [laser-show.input.link :as link]
             [laser-show.input.gamepad :as gamepad]
-            [laser-show.input.midi :as midi]
-            [laser-show.input.osc :as osc]
             [laser-show.input.router :as router]
             [laser-show.dev-config :as dev-config]
             [clojure.pprint :as pprint])
@@ -43,10 +42,12 @@
 (defonce ^{:private true :doc "The cljfx app instance."} *app (atom nil))
 
 (defn- default-error-handler
-  "Error handler for cljfx renderer.
+  "Error handler for cljfx renderer: what a render throws (create-app gives
+   it to fx/create-app as :renderer-error-handler).
    
-   Logs errors and prints stack trace. In dev mode, cljfx.dev provides
-   enhanced error messages with component stacks, which are stored in ex-data."
+   Logs errors and prints stack trace. In dev mode (laser-show.dev-renderer)
+   the message of an invalid description's error says what is wrong with it
+   and gives the cljfx component stack."
   [^Throwable ex]
   (log/error ex "Error in cljfx renderer:")
   (binding [*out* *err*]
@@ -57,32 +58,35 @@
     (println "Stack trace:")
     (.printStackTrace ex *out*)))
 
-(defn- get-type->lifecycle
-  "Returns the type->lifecycle function based on dev mode.
-   
-   In dev mode: Uses cljfx.dev/type->lifecycle for validation and better errors
-                on keyword types only. Function components use standard context-aware
-                lifecycle to ensure proper context propagation.
-   In prod mode: Uses standard cljfx lifecycle lookup"
+(defn- get-renderer-middleware
+  "fx/create-app's :renderer-middleware for this mount: identity, but in dev
+   mode laser-show.dev-renderer/middleware (dev/, on the :dev classpath
+   only): cljfx.dev's description validation, component stacks in render
+   errors and its F12 inspector, around cljfx's own lifecycles. Only then is
+   the dev namespace looked up, once, here. If it can't be loaded or has no
+   middleware: a warning and identity for this mount. Render errors are the
+   renderer error handler's either way."
   []
-  (let [std-lifecycle #(or (fx/keyword->lifecycle %)
-                           (fx/fn->lifecycle-with-context %))]
-    (if (dev-config/dev-mode?)
-      (if-let [dev-lifecycle (try
-                               @(requiring-resolve 'cljfx.dev/type->lifecycle)
-                               (catch Throwable t
-                                 (log/warn t "Could not load cljfx.dev tools; falling back to standard lifecycle")
-                                 nil))]
-        (do
-          (log/info "🔧 Dev mode enabled - cljfx dev tools active (Press F12 for inspector)")
-          (fn [type]
-            (if (keyword? type)
-              (dev-lifecycle type)
-              (fx/fn->lifecycle-with-context type))))
-        (do
-          (log/info "🔧 Dev mode enabled - using standard cljfx lifecycle")
-          std-lifecycle))
-      std-lifecycle)))
+  (if-not (dev-config/dev-mode?)
+    identity
+    (let [middleware (try
+                       (requiring-resolve 'laser-show.dev-renderer/middleware)
+                       (catch Throwable t
+                         (log/warn t "Dev mode: could not load laser-show.dev-renderer (dev/ and cljfx.dev, the :dev alias);"
+                                   "rendering without cljfx.dev validation or the F12 inspector")
+                         ::not-loaded))]
+      (cond
+        (var? middleware)
+        (do (log/info "🔧 Dev mode: renderer middleware laser-show.dev-renderer/middleware,"
+                      "cljfx.dev validation (F12 opens its inspector)")
+            @middleware)
+
+        (nil? middleware)
+        (do (log/warn "Dev mode: laser-show.dev-renderer has no middleware;"
+                      "rendering without cljfx.dev validation or the F12 inspector")
+            identity)
+
+        :else identity))))
 
 (defn- agent-error-handler
   "Error handler for the event processing agent.
@@ -98,16 +102,25 @@
    and effects and runs it on its agent, on the one event thread
    (events/event-executor, shared by every app instance), so every
    effect's dispatch queues on that agent. The :fx/context co-effect cljfx
-   would add is switched off: events carry :state instead."
+   would add is switched off: events carry :state instead. Each app is a
+   new app instance (events/new-instance!, for the context init-state!
+   made last): its handler, the one dispatcher of this app, runs the
+   pipeline through events/instance-handler, so once stop! retires it,
+   nothing that comes back to it changes the app after it.
+
+   cljfx makes the renderer, mounted on the context atom, with its own
+   options: its context-aware lifecycles and that handler as the map event
+   handler. What a render throws goes to default-error-handler; in dev mode
+   get-renderer-middleware adds cljfx.dev's validation and inspector."
   []
   (fx/create-app
    (state/get-context-atom)
-   :event-handler events/ordered-pipeline
+   :event-handler (events/instance-handler (events/new-instance!))
    :co-effects (assoc events/co-effects :fx/context (constantly nil))
    :effects events/effects
    :desc-fn (fn [_] {:fx/type root/root-view})
-   :opts {:fx.opt/type->lifecycle (get-type->lifecycle)}
-   :error-handler default-error-handler
+   :renderer-middleware (get-renderer-middleware)
+   :renderer-error-handler default-error-handler
    :async-agent-options {:error-handler agent-error-handler
                          :fx/executor events/event-executor}))
 
@@ -141,13 +154,15 @@
                      :dir dir}))
 
 (defn- starter-state
-  "A fresh starter document: the starter cues, vibes and the Master."
+  "A fresh starter document: the starter cues, vibes and the Master, with
+   an identity of its own (persistent/begin-document)."
   []
   (-> (domains/build-initial-state)
       (templates/apply-starter-cue-chains)
       (templates/apply-starter-vibes)
       (templates/apply-starter-effects)
-      (history/mark-clean)))
+      (history/mark-clean)
+      (persistent/begin-document)))
 
 (defn- load-rig
   "state on this machine's rig, the file at path (plans/2026-11-19-zones/09):
@@ -229,6 +244,7 @@
 
     (output-runtime/open!)
     (output-runtime/install-shutdown-hook!)
+    (devices/open!)
     (rig-store/install-shutdown-hook!)
 
     (let [app (create-app)]
@@ -276,19 +292,15 @@
       (log/warn "Error stopping streaming engines:" (.getMessage e)))))
 
 (defn- release-devices!
-  "Close what state lists: the MIDI ports and the OSC server, and the
-   Carabiner connection when it is connected. Each is closed once, in its
-   own try, and nothing is written back: the next start replaces app state."
+  "Close the MIDI inputs and the OSC server (input.devices/release!: what
+   their owner has open, whatever state says), and the Carabiner connection
+   when state says it is connected. Each is closed once, in its own try, and
+   nothing is written back: the next start replaces app state."
   [state]
-  (when-let [{:keys [midi osc]} (get-in state [:backend :input])]
-    (try
-      (midi/disconnect-all midi)
-      (catch Exception e
-        (log/warn "Error releasing MIDI ports:" (.getMessage e))))
-    (try
-      (osc/stop-server osc)
-      (catch Exception e
-        (log/warn "Error stopping the OSC server:" (.getMessage e)))))
+  (try
+    (devices/release! 1000)
+    (catch Exception e
+      (log/warn "Error releasing the MIDI inputs and the OSC server:" (.getMessage e))))
   (when (get-in state [:backend :link :carabiner-connected?])
     (try
       (link/disconnect-carabiner! (get-in state [:backend :link]))
@@ -296,28 +308,42 @@
         (log/warn "Error disconnecting from Carabiner:" (.getMessage e))))))
 
 (defn- stop-rig-file!
-  "Write the rig change still pending (within 2 s), then let go of the rig
-   file's lock, so the next window can write it."
+  "Write the rig change still pending, and wait for the write running (at
+   most rig-store/flush-ms), then let go of the rig file's lock, so the next
+   window can write it: after that write, never during it, unless the wait
+   ran out (logged; shutdown doesn't wait any longer). A write's result,
+   reported meanwhile, is queued as an event, behind this one."
   []
-  (try
-    (rig-store/flush! 2000)
-    (catch Exception e
-      (log/warn "Error writing the rig file:" (.getMessage e))))
-  (rig-store/unlock!))
+  (let [done? (try
+                (rig-store/flush! rig-store/flush-ms)
+                (catch Exception e
+                  (log/warn "Error writing the rig file:" (.getMessage e))
+                  false))]
+    (when-not done?
+      (log/warn "Letting go of the rig file's lock with its last write unfinished"))
+    (rig-store/unlock!)))
 
 (defn stop!
   "Stop the mounted cljfx application and release application-owned services:
    the UI, the show clock, the input mapper, the gamepad poller, the
    streaming engines (the output runtime is drained), the add-ons' drivers
-   (unregistered, their jars closed), input devices, the Carabiner link and
-   the rig file (its pending change written, its lock let go). dispatch!
+   (unregistered, their jars closed), input devices, the Carabiner link,
+   the rig file (its pending change written and the write running finished,
+   then its lock let go: stop-rig-file!) and the open press's deadline
+   wake-up (events/dispose-gesture-alarm!). dispatch!
    falls back to the synchronous handler afterwards, and the write guard
    start! or start-test! installed is removed.
 
-   It writes nothing to app state. The devices are closed from one read,
-   after the events already queued have run (within 1 s; on the event
-   thread, as on Quit, it can't wait for them and doesn't), and only by the
-   call that claimed the app, so each is closed once.
+   It writes nothing to app state. The devices are closed after the events
+   already queued have run (within 1 s; on the event thread, as on Quit, it
+   can't wait for them and doesn't), and only by the call that claimed the
+   app, so each is closed once: the MIDI inputs and the OSC server by their
+   owner (input.devices/release!, which takes no request until the next
+   start), the Carabiner link from one read. Then the app instance
+   is retired (events/retire!), before the rig file's last write: what
+   comes back to it later (that write's result, Exit after its wait for the
+   rig, a scan, a learn, an event still running) is dropped, so it can't
+   change an app started after it.
 
    This is intentionally idempotent so UI fixtures can safely call it from
    `finally` blocks after a failed startup or test."
@@ -334,7 +360,9 @@
     (when app
       (events/flush! 1000)
       (release-devices! (state/get-raw-state)))
+    (events/retire!)
     (stop-rig-file!)
+    (events/dispose-gesture-alarm!)
     (events/set-exit-fn! nil)
     (events/set-dispatch-fn! nil)
     (state/guard-writes! nil)
@@ -389,6 +417,7 @@
      (state/init-state! (:state rig))
      (show-time/reset-runtime!)
      (output-runtime/open!)
+     (devices/open!)
      (let [app (create-app)]
        (reset! *app app)
        (events/set-dispatch-fn! (:handler app))

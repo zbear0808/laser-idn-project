@@ -81,6 +81,7 @@
          :domain domain
          :entity-key [col row]
          :item-path (:path target)
+         :owner-id (:id (:entity target))
          :effect-path [idx]
          :effect effect
          :effect-def effect-def

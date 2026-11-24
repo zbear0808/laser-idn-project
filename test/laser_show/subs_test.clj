@@ -12,6 +12,7 @@
    [laser-show.routing.zone-patterns :as zone-patterns]
    [laser-show.state.templates :as templates]
    [laser-show.vibes.engine :as engine]
+   [laser-show.vibes.faders :as faders]
    [laser-show.vibes.library :as library]
    [laser-show.vibes.reactions :as reactions]))
 
@@ -65,7 +66,30 @@
               :selected? false
               :timeline? false
               :has-content? false}
-             (fx/sub-ctx ctx subs/cell-display-data 3 2))))))
+             (fx/sub-ctx ctx subs/cell-display-data 3 2))))
+    (testing "what a cell holds: a timeline, or a preset at the top or in a group, enabled or not"
+      (let [P {:type :preset :preset-id :circle}
+            holds (fn [cue]
+                    (-> (update-in base-state [:chains :cue-chains] #(if cue (assoc % [2 1] cue) (dissoc % [2 1])))
+                        context
+                        (fx/sub-ctx subs/cell-display-data 2 1)
+                        (select-keys [:first-preset-id :preset-count :timeline? :has-content?])))
+            nothing {:first-preset-id nil :preset-count 0 :timeline? false :has-content? false}
+            a-timeline {:first-preset-id nil :preset-count 0 :timeline? true :has-content? true}]
+        (is (= nothing (holds nil)) "no cue")
+        (is (= nothing (holds {:items []})) "the same as no cue")
+        (is (= nothing (holds {:name "Draft" :trigger-mode :retrigger})) "a name and a mode alone")
+        (is (= nothing (holds {:name "Draft" :items [{:type :group :items []}]})) "an empty group")
+        (is (= nothing (holds {:items [{:preset-id :circle} {:type :effect :effect-id :scale}]}))
+            "an untyped item and an effect")
+        (is (= {:first-preset-id :circle :preset-count 1 :timeline? false :has-content? true}
+               (holds {:items [{:type :group :enabled? false :items [(assoc P :enabled? false)]}]}))
+            "a disabled preset in a disabled group")
+        (is (= a-timeline (holds {:editor-type :timeline :items []})) "a timeline, without clips")
+        (is (= a-timeline (holds {:tracks [{:id :t :type :track}] :items []})) "tracks make it a timeline")
+        (is (= a-timeline (holds {:items [{:track-id :t}]})) "so does a clip's track")
+        (is (= nothing (holds {:editor-type :cue-chain :tracks [{:id :t :type :track}]}))
+            "a cue chain by choice: tracks alone don't make it a timeline")))))
 
 (deftest cell-display-data-ignores-unrelated-changes-test
   (let [ctx (context base-state)
@@ -97,13 +121,49 @@
             :active? true
             :selected? false
             :has-effects? true
+            :has-content? true
             :display-text "scale +1"}
            before))
     (testing "unaffected by cue-chain edits and the show clock's status"
       (let [ctx' (-> ctx
                      (fx/swap-context assoc-in [:chains :cue-chains [0 0] :name] "Renamed")
                      (status-write))]
-        (is (identical? before (fx/sub-ctx ctx' subs/effect-cell-display-data 0 0)))))))
+        (is (identical? before (fx/sub-ctx ctx' subs/effect-cell-display-data 0 0)))))
+    (testing "what a cell stores, on or off, and whether it holds anything (plan 11 §7)"
+      (let [P (zone-patterns/preset-instance :chase :cell)
+            cells {[1 0] {:name "Old" :items []}
+                   [2 0] {:items [{:type :group :items []}]}
+                   [3 0] {:active? true :items [{:effect-id :zone-map-cycle :enabled? false}]}
+                   [4 0] {:active? true :items [{:type :group :items [{:type :group :enabled? false
+                                                                         :items [P {:effect-id :scale}]}]}]}
+                   [0 3] (faders/master-cell)}
+            ctx (context (update-in base-state [:chains :effect-chains] merge cells))
+            stored (fn [col row]
+                     (select-keys (fx/sub-ctx ctx subs/effect-cell-display-data col row)
+                                  [:effect-count :first-effect-id :effect-ids :has-effects? :has-content? :display-text]))
+            nothing {:effect-count 0 :first-effect-id nil :effect-ids [] :has-effects? false :has-content? false
+                     :display-text nil}]
+        (is (= nothing (stored 7 3)) "no cell")
+        (is (= nothing (stored 1 0)) "a name, and no items")
+        (is (= (assoc nothing :has-content? true) (stored 2 0)) "a group: occupied, no effect")
+        (is (= {:effect-count 1 :first-effect-id :zone-map-cycle :effect-ids [:zone-map-cycle] :has-effects? true
+                :has-content? true :display-text "zone-map-cycle"}
+               (stored 3 0))
+            "a disabled Map cycle")
+        (is (= {:effect-count 2 :first-effect-id :zone-pattern :effect-ids [:zone-pattern :scale] :has-effects? true
+                :has-content? true :display-text "zone-pattern +1"}
+               (stored 4 0))
+            "a pattern and a scale in a disabled group")
+        (is (= {:effect-count 1 :first-effect-id :intensity :effect-ids [:intensity] :has-effects? true
+                :has-content? true :display-text "intensity"}
+               (stored 0 3))
+            "the Master")
+        (testing "the picker shows the same"
+          (doseq [[col row] (conj (keys cells) [7 3])]
+            (is (= (merge (select-keys (stored col row) [:effect-count :first-effect-id :effect-ids :has-content?])
+                          {:name (get-in cells [[col row] :name])})
+                   (fx/sub-ctx ctx subs/vibe-pick-fx-label col row))
+                (str [col row]))))))))
 
 (deftest effects-grid-empty-sub-test
   (testing "no effects cell, or none with an effect in it"
@@ -130,7 +190,24 @@
       (is (false? (empty? (update-in mastered [:chains :effect-chains [0 3] :items] conj {:effect-id :scale :enabled? true})))
           "with another effect in its own chain")
       (is (false? (empty? (assoc-in mastered [:chains :effect-chains [0 3] :items 0 :params :amount] 0.5)))
-          "its Intensity on a fixed amount: an effect cell like any"))))
+          "its Intensity on a fixed amount: an effect cell like any")
+      (testing "a disabled effect is a stored one (plan 11 §7)"
+        (is (false? (empty? (update-in mastered [:chains :effect-chains [0 3] :items] conj {:effect-id :scale :enabled? false})))
+            "a disabled effect beside the Master")
+        (is (false? (empty? (assoc-in mastered [:chains :effect-chains [0 3] :items 0 :enabled?] false)))
+            "the Master's Intensity disabled")
+        (is (false? (empty? (update-in mastered [:chains :effect-chains [0 3] :items] #(vector {:type :group :enabled? false :items %}))))
+            "or in a disabled group")
+        (is (false? (empty? (assoc-in mastered [:chains :effect-chains [3 0]]
+                                      {:active? true :items [{:effect-id :zone-map-cycle :enabled? false}]})))
+            "a disabled Map cycle")
+        (is (false? (empty? (assoc-in mastered [:chains :effect-chains [4 0]]
+                                      {:active? true :items [{:type :group :items [{:type :group :enabled? false
+                                                                                    :items [(zone-patterns/preset-instance :chase :cell)
+                                                                                            {:effect-id :scale}]}]}]})))
+            "a pattern and a scale in a disabled group")
+        (is (true? (empty? (assoc-in mastered [:chains :effect-chains [2 0]] {:items [{:type :group :items []}]})))
+            "a group alone: no effect yet")))))
 
 (deftest beat-index-sub-test
   (let [ctx (context base-state)]
@@ -283,7 +360,7 @@
         {:keys [cell run]} (in-state ctx :vibe-runtime :voices :hit)]
     (is (= cell (:playing (fx/sub-ctx ctx subs/vibe-pad :hit))) "a tap: its cue decays")
     (testing "the show clock ends the decayed run: the pad shows nothing, though the engine still remembers the voice"
-      (let [ctx' (handle ctx {:event/type :show-clock/cue-ended :cell cell :run run})]
+      (let [ctx' (handle ctx {:event/type :show-clock/cue-ended :cell cell :run run :position-ids {:restart nil :seek nil}})]
         (is (some? (in-state ctx' :vibe-runtime :voices :hit)))
         (is (nil? (:playing (fx/sub-ctx ctx' subs/vibe-pad :hit))))))
     (testing "the grid starts the cell again: a run that isn't HIT's"
@@ -554,7 +631,20 @@
       (let [none (assoc-in playing-state [:playback :active-cues] {})]
         (is (false? (held? none)))
         (is (false? (held? (after none :transport/stop))))
-        (is (zero? (held (after none :transport/stop))))))))
+        (is (zero? (held (after none :transport/stop))))))
+    (testing "plan 03 example 2: the end of a held cue after Stop leaves the other held, until Play"
+      (let [two (update-in playing-state [:playback :active-cues] dissoc [0 1])
+            stopped (after two :transport/stop)
+            end {:event/type :show-clock/cue-ended :cell [0 0] :run #uuid "00000000-0000-0000-0000-000000000001"
+                 :position-ids {:restart (get-in stopped [:playback :requests :restart :id]) :seek nil}}
+            ended (:state (timing/handle (assoc end :state stopped)))
+            playing (after ended :transport/play)]
+        (is (= 2 (held stopped)))
+        (is (= [true 1] [(held? ended) (held ended)]))
+        (is (= [] (fx/sub-ctx (context ended) subs/playing-cues)) "nothing plays while it holds")
+        (is (= {:state ended} (timing/handle (assoc end :state ended))) "a duplicate changes nothing")
+        (is (= [false 0] [(held? playing) (held playing)]))
+        (is (= [[1 0]] (map (juxt :col :row) (fx/sub-ctx (context playing) subs/playing-cues))))))))
 
 (deftest playing-cues-sub-test
   (let [ctx (context playing-state)
@@ -583,14 +673,80 @@
                                                           (assoc-in [:backend :streaming :running?] running?)
                                                           (assoc-in [:backend :streaming :status] status)))
                                              subs/connection-status)
-                                 [:state :status-text]))]
-    (is (= {:state :idle :status-text "No projectors enabled"}
+                                 [:running? :state :status-text]))]
+    (is (= {:running? true :state :idle :status-text "No projectors enabled"}
            (status-at true {:engines 0 :wanted 0 :pending? false :projectors {}}))
         "streaming is on, with nothing to stream")
-    (is (= {:state :streaming :status-text "Streaming to 1 of 1"}
+    (is (= {:running? true :state :streaming :status-text "Streaming to 1 of 1"}
            (status-at true {:engines 1 :wanted 1 :pending? false
                             :projectors {:a {:state :streaming :fps 59.8}}})))
-    (is (= {:state :stopped :status-text "Not streaming"} (status-at false nil)))))
+    (is (= {:running? false :state :stopped :status-text "Not streaming"} (status-at false nil)))
+    (is (= {:running? true :state :starting :status-text "Starting…"} (status-at true nil))
+        "on, and the output runtime has published nothing yet")
+    (testing "off: the intent goes first, whatever the last report says"
+      (is (= {:running? false :state :stopping :status-text "Stopping…"}
+             (status-at false {:engines 1 :wanted 0 :pending? false
+                               :projectors {:a {:state :error :error "open failed"}}}))
+          "an engine is still there, with an old error")
+      (is (= {:running? false :state :stopped :status-text "Not streaming"}
+             (status-at false {:engines 0 :wanted 0 :pending? true :projectors {}}))
+          "a queued command alone is no engine"))))
+
+(deftest connection-status-follows-published-projector-states-test
+  ;; One published sample at a time, as output-runtime/status makes them: only
+  ;; a :streaming report counts, and "N of M" needs a settled sample, with
+  ;; nothing pending and a report for each wanted output and no other. A
+  ;; drained queue alone says nothing about what streams
+  (let [starting {:state :starting}
+        streams {:state :streaming :fps 59.8}
+        failed {:state :error :error "open failed"}
+        sample (fn [engines wanted pending? projectors]
+                 {:engines engines :wanted wanted :pending? pending? :projectors projectors})
+        on (context (-> base-state
+                        (assoc :projectors {:a {:name "Laser L"} :b {:name "Laser R"}})
+                        (assoc-in [:backend :streaming :running?] true)))]
+    (reduce
+     (fn [ctx [why status expected errors]]
+       (let [ctx (fx/swap-context ctx assoc-in [:backend :streaming :status] status)
+             {:keys [running? state status-text] :as said} (fx/sub-ctx ctx subs/connection-status)]
+         (testing (str why " " (pr-str status))
+           (is (= expected [state status-text]))
+           (is (= errors (:errors said)) "the tooltip: a line for each error, by id")
+           (is (true? running?) "the intent, so the button stays Stop"))
+         ctx))
+     on
+     [["a command pending" (sample 1 1 true {:a starting})
+       [:starting "Starting…"] []]
+      ["the queue drained, and it still starts" (sample 1 1 false {:a starting})
+       [:starting "Starting…"] []]
+      ["it streams" (sample 1 1 false {:a streams})
+       [:streaming "Streaming to 1 of 1"] []]
+      ["another one added, still pending" (sample 2 2 true {:a streams :b starting})
+       [:starting "Updating outputs…"] []]
+      ["one streams, the other starts" (sample 2 2 false {:a streams :b starting})
+       [:mixed "Streaming to 1 of 2 · 1 starting"] []]
+      ["both stream" (sample 2 2 false {:a streams :b streams})
+       [:streaming "Streaming to 2 of 2"] []]
+      ["B failed before it was registered" (sample 1 2 false {:a starting :b failed})
+       [:error "0 of 2 streaming · 1 starting · 1 error"] ["Laser R: open failed"]]
+      ["both failed, with no engine" (sample 0 2 false {:b failed :a (assoc failed :error "No host")})
+       [:error "0 of 2 streaming · 2 errors"] ["Laser L: No host" "Laser R: open failed"]]
+      ["recovered: the errors go" (sample 2 2 false {:a streams :b streams})
+       [:streaming "Streaming to 2 of 2"] []]
+      ["two of three still start" (sample 3 3 false {:a streams :b starting :c starting})
+       [:mixed "Streaming to 1 of 3 · 2 starting"] []]
+      ["one not in the rig fails: its id names it" (sample 3 3 false {:a streams :b starting :c failed})
+       [:error "Streaming to 1 of 3 · 1 starting · 1 error"] ["c: open failed"]]
+      ["an old engine retires" (sample 2 1 true {:old streams :a streams})
+       [:starting "Updating outputs…"] []]
+      ["it fails while it retires" (sample 2 1 true {:old failed :a streams})
+       [:error "Updating outputs… · 1 error"] ["old: open failed"]]
+      ["still there with nothing pending: never 2 of 1" (sample 2 1 false {:old streams :a streams})
+       [:starting "Updating outputs…"] []]
+      ["gone" (sample 1 1 false {:a streams})
+       [:streaming "Streaming to 1 of 1"] []]
+      ["a warning is no error, and its output counts once" (sample 2 2 false {:a (assoc streams :warning "Corner Pin skipped") :b streams})
+       [:streaming "Streaming to 2 of 2"] []]])))
 
 (deftest zone-group-usage-counts-cues-test
   (let [s (-> base-state
@@ -1014,6 +1170,16 @@
                (into {} (keep #(when (#{:l :l2 :r} (:id %)) [(:id %) (:multi-output? %)]))
                      (fx/sub-ctx (context two) subs/rig-cards))))))))
 
+(deftest active-projector-is-nil-for-a-dangling-id-test
+  ;; Reactivity plan 14: an undo took the selected projector away
+  (let [s (assoc base-state :projectors {:r {:name "Laser R" :host "10.0.0.7"}})
+        active #(fx/sub-ctx (context (assoc-in s [:projector-ui :active-projector] %)) subs/active-projector)]
+    (is (= {:id :r :name "Laser R" :host "10.0.0.7"} (active :r)))
+    (is (nil? (active :gone)) "no projector, so the inspector shows none")
+    (is (nil? (active nil)))
+    (testing "with no projectors at all"
+      (is (nil? (fx/sub-ctx (context (assoc-in base-state [:projector-ui :active-projector] :gone)) subs/active-projector))))))
+
 (defn- matrix [projectors & {:keys [middle zone-groups]}]
   (fx/sub-ctx (context (cond-> (assoc base-state :projectors projectors)
                          middle (assoc-in [:rig :middle] middle)
@@ -1417,7 +1583,19 @@
       (is (false? (fx/sub-ctx (context s) subs/zone-map-pads-shown?)))
       (is (true? (fx/sub-ctx (context cue-pattern) subs/zone-map-pads-shown?)))
       (is (true? (fx/sub-ctx (context (assoc-in s [:chains :effect-chains [1 1]] {:active? false :items [(zone-patterns/cycle-instance)]}))
-                             subs/zone-map-pads-shown?))))))
+                             subs/zone-map-pads-shown?))))
+    (testing "stored, though disabled: the pads show for what can be switched back on (plan 11 §7)"
+      (let [nested (assoc-in s [:chains :effect-chains [1 1]]
+                             {:active? true :items [{:type :group :items [{:type :group :enabled? false
+                                                                           :items [(zone-patterns/preset-instance :chase :cell)
+                                                                                   {:effect-id :scale}]}]}]})
+            cycle (assoc-in s [:chains :effect-chains [1 1]] {:active? true :items [{:effect-id :zone-map-cycle :enabled? false}]})
+            gone (update-in cycle [:chains :effect-chains] dissoc [1 1])
+            pads (fn [s] {:pattern-pads? (in-use? s) :map-pads? (fx/sub-ctx (context s) subs/zone-map-pads-shown?)})]
+        (is (= {:pattern-pads? true :map-pads? true} (pads nested)) "a pattern in a disabled group")
+        (is (= {:pattern-pads? false :map-pads? true} (pads cycle)) "a disabled Map cycle instead: the map pads only")
+        (is (false? (:on? (fx/sub-ctx (context cycle) subs/map-cycle-state))) "and CYCLE stays off: it doesn't run")
+        (is (= {:pattern-pads? false :map-pads? false} (pads gone)) "the last one gone: neither")))))
 
 (deftest pattern-only-zone-catalogue-follows-edits-in-either-grid-test
   ;; plans/2026-11-23-cljfx-reactivity/28 §7.5: no cue, column or show target;
@@ -1630,9 +1808,10 @@
 ;; The step grid window (zones plan Z6, 08 §4, §7)
 
 (deftest step-grid-sub-test
-  (let [target {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]}
+  (let [g1 #uuid "00000000-0000-0000-0000-0000000013a1"
+        target {:domain :cue-zone-patterns :entity-key [0 0] :effect-instance-id g1}
         grid (-> (zone-patterns/preset-instance :steps :cue)
-                 (assoc :id :g1)
+                 (assoc :id g1)
                  (update :params merge {:zones [:zone/a :zone/b :zone/c :graphics]
                                         :steps [[:zone/a] [] [:zone/b :zone/c] [:graphics]]}))
         s (-> (domains/build-initial-state)
@@ -1646,7 +1825,7 @@
       (is (= [{:ref :zone/a :text "A · Beams → Left"} {:ref :zone/b :text "B → Right"} {:ref :zone/c :text "C → Left"}
               {:ref :graphics :text "Graphics"}]
              (:rows sg))))
-    (is (= :g1 (:id sg)) "the pattern's id, for the playhead")
+    (is (= g1 (:id sg)) "the pattern's id, for the playhead")
     (is (= 4 (:length sg)))
     (is (= [#{:zone/a} #{} #{:zone/b :zone/c} #{:graphics}] (:lit sg)) "the refs each step lights")
     (is (= [1 2] (:cursor sg)))
@@ -1668,11 +1847,16 @@
       (is (true? (:locked? (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :show-lock?] true) subs/step-grid target)))))
     (testing "a pattern that isn't a grid yet shows the grid it becomes"
       (let [chase (fx/swap-context ctx assoc-in [:chains :cue-chains [0 0] :zone-patterns]
-                                   [(assoc (zone-patterns/preset-instance :chase :cue) :id :p1 :params
+                                   [(assoc (zone-patterns/preset-instance :chase :cue) :id g1 :params
                                            (assoc (:params (zone-patterns/preset-instance :chase :cue)) :zones [:zone/a :zone/b :zone/c]))])
             sg (fx/sub-ctx chase subs/step-grid target)]
+        (is (= g1 (:id sg)) "the same pattern, its style switched")
         (is (false? (:grid? sg)))
         (is (= [#{:zone/a} #{:zone/b} #{:zone/c} #{:zone/a} #{:zone/b} #{:zone/c} #{:zone/a} #{:zone/b}] (:lit sg)))))
+    (testing "another pattern in its place, with an id of its own, isn't the window's: nothing"
+      (is (nil? (fx/sub-ctx (fx/swap-context ctx assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :id]
+                                             #uuid "00000000-0000-0000-0000-0000000013a2")
+                            subs/step-grid target))))
     (testing "Every laser's note, once it became zones"
       (is (= "Every laser can't be a row, because the number of lasers changes. It became zones A–D: pick a zone map that sends them where you want."
              (:every-laser-note (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :dialogs :step-grid-editor :every-laser]
@@ -1682,7 +1866,32 @@
              (:every-laser-note (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :dialogs :step-grid-editor :every-laser] [:zone/a :zone/b])
                                             subs/step-grid target)))))
     (testing "no zone pattern there: nothing"
-      (is (nil? (fx/sub-ctx ctx subs/step-grid {:domain :cue-zone-patterns :entity-key [5 0] :effect-path [0]}))))))
+      (is (nil? (fx/sub-ctx ctx subs/step-grid (assoc target :entity-key [5 0]))))
+      (is (nil? (fx/sub-ctx ctx subs/step-grid {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]}))
+          "a place is no target"))
+    (testing "the window's pattern where it is now (reactivity plan 05, examples 2 and 5)"
+      (let [p-id #uuid "00000000-0000-0000-0000-0000000013b1"
+            q-id #uuid "00000000-0000-0000-0000-0000000013b2"
+            p (-> (zone-patterns/preset-instance :steps :cell) (assoc :id p-id)
+                  (update :params merge {:zones [:zone/a] :steps [[] [:zone/a]]}))
+            q (-> (zone-patterns/preset-instance :steps :cell) (assoc :id q-id)
+                  (update :params merge {:zones [:zone/b] :steps [[:zone/b] [:zone/b] []]}))
+            t {:domain :effect-chains :entity-key [2 1] :effect-instance-id p-id}
+            items #(fx/swap-context %1 assoc-in [:chains :effect-chains [2 1] :items] %2)
+            c0 (context (-> (domains/build-initial-state)
+                            (assoc-in [:chains :effect-chains [2 1]] {:active? true :items [p q]})
+                            (assoc-in [:ui :dialogs :step-grid-editor] {:open? true :target t :cursor [0 1]})))
+            c1 (items c0 [q {:type :group :id #uuid "00000000-0000-0000-0000-0000000013b3" :items [p]}])
+            c2 (items c1 [q])
+            c3 (fx/swap-context c2 assoc-in [:chains :effect-chains [3 1]] {:active? true :items [p]})
+            c4 (items c3 [q p])]
+        (doseq [[why c] [["at first" c0] ["in a group behind Q" c1] ["back in its cell, after Q" c4]]]
+          (let [sg (fx/sub-ctx c subs/step-grid t)]
+            (is (= p-id (:id sg)) why)
+            (is (= [#{} #{:zone/a}] (:lit sg)) why)
+            (is (= [0 1] (:cursor sg)) why)))
+        (is (nil? (fx/sub-ctx c2 subs/step-grid t)) "gone from its cell: nothing, and not Q in its place")
+        (is (nil? (fx/sub-ctx c3 subs/step-grid t)) "in another cell: still nothing")))))
 
 (deftest can-paste-test
   ;; Keyboard plan Phase 4, Step 4a (D13 B): Paste follows the clipboard; an

@@ -25,8 +25,10 @@
    [:ui] only. An event the lock refuses that another event dispatches is
    refused too: each goes through the pipeline."
   (:require [laser-show.animation.safety :as safety]
+            [laser-show.events.handlers.chain.helpers :as chain-helpers]
             [laser-show.events.handlers.history :as history]
             [laser-show.events.helpers :as h]
+            [laser-show.events.safety-guard :as guard]
             [laser-show.routing.zone-patterns :as zone-patterns]))
 
 (def blocked-events
@@ -46,7 +48,8 @@
     :vibe/toggle-cell :vibe/toggle-fx :vibe/set-option :vibe/make-from-rows :vibe/clear-control
     :vibe/add-reaction :vibe/add-master :vibe/add-morph
     ;; They rebuild or re-route the engines
-    :projectors/add-manual :projectors/update-settings :projectors/update-driver-config :projectors/toggle-enabled
+    :projectors/add-manual :projectors/submit-manual-form :projectors/update-settings
+    :projectors/update-driver-config :projectors/toggle-enabled
     :projectors/toggle-zone-group :projectors/vp-toggle-zone-group :projectors/set-service-enabled
     :projectors/enable-all-by-ip :projectors/enable-device :projectors/request-remove :projectors/remove
     :zone-groups/request-remove :zone-groups/remove
@@ -97,31 +100,48 @@
    through chain-config's domains."
   #{"chain" "modulator" "keyframe"})
 
+(def ^:private instance-addressed
+  "The events that name their effect by its instance, not by its place: a
+   modulator's field edits (reactivity plan 07,
+   chain-helpers/resolve-effect-instance-path)."
+  #{:modulator/update-param :modulator/set-type :modulator/update-static-value})
+
 (defn pattern-edit?
   "Is event an edit of a zone pattern or a Map cycle (zones plan Z5): a
    chain, modulator or keyframe event on a cue's patterns (the domain
    :cue-zone-patterns, the pattern window's), or on a zone pattern or Map
-   cycle in an effects cell (the item at :effect-path)? Where the pictures
-   go is structure, as a target is (Z4-Q4 A); a point effect's edit in a
-   cell goes through, as before."
-  [{:keys [event/type domain entity-key effect-path state]}]
+   cycle in an effects cell (the item at :effect-path, or for a modulator's
+   field edit the effect with its instance's id, wherever it is now)? Where
+   the pictures go is structure, as a target is (Z4-Q4 A); a point
+   effect's edit in a cell goes through, as before."
+  [{:keys [event/type domain entity-key effect-path state] :as event}]
   (boolean
    (and (keyword? type)
         (contains? chain-edit-namespaces (namespace type))
         (case domain
           :cue-zone-patterns true
-          :effect-chains (and (sequential? effect-path)
-                              (contains? zone-patterns/zone-stage-ids
-                                         (:effect-id (get-in state (into [:chains :effect-chains entity-key :items] effect-path)))))
+          :effect-chains (let [path (if (contains? instance-addressed type)
+                                      (chain-helpers/resolve-effect-instance-path state event)
+                                      effect-path)]
+                           (and (sequential? path)
+                                (contains? zone-patterns/zone-stage-ids
+                                           (:effect-id (get-in state (into [:chains :effect-chains entity-key :items] path))))))
           false))))
 
 (def ^:private pattern-edit-refused "Zone pattern edit refused")
 
 (def safety-edits
   "The safety zone edits (zones plan Z1). The lock refuses one only when it
-   would make a zone larger (widens-a-zone?)."
-  #{:projectors/set-safety :projectors/add-blocked-area :projectors/remove-blocked-area
-    :projectors/copy-safety})
+   would make a zone larger: a coordinate edit or Reset by the change it
+   proposes (reviewed-widening), the others by a dry run (widens-a-zone?)."
+  #{:projectors/set-safety :projectors/set-safety-coordinate :projectors/reset-safety
+    :projectors/add-blocked-area :projectors/remove-blocked-area :projectors/copy-safety})
+
+(def ^:private reviewed-edits
+  "The safety edits whose handler trusts no :confirmed? on the event, only an
+   answer to their own question (safety-guard/review-answer): a dry run
+   with :confirmed? true would only ask."
+  #{:projectors/set-safety-coordinate :projectors/reset-safety})
 
 (def ^:private larger-zone-refused "Larger safety zone refused")
 
@@ -152,6 +172,22 @@
                                             (get-in after [:projectors id :safety])))
                    (keys (:projectors after))))))
 
+(defn- reviewed-widening
+  "The state to refuse a coordinate edit or Reset from when the change it
+   proposes now (guard/zone-edit-proposal) makes its zone larger, outputting
+   or not; else nil. An answer to its own open question is judged by the
+   intent the question asked about, and refused from the state with that
+   question closed, so the dialog doesn't stay open. A stale answer goes on
+   to its handler, which writes nothing."
+  [{:keys [state review-id] :as event}]
+  (let [widens? (fn [intent]
+                  (let [{:keys [before after same?] :as proposal} (guard/zone-edit-proposal state intent)]
+                    (and proposal (not same?) (safety/widens? before after))))]
+    (if (some? review-id)
+      (when-let [{:keys [intent closed stale?]} (guard/review-answer state event)]
+        (when (and (not stale?) (widens? intent)) closed))
+      (when (widens? event) state))))
+
 (defn- refuse
   "state with the notice that the lock refused an event of type: under the
    switch ([:ui :show-lock-notice] {:text :event}) and on the status bar."
@@ -169,5 +205,8 @@
       (not (locked? state)) (handler event)
       (contains? blocked-events type) (refuse state type (refused-text type))
       (pattern-edit? event) (refuse state type pattern-edit-refused)
+      (contains? reviewed-edits type) (if-let [from (reviewed-widening event)]
+                                        (refuse from type larger-zone-refused)
+                                        (handler event))
       (and (contains? safety-edits type) (widens-a-zone? handler event)) (refuse state type larger-zone-refused)
       :else (handler event))))

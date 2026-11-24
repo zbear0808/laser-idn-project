@@ -11,7 +11,8 @@
    
    The state.core namespace is agnostic about persistence - it just holds state.
    This namespace decides what gets saved and loaded."
-  (:require [clojure.string :as str]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.tools.logging :as log]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
@@ -19,7 +20,9 @@
             [laser-show.state.rig-file :as rig-file]
             [laser-show.state.serialization :as ser]
             [laser-show.state.templates :as templates]
-            [laser-show.timeline.model :as model]))
+            [laser-show.timeline.model :as model])
+  (:import [java.nio.file CopyOption Files Path StandardCopyOption]
+           [java.nio.file.attribute FileAttribute]))
 
 
 (def default-projects-dir
@@ -84,6 +87,72 @@
             {:path [:chains :projector-effects] :owner :rig}
             {:path [:zone-maps] :owner :show}
             {:path [:zones] :owner :show :merge-defaults? true}]}})
+
+(def ^:private member-names
+  "The names of a project zip's members (zip-filenames)."
+  (set (vals zip-filenames)))
+
+(defn- format-error
+  "The error for a member that isn't what a show's is: problem at path in it."
+  [member path problem]
+  (ex-info (str member (when (seq path) (str " at " path)) " " problem)
+           {:member member :path path}))
+
+(defn- grid-cell? [k]
+  (and (vector? k) (= 2 (count k)) (every? integer? k)))
+
+(defn- check-grid!
+  "Throw unless the cells at path in content.edn's data are {[col row] cell}
+   with map cells, whose :items, when there are any, are a sequence of maps."
+  [member data path]
+  (let [cells (get-in data path)]
+    (when-not (map? cells)
+      (throw (format-error member path "is not a map")))
+    (doseq [[k cell] cells
+            :let [at (conj path k)]]
+      (when-not (grid-cell? k)
+        (throw (format-error member at "is not a [col row] cell")))
+      (when-not (map? cell)
+        (throw (format-error member at "is not a map")))
+      (let [items (:items cell)]
+        (when-not (or (nil? items) (and (sequential? items) (every? map? items)))
+          (throw (format-error member (conj at :items) "is not a sequence of maps")))))))
+
+(defn checked-project-files
+  "files ({filename data}, as a project zip is read) when a show is in it,
+   else throws ex-info naming the member and the path in it (:member :path):
+   - content.edn must be there: a map whose :chains holds :cue-chains and
+     :effect-chains, each a map ({} for an empty grid) of [col row] integer
+     cells, each a map whose :items, when there are any, are a sequence of
+     maps. Its later paths ([:chains :projector-effects], :zone-maps,
+     :zones) may be missing.
+   - project-metadata.edn and hardware.edn may be missing (their paths then
+     take their defaults, as an old show's do), but one that is there is a
+     map. A damaged one isn't a missing one: it fails.
+   - Every path persistent-state-mapping reads from a member is a map, or
+     isn't there.
+   Other members are not looked at. Nothing about the content beyond that
+   (how many cues, which ids, what effects) is checked here."
+  [files]
+  (let [content (:content zip-filenames)]
+    (when-not (map? files)
+      (throw (format-error "the project" [] "is not a map of members")))
+    (when-not (contains? files content)
+      (throw (format-error content [] "is missing")))
+    (doseq [[file-key member] zip-filenames
+            :when (contains? files member)
+            :let [data (get files member)]]
+      (when-not (map? data)
+        (throw (format-error member [] "is not a map")))
+      (doseq [{:keys [path]} (get-in persistent-state-mapping [file-key :paths])
+              :let [v (get-in data path)]]
+        (when-not (or (nil? v) (map? v))
+          (throw (format-error member path "is not a map")))))
+    (when-not (map? (get-in files [content :chains]))
+      (throw (format-error content [:chains] "is not a map")))
+    (check-grid! content (get files content) [:chains :cue-chains])
+    (check-grid! content (get files content) [:chains :effect-chains])
+    files))
 
 
 ;; Pure Document Functions
@@ -190,12 +259,31 @@
         (update :held-inputs #(into #{} (remove keyboard?) %))
         (update :active-triggers #(into {} (remove (comp keyboard? :input val)) %)))))
 
+(defn begin-document
+  "state with a new document identity: a fresh random UUID at
+   [:project :document-id] (see state.domains). The starter show gets one at
+   start, and every New and Open (reset-session), so work that comes back
+   for the show that went (events.helpers/same-document?) can tell."
+  [state]
+  (assoc-in state [:project :document-id] (random-uuid)))
+
+(defn- end-learn
+  "state without the learn waiting for an input (handlers/input.clj): what
+   it learns goes into the show ([:config :input]), so its capture, should
+   one still come, finds no learn and binds nothing into the next show."
+  [state]
+  (cond-> state
+    (get-in state [:backend :input])
+    (update-in [:backend :input] dissoc :learning-target :learning-capture)))
+
 (defn- reset-session
   "Reset state that refers to the previous document (playback, what vibe
    mode is doing, selection, list UI, dialogs, the status bar's notice, the
    Vibes tab's selection, a pending zone map switch and the Map cycle's
-   pause, the pattern pads' style, undo history, project metadata).
-   Backend/runtime state (streaming, Link, MIDI/OSC, discovered devices) is kept."
+   pause, the pattern pads' style, a learn in progress, undo history,
+   project metadata), and give the new document its own identity
+   (begin-document). Backend/runtime state (streaming, Link, MIDI/OSC,
+   discovered devices) is kept."
   [state initial]
   (-> state
       (assoc :playback (:playback initial))
@@ -204,6 +292,8 @@
       (assoc :list-ui (:list-ui initial))
       (assoc :history (:history initial))
       (assoc :project (:project initial))
+      (begin-document)
+      (end-learn)
       (assoc :zone-group-ui (:zone-group-ui initial))
       (assoc-in [:ui :dialogs] (get-in initial [:ui :dialogs]))
       (assoc-in [:ui :notice] (get-in initial [:ui :notice]))
@@ -234,15 +324,23 @@
    machine's rig (projectors, virtual projectors, [:rig], calibration) stays
    as it is (D-30): the zip's copy of it is only read, to match the show onto
    this rig. The show's pins follow their units to this rig's ids
-   (rig-file/rename-pins).
+   (rig-file/rename-pins). The rig's group copy keeps the definitions of the
+   groups its lasers are in that the incoming show doesn't define, as the
+   outgoing show and copy had them (rig-file/with-group-copy); the incoming
+   show's own win, and none goes into the incoming show.
    
-   zip-contents is the {filename data} map from serialization/load-from-zip.
+   zip-contents is the {filename data} map from read-project. It is checked
+   first (checked-project-files): contents that aren't a show throw, and
+   replace nothing.
    An old show is converted (state.migration: Z2's rows, its groups judged by
    its own hardware, then Z4's, its routing as :target) before the saved
-   baseline is taken, so it isn't \"unsaved\" right after loading."
+   baseline is taken, so it isn't \"unsaved\" right after loading. The show
+   opened has a new identity (reset-session)."
   [state zip-contents zip-path]
   (let [initial (domains/build-initial-state)
-        hardware (get zip-contents (:hardware zip-filenames))]
+        zip-contents (checked-project-files zip-contents)
+        hardware (get zip-contents (:hardware zip-filenames))
+        outgoing-copy (rig-file/group-copy state)]
     (-> state
         (replace-document initial (zip-contents->file-data zip-contents) #{:show})
         (reset-session initial)
@@ -251,13 +349,15 @@
         (migration/zones-z2-show hardware)
         (migration/zones-z4)
         (rig-file/rename-pins hardware)
+        (rig-file/with-group-copy outgoing-copy)
         history/mark-clean
         (assoc-in [:project :current-file] zip-path))))
 
 (defn new-project-state
   "Return state with a fresh starter show on the same rig: the rig stays as
    it is, and the groups its lasers are in come into the new show
-   (rig-file/group-copy). Runtime/backend state is kept."
+   (rig-file/group-copy). The new show has a new identity (reset-session).
+   Runtime/backend state is kept."
   [state]
   (let [initial (domains/build-initial-state)
         rig-groups (rig-file/group-copy state)]
@@ -274,28 +374,81 @@
 ;; I/O Functions
 
 
-(defn write-project!
-  "Write a project-files map (see project-files) to zip-path.
-   Returns true on success, false on failure."
-  [zip-path files]
-  (try
-    (boolean (ser/save-to-zip! zip-path files))
-    (catch Exception e
-      (log/error "Error saving project:" (.getMessage e))
-      false)))
-
 (defn read-project
-  "Read a project zip. Returns the {filename data} map, or nil if the file is
-   missing or unreadable."
+  "Read a project zip: the {filename data} of its members (zip-filenames),
+   each read strictly (serialization/load-from-zip :strict?) and then
+   checked (checked-project-files). nil when the file is missing, can't be
+   read, or holds no show this build can open; the reason is logged, once."
   [zip-path]
   (try
     (if-not (.exists (java.io.File. ^String zip-path))
       (do (log/warn "Project file does not exist:" zip-path)
           nil)
-      (ser/load-from-zip zip-path))
+      (checked-project-files (ser/load-from-zip zip-path :strict? true :filenames member-names)))
     (catch Exception e
-      (log/error "Error loading project:" (.getMessage e))
+      (log/error "Could not read project" zip-path "-" (ex-message e))
       nil)))
+
+(defn- staging-file
+  "A new, empty file beside target, named after it (<name>.<uuid>.tmp):
+   in the same folder, so on the same file system."
+  ^Path [^Path target]
+  (Files/createFile (.resolveSibling target (str (.getFileName target) "." (random-uuid) ".tmp"))
+                    (make-array FileAttribute 0)))
+
+(defn- publish-project!
+  "Move the checked staged file onto target, replacing the file there, in
+   one step: the one moment a save changes what target holds. Where the file
+   system can't replace a file in one step this throws
+   (AtomicMoveNotSupportedException), and target is left as it was: the
+   last good show is never deleted or cut short to make room."
+  [^Path staged ^Path target]
+  (Files/move staged target (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE])))
+
+(defn write-project!
+  "Write a project-files map (see project-files) to zip-path, without ever
+   leaving zip-path half written or unreadable:
+   1. its folder is made when it isn't there, and the zip is written to a
+      new file beside it (staging-file), every value printed in full;
+   2. that file must read back (read-project, as Open reads it) as files,
+      each of the three members equal to its value here: a value that
+      doesn't print as EDN, a member left out or a writer that wrote
+      something else fails here;
+   3. it is moved onto zip-path in one step (publish-project!).
+   Returns true when zip-path holds the new show. false when any step
+   failed (logged), with zip-path as it was, or still absent. The staged
+   file is removed either way."
+  [zip-path files]
+  (let [staged (volatile! nil)
+        refuse (fn [why]
+                 (log/error "Not saving" zip-path "-" why)
+                 false)]
+    (try
+      (if-not (and (map? files) (every? #(contains? files %) member-names))
+        (refuse (str "a save needs all of " (str/join ", " (sort member-names))))
+        (let [target (.toAbsolutePath (.toPath (io/file zip-path)))]
+          (Files/createDirectories (.getParent target) (make-array FileAttribute 0))
+          (vreset! staged (staging-file target))
+          (cond
+            (not (binding [*print-length* nil *print-level* nil *print-meta* false]
+                   (ser/save-to-zip! (str @staged) files)))
+            (refuse "the zip couldn't be written")
+
+            (not= files (read-project (str @staged)))
+            (refuse "what was written doesn't read back as the show")
+
+            :else
+            (do (publish-project! @staged target)
+                true))))
+      (catch Exception e
+        (log/error "Could not save project" zip-path "-" (ex-message e))
+        false)
+      (finally
+        (when-let [^Path p @staged]
+          (try
+            (Files/deleteIfExists p)
+            (catch Exception e
+              (log/error "Could not remove the temporary file" (str p) "-" (ex-message e)))))))))
 
 (defn get-default-project-filename
   "Generate a default project filename with timestamp.

@@ -96,7 +96,19 @@
                           ["the calibration" #(assoc-in % [:chains :projector-effects :projector-10-0-0-5-1 :items] [])]
                           ["the definition of a group Laser L is in" #(assoc-in % [:zone-groups :graphics :name] "Gfx")]
                           ["that group's colour" #(assoc-in % [:zone-groups :graphics :color] "#000000")]]]
-      (is (true? (rig-file/rig-changed? s (edit s))) label))))
+      (is (true? (rig-file/rig-changed? s (edit s))) label)))
+  (testing "the copy's own definitions (reactivity plan 23): only one of a group a laser is in that the show doesn't define"
+    (let [s (-> (rigged)
+                (assoc-in [:projectors :projector-10-0-0-5-1 :zone-groups] [:graphics :group-balcony])
+                (assoc-in [:rig-file :group-copy] {:group-balcony {:id :group-balcony :name "Balcony" :description "House"}
+                                                   :group-unused {:id :group-unused :name "Unused"}
+                                                   :graphics {:id :graphics :name "Graphics (old)"}}))]
+      (is (true? (rig-file/rig-changed? s (assoc-in s [:rig-file :group-copy :group-balcony :description] "Show")))
+          "a listed group only the copy defines")
+      (doseq [[label edit] [["an unused one" #(assoc-in % [:rig-file :group-copy :group-unused :name] "Unused 2")]
+                            ["one the show's definition shadows" #(assoc-in % [:rig-file :group-copy :graphics :name] "Old")]
+                            ["the writer's status" #(update % :rig-file assoc :requested 9 :written 9 :status :saved :written-at 5)]]]
+        (is (false? (rig-file/rig-changed? s (edit s))) label)))))
 
 (def ^:private unit-r "1F 2E 3D 4C 5B 6A 79 88 97 A6 B5 C4 D3 E2 F1 00")
 

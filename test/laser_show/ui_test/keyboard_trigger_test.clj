@@ -297,8 +297,10 @@
 
 (deftest focused-step-grid-keeps-its-space-test
   (bind! :space {:type :trigger-cue :target [1 0]})
+  ;; A1 has no pattern: its first, as the Pattern chip asks for it
   (events/dispatch! {:event/type :step-grid/open
-                     :target {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]}})
+                     :target {:domain :cue-zone-patterns :entity-key [0 0]}
+                     :create-first? true})
   (let [robot (ui/focus! (ui/robot) "#step-grid-body")
         first-step #(at :chains :cue-chains [0 0] :zone-patterns 0 :params :steps 0)]
     (ui/wait-for! #(= [:zone/a] (first-step)))

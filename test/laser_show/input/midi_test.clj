@@ -68,7 +68,7 @@
     (is (= 1 (count @sent)))))
 
 (defn- fake-midi-in
-  "A midi-in map shaped like overtone.midi/midi-in's result, with a
+  "A midi-in map shaped like midi/open-input!'s result, with a
    Transmitter and MidiDevice that record what was done to them."
   [calls]
   {:name "Test Device"
@@ -80,25 +80,45 @@
              (isOpen [_] true)
              (close [_] (swap! calls conj :close-device)))})
 
-(deftest disconnect-detaches-and-closes-test
-  (let [calls (atom [])
-        state {:enabled? true
-               :devices {"Test Device" (fake-midi-in calls)}
-               :handlers {"Test Device" identity}
-               :connected-devices #{"Test Device"}}
-        after (midi/disconnect-device state "Test Device")]
-    (is (= [[:set-receiver nil] :close-transmitter :close-device] @calls))
-    (is (empty? (:devices after)))
-    (is (empty? (:handlers after)))
-    (is (empty? (:connected-devices after)))))
+(deftest close-input-detaches-and-closes-test
+  (let [calls (atom [])]
+    (midi/close-input! (fake-midi-in calls))
+    (is (= [[:set-receiver nil] :close-transmitter :close-device] @calls))))
 
-(deftest disconnect-all-closes-every-device-test
+(deftest open-input-test
   (let [calls (atom [])
-        state {:devices {"A" (fake-midi-in calls) "B" (fake-midi-in calls)}
-               :connected-devices #{"A" "B"}}
-        after (midi/disconnect-all state)]
-    (is (= 2 (count (filter #{:close-device} @calls))))
-    (is (empty? (:connected-devices after)))))
+        source (fx/midi-source "Test Device" calls)
+        sent (atom [])
+        midi-in (midi/open-input! source #(swap! sent conj (:note %)) (fn [_]))]
+    (testing "the device opened, a transmitter of its own, and our receiver on it"
+      (is (= [:open :get-transmitter [:set-receiver (:receiver midi-in)]] @calls))
+      (is (some? (:receiver midi-in))))
+    (testing "what the device sends comes to the handler, real-shaped"
+      (fx/send-midi! source (fx/short-message javax.sound.midi.ShortMessage/NOTE_ON 0 60 100))
+      (is (= [60] @sent)))
+    (testing "closed, nothing comes any more"
+      (midi/close-input! midi-in)
+      (fx/send-midi! source (fx/short-message javax.sound.midi.ShortMessage/NOTE_ON 0 61 100))
+      (is (= [60] @sent))))
+  (testing "a device that won't give a transmitter is closed again, and the error thrown"
+    (let [calls (atom [])
+          source (assoc (fx/midi-source "Busy" calls)
+                        :device (reify javax.sound.midi.MidiDevice
+                                  (isOpen [_] false)
+                                  (open [_] (swap! calls conj :open))
+                                  (getTransmitter [_] (throw (javax.sound.midi.MidiUnavailableException. "busy")))
+                                  (close [_] (swap! calls conj :close-device))))]
+      (is (thrown-with-msg? javax.sound.midi.MidiUnavailableException #"busy"
+                            (midi/open-input! source (fn [_]) (fn [_]))))
+      (is (= [:open :close-device] @calls)))))
+
+(deftest find-device-test
+  (let [sources [{:name "USB MIDI (Port 1)"} {:name "Launchpad Mini"} {:name "Launchpad"}]]
+    (is (= "Launchpad" (:name (midi/find-device sources "Launchpad"))) "its own name first")
+    (is (= "USB MIDI (Port 1)" (:name (midi/find-device sources "USB MIDI (Port 1)"))) "a name is not a pattern")
+    (is (= "Launchpad Mini" (:name (midi/find-device sources "mini"))) "else part of a name, any case")
+    (is (nil? (midi/find-device sources "Keystation")))
+    (is (nil? (midi/find-device sources nil)))))
 
 (deftest stale-handler-ignored-after-disconnect-test
   (let [sent (atom [])

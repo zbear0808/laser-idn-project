@@ -7,7 +7,9 @@
    - Each top-level clip renders with clip-local time, so modulators and
      keyframes start from the clip's start, not the cue trigger.
    - A timeline with :timeline/chase :mtc follows incoming MIDI timecode
-     (apply-chase)."
+     (apply-chase). The show clock's chase reports and their handler name
+     which definition and which owner they mean in the same words
+     (source-version, intent-owner)."
   (:require [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.timeline.model :as model]
@@ -54,6 +56,28 @@
   "Does this cue follow incoming MIDI timecode?"
   [cue]
   (and (cue-chains/timeline-cue? cue) (= :mtc (:timeline/chase cue))))
+
+(defn source-version
+  "Which version of the cue at cell in state follows timecode
+   ([:playback :chase-sources :cells cell], given by the edit that made it,
+   events.handlers.timeline/reconcile-chase-sources), or nil when the cue
+   there doesn't follow. A follower the show opened or started with, which
+   no edit has versioned, is 0."
+  [state cell]
+  (when (chases-mtc? (get-in state [:chains :cue-chains cell]))
+    (get-in state [:playback :chase-sources :cells cell] 0)))
+
+(defn intent-owner
+  "Who holds a cell, by its intent in [:playback :active-cues]: :none (no
+   intent), [:run r] (a run the grid, the editor or a vibe started), or
+   [:chase k] (timecode, episode k, show-time's :chase-id). Anything else
+   is [:other intent], never :none."
+  [intent]
+  (cond
+    (nil? intent) :none
+    (:chasing? intent) [:chase (:chase-id intent)]
+    (some? (:run intent)) [:run (:run intent)]
+    :else [:other intent]))
 
 (defn chase-beat
   "Timeline beat for show time `seconds`: beat 0 sits at :timeline/tc-start."

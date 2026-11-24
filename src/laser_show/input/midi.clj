@@ -2,10 +2,14 @@
   "MIDI input handler using overtone/midi-clj.
    Converts MIDI messages to standardized input events.
    
-   This module provides pure functions for MIDI state management.
-   State is passed as a parameter and returned as output.
-   Actual state storage is managed by the application state in domains.clj."
-  (:require [clojure.tools.logging :as log]
+   It also lists the inputs, builds the handlers a connected input hands
+   its messages to, and opens and closes an input's port (open-input!,
+   close-input!): laser-show.input.devices, which owns every port, calls
+   those on its worker thread. App state ([:backend :input :midi]) holds
+   plain data only (the switch, the channel filter, the inputs' status);
+   the pure functions below take that map and return it changed."
+  (:require [clojure.string :as str]
+            [clojure.tools.logging :as log]
             [overtone.midi :as m]
             [laser-show.input.events :as events]
             [laser-show.input.mtc :as mtc]
@@ -13,11 +17,14 @@
   (:import [javax.sound.midi MidiDevice Transmitter]))
 
 
-;; Device Discovery (pure functions - no state needed)
+;; Device Discovery
 
 
 (defn list-devices
-  "Returns a list of available MIDI input devices."
+  "Returns a list of available MIDI input devices (overtone.midi/midi-sources:
+   {:name :description :vendor :version :info :device …}, :device the
+   javax.sound.midi device). Enumerating them can take a while: the device
+   worker (input.devices) calls this."
   []
   (try
     (m/midi-sources)
@@ -31,11 +38,13 @@
   (mapv :name (list-devices)))
 
 (defn find-device
-  "Finds a MIDI device by name (partial match)."
-  [name-pattern]
-  (u/seek #(re-find (re-pattern (str "(?i)" name-pattern)) 
-                    (:name %))
-          (list-devices)))
+  "The input in sources (as list-devices lists them) named device-name,
+   else the first whose name contains it, ignoring case; nil if none."
+  [sources device-name]
+  (when device-name
+    (let [part (str/lower-case device-name)]
+      (or (u/seek #(= device-name (:name %)) sources)
+          (u/seek #(some-> (:name %) str/lower-case (str/includes? part)) sources)))))
 
 
 ;; MIDI Message Conversion (pure function)
@@ -87,7 +96,7 @@
       nil)))
 
 
-;; MIDI State Operations (pure functions)
+;; Handlers and ports
 
 
 (defn create-midi-handler
@@ -100,7 +109,10 @@
    Args:
    - device-name: Name of the device for logging
    - dispatch-fn: Function to call with converted events
-   - get-state-fn: Function that returns current MIDI state (for checking enabled/filter)
+   - get-state-fn: Function that returns current MIDI state: :enabled? and
+     :channel-filter, and :connected-devices, which has device-name only
+     while this handler's connection is the live one (input.devices' fn
+     says so)
    
    Returns: handler function that processes raw MIDI messages"
   [device-name dispatch-fn get-state-fn]
@@ -131,36 +143,10 @@
                  (mtc/full-frame? data))
         (mtc/on-sysex! data)))))
 
-(defn connect-device
-  "Connects to a MIDI input device by name.
-   Returns updated state map with device and handler.
-   
-   Note: This function performs side effects (opens MIDI port).
-   The returned state includes the live device/handler references."
-  [midi-state device-name dispatch-fn get-state-fn]
-  (try
-    (if-let [device-info (find-device device-name)]
-      (let [actual-name (:name device-info)
-            receiver (m/midi-in device-info)
-            handler (create-midi-handler actual-name dispatch-fn get-state-fn)]
-        ;; Set up the handler (side effect)
-        (m/midi-handle-events receiver handler (create-sysex-handler actual-name get-state-fn))
-        (log/info "Connected to MIDI device:" actual-name)
-        ;; Return updated state
-        (-> midi-state
-            (assoc-in [:devices actual-name] receiver)
-            (assoc-in [:handlers actual-name] handler)
-            (update :connected-devices (fnil conj #{}) actual-name)))
-      (do
-        (log/warn "MIDI device not found:" device-name)
-        midi-state))
-    (catch Exception e
-      (log/error "Error connecting to MIDI device:" (.getMessage e))
-      midi-state)))
-
-(defn- close-midi-in!
-  "Detaches our receiver and closes the transmitter and device opened by
-   overtone.midi/midi-in. Each step is attempted independently."
+(defn close-input!
+  "Detaches our receiver and closes the transmitter and device of midi-in
+   (open-input!'s, or a source with none yet). Each step is attempted
+   independently."
   [{:keys [transmitter device] :as midi-in}]
   (when transmitter
     (try (.setReceiver ^Transmitter transmitter nil)
@@ -172,28 +158,29 @@
          (catch Exception e (log/warn "Error closing MIDI device:" (.getMessage e)))))
   midi-in)
 
-(defn disconnect-device
-  "Disconnects from a MIDI device: detaches the handler and closes the port.
-   Returns updated state map."
-  [midi-state device-name]
-  (if-let [midi-in (get-in midi-state [:devices device-name])]
-    (do
-      (close-midi-in! midi-in)
-      (log/info "Disconnected from MIDI device:" device-name)
-      (-> midi-state
-          (update :devices dissoc device-name)
-          (update :handlers dissoc device-name)
-          (update :connected-devices (fnil disj #{}) device-name)))
-    midi-state))
-
-(defn disconnect-all
-  "Disconnects from all MIDI devices.
-   Returns updated state map."
-  [midi-state]
-  (reduce (fn [state device-name]
-            (disconnect-device state device-name))
-          midi-state
-          (keys (:devices midi-state))))
+(defn open-input!
+  "Opens source (an input as list-devices lists it) for reading: its device
+   opened if it isn't yet, a transmitter of its own, and on that a receiver
+   handing short messages to on-short and SysEx to on-sysex
+   (overtone.midi/midi-handle-events). Every call opens another transmitter,
+   so another delivery of each message: the device worker opens a device
+   once. Returns source with :transmitter and :receiver, a midi-in for
+   close-input!. Throws when the port won't open, having closed what it
+   opened."
+  [{:keys [^MidiDevice device] :as source} on-short on-sysex]
+  (let [transmitter (try
+                      (when-not (.isOpen device)
+                        (.open device))
+                      (.getTransmitter device)
+                      (catch Exception e
+                        (close-input! source)
+                        (throw e)))
+        midi-in (assoc source :transmitter transmitter)]
+    (try
+      (assoc midi-in :receiver (m/midi-handle-events midi-in on-short on-sysex))
+      (catch Exception e
+        (close-input! midi-in)
+        (throw e)))))
 
 (defn connected-devices
   "Returns set of currently connected device names."
@@ -272,54 +259,20 @@
   (:learn-mode midi-state))
 
 
-;; Auto-Connect (pure function returning updated state)
-
-
-(defn auto-connect
-  "Attempts to connect to the first available MIDI input device.
-   Returns updated state."
-  [midi-state dispatch-fn get-state-fn]
-  (if-let [devices (seq (list-devices))]
-    (do
-      (log/info "Found MIDI devices:" (mapv :name devices))
-      (connect-device midi-state (:name (first devices)) dispatch-fn get-state-fn))
-    (do
-      (log/info "No MIDI input devices found")
-      midi-state)))
-
-
 ;; Initialization (pure functions)
 
 
 (def initial-state
-  "Default MIDI state structure."
+  "Default MIDI state structure: plain data (the ports are the device
+   worker's, input.devices)."
   {:enabled? true
-   :devices {}
+   :available-devices []
    :connected-devices #{}
-   :handlers {}
+   :requests {}
    :channel-filter nil
    :learn-mode nil
    :note-mappings {}
    :cc-mappings {}})
-
-(defn init
-  "Initializes MIDI state. Optionally auto-connects to first device.
-   Returns initialized state."
-  ([midi-state]
-   (init midi-state false nil nil))
-  ([midi-state auto-connect? dispatch-fn get-state-fn]
-   (let [state (enable midi-state)]
-     (if auto-connect?
-       (auto-connect state dispatch-fn get-state-fn)
-       state))))
-
-(defn shutdown
-  "Shuts down MIDI system, disconnecting all devices.
-   Returns cleaned up state."
-  [midi-state]
-  (-> midi-state
-      disconnect-all
-      disable))
 
 
 ;; Utility functions for working with MIDI data

@@ -22,6 +22,7 @@
             [clojure.string :as str]
             [laser-show.animation.show-time :as show-time]
             [laser-show.subs :as subs]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.clock-view :as clock-view]
             [laser-show.views.components.trigger-bank :as trigger-bank])
   (:import [javafx.css PseudoClass]
@@ -91,15 +92,25 @@
          :else (str "Switch to " name " on the next " (if bar? "bar" "beat (Shift: the bar)")))
        (when (seq bindings) (str " · " (keys-text bindings)))))
 
+(defn- bar-item
+  "Switch on the bar, for the pad of map-id (:cycle for CYCLE): a check
+   menu item that shows the pad's setting, after a refused click too
+   (applied-value)."
+  [node-id map-id bar?]
+  {:fx/type applied-value/applied-control
+   :property :selected
+   :address [:zone-map-pad map-id :bar?]
+   :value bar?
+   :on-change (fn [on?] {:event/type :zone-map/set-pad-bar :map map-id :bar? on?})
+   :desc {:fx/type :check-menu-item
+          :id (str node-id "-bar")
+          :text "Switch on the bar"}})
+
 (defn- pad-menu
   "A pad's menu: Switch on the bar, its control, Edit maps…."
   [node-id {:keys [id bar? learning? bindings]}]
   {:fx/type :context-menu
-   :items [{:fx/type :check-menu-item
-            :id (str node-id "-bar")
-            :text "Switch on the bar"
-            :selected (boolean bar?)
-            :on-action {:event/type :zone-map/set-pad-bar :map id :bar? (not bar?)}}
+   :items [(bar-item node-id id bar?)
            {:fx/type :separator-menu-item}
            {:fx/type :menu-item
             :id (str node-id "-learn")
@@ -203,11 +214,7 @@
   "CYCLE's menu: Switch on the bar, its control."
   [node-id {:keys [bar? learning? bindings]}]
   {:fx/type :context-menu
-   :items [{:fx/type :check-menu-item
-            :id (str node-id "-bar")
-            :text "Switch on the bar"
-            :selected (boolean bar?)
-            :on-action {:event/type :zone-map/set-pad-bar :map :cycle :bar? (not bar?)}}
+   :items [(bar-item node-id :cycle bar?)
            {:fx/type :separator-menu-item}
            {:fx/type :menu-item
             :id (str node-id "-learn")

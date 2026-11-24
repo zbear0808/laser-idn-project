@@ -398,7 +398,10 @@
   (let [robot (ui/robot)
         config #(get-in (app-state) [:projectors :choice :driver-config])
         combo-value #(ui/on-fx-thread (fn [] (.getValue ^javafx.scene.control.ComboBox (ui/query "#driver-field-order"))))
-        checked? #(ui/selected? "#driver-field-fast")]
+        ;; nil while there is no box: ui/selected? says false for that too
+        checked? #(when-let [box (ui/query "#driver-field-fast")]
+                    (ui/on-fx-thread (fn [] (.isSelected ^javafx.scene.control.CheckBox box))))
+        notice-id #(get-in (app-state) [:ui :notice :id])]
     (driver/register! (update choice-descriptor :fields conj {:key :fast :label "Fast" :type :boolean}))
     (try
       (loaded!)
@@ -414,8 +417,14 @@
       (ui/assert-text! "#status-notice-text" "Show lock is on: Change Output Settings refused. Unlock it on the Perform tab")
       (ui/wait-for! #(= :be (combo-value)))
       (is (= {:order :be} (config)))
-      (ui/click! robot "#driver-field-fast")
-      (ui/wait-for! #(not (checked?)))
+      (let [combo-refusal (notice-id)]
+        (ui/click! robot "#driver-field-fast")
+        (ui/wait-for! #(and (some? (notice-id)) (not= combo-refusal (notice-id))))
+        (is (= {:text "Change Output Settings refused" :event :projectors/update-driver-config}
+               (get-in (app-state) [:ui :show-lock-notice]))
+            "the box's own refusal, not the choice's before it")
+        (ui/assert-text! "#status-notice-text" "Show lock is on: Change Output Settings refused. Unlock it on the Perform tab"))
+      (ui/wait-for! #(false? (checked?)))
       (is (= {:order :be} (config)) "refused, and the box shows it isn't on")
       (testing "unlocked, they apply"
         (events/dispatch! {:event/type :vibe/set-show-lock :locked? false})

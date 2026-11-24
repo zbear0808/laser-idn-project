@@ -80,3 +80,18 @@
               [2 0] {:editor-type :cue-chain :timeline/chase :mtc :items []}}]
     (is (= pb (playback/apply-chase pb cues {:state :running :seconds 3605.0} 120.0 0)))
     (is (= pb (playback/apply-chase pb cues {:state :stopped :seconds nil} 120.0 0)))))
+
+(deftest intent-owner-and-source-version-test
+  (testing "who holds a cell, in the words the chase reports and their handler share (reactivity plan 15)"
+    (is (= :none (playback/intent-owner nil)))
+    (is (= [:run :r] (playback/intent-owner {:run :r :timeline? true :start-beat 0.0})))
+    (is (= [:chase :k] (playback/intent-owner {:chasing? true :timeline? true :chase-id :k})))
+    (is (= [:chase nil] (playback/intent-owner {:chasing? true :timeline? true})) "a marker with no episode")
+    (is (= [:other {:timeline? true}] (playback/intent-owner {:timeline? true})) "anything else isn't :none"))
+  (testing "a cue's version while it follows timecode"
+    (let [state {:chains {:cue-chains {[0 0] chasing-cue
+                                       [1 0] (dissoc chasing-cue :timeline/chase)
+                                       [2 0] chasing-cue}}
+                 :playback {:chase-sources {:next 8 :cells {[0 0] 7 [1 0] 6}}}}]
+      (is (= [7 nil 0 nil] (map #(playback/source-version state %) [[0 0] [1 0] [2 0] [3 0]]))
+          "its own; none for an ordinary cue or an empty cell; 0 for a follower no edit versioned"))))

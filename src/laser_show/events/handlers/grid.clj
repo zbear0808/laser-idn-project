@@ -56,16 +56,27 @@
   [state col row]
   (update state :playback cue-timing/deactivate-cue [col row]))
 
+(defn- cue-content?
+  "Does [col row] hold a cue now, by the rule its cell shows
+   (cue-chains/grid-content): a timeline, or a preset? Only then can a
+   press start it."
+  [state col row]
+  (:has-content? (cue-chains/grid-content (get-in state [:chains :cue-chains [col row]]))))
+
 (defn- handle-grid-trigger-cell
-  "Trigger a grid cell from external input (MIDI/OSC).
-   Respects cue trigger mode (:toggle or :retrigger)."
+  "Press the cell at [col row]: a single primary click on it, or a bound
+   input's press that isn't momentary. The press names the cell, not what
+   the cell showed: it selects the cell, then what the cell holds as the
+   press is handled (cue-content?) decides. A cue there is started or
+   stopped by its trigger mode (resolve-trigger-mode): :toggle stops it
+   while in play and starts it otherwise, :retrigger starts it as a new run.
+   Without a cue there, playback stays as it is."
   [{:keys [col row state]}]
-  (let [has-content? (boolean (get-in state [:chains :cue-chains [col row]]))
-        state-with-selected (assoc-in state [:grid :selected-cell] [col row])]
-    (if has-content?
+  (let [state-with-selected (assoc-in state [:grid :selected-cell] [col row])]
+    (if (cue-content? state col row)
       (let [trigger-mode (resolve-trigger-mode state-with-selected col row)
             cue-active? (contains? (get-in state-with-selected [:playback :active-cues]) [col row])]
-        (log/info "External trigger cell:"
+        (log/info "Grid cell pressed:"
                   {:col col :row row
                    :trigger-mode trigger-mode
                    :cue-active? cue-active?})
@@ -75,13 +86,15 @@
                     {:state (start-cue state-with-selected col row)})
           ;; :retrigger or any other value - always trigger/restart
           {:state (start-cue state-with-selected col row)}))
-      ;; Triggering an empty cell just selects it
+      ;; Pressing an empty cell just selects it
       {:state state-with-selected})))
 
 (defn- handle-grid-activate-cell
-  "Start a cue regardless of trigger mode (momentary press)."
+  "Start a cue regardless of trigger mode (momentary press), selecting its
+   cell, when the cell holds one now (cue-content?). An empty cell is left
+   alone: not selected, nothing started."
   [{:keys [col row state]}]
-  (if (get-in state [:chains :cue-chains [col row]])
+  (if (cue-content? state col row)
     {:state (start-cue (assoc-in state [:grid :selected-cell] [col row]) col row)}
     {:state state}))
 
@@ -96,39 +109,6 @@
   "Select a cell in the grid without triggering playback."
   [{:keys [col row state]}]
   {:state (assoc-in state [:grid :selected-cell] [col row])})
-
-(defn- handle-grid-cell-clicked
-  "Handle grid cell click - dispatches to trigger or select.
-   
-   Trigger modes:
-   - :toggle - Click ON to start, click OFF to stop
-   - :retrigger - Always start/restart the cue
-   
-   Note: Button detection is handled in grid_cell.clj before dispatching.
-   This handler receives only single left-clicks."
-  [{:keys [col row has-content? state]}]
-  (let [state-with-selected (assoc-in state [:grid :selected-cell] [col row])]
-    (if has-content?
-      (let [trigger-mode (resolve-trigger-mode state-with-selected col row)
-            cue-active? (contains? (get-in state-with-selected [:playback :active-cues]) [col row])]
-        (log/info "Grid cell clicked:"
-                  {:col col :row row
-                   :trigger-mode trigger-mode
-                   :cue-active? cue-active?})
-        (case trigger-mode
-          :toggle (if cue-active?
-                    (do
-                      (log/info "Toggle mode: Turning OFF cue" {:col col :row row})
-                      {:state (untrigger-cue state-with-selected col row)})
-                    (do
-                      (log/info "Toggle mode: Turning ON cue" {:col col :row row})
-                      {:state (start-cue state-with-selected col row)}))
-          ;; :retrigger or any other value - always trigger/restart
-          (do
-            (log/info "Retrigger mode: Always triggering cue" {:col col :row row})
-            {:state (start-cue state-with-selected col row)})))
-      ;; Left click on empty - select
-      {:state state-with-selected})))
 
 (defn- handle-grid-move-cell
   "Move a cell's cue chain from one position to another, preserving any active
@@ -176,15 +156,16 @@
                                  (comp chains/fresh-ids migration/cue-z4)))
 
 (defn- handle-grid-clear-cell
-  "Clear a cell's cue chain, and the triggers and vibes that named it."
+  "Clear a cell's cue chain, and the triggers and vibes that named it. A cue
+   playing there stops as any cue stops (cue-timing/deactivate-cue): the
+   last one stops the transport, another leaves it as it is."
   [{:keys [col row state]}]
   {:state (-> state
               (update-in [:chains :cue-chains] dissoc [col row])
               (update-in [:config :input :trigger-map] refs/remove-trigger-targets [col row] :trigger-cue)
               (refs/remove-cue [col row])
-              (cond-> (= (get-in state [:playback :active-cell]) [col row])
-                (assoc-in [:playback :active-cell] nil))
-              (update-in [:playback :active-cues] dissoc [col row]))})
+              (cond-> (contains? (get-in state [:playback :active-cues]) [col row])
+                (update :playback cue-timing/deactivate-cue [col row])))})
 
 (defn- handle-grid-set-column-target
   "Set or clear (nil) column col's default target (zones plan Z4), in normal
@@ -220,7 +201,8 @@
     :grid/trigger-cell (handle-grid-trigger-cell event)
     :grid/activate-cell (handle-grid-activate-cell event)
     :grid/release-cell (handle-grid-release-cell event)
-    :grid/cell-clicked (handle-grid-cell-clicked event)
+    ;; A click's old name, the same press: the :has-content? it carried is ignored
+    :grid/cell-clicked (handle-grid-trigger-cell event)
     :grid/select-cell (handle-grid-select-cell event)
     :grid/open-cell-editor (handle-grid-open-cell-editor event)
     :grid/move-cell (handle-grid-move-cell event)

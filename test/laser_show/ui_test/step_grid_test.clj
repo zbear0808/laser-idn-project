@@ -17,7 +17,8 @@
   (:import [javafx.event Event]
            [javafx.scene Node]
            [javafx.scene.control ButtonBase Control Labeled Menu MenuButton MenuItem]
-           [javafx.scene.input KeyCode KeyEvent MouseButton MouseEvent]))
+           [javafx.scene.input KeyCode KeyEvent MouseButton MouseEvent]
+           [javafx.stage Stage Window WindowEvent]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -28,8 +29,10 @@
 (def ^:private B :zone/b)
 (def ^:private C :zone/c)
 
-(def ^:private cue-target {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]})
-(def ^:private cell-target {:domain :effect-chains :entity-key [3 1] :effect-path [0]})
+(def ^:private cue-target
+  {:domain :cue-zone-patterns :entity-key [0 0] :effect-instance-id #uuid "00000000-0000-0000-0000-00000000a6a1"})
+(def ^:private cell-target
+  {:domain :effect-chains :entity-key [3 1] :effect-instance-id #uuid "00000000-0000-0000-0000-00000000a6b2"})
 
 (defn- cue-params [] (get-in (app-state) [:chains :cue-chains [0 0] :zone-patterns 0 :params]))
 (defn- cell-params [] (get-in (app-state) [:chains :effect-chains [3 1] :items 0 :params]))
@@ -46,7 +49,7 @@
                              (assoc-in [:chains :cue-chains [0 0] :name] "Beams")
                              (assoc-in [:chains :cue-chains [0 0] :zone-patterns]
                                        [(-> (zone-patterns/preset-instance :steps :cue)
-                                            (assoc :id #uuid "00000000-0000-0000-0000-00000000a6a1")
+                                            (assoc :id (:effect-instance-id cue-target))
                                             (update :params merge extra))])))))
 
 (defn- open-grid! [target]
@@ -190,6 +193,73 @@
     (ui/wait-for! #(= [A B] (first (:steps (cell-params)))))))
 
 
+;; The pattern it opened on (reactivity plan 05): the window follows the
+;; pattern's id, never the place it had in its cell
+
+(defn- chip
+  "The chip button that says text (an editor's Visual | Numeric), in any
+   window."
+  ^ButtonBase [text]
+  (let [nodes (ui/query-all ".chip")]
+    (ui/on-fx-thread #(some (fn [n] (when (and (instance? ButtonBase n) (= text (.getText ^Labeled n))) n)) nodes))))
+
+(defn- fire-chip! [text]
+  (ui/wait-for! #(some? (chip text)))
+  (let [b (chip text)]
+    (ui/on-fx-thread #(.fire b)))
+  (ui/sync-fx!))
+
+(deftest open-window-follows-pattern-through-reorder-and-removal-test
+  (let [p-id #uuid "00000000-0000-0000-0000-00000000a6c1"
+        q-id #uuid "00000000-0000-0000-0000-00000000a6c2"
+        p (-> (zone-patterns/preset-instance :steps :cell) (assoc :id p-id)
+              (update :params merge {:zones [A B] :steps [[A] [] [] []]}))
+        q (-> (zone-patterns/preset-instance :steps :cell) (assoc :id q-id)
+              (update :params merge {:zones [A B] :steps [[] [B] [] []]}))
+        title "Step Grid — Effects B4 \"Run\" · Zone pattern"
+        items #(get-in (app-state) [:chains :effect-chains [3 1] :items])
+        steps-of (fn [id] (some #(when (= id (:id %)) (get-in % [:params :steps])) (items)))
+        set-items! #(events/dispatch! {:event/type :chain/set-items :domain :effect-chains :entity-key [3 1] :items %})]
+    (events/write-state! assoc-in [:chains :effect-chains [3 1]] {:name "Run" :active? false :items [p q]})
+    (events/dispatch! {:event/type :effect-chain/open-editor :col 3 :row 1})
+    (events/dispatch! {:event/type :list/select-item :component-id [:effect-chain 3 1] :item-id p-id :mode :single})
+    (testing "Numeric's Edit grid… opens P's grid"
+      (fire-chip! "Numeric")
+      (fire! "#zone-pattern-edit-grid")
+      (ui/wait-for! #(window-open? title))
+      (ui/wait-for! #(some? (body)))
+      (is (= {:domain :effect-chains :entity-key [3 1] :effect-instance-id p-id}
+             (get-in (app-state) [:ui :dialogs :step-grid-editor :target])))
+      (ui/wait-for! #(lit-cell? 0 0))
+      (is (not (lit-cell? 1 1)) "P's cells, not Q's"))
+    (testing "the effects list puts Q first: the window still shows P"
+      (set-items! [q p])
+      (ui/wait-for! #(= [q-id p-id] (mapv :id (items))))
+      (ui/wait-for! #(and (lit-cell? 0 0) (not (lit-cell? 1 1)))))
+    (testing "its keys edit P where it is now; Q stays as it was"
+      (key! KeyCode/RIGHT)
+      (key! KeyCode/SPACE)
+      (ui/wait-for! #(= [[A] [A] [] []] (steps-of p-id)))
+      (ui/wait-for! #(lit-cell? 0 1))
+      (is (= q (first (items)))))
+    (testing "and so does a click"
+      (let [[x y] (cell-centre 1 2)]
+        (fire-grid! MouseEvent/MOUSE_PRESSED x y)
+        (fire-grid! MouseEvent/MOUSE_RELEASED x y))
+      (ui/wait-for! #(= [[A] [A] [B] []] (steps-of p-id)))
+      (ui/wait-for! #(lit-cell? 1 2))
+      (is (= q (first (items)))))
+    (testing "P removed: the window says so, with no grid, and Close"
+      (set-items! [q])
+      (ui/wait-for! #(= [q-id] (mapv :id (items))))
+      (ui/assert-text! "#step-grid-missing" "This pattern is no longer in this cell.")
+      (is (nil? (body)) "no grid to edit")
+      (is (ui/enabled? "#step-grid-close"))
+      (is (= [q] (items)) "Q, in P's old place, untouched")
+      (fire! "#step-grid-close")
+      (ui/wait-for! #(not (window-open? title))))))
+
+
 ;; The mouse
 
 (deftest click-toggles-a-cell-test
@@ -243,6 +313,132 @@
     (key! KeyCode/Z :shortcut? true :shift? true)
     (testing "and ⇧⌘Z redoes it"
       (ui/wait-for! #(= [[] [A] [A] [A] [A] [A] [A] []] (steps))))))
+
+
+;; A press is one gesture (reactivity plan 16)
+
+(defn- record-dispatches!
+  "(f) with every event the views send through events/dispatch! recorded
+   in sent too (the grid body's are), still dispatched."
+  [sent f]
+  (let [dispatch events/dispatch!]
+    (with-redefs [events/dispatch! (fn [e] (swap! sent conj e) (dispatch e))]
+      (f))))
+
+(defn- undo-count [] (count (get-in (app-state) [:history :undo-stack])))
+
+(defn- open-press [] (get-in (app-state) [:history :transaction :gesture-id]))
+
+(defn- grid-stage
+  "The step grid's window, while it shows."
+  ^Stage []
+  (ui/on-fx-thread #(some (fn [^Window w] (when (and (instance? Stage w) (.isShowing w) (= cue-title (.getTitle ^Stage w))) w))
+                          (vec (Window/getWindows)))))
+
+(defn- lose-window-focus!
+  "What the OS does when another window takes the focus: stage's focused
+   goes false. Headless, every stage keeps it, so this is the platform's
+   own setter (com.sun.javafx.stage.WindowHelper)."
+  [^Stage stage]
+  (ui/on-fx-thread
+   #(let [setter (.getMethod (Class/forName "com.sun.javafx.stage.WindowHelper") "setFocused"
+                             (into-array Class [Window Boolean/TYPE]))]
+      (.invoke setter nil (object-array [stage false]))))
+  (ui/sync-fx!))
+
+(deftest intra-cell-motion-dispatches-nothing-test
+  (grid-on-a1! {:steps (vec (repeat 8 []))})
+  (open-grid! cue-target)
+  (let [sent (atom [])
+        [x y] (cell-centre 0 1)]
+    (record-dispatches!
+     sent
+     #(do
+        (fire-grid! MouseEvent/MOUSE_PRESSED x y)
+        (ui/wait-for! (fn [] (= [A] (nth (steps) 1))))
+        (reset! sent [])
+        (dotimes [i 100]
+          (fire-grid! MouseEvent/MOUSE_DRAGGED (+ x (- (mod i 9) 4)) (+ y (- (mod i 7) 3))))
+        (is (= [] @sent) "100 motions inside one cell: not one event")
+        (doseq [k [2 3 4 5]]
+          (fire-grid! MouseEvent/MOUSE_DRAGGED (first (cell-centre 0 k)) y))
+        (fire-grid! MouseEvent/MOUSE_RELEASED (first (cell-centre 0 5)) y)
+        (is (= [:step-grid/paint :step-grid/paint :step-grid/paint :step-grid/paint :step-grid/paint-end]
+               (mapv :event/type @sent))
+            "one paint for each new cell, then the end")
+        (is (apply = (map :history/gesture-id @sent)) "all the press's own")))
+    (ui/wait-for! #(= [[] [A] [A] [A] [A] [A] [] []] (steps)))
+    (ui/wait-for! #(every? (fn [k] (lit-cell? 0 k)) [1 2 3 4 5]))
+    (ui/wait-for! #(nil? (open-press)))
+    (is (= 1 (undo-count)) "one undo step")
+    (events/dispatch! {:event/type :edit/undo})
+    (ui/wait-for! #(= (vec (repeat 8 [])) (steps)))
+    (ui/wait-for! #(not (lit-cell? 0 3)))))
+
+(deftest interrupted-press-finishes-once-test
+  (grid-on-a1! {:zones [A B C] :steps (vec (repeat 8 []))})
+  (let [sent (atom [])
+        ends #(filterv (fn [e] (= :step-grid/paint-end (:event/type e))) @sent)
+        held! (fn [row step]
+                ;; Pressed on [row step] and dragged onto the next cell; no release
+                (let [[x y] (cell-centre row step)]
+                  (fire-grid! MouseEvent/MOUSE_PRESSED x y)
+                  (fire-grid! MouseEvent/MOUSE_DRAGGED (first (cell-centre row (inc step))) y)
+                  (ui/wait-for! #(some? (open-press)))
+                  (open-press)))
+        sealed! (fn [n]
+                  (ui/wait-for! #(and (nil? (open-press)) (= n (undo-count)))))
+        lit-pair? (fn [row step] (and (lit-cell? row step) (lit-cell? row (inc step))))]
+    (record-dispatches!
+     sent
+     #(do
+        (testing "the footer's Close"
+          (open-grid! cue-target)
+          (held! 0 0)
+          (fire! "#step-grid-close")
+          (ui/wait-for! (fn [] (not (window-open? cue-title))))
+          (sealed! 1)
+          (is (= [[A] [A]] (subvec (steps) 0 2)) "what the press painted stays"))
+        (testing "the window's own close request: consumed, then closed by its state"
+          (open-grid! cue-target)
+          (held! 0 2)
+          (let [stage (grid-stage)]
+            (ui/on-fx-thread (fn [] (Event/fireEvent stage (WindowEvent. stage WindowEvent/WINDOW_CLOSE_REQUEST)))))
+          (ui/wait-for! (fn [] (not (window-open? cue-title))))
+          (sealed! 2))
+        (testing "the focus moving within the window ends the press; the window stays"
+          (open-grid! cue-target)
+          (held! 0 4)
+          (ui/on-fx-thread (fn [] (.requestFocus ^Node (ui/query "#step-grid-close"))))
+          (sealed! 3)
+          (is (window-open? cue-title))
+          (ui/wait-for! (fn [] (lit-pair? 0 4))))
+        (testing "another window taking the focus ends it too"
+          (held! 1 0)
+          (lose-window-focus! (grid-stage))
+          (sealed! 4)
+          (is (window-open? cue-title))
+          (ui/wait-for! (fn [] (lit-pair? 1 0))))
+        (testing "and so does the body going, with no close at all"
+          (held! 1 2)
+          (events/write-state! assoc-in [:ui :dialogs :step-grid-editor :open?] false)
+          (ui/wait-for! (fn [] (not (window-open? cue-title))))
+          (sealed! 5))
+        (testing "each press sent its end once"
+          (is (= 5 (count (ends))))
+          (is (= 5 (count (distinct (map :history/gesture-id (ends)))))))
+        (testing "an old end, delivered after a reopen and a new press, ends nothing"
+          (let [old-end (first (ends))]
+            (open-grid! cue-target)
+            (let [new-press (held! 2 0)]
+              (events/dispatch! old-end)
+              (events/flush!)
+              (is (= new-press (open-press)) "the new press is still open")
+              (fire-grid! MouseEvent/MOUSE_RELEASED (first (cell-centre 2 1)) (second (cell-centre 2 1)))
+              (sealed! 6))))))
+    (is (= (vec (repeat 6 "Edit Step Grid")) (mapv :description (get-in (app-state) [:history :undo-stack])))
+        "six presses, six steps")
+    (is (= [[A B C] [A B C] [A B] [A B] [A] [A] [] []] (steps)) "every no-release paint survived")))
 
 
 ;; The keys
@@ -350,7 +546,7 @@
   (events/write-state! assoc-in [:chains :effect-chains [3 1]]
                        {:active? false
                         :items [(-> (zone-patterns/preset-instance :steps :cell)
-                                    (assoc :id #uuid "00000000-0000-0000-0000-00000000a6b2")
+                                    (assoc :id (:effect-instance-id cell-target))
                                     (update :params merge {:zones [C] :steps [[C] [] [C] []]}))]})
   (open-grid! cue-target)
   (testing "the tooltips name the keys as the platform writes them"

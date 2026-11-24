@@ -46,30 +46,104 @@
     (handler {:path "/btn" :args [(float 1.0)]})
     (is (= 1 (count @sent)))))
 
+(defn- answer
+  "What the device worker sends back for the request effects carries under
+   effect-key: an event of type with its :request-id and status."
+  [effects effect-key type & {:as status}]
+  (merge {:event/type type :request-id (get-in effects [effect-key :request-id])} status))
+
 (deftest osc-server-is-the-one-switch-test
-  ;; osc/start-server opens a socket: these tests stand in for it
-  (let [osc-of #(get-in % [:state :backend :input :osc])]
-    (with-redefs [osc/start-server (fn [osc-state port _dispatch _get-state]
-                                     (assoc osc-state :port port :server-running? true))]
-      (let [started (input/handle {:event/type :input/osc-start-server :port 9001 :state (initial-state)})
-            stopped (input/handle {:event/type :input/osc-stop-server :state (:state started)})]
-        (testing "Start Server listens and lets the messages in: there is no second switch to find"
-          (is (= {:port 9001 :server-running? true :enabled? true}
-                 (select-keys (osc-of started) [:port :server-running? :enabled?])))
-          (is (nil? (get-in started [:state :ui :notice]))))
-        (testing "Stop Server does both the other way"
-          (is (= {:server-running? false :enabled? false}
-                 (select-keys (osc-of stopped) [:server-running? :enabled?]))))))
+  ;; The device worker (input.devices) opens the socket: these tests answer
+  ;; for it
+  (let [osc-of #(get-in % [:backend :input :osc])
+        handle (fn [state event] (input/handle (assoc event :state state)))
+        set-port (:state (handle (initial-state) {:event/type :input/osc-set-port :port 9100}))
+        start (handle set-port {:event/type :input/osc-start-server :port 9001})]
+    (testing "Start asks the worker for the port set when it is handled, not one the button was drawn with"
+      (is (= {:request-id (get-in start [:state :backend :input :osc :requests :server]) :port 9100}
+             (:input/osc-start start)))
+      (is (uuid? (get-in start [:input/osc-start :request-id])))
+      (is (= {:server-running? false :enabled? false} (select-keys (osc-of (:state start)) [:server-running? :enabled?]))
+          "nothing listens before the worker says so"))
+    (let [started (handle (:state start) (answer start :input/osc-start :input/osc-started :server-running? true :port 9100))
+          stop (handle (:state started) {:event/type :input/osc-stop-server})
+          stopped (handle (:state stop) (answer stop :input/osc-stop :input/osc-stopped :server-running? false))]
+      (testing "Start Server listens and lets the messages in: there is no second switch to find"
+        (is (= {:port 9100 :server-running? true :enabled? true}
+               (select-keys (osc-of (:state started)) [:port :server-running? :enabled?])))
+        (is (empty? (:requests (osc-of (:state started)))) "the request is over")
+        (is (nil? (get-in started [:state :ui :notice]))))
+      (testing "Stop Server does both the other way: the messages stop at once, then the server"
+        (is (= {:request-id (get-in stop [:state :backend :input :osc :requests :server])} (:input/osc-stop stop)))
+        (is (= {:server-running? true :enabled? false} (select-keys (osc-of (:state stop)) [:server-running? :enabled?])))
+        (is (= {:server-running? false :enabled? false}
+               (select-keys (osc-of (:state stopped)) [:server-running? :enabled?])))))
     (testing "a port that won't open: still off, and a notice says so"
-      (with-redefs [osc/start-server (fn [osc-state _port _dispatch _get-state]
-                                       (assoc osc-state :server-running? false))]
-        (let [result (input/handle {:event/type :input/osc-start-server :port 9001 :state (initial-state)})
-              {:keys [id] :as notice} (get-in result [:state :ui :notice])]
-          (is (= {:server-running? false :enabled? false}
-                 (select-keys (osc-of result) [:server-running? :enabled?])))
-          (is (= {:text "Could not listen for OSC on port 9001" :level :error} (dissoc notice :id)))
-          (is (= {:event {:event/type :ui/clear-notice :id id} :delay-ms 6000}
-                 (:dispatch-later result))))))))
+      (let [result (handle (:state start) (answer start :input/osc-start :input/osc-started
+                                                  :server-running? false :port 9100
+                                                  :error "Could not listen for OSC on port 9100"))
+            {:keys [id] :as notice} (get-in result [:state :ui :notice])]
+        (is (= {:server-running? false :enabled? false}
+               (select-keys (osc-of (:state result)) [:server-running? :enabled?])))
+        (is (= {:text "Could not listen for OSC on port 9100" :level :error} (dissoc notice :id)))
+        (is (= {:event {:event/type :ui/clear-notice :id id} :delay-ms 6000}
+               (:dispatch-later result)))))))
+
+(deftest stale-device-completion-is-ignored-test
+  (let [pipe (fn [state event] (events/handle-event-pipeline (merge {:time 0} event {:state state})))
+        s0 (history/mark-clean (initial-state))]
+    (testing "two Refreshes: the first one's list, coming late, changes nothing"
+      (let [r1 (pipe s0 {:event/type :input/midi-refresh-devices})
+            r2 (pipe (:state r1) {:event/type :input/midi-refresh-devices})
+            s2 (:state r2)
+            listed #(answer %1 :input/midi-list :input/midi-listed :available-devices %2)]
+        (is (not= (get-in r1 [:input/midi-list :request-id]) (get-in r2 [:input/midi-list :request-id])))
+        (is (= {} (pipe s2 (listed r1 ["Old"]))) "no commit at all")
+        (let [s3 (:state (pipe s2 (listed r2 ["Pad" "Keys"])))]
+          (is (= ["Pad" "Keys"] (get-in s3 [:backend :input :midi :available-devices])))
+          (is (= {} (pipe s3 (listed r2 ["Pad"]))) "the same result again: the request is over")
+          (is (= {} (pipe s3 (listed r1 ["Old"]))) "nor an earlier one's after it")
+          (is (= {} (pipe s3 {:event/type :input/midi-listed :available-devices ["Made up"]})) "nor one without an id")
+          (is (false? (get-in s3 [:project :dirty?])) "a device list isn't the show's")
+          (is (empty? (get-in s3 [:history :undo-stack]))))))
+    (testing "Connect then Disconnect: the connect's result, before or after the disconnect's, can't connect it again"
+      (let [c (pipe s0 {:event/type :input/midi-connect-device :device-name "Pad"})
+            d (pipe (:state c) {:event/type :input/midi-disconnect-device :device-name "Pad"})
+            connected (answer c :input/midi-connect :input/midi-connected :connected-devices #{"Pad"})
+            disconnected (answer d :input/midi-disconnect :input/midi-disconnected :connected-devices #{})]
+        (is (= {:request-id (:request-id connected) :device-name "Pad"} (:input/midi-connect c)))
+        (is (= {:request-id (:request-id disconnected) :device-name "Pad"} (:input/midi-disconnect d)))
+        (testing "in order"
+          (is (= {} (pipe (:state d) connected)) "superseded: no commit, no notice")
+          (is (= #{} (get-in (:state (pipe (:state d) disconnected)) [:backend :input :midi :connected-devices]))))
+        (testing "reversed"
+          (let [s (:state (pipe (:state d) disconnected))]
+            (is (= {} (pipe s connected)))))))
+    (testing "OSC: an earlier Start's result after a Stop's leaves it stopped"
+      (let [start (pipe s0 {:event/type :input/osc-start-server})
+            stop (pipe (:state start) {:event/type :input/osc-stop-server})
+            s (:state (pipe (:state stop) (answer stop :input/osc-stop :input/osc-stopped :server-running? false)))]
+        (is (= {} (pipe s (answer start :input/osc-start :input/osc-started :server-running? true :port 9000))))
+        (is (= {} (pipe (:state stop) (answer start :input/osc-start :input/osc-started :server-running? false :port 9000
+                                              :error "Could not listen for OSC on port 9000")))
+            "nor does its failure leave a notice")))))
+
+(deftest midi-connect-results-test
+  (let [handle (fn [state event] (input/handle (assoc event :state state)))
+        auto (handle (initial-state) {:event/type :input/midi-auto-connect})
+        connected (handle (:state auto) (answer auto :input/midi-connect :input/midi-connected :connected-devices #{"Pad"}))]
+    (is (= {:request-id (get-in auto [:input/midi-connect :request-id]) :auto? true} (:input/midi-connect auto)))
+    (is (= #{"Pad"} (get-in connected [:state :backend :input :midi :connected-devices])))
+    (is (nil? (get-in connected [:state :ui :notice])))
+    (testing "the input couldn't be connected: the worker's sentence as a notice"
+      (let [failed (handle (:state auto) (answer auto :input/midi-connect :input/midi-connected
+                                                 :connected-devices #{} :error "No MIDI input to connect to"))]
+        (is (= #{} (get-in failed [:state :backend :input :midi :connected-devices])))
+        (is (= {:text "No MIDI input to connect to" :level :error}
+               (dissoc (get-in failed [:state :ui :notice]) :id)))))
+    (testing "Disconnect All asks for all of them"
+      (is (true? (get-in (handle (:state connected) {:event/type :input/midi-disconnect-all})
+                         [:input/midi-disconnect :all?]))))))
 
 (def ^:private registered-effects
   "Effect keys registered in laser-show.events.core/event-handler that these
@@ -540,9 +614,7 @@
       (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)))
 
 (deftest midi-disconnect-releases-input-holds-only-test
-  (let [s0 (-> (vibe-world)
-               (assoc-in [:backend :input :midi :devices "Pad"] {})
-               (assoc-in [:backend :input :midi :connected-devices] #{"Pad"}))
+  (let [s0 (assoc-in (vibe-world) [:backend :input :midi :connected-devices] #{"Pad"})
         held (-> s0
                  (piped {:event/type :vibe/press :role :hit :input-time 1000 :time 1000})
                  (piped {:event/type :vibe/press :role :accent :src :pad :time 1000}))]
@@ -550,11 +622,16 @@
     (doseq [event [{:event/type :input/midi-disconnect-device :device-name "Pad"}
                    {:event/type :input/midi-disconnect-all}]]
       (testing (str (:event/type event))
-        (let [s (piped held (assoc event :time 2000))]
-          (is (not (contains? (get-in s [:backend :input :midi :connected-devices]) "Pad")))
-          (is (nil? (get-in s [:vibe-runtime :held :hit])) "beyond-vibe disconnect_releases_held_keys: the key's hold ends")
-          (is (false? (get-in s [:playback :pulses :hit :held?])))
-          (is (= :pad (get-in s [:vibe-runtime :held :accent :src])) "a pad's hold stays: its release still comes"))))))
+        (let [asked (events/handle-event-pipeline (assoc event :time 2000 :state held))
+              s (:state asked)]
+          (is (= :input (get-in s [:vibe-runtime :held :hit :src])) "until the port is closed, its key holds on")
+          (testing "the device worker says it's disconnected"
+            (let [s (piped s (assoc (answer asked :input/midi-disconnect :input/midi-disconnected :connected-devices #{})
+                                    :time 2000))]
+              (is (not (contains? (get-in s [:backend :input :midi :connected-devices]) "Pad")))
+              (is (nil? (get-in s [:vibe-runtime :held :hit])) "beyond-vibe disconnect_releases_held_keys: the key's hold ends")
+              (is (false? (get-in s [:playback :pulses :hit :held?])))
+              (is (= :pad (get-in s [:vibe-runtime :held :accent :src])) "a pad's hold stays: its release still comes"))))))))
 
 (deftest a-key-that-loses-its-role-lets-go-test
   (try
@@ -580,5 +657,40 @@
       (testing "a pad's hold stays"
         (let [pad (piped s0 {:event/type :vibe/press :role :hit :src :pad :time 1000})]
           (is (= :pad (get-in (press-key (learning pad hit) 50) [:vibe-runtime :held :hit :src]))))))
+    (finally
+      (stop-learning!))))
+
+
+;; A learn binds into the show it was started in (reactivity plan 20)
+
+(deftest a-capture-after-new-or-open-binds-nothing-test
+  ;; Before: the old learn's input bound in the new show, which became
+  ;; unsaved and got a "Learn Trigger" undo step
+  (try
+    (let [show (history/mark-clean (initial-state))
+          cell {:type :trigger-cue :target [0 0]}
+          pending #(deref @#'input/!pending-learn)]
+      (doseq [[label replace] [["File > New" {:event/type :file/new-project :force? true}]
+                               ["File > Open" {:event/type :file/project-loaded :file-path "other.zip"
+                                               :contents (persistent/project-files show)}]]
+              [what start target input!] [["a cell's learn" {:event/type :input/start-learn :target-action cell}
+                                           cell #(router/dispatch! (note 36))]
+                                          ["Learn all" learn-all hit-role #(router/dispatch! (note 37))]
+                                          ["a fader's learn" {:event/type :input/start-learn :target-action slider-1}
+                                           slider-1 #(move! 0 1 0.1 0.5)]]]
+        (testing (str label ", during " what)
+          (let [learning (piped show start)
+                p (pending)
+                replaced (piped learning replace)
+                _ (input!)
+                late (piped replaced {:event/type :input/learn-captured :target-action target :input-event (caught p)})]
+            (is (= target (learning-target learning)))
+            (is (some? (caught p)) "the old learn's listener still caught the input")
+            (is (nil? (learning-target replaced)) "the new show isn't learning")
+            (is (nil? (get-in replaced [:backend :input :learning-capture])) "so its keys play their bindings")
+            (is (nil? (wizard replaced)))
+            (is (= (get-in replaced [:config :input]) (get-in late [:config :input])) "the late capture binds nothing")
+            (is (false? (get-in late [:project :dirty?])))
+            (is (empty? (get-in late [:history :undo-stack])))))))
     (finally
       (stop-learning!))))

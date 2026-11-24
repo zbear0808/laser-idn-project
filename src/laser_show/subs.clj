@@ -37,6 +37,7 @@
             [laser-show.animation.chains :as chains]
             [laser-show.animation.presets :as presets]
             [laser-show.animation.safety :as safety]
+            [laser-show.events.handlers.chain.helpers :as chain-helpers]
             [laser-show.output.driver :as driver]
             [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
@@ -264,31 +265,18 @@
    - :active? - is this cell playing?
    - :selected? - is this cell currently selected?
    - :timeline? - is this a timeline cue?
-   - :has-content? - does cell have any presets or timeline configuration?"
+   - :has-content? - does cell have any presets or timeline configuration?
+   The presets, :timeline? and :has-content? are cue-chains/grid-content's,
+   the rule a press of the cell follows too."
   [context col row]
-  (let [cue-chain-data (fx/sub-ctx context cue-cell-chain col row)
-        items (:items cue-chain-data [])
-        active? (fx/sub-ctx context cue-cell-active? col row)
-        selected? (= (fx/sub-ctx context selected-grid-cell) [col row])
-        ;; Flatten to get all presets (excluding groups)
-        flat-items (filterv #(= :preset (:type %))
-                            (tree-seq #(= :group (:type %))
-                                      #(:items % [])
-                                      {:type :group :items items}))
-        first-preset (first flat-items)
-        preset-count (count flat-items)
-        timeline? (cue-chains/timeline-cue? cue-chain-data)
-        has-content? (or (pos? preset-count) timeline?)]
-    {:col col
-     :row row
-     :name (:name cue-chain-data)
-     :cue-chain cue-chain-data
-     :preset-count preset-count
-     :first-preset-id (:preset-id first-preset)
-     :active? active?
-     :selected? selected?
-     :timeline? timeline?
-     :has-content? has-content?}))
+  (let [cue-chain-data (fx/sub-ctx context cue-cell-chain col row)]
+    (merge {:col col
+            :row row
+            :name (:name cue-chain-data)
+            :cue-chain cue-chain-data
+            :active? (fx/sub-ctx context cue-cell-active? col row)
+            :selected? (= (fx/sub-ctx context selected-grid-cell) [col row])}
+           (cue-chains/grid-content cue-chain-data))))
 
 (defn- held-count [state]
   (if (ex/playing? state) 0 (count (ex/active-cues state))))
@@ -334,52 +322,64 @@
   [context col row]
   (fx/sub-val context get-in [:chains :effect-chains [col row]]))
 
+(defn stored-effect-cell
+  "What the effects cell at [col row] stores, on or off
+   (chains/stored-effect-content of its saved :items): {:has-content?
+   :leaves}. Only depends on that cell's items."
+  [context col row]
+  (chains/stored-effect-content (fx/sub-val context get-in [:chains :effect-chains [col row] :items])))
+
 (defn effect-cell-display-data
   "Computed display data for an effects grid cell.
    
-   Depends on: effect-cell-chain (this cell's effect chain)
+   Depends on: effect-cell-chain (this cell's effect chain) and
+   stored-effect-cell (what it stores)
    
    Returns map with:
    - :col, :row - position
    - :name - custom name for the effect chain (nil if not set)
-   - :effect-count - number of actual effects in chain (flattened, excludes groups)
+   - :effect-count - number of effects it stores (in groups too, enabled or not)
    - :first-effect-id - id of first effect (not group)
-   - :effect-ids - ids of the effects, in chain order (flattened)
+   - :effect-ids - ids of the effects, in chain order
    - :active? - is effect chain active?
    - :selected? - is effect chain cell selected?
-   - :has-effects? - does cell have any effects?
+   - :has-effects? - does cell store any effects?
+   - :has-content? - does cell hold anything, effects or groups? A cell
+     that doesn't is empty: New offers to fill it, and it can't be dragged
    - :display-text - text to display in the cell"
   [context col row]
   (let [cell-data (fx/sub-ctx context effect-cell-chain col row)
-        ;; Effect chain items are stored under :items key
-        effect-chain (:items cell-data [])
-        ;; Flatten the chain to get actual effects (not groups)
-        flattened-effects (chains/flatten-chain effect-chain)
-        first-effect (first flattened-effects)
-        effect-count (count flattened-effects)
+        {:keys [has-content? leaves]} (fx/sub-ctx context stored-effect-cell col row)
+        first-effect (first leaves)
+        effect-count (count leaves)
         selected? (= (fx/sub-ctx context selected-effects-cell) [col row])]
     {:col col
      :row row
      :name (:name cell-data)
      :effect-count effect-count
      :first-effect-id (:effect-id first-effect)
-     :effect-ids (mapv :effect-id flattened-effects)
+     :effect-ids (mapv :effect-id leaves)
      :active? (:active? cell-data false)
      :selected? selected?
      :has-effects? (pos? effect-count)
+     :has-content? has-content?
      :display-text (when first-effect
                      (str (name (:effect-id first-effect))
                           (when (> effect-count 1)
                             (str " +" (dec effect-count)))))}))
 
 (defn effects-grid-empty?
-  "True while no effects cell has an effect in it (groups don't count), as
-   effect-cell-display-data's :has-effects? would say for every cell; but
-   for Masters, by the Master rule: a cell that is a Master and nothing more
+  "True while no effects cell stores an effect, on or off (groups don't
+   count), but for Masters: a cell whose one stored effect is a Master
    (vibes.faders/master-only?) doesn't count, so a new project's grid, which
-   has one, still says what effect cells are for."
+   has one, still says what effect cells are for. A Master with a disabled
+   effect beside it, or disabled itself, counts. Only the Effects tab's
+   hint follows it."
   [context]
-  (not-any? #(and (seq (chains/flatten-chain (:items % []))) (not (faders/master-only? %)))
+  (not-any? (fn [cell]
+              (let [leaves (:leaves (chains/stored-effect-content (:items cell)))]
+                (and (seq leaves)
+                     (not (and (= 1 (count leaves)) (faders/master-only? cell))))))
             (vals (fx/sub-val context get-in [:chains :effect-chains]))))
 
 
@@ -479,44 +479,62 @@
         item (assoc :item-name item)))))
 
 (defn connection-status
-  "Streaming status for the toolbar.
+  "Streaming status for the toolbar, from one published status.
    
    Depends on: [:backend :streaming :running?] (the operator's intent, which
-   picks the button) and the output runtime's status (what actually streams).
+   picks the button) and the output runtime's status (what each output
+   reports: :streaming, :starting or :error). Only a :streaming report
+   counts: a drained command queue doesn't mean an output streams. The
+   rig's names only label the errors.
    
    Returns map with:
    - :running? - streaming is on
-   - :state - :stopped, :stopping, :starting, :streaming, :error or :idle
-     (on, with no enabled projectors)
-   - :status-text - e.g. \"Streaming to 2 of 3 · 1 error\", or \"No
-     projectors enabled\" (:idle)
-   - :errors - [\"<projector name>: <error>\" …]"
+   - :state - :stopped, :stopping, :starting, :mixed (some outputs stream,
+     the others still start), :streaming (every wanted output streams),
+     :error or :idle (on, with no enabled projectors)
+   - :status-text - e.g. \"Streaming to 1 of 2 · 1 starting\", \"0 of 2
+     streaming · 1 error\", \"Updating outputs…\" or \"No projectors
+     enabled\" (:idle). It says N of M only of a settled status: nothing
+     pending, and a report for each of the M wanted outputs, none for an
+     engine still being retired
+   - :errors - [\"<projector name>: <error>\" …], by projector id"
   [context]
   (let [running? (boolean (fx/sub-val context get-in [:backend :streaming :running?]))
         {:keys [engines wanted pending? projectors] :as status} (fx/sub-ctx context streaming-status)
         names (fx/sub-val context :projectors)
-        streaming (count (filter #(= :streaming (:state %)) (vals projectors)))
+        wanted (or wanted 0)
+        {streaming :streaming starting :starting :or {streaming 0 starting 0}}
+        (frequencies (map :state (vals projectors)))
         errors (vec (for [[id {:keys [state error]}] (sort-by key projectors)
                           :when (= :error state)]
                       (str (or (get-in names [id :name]) (name id)) ": " error)))
+        settled? (and (some? status) (not pending?) (= wanted (count projectors)))
+        ratio (when (and settled? (pos? wanted))
+                (str (if (pos? streaming)
+                       (str "Streaming to " streaming " of " wanted)
+                       (str "0 of " wanted " streaming"))
+                     (when (pos? starting) (str " · " starting " starting"))))
         state (cond
                 (not running?) (if (pos? (or engines 0)) :stopping :stopped)
-                (or (nil? status) pending?) :starting
                 (seq errors) :error
-                (zero? (or wanted 0)) :idle
-                :else :streaming)]
+                (not settled?) :starting
+                (zero? wanted) :idle
+                (= streaming wanted) :streaming
+                (and (pos? streaming) (= wanted (+ streaming starting))) :mixed
+                :else :starting)]
     {:running? running?
      :state state
      :errors errors
      :status-text (case state
                     :stopped "Not streaming"
                     :stopping "Stopping…"
-                    :starting "Starting…"
                     :idle "No projectors enabled"
-                    (str "Streaming to " streaming " of " wanted
-                         (when (zero? wanted) " (no enabled projectors)")
-                         (when (seq errors)
-                           (str " · " (count errors) (if (= 1 (count errors)) " error" " errors")))))}))
+                    :starting (if (or (pos? streaming) (> (count projectors) wanted))
+                                "Updating outputs…"
+                                "Starting…")
+                    (:mixed :streaming) ratio
+                    :error (str (or ratio "Updating outputs…")
+                                " · " (count errors) (if (= 1 (count errors)) " error" " errors")))}))
 
 
 ;; Level 2: Computed UI State Subscriptions
@@ -605,13 +623,15 @@
   (:active-projector (fx/sub-val context :projector-ui)))
 
 (defn active-projector
-  "Get the full config of the currently selected projector.
+  "Get the full config of the currently selected projector, with its :id;
+   nil when none is selected or the selected id has no projector (an undo
+   took it away), so the inspector shows no selection.
    Depends on: projector-ui domain and projectors domain"
   [context]
   (let [active-id (:active-projector (fx/sub-val context :projector-ui))
-        projectors (fx/sub-val context :projectors)]
-    (when active-id
-      (assoc (get projectors active-id) :id active-id))))
+        projector (when active-id (get (fx/sub-val context :projectors) active-id))]
+    (when projector
+      (assoc projector :id active-id))))
 
 (defn discovered-devices
   "Get the devices from the last scan.
@@ -858,21 +878,6 @@
         :drop-target-id nil
         :drop-position nil
         :renaming-id nil}))
-
-(defn list-ordered-ids
-  "Get the ordered vector of item IDs for a hierarchical list component or items-path.
-   Calculates visual document-order IDs directly from the state context.
-   Returns an eager vector of UUIDs in document order."
-  ([context component-id]
-   (list-ordered-ids context component-id nil))
-  ([context component-id items-path]
-   (let [target (or items-path (ex/resolve-items-path component-id))]
-     (if (and (vector? target) (= :chains (first target)))
-       (let [chains (fx/sub-val context :chains)
-             sub-path (subvec target 1)]
-         (chains/collect-all-ids (get-in chains sub-path [])))
-       (let [state (fx/sub-val context identity)]
-         (ex/chain-ordered-ids state (or target component-id)))))))
 
 
 ;; Level 2: Virtual Projector Subscriptions
@@ -1206,9 +1211,10 @@
   (zone-patterns/fold-text (fx/sub-ctx context pattern-world) params (fx/sub-ctx context names-ctx)))
 
 (defn- holds-effect?
-  "Does an effects cell's chain hold an effect-id, on or off?"
+  "Does an effects cell's chain store an effect-id, on or off, in a
+   disabled group or not (chains/stored-effect-content)?"
   [effect-id chain]
-  (boolean (some #(= effect-id (:effect-id %)) (chains/flatten-chain (:items chain)))))
+  (boolean (some #(= effect-id (:effect-id %)) (:leaves (chains/stored-effect-content (:items chain))))))
 
 (defn zone-patterns-in-use?
   "Does the show have a zone pattern anywhere, on or off: on a cue, or in
@@ -1339,17 +1345,21 @@
 
 (defn step-grid
   "The step grid window's grid at target ({:domain :entity-key
-   :effect-path}, a cue's zone pattern or an effects cell's), or nil when it
-   holds no zone pattern: {:id (the pattern's, for the playhead) :params
+   :effect-instance-id}: the zone pattern with that id among a cue's
+   patterns or an effects cell's items, wherever it is among them now,
+   routing.step-grid/locate-pattern), or nil when they hold no zone pattern
+   with that id: {:id (the pattern's, for the playhead) :params
    (the grid as it shows, routing.step-grid/as-grid: a pattern that isn't
    one yet shows the grid it becomes) :grid? (it is one already) :rows
    [{:ref :text}] (each row and where it goes under the map in use) :lit
    (each step's refs, as sets) :length :cursor [row step] :keyframes? (its
    keyframes are on: the grid is greyed out) :locked? (the show lock is on)
    :wrap-note (S-5) :every-laser-note (S-4, once it became zones)}."
-  [context {:keys [domain entity-key effect-path] :as target}]
-  (let [fx (fx/sub-ctx context zone-pattern-at domain entity-key effect-path)]
-    (when (= :zone-pattern (:effect-id fx))
+  [context {:keys [domain entity-key effect-instance-id] :as target}]
+  (let [items-path (chain-helpers/zone-pattern-items-path domain entity-key)
+        fx (when items-path
+             (:instance (step-grid/locate-pattern (fx/sub-val context get-in items-path) effect-instance-id)))]
+    (when fx
       (let [world (fx/sub-ctx context pattern-world)
             params (step-grid/as-grid (:params fx) (count (rig/e-order (rig/rig-inputs world))))
             names (fx/sub-ctx context names-ctx)
@@ -2072,12 +2082,11 @@
   (fx/sub-ctx context pick-label col row))
 
 (defn- pick-fx-label [context col row]
-  (let [data (fx/sub-ctx context effect-cell-display-data col row)]
-    (assoc (select-keys data [:name :first-effect-id :effect-count :effect-ids])
-           :has-content? (:has-effects? data))))
+  (select-keys (fx/sub-ctx context effect-cell-display-data col row)
+               [:name :first-effect-id :effect-count :effect-ids :has-content?]))
 
 (defn vibe-pick-fx-label
-  "What an effect cell of the picker shows of its effects (grid_cell.clj
+  "What an effect cell of the picker shows of what it stores (grid_cell.clj
    effects-label's keys, and :has-content?): not whether it is on."
   [context col row]
   (fx/sub-ctx context pick-fx-label col row))

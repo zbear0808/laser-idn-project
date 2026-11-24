@@ -12,18 +12,20 @@
             [laser-show.subs :as subs]
             [laser-show.views.dialogs.common :as common]))
 
-(defn- action-label
-  "What the parked action does, for the question text."
-  [pending]
-  (case (:event/type pending)
-    :file/new-project "creating a new project"
-    :file/open "opening another project"
-    "closing"))
-
 (defn- project-name [file]
   (if file
     (.getName (java.io.File. ^String file))
     "this project"))
+
+(defn- action-label
+  "What the parked action does, for the question text. An Open asked about
+   again once its file was picked (the show changed meanwhile) names it."
+  [pending]
+  (case (:event/type pending)
+    :file/new-project "creating a new project"
+    :file/open "opening another project"
+    :file/open-result (str "opening " (project-name (:file-path pending)))
+    "closing"))
 
 (defn- rig-confirm-content
   "The rig's question: its last changes couldn't be written."
