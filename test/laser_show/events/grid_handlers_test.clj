@@ -166,12 +166,13 @@
 
 
 (deftest handle-grid-cell-clicked-with-content
-  (testing "Clicking cell with content triggers playback and selects cell"
+  (testing "Clicking cell with content triggers playback and selects cell, whatever the click says the cell showed"
     (let [event {:event/type :grid/cell-clicked
                  :col 0
                  :row 0
-                 :has-content? true
-                 :state sample-state-with-content
+                 :has-content? false
+                 :state (assoc-in sample-state-empty [:chains :cue-chains [0 0]]
+                                  {:items [{:type :preset :preset-id :circle}]})
                  :time 5000}
           result (grid/handle event)]
       (is (= [0 0] (get-in result [:state :playback :active-cell])))
@@ -181,11 +182,11 @@
           "the cue's intent names a new run; the show clock starts it at its next tick"))))
 
 (deftest handle-grid-cell-clicked-empty
-  (testing "Clicking empty cell selects it"
+  (testing "Clicking empty cell selects it, though the click says the cell had content"
     (let [event {:event/type :grid/cell-clicked
                  :col 2
                  :row 2
-                 :has-content? false
+                 :has-content? true
                  :state sample-state-empty}
           result (grid/handle event)]
       (is (= [2 2] (get-in result [:state :grid :selected-cell])))

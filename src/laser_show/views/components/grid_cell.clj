@@ -109,7 +109,8 @@
    - :display-data - Map with cell state (:active?, :has-content?, :selected?)
    - :size - [width height] of the cell (default [80 60])
    - :font-size - Optional size in px of its label (default: the stylesheet's)
-   - :on-click - Event map for click handling
+   - :on-click - Event map for a single primary click (augmented with :col,
+     :row only: its handler reads what the cell holds when it handles it)
    - :on-right-click - Event map for right-click (augmented with :col, :row)
    - :drag-config - Map with :drag-type and :on-drop event
    - :label-fn - Function (fn [display-data] -> string)
@@ -123,7 +124,7 @@
     :col 0 :row 0
     :cell-type :grid
     :display-data {:active? true :has-content? true}
-    :on-click {:event/type :grid/cell-clicked}
+    :on-click {:event/type :grid/trigger-cell}
     :on-right-click {:event/type :cue-chain/open-editor}
     :drag-config {:drag-type :grid-cell
                   :on-drop {:event/type :grid/move-cell}}
@@ -173,9 +174,7 @@
 
                                       ;; Single left-click: dispatch click event (trigger / select)
                                       (= button MouseButton/PRIMARY)
-                                      (events/dispatch! (assoc on-click
-                                                               :col col :row row
-                                                               :has-content? has-content?)))))
+                                      (events/dispatch! (assoc on-click :col col :row row)))))
 
               ;; Drag handlers - use inline handlers that are re-created on each render
               ;; This ensures has-content? and other values are always current
@@ -381,7 +380,7 @@
      :font-size font-size
      :cell-type :grid
      :display-data cell-display-data
-     :on-click {:event/type :grid/cell-clicked}
+     :on-click {:event/type :grid/trigger-cell}
      :on-right-click open-editor-event
      :drag-config {:drag-type :grid-cell
                    :on-drop {:event/type :grid/move-cell}}

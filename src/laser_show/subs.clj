@@ -264,31 +264,18 @@
    - :active? - is this cell playing?
    - :selected? - is this cell currently selected?
    - :timeline? - is this a timeline cue?
-   - :has-content? - does cell have any presets or timeline configuration?"
+   - :has-content? - does cell have any presets or timeline configuration?
+   The presets, :timeline? and :has-content? are cue-chains/grid-content's,
+   the rule a press of the cell follows too."
   [context col row]
-  (let [cue-chain-data (fx/sub-ctx context cue-cell-chain col row)
-        items (:items cue-chain-data [])
-        active? (fx/sub-ctx context cue-cell-active? col row)
-        selected? (= (fx/sub-ctx context selected-grid-cell) [col row])
-        ;; Flatten to get all presets (excluding groups)
-        flat-items (filterv #(= :preset (:type %))
-                            (tree-seq #(= :group (:type %))
-                                      #(:items % [])
-                                      {:type :group :items items}))
-        first-preset (first flat-items)
-        preset-count (count flat-items)
-        timeline? (cue-chains/timeline-cue? cue-chain-data)
-        has-content? (or (pos? preset-count) timeline?)]
-    {:col col
-     :row row
-     :name (:name cue-chain-data)
-     :cue-chain cue-chain-data
-     :preset-count preset-count
-     :first-preset-id (:preset-id first-preset)
-     :active? active?
-     :selected? selected?
-     :timeline? timeline?
-     :has-content? has-content?}))
+  (let [cue-chain-data (fx/sub-ctx context cue-cell-chain col row)]
+    (merge {:col col
+            :row row
+            :name (:name cue-chain-data)
+            :cue-chain cue-chain-data
+            :active? (fx/sub-ctx context cue-cell-active? col row)
+            :selected? (= (fx/sub-ctx context selected-grid-cell) [col row])}
+           (cue-chains/grid-content cue-chain-data))))
 
 (defn- held-count [state]
   (if (ex/playing? state) 0 (count (ex/active-cues state))))

@@ -412,6 +412,33 @@
     (is (true? (get-in (run dirty {:event/type :timing/set-bpm :bpm 90.0}) [:project :dirty?])))
     (is (true? (get-in (run dirty {:event/type :effects/toggle-cell :col 1 :row 0}) [:project :dirty?])))
     (is (false? (get-in (run (clean-state) {:event/type :effects/toggle-cell :col 1 :row 0}) [:project :dirty?])))))
+
+(deftest grid-press-keeps-document-history-test
+  (let [kept (fn [s0 s]
+               (is (= (get-in s0 [:chains :cue-chains]) (get-in s [:chains :cue-chains])) "the cues")
+               (is (= (select-keys (:history s0) [:undo-stack :redo-stack])
+                      (select-keys (:history s) [:undo-stack :redo-stack]))
+                   "undo and redo")
+               (is (= (get-in s0 [:project :dirty?]) (get-in s [:project :dirty?])) "unsaved or not"))]
+    (doseq [[label s0] [["clean" (clean-state)]
+                        ["unsaved, after an edit" (run (clean-state) edit-size)]]]
+      (testing label
+        (let [started (run s0 {:event/type :grid/trigger-cell :col 0 :row 0})
+              stopped (run started {:event/type :grid/trigger-cell :col 0 :row 0})
+              selected (run stopped {:event/type :grid/trigger-cell :col 1 :row 0})]
+          (is (some? (get-in started [:playback :active-cues [0 0]])))
+          (is (nil? (get-in stopped [:playback :active-cues [0 0]])))
+          (is (= [1 0] (get-in selected [:grid :selected-cell])) "an empty neighbour, selected")
+          (doseq [s [started stopped selected]]
+            (kept s0 s)))))
+    (testing "a press after Clear, by the click shown before it: nothing starts, nothing is recorded"
+      (let [cleared (run (clean-state) {:event/type :grid/clear-cell :col 0 :row 0})
+            pressed (run cleared {:event/type :grid/cell-clicked :col 0 :row 0 :has-content? true})]
+        (is (= 1 (undo-count cleared)))
+        (is (true? (get-in cleared [:project :dirty?])))
+        (is (= [0 0] (get-in pressed [:grid :selected-cell])))
+        (is (= (:playback cleared) (:playback pressed)))
+        (kept cleared pressed)))))
 (defn- timeline-state []
   (-> (test-state)
       (assoc-in [:chains :cue-chains [0 0]]

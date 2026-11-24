@@ -65,7 +65,30 @@
               :selected? false
               :timeline? false
               :has-content? false}
-             (fx/sub-ctx ctx subs/cell-display-data 3 2))))))
+             (fx/sub-ctx ctx subs/cell-display-data 3 2))))
+    (testing "what a cell holds: a timeline, or a preset at the top or in a group, enabled or not"
+      (let [P {:type :preset :preset-id :circle}
+            holds (fn [cue]
+                    (-> (update-in base-state [:chains :cue-chains] #(if cue (assoc % [2 1] cue) (dissoc % [2 1])))
+                        context
+                        (fx/sub-ctx subs/cell-display-data 2 1)
+                        (select-keys [:first-preset-id :preset-count :timeline? :has-content?])))
+            nothing {:first-preset-id nil :preset-count 0 :timeline? false :has-content? false}
+            a-timeline {:first-preset-id nil :preset-count 0 :timeline? true :has-content? true}]
+        (is (= nothing (holds nil)) "no cue")
+        (is (= nothing (holds {:items []})) "the same as no cue")
+        (is (= nothing (holds {:name "Draft" :trigger-mode :retrigger})) "a name and a mode alone")
+        (is (= nothing (holds {:name "Draft" :items [{:type :group :items []}]})) "an empty group")
+        (is (= nothing (holds {:items [{:preset-id :circle} {:type :effect :effect-id :scale}]}))
+            "an untyped item and an effect")
+        (is (= {:first-preset-id :circle :preset-count 1 :timeline? false :has-content? true}
+               (holds {:items [{:type :group :enabled? false :items [(assoc P :enabled? false)]}]}))
+            "a disabled preset in a disabled group")
+        (is (= a-timeline (holds {:editor-type :timeline :items []})) "a timeline, without clips")
+        (is (= a-timeline (holds {:tracks [{:id :t :type :track}] :items []})) "tracks make it a timeline")
+        (is (= a-timeline (holds {:items [{:track-id :t}]})) "so does a clip's track")
+        (is (= nothing (holds {:editor-type :cue-chain :tracks [{:id :t :type :track}]}))
+            "a cue chain by choice: tracks alone don't make it a timeline")))))
 
 (deftest cell-display-data-ignores-unrelated-changes-test
   (let [ctx (context base-state)

@@ -431,10 +431,14 @@
         (is (nil? (get-in (state/get-raw-state) [:playback :active-cues [0 0]])))))))
 
 (deftest active-runs-keep-the-intents-order-test
-  (init! {[0 0] circle [1 0] circle [2 0] {:items []}})
+  (init! {[0 0] circle [1 0] circle [2 0] circle})
   (doseq [col [1 0 2]] (handle! {:event/type :grid/trigger-cell :col col :row 0}))
+  ;; [2 0]'s chain loses its items while it plays
+  (state/swap-state! assoc-in [:chains :cue-chains [2 0] :items] [])
   (let [state (state/get-raw-state)
         rt (run-at (:runtime start) 0.0)]
+    (is (= [[1 0] [0 0] [2 0]] (keys (get-in state [:playback :active-cues])))
+        "every cell has an intent, [2 0]'s with no items")
     (is (= (keep #(when (seq (get-in state [:chains :cue-chains % :items])) %)
                  (keys (get-in state [:playback :active-cues])))
            (map :cell (show-time/active-runs state rt)))

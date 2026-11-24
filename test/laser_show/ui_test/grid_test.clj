@@ -165,6 +165,91 @@
       (is (= "#505050" (fill-hex "#effects-cell-0-0"))))))
 
 
+;; A click names its cell: what the cell holds when the click is handled
+;; decides what it does (plans/2026-11-23-cljfx-reactivity/10)
+
+(defn- recorded-click!
+  "The events a real primary click on selector dispatches, recorded instead
+   of dispatched; the mouse is moved off the cells after, so the next click
+   counts as a single one."
+  [robot selector]
+  (let [sent (atom [])]
+    (with-redefs [events/dispatch! #(swap! sent conj %)]
+      (ui/click! robot selector))
+    (move-away! robot selector)
+    @sent))
+
+(defn- handled!
+  "Dispatch events in turn and wait until the app has handled them."
+  [& events]
+  (run! events/dispatch! events)
+  (is (events/flush!)))
+
+(defn- edit-marks
+  "How many undo steps, and whether there are unsaved changes."
+  []
+  (let [s (state/get-raw-state)]
+    [(count (get-in s [:history :undo-stack])) (get-in s [:project :dirty?])]))
+
+(deftest primary-click-resolves-current-cue-test
+  (let [robot (ui/robot)
+        A [2 1]
+        cell "#grid-cell-2-1"
+        circle {:id (random-uuid) :type :preset :preset-id :circle :enabled? true :params {} :effects []}
+        click {:event/type :grid/trigger-cell :col 2 :row 1}
+        cue #(get-in (state/get-raw-state) [:chains :cue-chains A])
+        playback #(:playback (state/get-raw-state))
+        selected #(get-in (state/get-raw-state) [:grid :selected-cell])]
+    (ui/assert-visible! cell)
+    (testing "shown empty, filled before the click is handled: the click plays the cue there (§7 case 2)"
+      (ui/wait-for! #(ui/has-style-class? cell "grid-cell-empty"))
+      (let [clicks (recorded-click! robot cell)
+            items [{:id (random-uuid) :type :group :name "Group" :enabled? false :items [circle]}]]
+        (is (= [click] clicks) "the cell's coordinate, and nothing it showed")
+        (is (nil? (cue)))
+        (handled! {:event/type :chain/set-items :domain :cue-chains :entity-key A :items items})
+        (ui/wait-for! #(seq (:items (cue))))
+        (let [marks (edit-marks)]
+          (apply handled! clicks)
+          (let [{:keys [active-cues active-cell playing? pulses]} (playback)
+                run (get-in active-cues [A :run])]
+            (is (uuid? run))
+            (is (= {A {:run run}} active-cues))
+            (is (= [A true {:id 1}] [active-cell playing? (:cue pulses)])))
+          (is (= A (selected)))
+          (is (= marks (edit-marks)) "no undo step, and the unsaved flag as it was")
+          (ui/wait-for! #(and (ui/has-style-class? cell "grid-cell-active")
+                              (ui/has-style-class? cell "grid-cell-content")))
+          (is (= "circle" (label-text (str cell " .grid-cell-label"))) "one preset, the circle")
+          (testing "the same click again stops it"
+            (apply handled! clicks)
+            (is (= [{} nil false {:id 1}]
+                   ((juxt :active-cues :active-cell :playing? (comp :cue :pulses)) (playback))))
+            (is (= marks (edit-marks)))
+            (ui/wait-for! #(not (ui/has-style-class? cell "grid-cell-active")))))))
+    (testing "shown with a cue, cleared before the click is handled: the click only selects the cell (§7 case 1)"
+      (events/write-state! assoc-in [:chains :cue-chains A] {:items [circle]})
+      (handled! {:event/type :grid/trigger-cell :col 0 :row 0})
+      (ui/wait-for! #(and (ui/has-style-class? cell "grid-cell-content")
+                          (ui/has-style-class? "#grid-cell-0-0" "grid-cell-active")))
+      (let [clicks (recorded-click! robot cell)]
+        (is (= [click] clicks) "the same click as the empty cell's")
+        (handled! {:event/type :grid/clear-cell :col 2 :row 1})
+        (ui/wait-for! #(nil? (cue)))
+        (let [cleared (playback)
+              marks (edit-marks)]
+          (apply handled! clicks)
+          (is (= A (selected)))
+          (is (nil? (cue)) "the cue stays gone")
+          (is (= cleared (playback)) "no run, no pulse")
+          (is (some? (get-in (playback) [:active-cues [0 0]])) "the other cue plays on")
+          (is (= marks (edit-marks)) "no undo step, and the unsaved flag as it was")
+          (ui/wait-for! #(and (ui/has-style-class? cell "grid-cell-selected")
+                              (ui/has-style-class? cell "grid-cell-empty")))
+          (is (not (ui/has-style-class? cell "grid-cell-active")))
+          (is (ui/has-style-class? "#grid-cell-0-0" "grid-cell-active")))))))
+
+
 ;; What the tabs say about the clicks
 
 (defn- hint [selector]
