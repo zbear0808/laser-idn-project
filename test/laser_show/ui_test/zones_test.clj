@@ -5,6 +5,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.input :as input]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.router :as input-router]
             [laser-show.state.core :as state]
@@ -397,7 +398,7 @@
         (ui/assert-text! "#zone-map-pad-odd-even-keys" "Right-click to learn a control")
         (ui/right-click-node! robot (ui/query "#zone-map-pad-odd-even"))
         (ui/click! robot "#zone-map-pad-odd-even-learn")
-        (ui/wait-for! #(= {:type :zone-map :target :map/odd-even} (get-in (app-state) [:backend :input :learning-target])))
+        (ui/wait-for! #(= {:type :zone-map :target :map/odd-even} (input/learning-target (app-state))))
         (is (has-class? "#zone-map-pad-odd-even" "zone-map-pad-learning"))
         (is (= :map/left-right (active-map)) "the menu pressed nothing")
         (input-router/dispatch! (note :note-on 36))

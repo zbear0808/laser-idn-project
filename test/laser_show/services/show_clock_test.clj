@@ -20,6 +20,7 @@
             [laser-show.events.handlers.timing :as timing]
             [laser-show.idn.fake-dac :as dac]
             [laser-show.input.events :as ie]
+            [laser-show.input.learn :as learn]
             [laser-show.input.mtc :as mtc]
             [laser-show.input.router :as router]
             [laser-show.input.store :as input-store]
@@ -794,6 +795,7 @@
                          (templates/apply-starter-effects)
                          (assoc-in [:timing :bpm] 120.0)
                          (assoc-in [:config :input :macro-map] macro-map)
+                         (persistent/begin-document)
                          (history/mark-clean)))
   (show-time/reset-runtime!)
   (input-store/clear-continuous-values!)
@@ -804,6 +806,7 @@
       (trigger! 0 0)
       (f))
     (finally
+      (learn/retire!)
       (mapper/stop-mapper!)
       (mapper/set-dispatch-fn! nil)
       (router/clear-handlers!)
@@ -818,10 +821,18 @@
 
 (defn- cc! [control v] (router/dispatch! (ie/control-change :midi 0 control v)))
 
+(defn- start-fader-learn!
+  "Start the learn for the fader slot, from the show open now, through the
+   pipeline: its listener goes in the router's slot (:input/sync-learn)."
+  [slot]
+  (events/event-handler {:event/type :input/start-learn :target-action {:type :macro :slot slot} :capture :continuous
+                         :document-id (get-in (state/get-raw-state) [:project :document-id])}))
+
 (defn- learn! [slot control]
-  (state/swap-state! assoc-in [:backend :input :learning-target] {:type :macro :slot slot})
-  (events/event-handler {:event/type :input/learn-captured :target-action {:type :macro :slot slot}
-                         :input-event (assoc (ie/control-change :midi 0 control 0.5) :store-key [:midi 0 control])}))
+  (start-fader-learn! slot)
+  (let [{:keys [learn-id document-id]} (input-handlers/active-learn (state/get-raw-state))]
+    (events/event-handler {:event/type :input/learn-captured :learn-id learn-id :document-id document-id
+                           :input-event (assoc (ie/control-change :midi 0 control 0.5) :store-key [:midi 0 control])})))
 
 (defn- macro-map [] (get-in (state/get-raw-state) [:config :input :macro-map]))
 
@@ -858,17 +869,18 @@
           (is (close? (* 0.5 full) (first (tick-faders))))
           (cc! 7 1.0)
           (is (= [true {:slider-1 0.5}] ((juxt #(close? (* 0.5 full) (first %)) second) (tick-faders)))))
-        (testing "learned for real, the catcher and the mapper both listening: the slot is where the control was left, at once"
-          (let [{s :state {p :promise} :input/await-learn}
-                (input-handlers/handle {:event/type :input/start-learn :target-action {:type :macro :slot :slider-1}
-                                        :capture :continuous :state (state/get-raw-state)})]
-            (state/reset-state! s)
-            (cc! 11 0.1)
-            (cc! 11 0.25)
-            (events/event-handler {:event/type :input/learn-captured :target-action {:type :macro :slot :slider-1}
-                                   :input-event (deref p 1000 nil)})
-            (is (= {[:midi 0 11] :slider-1} (macro-map)))
-            (is (close? (* 0.25 full) (first (tick-faders))) "no move needed after the learn")))))))
+        (testing "learned for real, the listener and the mapper both on the router: the slot is where the control was left, at once"
+          (start-fader-learn! :slider-1)
+          (cc! 11 0.1)
+          (cc! 11 0.25)
+          ;; The listener's waiter sends the capture through the pipeline
+          (is (loop [n 0]
+                (cond
+                  (= {[:midi 0 11] :slider-1} (macro-map)) true
+                  (< n 200) (do (Thread/sleep 10) (recur (inc n)))
+                  :else false)))
+          (is (nil? (input-handlers/active-learn (state/get-raw-state))))
+          (is (close? (* 0.25 full) (first (tick-faders))) "no move needed after the learn"))))))
 
 (deftest undone-learn-leaves-the-master-full-test
   (with-faders {}

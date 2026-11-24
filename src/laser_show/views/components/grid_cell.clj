@@ -294,6 +294,7 @@
   (let [display-data (fx/sub-ctx context subs/cell-display-data col row)
         trigger-map (fx/sub-ctx context subs/input-trigger-map)
         learning-target (fx/sub-ctx context subs/input-learning-target)
+        document-id (fx/sub-ctx context subs/document-id)
         has-content? (:has-content? display-data)
         timeline? (:timeline? display-data)
         has-trigger? (boolean (some (fn [[_ v]]
@@ -355,11 +356,14 @@
                                      (if learning?
                                        {:fx/type :menu-item
                                         :text "Cancel Learning Trigger"
-                                        :on-action {:event/type :input/cancel-learn}}
+                                        ;; Only the cell that waits reads the attempt its Cancel names
+                                        :on-action (merge {:event/type :input/cancel-learn}
+                                                          (fx/sub-ctx context subs/learn-for-target {:type :trigger-cue :target [col row]}))}
                                        {:fx/type :menu-item
                                         :text "Learn Trigger..."
                                         :on-action {:event/type :input/start-learn
-                                                    :target-action {:type :trigger-cue :target [col row]}}})
+                                                    :target-action {:type :trigger-cue :target [col row]}
+                                                    :document-id document-id}})
                                      (when has-trigger?
                                        {:fx/type :menu-item
                                         :text "Clear Triggers"
@@ -474,6 +478,7 @@
   (let [display-data (fx/sub-ctx context subs/effect-cell-display-data col row)
         trigger-map (fx/sub-ctx context subs/input-trigger-map)
         learning-target (fx/sub-ctx context subs/input-learning-target)
+        document-id (fx/sub-ctx context subs/document-id)
         has-effects? (:has-effects? display-data)
         ;; Holds anything (effects or groups, on or off): not a slot to fill
         has-content? (:has-content? display-data)
@@ -512,11 +517,14 @@
                                      (if learning?
                                        {:fx/type :menu-item
                                         :text "Cancel Learning Trigger"
-                                        :on-action {:event/type :input/cancel-learn}}
+                                        ;; Only the cell that waits reads the attempt its Cancel names
+                                        :on-action (merge {:event/type :input/cancel-learn}
+                                                          (fx/sub-ctx context subs/learn-for-target {:type :trigger-effect :target [col row]}))}
                                        {:fx/type :menu-item
                                         :text "Learn Trigger..."
                                         :on-action {:event/type :input/start-learn
-                                                    :target-action {:type :trigger-effect :target [col row]}}})
+                                                    :target-action {:type :trigger-effect :target [col row]}
+                                                    :document-id document-id}})
                                      (when has-trigger?
                                        {:fx/type :menu-item
                                         :text "Clear Triggers"

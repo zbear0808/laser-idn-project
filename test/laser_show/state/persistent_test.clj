@@ -401,12 +401,28 @@
 (deftest session-reset-clears-the-vibes-tab-selection-test
   (testing "the Vibes tab's selection names the old project's vibes: New and Open reset it with the rest of the session (03 §10)"
     (let [busy (-> (with-starter-vibes)
-                   (assoc-in [:ui :vibes] {:selected :vibe-2 :slot :fx :wizard {:queue [:accent] :done [:hit]}}))
+                   (assoc-in [:ui :vibes] {:selected :vibe-2 :slot :fx}))
           initial (get-in (domains/build-initial-state) [:ui :vibes])]
-      (is (= {:selected nil :slot :hit :wizard nil} initial))
+      (is (= {:selected nil :slot :hit} initial))
       (is (= initial (get-in (persistent/new-project-state busy) [:ui :vibes])) "File > New")
       (is (= initial (get-in (persistent/apply-loaded-project busy (persistent/project-files busy) "x.zip") [:ui :vibes]))
           "File > Open"))))
+
+(deftest session-reset-ends-learning-test
+  (testing "a learn attempt (Learn all's too) and Settings' cards are the old show's session: New and Open start them afresh (reactivity plan 24)"
+    (let [busy (-> (with-starter-vibes)
+                   (persistent/begin-document)
+                   (assoc-in [:ui :input-learn] {:active {:learn-id #uuid "00000000-0000-0000-0000-0000000024f1"
+                                                          :owner :learn-all :capture :press
+                                                          :target-action {:type :vibe :role :accent}
+                                                          :wizard {:queue [:accent] :done [:hit]}}
+                                                 :settings {:midi {:status :timeout}}}))
+          initial (get-in (domains/build-initial-state) [:ui :input-learn])]
+      (is (= {:active nil :settings {}} initial))
+      (is (= initial (get-in (persistent/new-project-state busy) [:ui :input-learn])) "File > New")
+      (is (= initial (get-in (persistent/apply-loaded-project busy (persistent/project-files busy) "x.zip") [:ui :input-learn]))
+          "File > Open")
+      (is (not (re-find #"input-learn|learn-id" (pr-str (persistent/project-files busy)))) "and none of it is saved"))))
 
 (deftest open-and-new-stop-the-test-pattern-test
   (let [testing-pattern (-> (laser-show.state.domains/build-initial-state)

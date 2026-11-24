@@ -625,16 +625,28 @@
 
 (deftest learned-binding-is-undoable-and-unsaved-test
   (let [target {:type :trigger-cue :target [0 0]}
-        input {:type :note-on :source :midi :channel 0 :note 60 :velocity 100}
-        learning (assoc-in (clean-state) [:backend :input :learning-target] target)
-        s (run learning {:event/type :input/learn-captured :target-action target :input-event input})]
+        input {:type :note-on :source :midi :channel 0 :note 60 :velocity 1.0}
+        s0 (persistent/begin-document (clean-state))
+        doc (get-in s0 [:project :document-id])
+        learning (run s0 {:event/type :input/start-learn :target-action target :document-id doc})
+        capture {:event/type :input/learn-captured :input-event input :document-id doc
+                 :learn-id (get-in learning [:ui :input-learn :active :learn-id])}
+        s (run learning capture)]
+    (is (zero? (undo-count learning)) "starting a learn is no undo step")
+    (is (false? (get-in learning [:project :dirty?])))
     (is (= target (get-in s [:config :input :trigger-map {:source :midi :channel 0 :note 60}])))
-    (is (nil? (get-in s [:backend :input :learning-target])))
+    (is (nil? (get-in s [:ui :input-learn :active])))
     (is (true? (get-in s [:project :dirty?])))
     (is (= "Learn Trigger" (history/undo-label (:history s))))
+    (testing "Undo takes the binding back, and leaves no learn waiting"
+      (let [undone (run s {:event/type :edit/undo})]
+        (is (empty? (get-in undone [:config :input :trigger-map])))
+        (is (nil? (get-in undone [:ui :input-learn :active])))))
     (testing "a capture after learn was cancelled is ignored"
-      (let [s (run (clean-state) {:event/type :input/learn-captured :target-action target :input-event input})]
-        (is (empty? (get-in s [:config :input :trigger-map])))))))
+      (let [cancelled (run learning {:event/type :input/cancel-learn :learn-id (:learn-id capture) :document-id doc})
+            s (run cancelled capture)]
+        (is (empty? (get-in s [:config :input :trigger-map])))
+        (is (zero? (undo-count s)))))))
 
 (deftest live-events-keep-the-dirty-flag-test
   (let [dirty (run (clean-state) edit-size)]

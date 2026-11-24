@@ -434,7 +434,7 @@
         s1 (-> s0
                (run {:event/type :vibe/select-for-edit :vibe :vibe-2})
                (run {:event/type :vibe/set-slot :slot :bed}))]
-    (is (= {:selected :vibe-2 :slot :bed :wizard nil} (get-in s1 [:ui :vibes])))
+    (is (= {:selected :vibe-2 :slot :bed} (get-in s1 [:ui :vibes])))
     (is (= 0 (undo-count s1)))
     (is (false? (get-in s1 [:project :dirty?])))
     (is (history/document-roots-identical? s0 s1) "invariant 1: clicking around the editor makes no undo step")

@@ -6,15 +6,19 @@
    (plans/2026-11-18-vibe-mode/05 §11)."
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.input :as input-handlers]
             [laser-show.events.handlers.input-mapper :as input-mapper]
+            [laser-show.events.helpers :as h]
             [laser-show.input.fixtures :as fixtures]
             [laser-show.input.gamepad :as gamepad]
+            [laser-show.input.learn :as learn]
             [laser-show.input.midi :as midi]
             [laser-show.input.osc :as osc]
             [laser-show.input.router :as router]
             [laser-show.input.store :as store]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
+            [laser-show.state.persistent :as persistent]
             [laser-show.state.templates :as templates]
             [laser-show.vibes.faders :as faders]))
 
@@ -29,22 +33,25 @@
 
 (deftest mapper-ignores-discrete-events-while-learning-test
   (let [sent (atom [])
-        learning! #(state/swap-state! assoc-in [:backend :input :learning-target] %)]
+        learning! (fn [capture & {:as more}]
+                    (learn/retire!)
+                    (learn/sync! {:retire nil :arm (merge {:learn-id (random-uuid) :capture capture} more)} (fn [_])))]
     (state/init-state! (domains/build-initial-state))
     (input-mapper/set-dispatch-fn! #(swap! sent conj %))
     (input-mapper/start-mapper!)
     (try
+      (learn/retire!)
       (run! router/dispatch! discrete)
       (is (= 4 (count @sent)) "not learning: each goes to the trigger map")
       (is (= {:event/type :trigger/input :input-event (first discrete) :time 1000} (first @sent)))
-      (learning! {:type :vibe :role :hit})
+      (learning! :press)
       (run! router/dispatch! discrete)
       (is (= [:note-off :trigger-release] (mapv (comp :type :input-event) (drop 4 @sent)))
-          "learning: the learn catches the presses (handlers/input.clj), and their old bindings don't fire; the releases still reach theirs")
+          "learning: the router marks the presses for the learn (input.learn), and their old bindings don't fire; the releases still reach theirs")
       (testing "a fader still moves while a learn waits"
         (router/dispatch! (input :control-change :control 7 :value 0.25))
         (is (= 0.25 (store/get-continuous-value [:midi 0 7]))))
-      (learning! nil)
+      (learn/retire!)
       (router/dispatch! (first discrete))
       (is (= 7 (count @sent)) "learned: inputs reach the trigger map again")
       (testing "a keyboard press already claimed by learn still cannot perform if the learn finished first"
@@ -53,7 +60,16 @@
           (is (= 7 (count @sent)))
           (router/dispatch! press)
           (is (= press (:input-event (last @sent))))))
+      (testing "a fader's learn keeps the presses too; Settings' identify keeps none: it only looks"
+        (learning! :continuous)
+        (router/dispatch! (first discrete))
+        (is (= 8 (count @sent)))
+        (learning! :observe :source :midi)
+        (router/dispatch! (first discrete))
+        (is (= 9 (count @sent)))
+        (is (= (first discrete) (:input-event (last @sent)))))
       (finally
+        (learn/retire!)
         (input-mapper/stop-mapper!)
         (input-mapper/set-dispatch-fn! nil)
         (store/clear-continuous-values!)))))
@@ -65,26 +81,30 @@
       (state/init-state! (-> (domains/build-initial-state)
                              (templates/apply-starter-cue-chains)
                              (templates/apply-starter-vibes)
+                             (persistent/begin-document)
                              (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)
                              (assoc-in [:config :input :trigger-map] {hit-key {:type :vibe :role :hit}})))
       (input-mapper/set-dispatch-fn! events/event-handler)
       (input-mapper/start-mapper!)
+      (learn/retire!)
       (try
         (router/dispatch! (input :note-on :note 36 :velocity 1.0 :timestamp 1000))
         (let [cell (get-in (app-state) [:vibe-runtime :voices :hit :cell])]
           (is (= :input (get-in (app-state) [:vibe-runtime :held :hit :src])))
           (is (some? (get-in (app-state) [:playback :active-cues cell])))
-          (events/event-handler {:event/type :input/start-learn :target-action {:type :vibe :role :accent}})
-          (is (= {:type :vibe :role :accent} (get-in (app-state) [:backend :input :learning-target])))
+          (events/event-handler {:event/type :input/start-learn :target-action {:type :vibe :role :accent}
+                                 :document-id (h/document-id (app-state))})
+          (is (= {:type :vibe :role :accent} (input-handlers/learning-target (app-state))))
+          (is (= (:learn-id (input-handlers/active-learn (app-state))) (router/learn-listener-id)) "its listener is in the slot")
           (router/dispatch! (input :note-off :note 36 :timestamp 2000))
           (is (nil? (get-in (app-state) [:vibe-runtime :held :hit])) "the role is let go")
           (is (false? (get-in (app-state) [:playback :pulses :hit :held?])) "and its pulse")
           (is (nil? (get-in (app-state) [:playback :active-cues cell])) "held a second: its cue stops, as a release does")
-          (is (= {:type :vibe :role :accent} (get-in (app-state) [:backend :input :learning-target]))
+          (is (= {:type :vibe :role :accent} (input-handlers/learning-target (app-state)))
               "the learn still waits for its press")
           (is (= {hit-key {:type :vibe :role :hit}} (get-in (app-state) [:config :input :trigger-map]))))
         (finally
-          (events/event-handler {:event/type :input/cancel-learn})
+          (learn/retire!)
           (input-mapper/stop-mapper!)
           (input-mapper/set-dispatch-fn! nil))))))
 

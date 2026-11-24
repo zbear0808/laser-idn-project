@@ -227,50 +227,18 @@
   (:enabled? midi-state true))
 
 
-;; MIDI Learn (pure functions for state, setup needs dispatch)
-
-
-(defn start-learn
-  "Starts MIDI learn mode.
-   Returns updated state with promise in :learn-mode.
-   
-   The caller should:
-   1. Store the returned state
-   2. Register a global handler to listen for MIDI events
-   3. When event received, deliver to the promise and call cancel-learn"
-  [midi-state]
-  (let [p (promise)]
-    (assoc midi-state :learn-mode p)))
-
-(defn cancel-learn
-  "Cancels MIDI learn mode.
-   Returns updated state with :learn-mode set to nil."
-  [midi-state]
-  (assoc midi-state :learn-mode nil))
-
-(defn learning?
-  "Returns true if MIDI learn mode is active."
-  [midi-state]
-  (boolean (:learn-mode midi-state)))
-
-(defn get-learn-promise
-  "Returns the learn mode promise, or nil if not learning."
-  [midi-state]
-  (:learn-mode midi-state))
-
-
 ;; Initialization (pure functions)
 
 
 (def initial-state
   "Default MIDI state structure: plain data (the ports are the device
-   worker's, input.devices)."
+   worker's, input.devices). Settings' identify of an input is a learn
+   attempt (handlers/input.clj), not MIDI state."
   {:enabled? true
    :available-devices []
    :connected-devices #{}
    :requests {}
    :channel-filter nil
-   :learn-mode nil
    :note-mappings {}
    :cc-mappings {}})
 

@@ -218,8 +218,10 @@
                     :doc "timeline editor preferences shared by every cue (snap, preset drawer, inspector, ruler mode, detail panel height); kept for the session, not saved"}
    :preview-zone-selector-open {:default nil
                                 :doc "Cell index whose zone selector popup is open, or nil if none"}
-   :vibes {:default {:selected nil :slot :hit :wizard nil}
-           :doc "the Vibes tab (views/tabs/vibes.clj): :selected, the vibe edited (nil: the first); :slot, what a click on the picker fills (vibes.library/slots); :wizard, Learn all while it runs: {:queue roles to learn, the first being learned :done learned roles :refused the role a key pressed again is already}; for the session, not saved"}
+   :vibes {:default {:selected nil :slot :hit}
+           :doc "the Vibes tab (views/tabs/vibes.clj): :selected, the vibe edited (nil: the first); :slot, what a click on the picker fills (vibes.library/slots); for the session, not saved. Learn all is a learn attempt ([:ui :input-learn])"}
+   :input-learn {:default {:active nil :settings {}}
+                 :doc "Learning an input (reactivity plan 24, events/handlers/input.clj), for the session: never saved or undone, and New and Open start it afresh. :active, the one attempt waiting for an input, or nil: {:learn-id (new for each attempt, each Learn all step and retry too) :owner (:settings Settings' identify, :binding a cell's, a pad's, a role's or a fader's learn, :trigger-editor, :learn-all) :capture (:observe, :press, :continuous)}, with :source (:midi, :osc) for :settings, else :document-id (the show it binds into, [:project :document-id]) and :target-action (what it binds, for the trigger editor with the behaviour shown), and for :learn-all :wizard {:queue (its role first) :done :refused}. :settings {source {:status :captured :input-event (what it says: :type :source :channel :note ...)} or {:status :timeout|:failed}}: what each Settings card identified last. Only plain data: the listener, its gate and its waiter are laser-show.input.learn's"}
    :zone-maps {:default {:selected nil}
                :doc "the Zone Groups tab's zones and maps (views/components/zone_maps_panel.clj): :selected, the map its editor shows (nil: the one in use); for the session, not saved"}
    :show-lock? {:default false
@@ -263,7 +265,7 @@
    :last-saved {:default nil
                 :doc "timestamp of last save"}
    :document-id {:default nil
-                 :doc "The open show's identity (reactivity plan 20): a random UUID the starter show gets at start (app/starter-state), replaced by each File > New and Open that goes ahead (state.persistent/begin-document, from reset-session); Save, Save As, Undo and a cancelled or failed Open keep it. Work that comes back later for a show checks it (events.helpers/for-document and same-document?: an OS clipboard paste, Save As's chooser), and so does Open's chooser (handlers/menu.clj discard-authorization). Session only: never saved, undone or compared for unsaved changes. nil in a bare state (unit tests)"}})
+                 :doc "The open show's identity (reactivity plan 20): a random UUID the starter show gets at start (app/starter-state), replaced by each File > New and Open that goes ahead (state.persistent/begin-document, from reset-session); Save, Save As, Undo and a cancelled or failed Open keep it. Work that comes back later for a show checks it (events.helpers/for-document and same-document?: an OS clipboard paste, Save As's chooser; a learn's capture, handlers/input.clj), and so does Open's chooser (handlers/menu.clj discard-authorization). Session only: never saved, undone or compared for unsaved changes. nil in a bare state (unit tests)"}})
 
 
 ;; Configuration Domains (persisted to disk)
@@ -541,15 +543,13 @@
                             :connected-devices #{}     ; Names of the connected inputs (the device worker's, input.devices)
                             :requests {}               ; {:list id :connections id}: the latest request to the device worker, until its result is in
                             :channel-filter nil        ; nil = all channels, or set of channel numbers (0-15)
-                            :learn-mode nil            ; Promise when learning, nil otherwise
                             :note-mappings {}          ; Optional note remapping
                             :cc-mappings {}}           ; Optional CC remapping
                      :osc {:enabled? false
                            :server-running? false      ; The device worker's server is listening
                            :port 9000                  ; The port Start Server listens on (while listening: the one it listens on)
                            :requests {}                ; {:server id}: the latest Start or Stop, until its result is in
-                           :address-mappings {}        ; Map of OSC address -> event config
-                           :learn-mode nil}            ; Promise when learning, nil otherwise
+                           :address-mappings {}}       ; Map of OSC address -> event config
                      :mtc {:state :stopped :fps nil :text nil} ; the show clock's status of laser-show.input.mtc, see mirror-status
                      :gamepad {:enabled? true}
                      :keyboard {:enabled? true}

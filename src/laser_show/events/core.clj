@@ -20,7 +20,8 @@
    3. Agent thread: co-effects inject :state and :time into event
    4. Agent thread: Pure handler processes event, returns effects map
    5. Agent thread: effects execute, :state first (ordered-pipeline), then
-      the others in the map's order
+      the learn slot's exchange (:input/sync-learn), then the others in the
+      map's order
    6. State atom watch triggers re-render on FX thread
    
    Threading (with the app running):
@@ -30,10 +31,11 @@
    - An effect that continues the event (:dispatch, :dispatch-n,
      :project/save's :project/mark-clean and its :on-saved, ...) runs the
      follow-up inline through run-inline, in the same turn
-   - Effects that work later on another thread (futures: scan, learn,
-     :dispatch-later, :rig/flush's wait; the FX thread: file chooser; the
-     output runtime's status thread; the rig writer; the input device
-     worker, input.devices, which owns the MIDI inputs and the OSC server)
+   - Effects that work later on another thread (futures: scan, a learn
+     attempt's waiter (input.learn), :dispatch-later, :rig/flush's wait;
+     the FX thread: file chooser; the output runtime's status thread; the
+     rig writer; the input device worker, input.devices, which owns the
+     MIDI inputs and the OSC server)
      only do their side effect there. Their result goes through the
      dispatch fn the effect was given, which queues it on the agent behind the
      current event
@@ -82,6 +84,7 @@
             [laser-show.state.rig-store :as rig-store]
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.history :as history-handlers]
+            [laser-show.events.handlers.input :as input-handlers]
             [laser-show.events.handlers.rig-autosave :as rig-autosave]
             [laser-show.events.handlers.step-grid :as step-grid-handlers]
             [laser-show.events.handlers.timeline :as timeline-handlers]
@@ -91,6 +94,7 @@
             [laser-show.events.handlers.output-sync :as output-sync]
             [laser-show.common.util :as u]
             [laser-show.input.devices :as devices]
+            [laser-show.input.learn :as learn]
             [laser-show.input.link :as link]
             [laser-show.animation.show-time :as show-time])
   (:import [javafx.stage FileChooser FileChooser$ExtensionFilter Stage]
@@ -484,16 +488,18 @@
 
 ;; Input Learn Effects
 
-(defn- effect-input-await-learn
-  "Effect that waits (off the event thread) for a learn capture, then dispatches
-   :on-captured with :input-event. A nil delivery means learn was cancelled."
-  [{:keys [promise on-captured]} dispatch]
-  (future
-    (try
-      (when-let [input-event @promise]
-        (dispatch (assoc on-captured :input-event input-event)))
-      (catch Throwable t
-        (log/error "Input learn failed:" (.getMessage t))))))
+(defn- effect-sync-learn
+  "Effect that has the router's learn slot follow the active learn attempt
+   (reactivity plan 24): input.learn/sync!, {:retire L :arm A}, the change
+   handlers.input/wrap-learn-lifetime made, after this event's :state. A's
+   waiter dispatches its capture or its end through dispatch, the
+   dispatcher of the app this effect is for. If the app was stopped while
+   the exchange ran, the attempt it armed is retired again: input of the
+   app after it never goes to it."
+  [{:keys [arm] :as change} dispatch]
+  (learn/sync! change dispatch)
+  (when (and arm (retired))
+    (learn/sync! {:retire (:learn-id arm)} dispatch)))
 
 ;; Input Device Effects
 
@@ -810,6 +816,27 @@
                       "but no :fx/event value; they stay as they are")
             (handler event))))))
 
+(def ^:private learn-starts
+  "The events that can begin a learn attempt (reactivity plan 24): a Start,
+   Learn all, and a capture, which can begin Learn all's next step or its
+   retry. Each gets a new :fresh-learn-id (with-fresh-learn-id)."
+  #{:input/start-learn :input/midi-start-learn :input/osc-start-learn :vibe/learn-all :input/learn-captured})
+
+(defn new-learn-id
+  "A new learn attempt's id: a random UUID (tests stand in for it)."
+  []
+  (random-uuid))
+
+(defn- with-fresh-learn-id
+  "Pipeline step: an event that can begin a learn attempt (learn-starts)
+   gets :fresh-learn-id, a new id for it, whatever it carried: an id never
+   comes from a view's description, a clock tick or a time. Its :learn-id,
+   the attempt it answers, stays as it is."
+  [handler]
+  (fn [event]
+    (handler (cond-> event
+               (contains? learn-starts (:event/type event)) (assoc :fresh-learn-id (new-learn-id))))))
+
 (def handle-event-pipeline
   "Event handler pipeline: the show lock (innermost: while it is on, the
    events it refuses change [:ui] only, events/show_lock.clj), the step
@@ -825,9 +852,13 @@
    what the engines are built from (undo included) requests a refresh while
    streaming (handlers/output_sync.clj), and the rig autosave: a change to
    the rig (undo included) requests a write of the rig file
-   (handlers/rig_autosave.clj). Then, in dev mode only, the lost-update check
-   tags the :state effect with the event's snapshot. Outermost, with-fx-event
-   puts a map event's :fx/event value where its view wrote the placeholder.
+   (handlers/rig_autosave.clj). Then the learn attempt's lifetime: one
+   whose owner went ends, and the router's learn slot follows the active
+   attempt (handlers.input/wrap-learn-lifetime, :input/sync-learn). Then,
+   in dev mode only, the lost-update check tags the :state effect with the
+   event's snapshot. An event that can begin a learn attempt gets its id
+   (with-fresh-learn-id). Outermost, with-fx-event puts a map event's
+   :fx/event value where its view wrote the placeholder.
 
    app/create-app gives it, with :state first (ordered-pipeline) and for
    one app instance (instance-handler), to fx/create-app together with
@@ -841,21 +872,31 @@
       safety-guard/wrap-safety-versions
       output-sync/wrap-output-sync
       rig-autosave/wrap-rig-autosave
+      input-handlers/wrap-learn-lifetime
       wrap-lost-update-check
+      with-fresh-learn-id
       with-fx-event))
 
+(def ^:private leading-effects
+  "The effects that run first, in this order: the event's :state, then the
+   learn slot's exchange that state asks for (:input/sync-learn), so an
+   inline follow-up starts from both."
+  [:state :input/sync-learn])
+
 (defn- state-first
-  "Wrap handler so its :state effect runs before its other effects: the
-   result's :state entry, then the other entries in the map's own order, as
-   a seq of map entries (cljfx's wrap-effects iterates it like the map). A
-   write inside the turn (an inline follow-up, :output/write-status) then
-   can't be undone by the event's write-back. A result without :state (nil
-   and {} too) is returned unchanged."
+  "Wrap handler so its :state effect runs before its other effects, and
+   :input/sync-learn right after it (leading-effects): those entries, then
+   the other entries in the map's own order, as a seq of map entries
+   (cljfx's wrap-effects iterates it like the map). A write inside the turn
+   (an inline follow-up, :output/write-status) then can't be undone by the
+   event's write-back, nor find the learn slot on the attempt before. A
+   result without :state (nil and {} too) is returned unchanged."
   [handler]
   (fn [event]
     (let [result (handler event)]
-      (if-let [entry (find result :state)]
-        (cons entry (dissoc result :state))
+      (if (find result :state)
+        (concat (keep #(find result %) leading-effects)
+                (apply dissoc result leading-effects))
         result))))
 
 (def ordered-pipeline
@@ -901,7 +942,9 @@
    - :link/sync-to-downbeat - align phase to Link's downbeat (inline)
    - :show-clock/read - continue :on-read with the show clock's beats, or
      with :chase-cell its timecode episode there (inline)
-   - :input/await-learn - wait for a learn capture, then dispatch the binding (later, future)
+   - :input/sync-learn - the router's learn slot to the active learn
+     attempt (input.learn/sync!, right after :state); its waiter dispatches
+     the capture or the attempt's end (later, future)
    - :input/midi-list, :input/midi-connect, :input/midi-disconnect,
      :input/osc-start, :input/osc-stop - list the MIDI inputs, connect or
      disconnect one (or all), start or stop the OSC server, on the device
@@ -945,7 +988,7 @@
     :history/gesture-alarm effect-gesture-alarm
     :link/sync-to-downbeat effect-link-sync-to-downbeat
     :show-clock/read effect-show-clock-read
-    :input/await-learn effect-input-await-learn
+    :input/sync-learn effect-sync-learn
     ;; Input devices (on the device worker)
     :input/midi-list (device-request :midi/list)
     :input/midi-connect (device-request :midi/connect)

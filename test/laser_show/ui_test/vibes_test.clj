@@ -10,8 +10,10 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.input :as input]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.events :as input-events]
+            [laser-show.input.learn :as learn]
             [laser-show.input.router :as input-router]
             [laser-show.input.store :as store]
             [laser-show.state.core :as state]
@@ -43,7 +45,7 @@
 (defn- edited [] (get-in (app-state) [:ui :vibes :selected]))
 (defn- undo-stack [] (get-in (app-state) [:history :undo-stack]))
 (defn- undo-label [] (:description (peek (undo-stack))))
-(defn- learning-target [] (get-in (app-state) [:backend :input :learning-target]))
+(defn- learning-target [] (input/learning-target (app-state)))
 (defn- fx-on? [cell] (true? (get-in (app-state) [:chains :effect-chains cell :active?])))
 
 (defn- open-vibes! [robot]
@@ -214,6 +216,76 @@
       (is (empty? (rt :held)))
       (is (zero? (rt :started)) "no HIT, ACCENT or FLASH played")
       (is (false? (rt :blackout?)) "BLACKOUT's own key didn't black the room out"))))
+
+(deftest old-learn-callback-cannot-disarm-next-step-test
+  ;; Case 2 (reactivity plan 24 §7): before, HIT's router callback
+  ;; delivered, then unregistered the one shared key, so once Learn all had
+  ;; begun ACCENT's learn, the late unregister took ACCENT's listener away:
+  ;; the wizard waited for ACCENT with no listener
+  (let [robot (ui/robot)
+        entered (promise)
+        resume (promise)
+        deliveries (atom 0)
+        deliver-capture learn/deliver-capture!
+        attempt #(input/active-learn (app-state))
+        status #(ui/node-text "#vibe-wizard-status")
+        press! (fn [n]
+                 (input-router/dispatch! (note :note-on n))
+                 (input-router/dispatch! (note :note-off n)))]
+    (with-redefs [learn/deliver-capture! (fn [gate event]
+                                           (deliver-capture gate event)
+                                           ;; HIT's callback: delivered, not returned yet
+                                           (when (= 1 (swap! deliveries inc))
+                                             (deliver entered true)
+                                             (deref resume 5000 nil)))]
+      (try
+        (open-vibes! robot)
+        (ui/click! robot "#vibe-learn-all")
+        (ui/wait-for! #(and (= {:type :vibe :role :hit} (learning-target))
+                            (= (:learn-id (attempt)) (input-router/learn-listener-id))))
+        (let [hit-attempt (:learn-id (attempt))
+              ;; A controller's thread: its note 36 goes to HIT's listener
+              input-thread (future (input-router/dispatch! (note :note-on 36)))]
+          (is (deref entered 2000 false) "HIT's callback delivered, and is held before it returns")
+          (ui/wait-for! #(and (= {:type :vibe :role :accent} (learning-target))
+                              (= (:learn-id (attempt)) (input-router/learn-listener-id))))
+          (let [accent-attempt (:learn-id (attempt))]
+            (is (not= hit-attempt accent-attempt))
+            (deliver resume true)
+            (is (deref input-thread 2000 false) "HIT's callback returned")
+            (input-router/dispatch! (note :note-off 36))
+            (is (events/flush!))
+            (is (= accent-attempt (input-router/learn-listener-id)) "ACCENT's listener survives HIT's callback")
+            (ui/assert-text! "#vibe-wizard-status" "Press the key for ACCENT (2 of 5)")
+            (testing "36 again: HIT's already, the same step waits again, as an attempt of its own"
+              (press! 36)
+              (ui/wait-for! #(= "Press the key for ACCENT (2 of 5) · that key is HIT's already" (status)))
+              (is (= :hit (get-in (attempt) [:wizard :refused])))
+              (is (not= accent-attempt (:learn-id (attempt))))
+              (is (= (:learn-id (attempt)) (input-router/learn-listener-id)))
+              (is (= {(note-key 36) {:type :vibe :role :hit}} (get-in (app-state) [:config :input :trigger-map])) "no edit")
+              (is (= 1 (count (undo-stack)))))
+            (testing "37 binds ACCENT and FLASH's step listens"
+              (press! 37)
+              (ui/wait-for! #(and (= {:type :vibe :role :flash} (learning-target))
+                                  (= (:learn-id (attempt)) (input-router/learn-listener-id))))
+              (is (= {:type :vibe :role :accent} (get-in (app-state) [:config :input :trigger-map (note-key 37)])))
+              (ui/assert-text! "#vibe-wizard-status" "Press the key for FLASH (3 of 5)"))
+            (doseq [[n role] [[38 :flash] [39 :vibe] [40 :blackout]]]
+              (ui/wait-for! #(= {:type :vibe :role role} (learning-target)))
+              (press! n)
+              (ui/wait-for! #(= {:type :vibe :role role} (get-in (app-state) [:config :input :trigger-map (note-key n)]))))
+            (ui/wait-for! #(nil? (attempt)))
+            (is (events/flush!))
+            (is (nil? (input-router/learn-listener-id)) "no listener left")
+            (is (= (zipmap (map note-key [36 37 38 39 40]) (map #(hash-map :type :vibe :role %) [:hit :accent :flash :vibe :blackout]))
+                   (get-in (app-state) [:config :input :trigger-map])))
+            (is (= (repeat 5 "Learn Trigger") (map :description (undo-stack))) "five changed bindings, five steps")
+            (is (empty? (rt :held)))
+            (is (zero? (rt :started)) "no learning press played a role")
+            (ui/wait-for! #(not (ui/visible? "#vibe-wizard-status")))))
+        (finally
+          (deliver resume true))))))
 
 (deftest learn-a-fader-binds-a-slot-test
   (let [robot (ui/robot)

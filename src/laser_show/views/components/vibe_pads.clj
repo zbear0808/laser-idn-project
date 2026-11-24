@@ -61,6 +61,8 @@
   [{:keys [fx/context role]}]
   (let [{:keys [label bindings held? learning? dim? on? reactions] :as data} (fx/sub-ctx context subs/vibe-pad role)
         audience? (fx/sub-ctx context subs/vibe-pad-audience? role)
+        learn (fx/sub-ctx context subs/learn-for-target {:type :vibe :role role})
+        document-id (fx/sub-ctx context subs/document-id)
         id (str "vibe-pad-" (name role))
         pointer {:event/type :vibe/pointer :role role}
         badge (badge-text data)]
@@ -89,12 +91,13 @@
                              :id (str id "-learn")
                              :text "Learn control…"
                              :on-action {:event/type :input/start-learn
-                                         :target-action {:type :vibe :role role}}}
+                                         :target-action {:type :vibe :role role}
+                                         :document-id document-id}}
                             {:fx/type :menu-item
                              :id (str id "-cancel-learn")
                              :text "Cancel learning"
                              :disable (not learning?)
-                             :on-action {:event/type :input/cancel-learn}}
+                             :on-action (merge {:event/type :input/cancel-learn} learn)}
                             {:fx/type :separator-menu-item}
                             {:fx/type :menu-item
                              :id (str id "-clear")
