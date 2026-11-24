@@ -17,9 +17,10 @@
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]
-            [laser-show.vibes.faders :as faders])
+            [laser-show.vibes.faders :as faders]
+            [laser-show.views.components.applied-value :as applied-value])
   (:import [javafx.scene Node Parent]
-           [javafx.scene.control Labeled MenuButton MenuItem]))
+           [javafx.scene.control CheckBox Labeled MenuButton MenuItem]))
 
 (defn- with-input-mapper
   "start-test! doesn't start the input mapper (app.clj:252); Learn all's
@@ -465,3 +466,89 @@
     (is (some #(re-find #"HIT does nothing" %) (texts ".vibe-lint-row")) "the error the badge counts")
     (events/dispatch! {:event/type :vibe/toggle-cell :vibe :vibe-1 :slot :hit :cell [0 0]})
     (ui/wait-for! #(= "Vibes" (tab-text)))))
+
+
+;; A refused edit (plans/2026-11-23-cljfx-reactivity/13): the control shows
+;; what applies
+
+(defn- notice-id [] (get-in (app-state) [:ui :notice :id]))
+
+(defn- ticked
+  "Whether the check box selector finds is ticked, on the FX thread; nil
+   when there is none (ui/selected? says false for a missing node too)."
+  [selector]
+  (when-let [box (ui/query selector)]
+    (ui/on-fx-thread #(.isSelected ^CheckBox box))))
+
+(defn- attempt!
+  "(act!), then wait for the show lock's new refusal of an event of type."
+  [type act!]
+  (let [before (notice-id)]
+    (act!)
+    (ui/wait-for! #(and (some? (notice-id)) (not= before (notice-id))
+                        (= type (get-in (app-state) [:ui :show-lock-notice :event]))))))
+
+(deftest locked-vibe-options-and-name-show-applied-values-test
+  (let [robot (ui/robot)
+        shapes #(vibes :library :vibe-1)
+        lock! (fn [locked?]
+                (events/dispatch! {:event/type :vibe/set-show-lock :locked? locked?})
+                (ui/wait-for! #(= locked? (true? (get-in (app-state) [:ui :show-lock?])))))]
+    (open-vibes! robot)
+    (ui/assert-text! "#vibe-name-field" "Shapes")
+    (lock! true)
+    (let [depth (count (undo-stack))]
+      (testing "Allow audience cells"
+        (attempt! :vibe/set-option #(ui/click! robot "#vibe-allow-audience"))
+        (is (false? (:allow-audience? (shapes))))
+        (ui/wait-for! #(false? (ticked "#vibe-allow-audience"))))
+      (doseq [slot [:flash-cue :flash-fx]]
+        (testing (str "Solo, on " (name slot))
+          (ui/click! robot (str "#vibe-slot-" (name slot)))
+          (ui/wait-for! #(= slot (get-in (app-state) [:ui :vibes :slot])))
+          (ui/wait-for! #(true? (ticked "#vibe-solo")))
+          (attempt! :vibe/set-option #(ui/click! robot "#vibe-solo"))
+          (is (true? (get-in (shapes) [:flash :solo?])))
+          (ui/wait-for! #(true? (ticked "#vibe-solo")))))
+      (testing "another name"
+        (ui/fill! robot "#vibe-name-field" "Warm-up")
+        (attempt! :vibe/rename #(ui/submit! robot "#vibe-name-field"))
+        (is (= "Shapes" (:name (shapes))))
+        (ui/assert-text! "#vibe-name-field" "Shapes"))
+      (is (= depth (count (undo-stack))) "no undo step"))
+    (testing "unlocked, the boxes take real clicks"
+      (lock! false)
+      (ui/click! robot "#vibe-allow-audience")
+      (ui/wait-for! #(true? (:allow-audience? (shapes))))
+      (ui/wait-for! #(true? (ticked "#vibe-allow-audience")))
+      (ui/click! robot "#vibe-solo")
+      (ui/wait-for! #(false? (get-in (shapes) [:flash :solo?])))
+      (ui/wait-for! #(false? (ticked "#vibe-solo"))))
+    (testing "the name it has, spelled otherwise: no notice, and the stored spelling"
+      (let [before (notice-id)
+            depth (count (undo-stack))]
+        (ui/fill! robot "#vibe-name-field" " Shapes ")
+        (ui/submit! robot "#vibe-name-field")
+        (is (events/flush!))
+        (ui/wait-for! #(= "Shapes" (ui/node-text "#vibe-name-field")))
+        (ui/focus! robot "#vibe-add")
+        (is (events/flush!))
+        (is (= "Shapes" (ui/node-text "#vibe-name-field")) "and leaving the field sends nothing")
+        (is (= "Shapes" (:name (shapes))))
+        (is (= before (notice-id)))
+        (is (= depth (count (undo-stack))))))))
+
+(deftest applied-boxes-go-with-their-node-test
+  ;; A box's listener and timer belong to its node: Solo's go with its slot,
+  ;; and another vibe's box replaces the last one's
+  (let [robot (ui/robot)]
+    (open-vibes! robot)
+    (ui/click! robot "#vibe-slot-flash-cue")
+    (ui/wait-for! #(some? (ui/query "#vibe-solo")))
+    (let [with-solo (applied-value/attached-count)]
+      (ui/click! robot "#vibe-slot-hit")
+      (ui/wait-for! #(nil? (ui/query "#vibe-solo")))
+      (is (= (dec with-solo) (applied-value/attached-count)))
+      (ui/click! robot "#vibe-card-vibe-2")
+      (ui/assert-text! "#vibe-name-field" "Lines")
+      (is (= (dec with-solo) (applied-value/attached-count)) "Allow audience: one box, Lines'"))))

@@ -16,18 +16,17 @@
             [clojure.string :as str]
             [laser-show.animation.modulator-registry :as reg]
             [laser-show.animation.show-time :as show-time]
-            [laser-show.events.core :as events]
             [laser-show.routing.rig :as rig]
             [laser-show.routing.step-grid :as step-grid]
             [laser-show.routing.targets :as targets]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.routing.zone-remap :as zone-remap]
             [laser-show.subs :as subs]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.clock-view :as clock-view]
             [laser-show.views.components.modulator-param-control :as mod-param]
             [laser-show.views.components.parameter-controls :as param-controls])
-  (:import [javafx.event ActionEvent]
-           [javafx.scene.control Labeled RadioButton]))
+  (:import [javafx.scene.control Labeled]))
 
 
 ;; What a pattern says of itself (07 §7.1, §7.2)
@@ -361,7 +360,8 @@
 
 (defn moves-radios
   "Moves, as three radio buttons (07 §7.1); a click on the one already
-   chosen keeps it."
+   chosen keeps it, and one the app refused (the show lock) goes back to
+   the one chosen (applied-value)."
   [{:keys [current-params params-map on-change-event]}]
   (let [spec (get params-map :source)
         v (if (keyword? (:source current-params)) (:source current-params) (:default spec))]
@@ -370,17 +370,20 @@
      :alignment :center-left
      :children (into [{:fx/type :label :text (:label spec "Moves") :pref-width label-width :style-class ["label-secondary"]}]
                      (for [c (:choices spec)]
-                       (cond-> {:fx/type :radio-button
-                                :id (str "zone-pattern-source-" (name c))
-                                :text (param-controls/choice-text spec c)
-                                :selected (= c v)
-                                :focus-traversable false
-                                :on-action (fn [^ActionEvent e]
-                                             (if (= c v)
-                                               (.setSelected ^RadioButton (.getSource e) true)
-                                               (events/dispatch! (assoc on-change-event :param-key :source :value c))))}
-                         (= :auto c) (assoc :tooltip {:fx/type :tooltip
-                                                      :text "Automatic: the All picture if the cue draws into All, else what's in the zones"}))))}))
+                       {:fx/type applied-value/applied-control
+                        :property :selected
+                        :address [on-change-event :source c]
+                        :value (= c v)
+                        ;; un-ticking is no edit: it ticks again at once
+                        :on-change (fn [selected?]
+                                     (when selected?
+                                       (assoc on-change-event :param-key :source :value c)))
+                        :desc (cond-> {:fx/type :radio-button
+                                       :id (str "zone-pattern-source-" (name c))
+                                       :text (param-controls/choice-text spec c)
+                                       :focus-traversable false}
+                                (= :auto c) (assoc :tooltip {:fx/type :tooltip
+                                                             :text "Automatic: the All picture if the cue draws into All, else what's in the zones"}))}))}))
 
 (defn pattern-visual
   "A zone pattern's visual editor (the :zone-pattern renderer, 07 §7.1):
@@ -412,13 +415,16 @@
       (concat
        [(row :style
              (control props :style)
-             {:fx/type :check-box
-              :id "zone-pattern-follow-pads"
-              :text "Follows the pattern pads"
-              :min-height line-height
-              :focus-traversable false
-              :selected (not (false? (:follow-pads? params)))
-              :on-selected-changed (assoc (:on-change-event props) :param-key :follow-pads?)})
+             {:fx/type applied-value/applied-control
+              :property :selected
+              :address [(:on-change-event props) :follow-pads?]
+              :value (not (false? (:follow-pads? params)))
+              :on-change (fn [on?] (assoc (:on-change-event props) :param-key :follow-pads? :value on?))
+              :desc {:fx/type :check-box
+                     :id "zone-pattern-follow-pads"
+                     :text "Follows the pattern pads"
+                     :min-height line-height
+                     :focus-traversable false}})
         (when (show? :zones)
           (row :zones
                (assoc (control props :zones)
@@ -495,14 +501,17 @@
         (row :rate
              {:fx/type :label :text (:label (:rate params-map) "Every") :pref-width label-width :min-height line-height
               :style-class ["label-secondary"]}
-             {:fx/type :combo-box
-              :id "map-cycle-every"
-              :items (vec (distinct (conj every-rates (double rate))))
+             {:fx/type applied-value/applied-control
+              :property :value
+              :address [on-change-event :rate]
               :value (double rate)
-              :pref-width 150
-              :button-cell (fn [r] {:text (if (number? r) (every-text source r) "")})
-              :cell-factory {:fx/cell-type :list-cell :describe (fn [r] {:text (if (number? r) (every-text source r) "")})}
-              :on-value-changed (assoc on-change-event :param-key :rate)})
+              :on-change (fn [r] (assoc on-change-event :param-key :rate :value r))
+              :desc {:fx/type :combo-box
+                     :id "map-cycle-every"
+                     :items (vec (distinct (conj every-rates (double rate))))
+                     :pref-width 150
+                     :button-cell (fn [r] {:text (if (number? r) (every-text source r) "")})
+                     :cell-factory {:fx/cell-type :list-cell :describe (fn [r] {:text (if (number? r) (every-text source r) "")})}}})
         (row :rate (control props :rate)))
       (row :path (control props :path))
       (row :step-on (control props :step-on))
