@@ -182,9 +182,12 @@
   "How the output does while streaming is on, from the toolbar's connection
    status (subs/connection-status) and each projector's output status
    ([:backend :streaming :status :projectors]): the frame rate the projectors
-   draw (the slowest and the fastest) and how many fail. nil while streaming
-   is off or has nothing to stream, which the toolbar says."
-  [{:keys [running? state errors]} projectors]
+   draw (the slowest and the fastest) and how many fail, also while others
+   still start (:mixed). While none streams yet or the outputs change
+   (:starting), what the toolbar says (\"Starting…\", \"Updating
+   outputs…\"). nil while streaming is off or has nothing to stream, which
+   the toolbar says."
+  [{:keys [running? state status-text errors]} projectors]
   (let [rates (sort (keep (fn [{s :state fps :fps}] (when (= :streaming s) fps)) (vals projectors)))
         rate (when (seq rates)
                (let [low (double (first rates))
@@ -196,9 +199,9 @@
                   (str (count errors) (if (= 1 (count errors)) " error" " errors")))]
     (when running?
       (case state
-        :starting "Starting…"
-        (:streaming :error) (or (not-empty (str/join " · " (remove nil? [rate failing])))
-                                "Starting…")
+        :starting status-text
+        (:streaming :mixed :error) (or (not-empty (str/join " · " (remove nil? [rate failing])))
+                                       "Starting…")
         nil))))
 
 (defn output-health

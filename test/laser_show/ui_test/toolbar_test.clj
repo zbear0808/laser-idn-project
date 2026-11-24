@@ -1,6 +1,6 @@
 (ns laser-show.ui-test.toolbar-test
-  "Toolbar: transport, BPM input, trigger mode, tap tempo and the beat
-   indicator."
+  "Toolbar: transport, BPM input, trigger mode, tap tempo, the beat
+   indicator and the streaming status."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
             [laser-show.services.show-clock :as show-clock]
@@ -174,6 +174,52 @@
       (tick! ms)
       (ui/wait-for! #(= #{beat} (active)))
       (is (= #{beat} (active)) (str (/ ms 500.0) " beats at 120 BPM")))))
+
+
+;; The streaming status says what the outputs report, not that a drained
+;; lifecycle queue streams (reactivity plan 30)
+
+(defn- indicator-class
+  "The streaming indicator's colour: its status-indicator-* class."
+  []
+  (some #(when (ui/has-style-class? "#streaming-indicator" %) %)
+        ["status-indicator-connected" "status-indicator-connecting" "status-indicator-disconnected"]))
+
+(defn- status-tooltip
+  "The streaming status label's tooltip text, nil without one."
+  []
+  (let [^Labeled label (ui/query "#streaming-status-label")]
+    (ui/on-fx-thread #(some-> label .getTooltip .getText))))
+
+(deftest toolbar-follows-published-start-progress-test
+  ;; Reports as the output runtime publishes them (:output/status), with
+  ;; streaming on and no Stream click: no engine runs, nor the status thread
+  (let [projector (fn [n host] {:name n :host host :enabled? true :zone-groups [:all]})
+        starting {:state :starting}
+        streams {:state :streaming :fps 59.8}
+        publish! (fn [status]
+                   (events/dispatch! {:event/type :output/status :status status})
+                   (ui/wait-for! #(= status (get-in (state/get-raw-state) [:backend :streaming :status]))))]
+    (events/write-state! #(-> %
+                              (assoc :projectors {:a (projector "Laser L" "10.0.0.9")
+                                                  :b (projector "Laser R" "10.0.0.10")})
+                              (assoc-in [:backend :streaming :running?] true)))
+    (doseq [[status text indicator tooltip]
+            [[{:engines 2 :wanted 2 :pending? false :projectors {:a starting :b starting}}
+              "Starting…" "status-indicator-connecting" nil]
+             [{:engines 2 :wanted 2 :pending? false :projectors {:a streams :b starting}}
+              "Streaming to 1 of 2 · 1 starting" "status-indicator-connecting" nil]
+             [{:engines 1 :wanted 2 :pending? false :projectors {:a streams :b {:state :error :error "open failed"}}}
+              "Streaming to 1 of 2 · 1 error" "status-indicator-disconnected" "Laser R: open failed"]
+             [{:engines 2 :wanted 2 :pending? false :projectors {:a streams :b streams}}
+              "Streaming to 2 of 2" "status-indicator-connected" nil]]]
+      (testing text
+        (publish! status)
+        (ui/assert-text! "#streaming-status-label" text)
+        (ui/wait-for! #(= indicator (indicator-class)))
+        (is (= indicator (indicator-class)))
+        (ui/assert-text! "#stream-btn" "Stop")
+        (is (= tooltip (status-tooltip)) "the errors, by name; gone once none fails")))))
 
 
 ;; Single keys after a click on the toolbar or the tab bar (keyboard plan 03,
