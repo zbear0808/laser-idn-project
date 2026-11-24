@@ -14,6 +14,7 @@
    [clojure.string :as str]
    [laser-show.events.core :as events]
    [laser-show.events.handlers.projector :as projectors]
+   [laser-show.events.handlers.rig :as rig-handlers]
    [laser-show.events.safety-guard :as guard]
    [laser-show.animation.fit-guard :as fit-guard]
    [laser-show.output.driver :as driver]
@@ -829,7 +830,7 @@
                     "2 cues are pinned to it.")
                (:message dialog)))
         (is (= "A1 Intro · A2 Drop" (:details dialog)))
-        (is (= {:key :retarget-to :label "Send its cues to:"} (select-keys (:choice dialog) [:key :label])))
+        (is (= {:key :retarget-to :label "Replace references with:"} (select-keys (:choice dialog) [:key :label])))
         (is (= :all (:choice-value dialog)))
         (is (= [:all :auto/left] (take 2 options)))
         (is (some #{:auto.laser/p2} options) "another laser can take them")
@@ -843,7 +844,7 @@
         (is (= :auto.laser/p2 (get-in state [:chains :cue-chains [2 0] :items 0 :target])) "another laser's stay")
         (is (empty? (refs/cues-using (get-in state [:chains :cue-chains]) :auto.laser/p1))
             "and nothing names it any more (invariant 12)")
-        (is (= "Removed Laser L · 2 cues now go to Left" (get-in state [:ui :notice :text])))))
+        (is (= "Removed Laser L · references in 2 cues now name Left" (get-in state [:ui :notice :text])))))
     (testing "with no choice made, to All; Nothing lets them inherit"
       (is (= :all (get-in (removed) [:chains :cue-chains [0 0] :target])))
       (is (= :all (get-in (removed :retarget-to :auto.laser/p1) [:chains :cue-chains [1 0] :items 0 :target]))
@@ -854,6 +855,41 @@
                         [:state :ui :dialogs :confirm :choice])))
       (is (nil? (get-in (projectors/handle {:event/type :projectors/remove :projector-id :p1 :state removable-state})
                         [:state :ui :notice]))))))
+
+(deftest effect-only-pin-gets-a-retarget-choice-test
+  ;; plans/2026-11-23-cljfx-reactivity/28: no cue is pinned to Laser L, only a
+  ;; pattern nested in an effect cell's group names it
+  (let [nested {:id "zp" :effect-id :zone-pattern :enabled? true
+                :params {:zones [:auto.laser/p1 :zone/b] :from :auto.laser/p1 :steps [[:auto.laser/p1] [:zone/b]]}
+                :keyframe-modulator {:enabled? false :keyframes [{:position 0.0 :params {:zones [:auto.laser/p1]}}]}}
+        state (assoc-in removable-state [:chains :effect-chains [3 2]] {:active? false :items [{:id "g" :type :group :items [nested]}]})
+        ask (fn [event] (get-in (:state event) [:ui :dialogs :confirm]))
+        removing (ask (projectors/handle {:event/type :projectors/request-remove :projector-id :p1 :state state}))
+        forgetting (ask (rig-handlers/handle {:event/type :rig/request-forget :projector-id :p1 :state state}))
+        removed (fn [target] (:state (projectors/handle {:event/type :projectors/remove :projector-id :p1
+                                                         :retarget-to target :state state})))
+        pattern-of (fn [s] (get-in s [:chains :effect-chains [3 2] :items 0 :items 0]))]
+    (testing "both questions count the effect cell, list no cue, and ask where its references go"
+      (is (= "Its calibration goes too. If it's still on the network, the next scan finds it again, turned off. 1 effect cell refers to it."
+             (:message removing)))
+      (is (= "Its calibration and safety zone leave the rig. A scan that finds it again adds it as a new laser. 1 effect cell refers to it."
+             (:message forgetting)))
+      (doseq [dialog [removing forgetting]]
+        (is (nil? (:details dialog)))
+        (is (= {:key :retarget-to :label "Replace references with:"} (select-keys (:choice dialog) [:key :label])))
+        (is (= :all (:choice-value dialog)))
+        (is (not (some #{:auto.laser/p1} (map :value (get-in dialog [:choice :options])))) "never the laser that goes")))
+    (testing "removed: its references name the laser chosen"
+      (let [s (removed :auto.laser/p2)]
+        (is (= {:zones [:auto.laser/p2 :zone/b] :from :auto.laser/p2 :steps [[:auto.laser/p2] [:zone/b]]} (:params (pattern-of s))))
+        (is (= [{:position 0.0 :params {:zones [:auto.laser/p2]}}] (get-in (pattern-of s) [:keyframe-modulator :keyframes])))
+        (is (= "Removed Laser L · references in 1 effect cell now name Laser R" (get-in s [:ui :notice :text])))))
+    (testing "or cleared: the pattern drops them"
+      (let [s (removed :inherit)]
+        (is (= {:zones [:zone/b] :steps [[] [:zone/b]]} (:params (pattern-of s))))
+        (is (= [{:position 0.0 :params {:zones []}}] (get-in (pattern-of s) [:keyframe-modulator :keyframes])))
+        (is (= "Removed Laser L · references in 1 effect cell cleared: targets inherit, patterns drop it"
+               (get-in s [:ui :notice :text])))))))
 
 (deftest remove-projector-stops-its-engine-test
   (let [result (events/handle-event-pipeline {:event/type :projectors/remove :projector-id :p1

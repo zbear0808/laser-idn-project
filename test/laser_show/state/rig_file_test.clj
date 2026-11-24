@@ -356,6 +356,97 @@
     (is (= [:projector-10-0-0-9-1 :projector-10-0-0-10-1] (:new-lasers report)) "the show's lasers that aren't here")
     (is (= {:show-lasers 4 :rig-lasers 2} (select-keys report [:show-lasers :rig-lasers])))))
 
+;; Pins in zone patterns (plans/2026-11-23-cljfx-reactivity/28)
+
+(defn- patterned
+  "s with every place, source and lit step of a cue's pattern and of an
+   effect cell's (its base and two sparse keyframes) naming a and b."
+  [s a b]
+  (-> s
+      (assoc-in [:chains :cue-chains [6 1]] {:items [{:id "i61" :type :preset :preset-id :circle}]
+                                             :zone-patterns [{:effect-id :zone-pattern :enabled? false
+                                                              :params {:style :steps :from a :zones [a b]
+                                                                       :steps [[b] [] [a]]}}]})
+      (assoc-in [:chains :effect-chains [6 1]] {:active? false
+                                                :items [{:effect-id :zone-pattern
+                                                         :params {:from b}
+                                                         :keyframe-modulator {:enabled? false
+                                                                              :keyframes [{:position 0.0 :params {:zones [a]}}
+                                                                                          {:position 1.0 :params {:steps [[b] []]}}]}}]})))
+
+(defn- pattern-fields [s]
+  [(get-in s [:chains :cue-chains [6 1] :zone-patterns 0 :params])
+   (get-in s [:chains :effect-chains [6 1] :items 0 :params])
+   (mapv :params (get-in s [:chains :effect-chains [6 1] :items 0 :keyframe-modulator :keyframes]))])
+
+(defn- expected-fields [a b]
+  [{:style :steps :from a :zones [a b] :steps [[b] [] [a]]}
+   {:from b}
+   [{:zones [a]} {:steps [[b] []]}]])
+
+(deftest pattern-pins-follow-collisions-and-late-matches-test
+  (testing "a show's laser that isn't here, whose id is another laser's here, gets a free pin: never the one here"
+    (let [here (assoc (domains/build-initial-state)
+                      :projectors {:projector-10-0-0-5-1 {:name "Someone else" :host "10.0.0.5" :service-id 1 :stable-id [:unit "99 99" 1]}
+                                   :projector-10-0-0-57-1 {:name "Laser L" :host "10.0.0.57" :service-id 1 :stable-id [:unit unit-l 1]}})
+          hardware {:rig {:order []}
+                    :projectors {:projector-10-0-0-5-1 {:name "Gone" :host "10.0.0.5" :service-id 1 :stable-id [:unit "AB CD" 1]}
+                                 :projector-10-0-0-6-1 {:name "Laser L" :host "10.0.0.6" :service-id 1 :stable-id [:unit unit-l 1]}}}
+          renamed (rig-file/rename-pins (patterned here :auto.laser/projector-10-0-0-5-1 :auto.laser/projector-10-0-0-6-1) hardware)]
+      (is (= (expected-fields :auto.laser/projector-10-0-0-5-1-2 :auto.laser/projector-10-0-0-57-1) (pattern-fields renamed))
+          "the missing unit's pin goes free, the matched unit's follows it to .57, in both grids and every keyframe")
+      (is (= [{:ref :auto.laser/projector-10-0-0-5-1-2 :name "Gone" :cues 1 :effect-cells 1}]
+             (:missing-pins (rig-file/match-report renamed hardware {})))
+          "and the report names it, by the show's name")))
+  (testing "two lasers found since the show was opened, each at the other's id: set-up and import swap their pins once"
+    (let [pin-5 :auto.laser/projector-10-0-0-5-1
+          pin-6 :auto.laser/projector-10-0-0-6-1
+          hardware {:rig {:order [:projector-10-0-0-5-1 :projector-10-0-0-6-1]}
+                    :projectors {:projector-10-0-0-5-1 {:name "Laser X" :host "10.0.0.5" :service-id 1 :stable-id [:unit "AA 01" 1] :enabled? true}
+                                 :projector-10-0-0-6-1 {:name "Laser Y" :host "10.0.0.6" :service-id 1 :stable-id [:unit "BB 02" 1] :enabled? true}}}
+          opened (patterned (domains/build-initial-state) pin-5 pin-6)
+          pins-then (rig-file/pin-map opened hardware)
+          ;; the units came back on each other's address
+          later (assoc opened :projectors {:projector-10-0-0-6-1 {:name "Head 6" :host "10.0.0.6" :service-id 1 :stable-id [:unit "AA 01" 1] :enabled? false}
+                                           :projector-10-0-0-5-1 {:name "Head 5" :host "10.0.0.5" :service-id 1 :stable-id [:unit "BB 02" 1] :enabled? false}})]
+      (is (= {:projector-10-0-0-5-1 :projector-10-0-0-5-1 :projector-10-0-0-6-1 :projector-10-0-0-6-1} pins-then)
+          "neither unit was here when the show was opened")
+      (is (identical? opened (rig-file/rename-pins opened hardware)) "so Open renamed nothing")
+      (is (= (expected-fields pin-6 pin-5) (pattern-fields (rig-file/set-up-from-show later hardware {} pins-then)))
+          "Set up rig: X's pins on .6, Y's on .5, once (twice would swap them back)")
+      (is (= (expected-fields pin-6 pin-5) (pattern-fields (rig-file/import-new-lasers later hardware {} pins-then)))
+          "Import: no laser to bring, the same pins, once"))))
+
+(deftest report-counts-pattern-owners-once-per-grid-test
+  (let [hardware (assoc-in friday-on-a-bigger-rig [:projectors :gone]
+                           {:name "Balcony" :host "10.0.0.66" :service-id 1 :stable-id [:host "10.0.0.66" 1] :enabled? true :zone-groups []})
+        gone :auto.laser/gone
+        many {:effect-id :zone-pattern
+              :params {:from :group-upstage :zones [:zone/f gone :group-upstage]
+                       :steps [[gone] [:group-upstage gone] []]}
+              :keyframe-modulator {:enabled? true
+                                   :keyframes [{:position 0.0 :params {:zones [gone]}}
+                                               {:position 1.0 :params {:steps [[:group-upstage] [gone]]}}]}}
+        s (-> (rig-here)
+              (assoc-in [:zone-groups :group-upstage] {:id :group-upstage :name "Upstage" :color "#333333"})
+              (assoc-in [:chains :effect-chains] {[2 1] {:active? false :items [many]}
+                                                  [3 1] {:active? false :items [{:effect-id :zone-pattern :params {:zones [gone :group-undefined]}}]}
+                                                  [4 1] {:active? false :items [{:effect-id :zone-pattern
+                                                                                 :params {:zones [:auto.laser/projector-10-0-0-57-1]}}]}})
+              (assoc-in [:chains :cue-chains [6 0]] {:items [{:id "i60" :type :preset :preset-id :circle :target :auto/left}]
+                                                     :zone-patterns [{:effect-id :zone-pattern :params {:from :group-upstage}}]}))
+        report (rig-file/match-report s hardware friday-calibration)]
+    (is (= [{:group-id :crowd :name "Crowd Scanning" :cues 1}
+            {:group-id :graphics :name "Graphics" :cues 2 :same-name {:group-id :group-77 :name "graphics " :lasers 1}}
+            {:group-id :group-upstage :name "Upstage" :cues 1 :effect-cells 1}]
+           (:groups-without-lasers report))
+        "Upstage: a cue's pattern source and one effect cell, however often it names it; the cue-only rows as they were")
+    (is (= [{:ref gone :name "Balcony" :cues 0 :effect-cells 2}
+            {:ref :auto.laser/projector-10-0-0-9-1 :name "SR Beam" :cues 2}]
+           (:missing-pins report))
+        "one row per pin: two effect cells and no cue; a group the show doesn't define, or a laser that is here, is none")
+    (is (= 5 (rig-file/warning-count report)))))
+
 (deftest report-is-empty-on-the-same-rig-test
   (let [s (-> (rig-here)
               (assoc-in [:chains :cue-chains] {[4 0] (pinned :auto.laser/projector-10-0-0-57-1)})
