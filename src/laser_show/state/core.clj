@@ -59,9 +59,19 @@
   (atom {}))
 
 (def cache-factory
-  "LRU cache factory for context memoization.
-   Adjust :threshold based on app complexity."
-  #(cache/lru-cache-factory % :threshold 512))
+  "LRU cache factory for context memoization, 4096 entries (reactivity
+   plan 36). A render looks up every subscription and function component
+   on screen (its working set); an LRU smaller than that evicts it all each
+   render, so any change runs every view body (at 512: 226 on the starter
+   Grid, 370 with both chain editors open). Working sets of the starter
+   show, in entries: Grid 817, Vibes 602, Perform 296, Grid and both
+   editors 977; a cue in every cell and longer chains in both editors,
+   1036. At 4096, the first power of two at least twice that, a change no
+   view reads runs no view body, and a cell's rename only that cell's two.
+   The rest holds descriptions no view uses any more (a grid cell's: about
+   16 KB), never an earlier context's cache. ui-test cache-working-set-test
+   keeps the Grid and both editors under half of it."
+  #(cache/lru-cache-factory % :threshold 4096))
 
 
 ;; Section 2: Context Access Functions

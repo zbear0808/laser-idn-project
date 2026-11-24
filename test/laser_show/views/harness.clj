@@ -88,7 +88,8 @@
   (mount! state cache-factory desc changes f true))
 
 (def lru-512
-  "The app's cache (state.core/cache-factory)."
+  "A 512-entry LRU, the app's cache before reactivity plan 36 (now
+   state.core/cache-factory's 4096)."
   #(cache/lru-cache-factory % :threshold 512))
 
 (def unbounded
