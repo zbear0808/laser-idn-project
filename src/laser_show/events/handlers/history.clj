@@ -24,6 +24,7 @@
    change, a :history/gesture-alarm wake-up) seal it too."
   (:require [clojure.tools.logging :as log]
             [clojure.string :as str]
+            [laser-show.events.helpers :as h]
             [laser-show.events.safety-guard :as guard]
             [laser-show.state.history :as history]
             [laser-show.vibes.refs :as refs]))
@@ -42,12 +43,15 @@
    Undo, Redo and a press's abort. The effect cells the vibe engine
    switched on stay its own where the restore takes their on/off
    (history/effect-cell-sources, on the state before it; refs/restore-fx),
-   so the next vibe and Save still switch them off (reactivity plans 22,
-   23)."
+   so the next vibe and Save still switch them off. The projector UI lets go
+   of a projector or virtual projector the restore took away
+   (h/prune-projector-ui), and selects nothing: Redo of an Add brings the
+   projector back unselected (reactivity plans 22, 23, 14)."
   [state snapshot]
   (-> state
       (history/restore-snapshot snapshot)
-      (refs/restore-fx (history/effect-cell-sources state (:document-state snapshot)))))
+      (refs/restore-fx (history/effect-cell-sources state (:document-state snapshot)))
+      (h/prune-projector-ui)))
 
 (defn handle-begin-transaction
   "A press's transaction, on mouse down: :history/gesture-id is the press's

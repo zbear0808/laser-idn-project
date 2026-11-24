@@ -721,6 +721,16 @@
                (into {} (keep #(when (#{:l :l2 :r} (:id %)) [(:id %) (:multi-output? %)]))
                      (fx/sub-ctx (context two) subs/rig-cards))))))))
 
+(deftest active-projector-is-nil-for-a-dangling-id-test
+  ;; Reactivity plan 14: an undo took the selected projector away
+  (let [s (assoc base-state :projectors {:r {:name "Laser R" :host "10.0.0.7"}})
+        active #(fx/sub-ctx (context (assoc-in s [:projector-ui :active-projector] %)) subs/active-projector)]
+    (is (= {:id :r :name "Laser R" :host "10.0.0.7"} (active :r)))
+    (is (nil? (active :gone)) "no projector, so the inspector shows none")
+    (is (nil? (active nil)))
+    (testing "with no projectors at all"
+      (is (nil? (fx/sub-ctx (context (assoc-in base-state [:projector-ui :active-projector] :gone)) subs/active-projector))))))
+
 (defn- matrix [projectors & {:keys [middle zone-groups]}]
   (fx/sub-ctx (context (cond-> (assoc base-state :projectors projectors)
                          middle (assoc-in [:rig :middle] middle)

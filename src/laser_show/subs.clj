@@ -606,13 +606,15 @@
   (:active-projector (fx/sub-val context :projector-ui)))
 
 (defn active-projector
-  "Get the full config of the currently selected projector.
+  "Get the full config of the currently selected projector, with its :id;
+   nil when none is selected or the selected id has no projector (an undo
+   took it away), so the inspector shows no selection.
    Depends on: projector-ui domain and projectors domain"
   [context]
   (let [active-id (:active-projector (fx/sub-val context :projector-ui))
-        projectors (fx/sub-val context :projectors)]
-    (when active-id
-      (assoc (get projectors active-id) :id active-id))))
+        projector (when active-id (get (fx/sub-val context :projectors) active-id))]
+    (when projector
+      (assoc projector :id active-id))))
 
 (defn discovered-devices
   "Get the devices from the last scan.

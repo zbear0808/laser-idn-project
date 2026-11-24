@@ -134,3 +134,24 @@
       (when (clipboard/accepts? clip expected-type)
         (let [data (clipboard/payload clip expected-type)]
           {:state (assoc-in state target-path (if transform-fn (transform-fn data) data))})))))
+
+
+;; What the projector UI names (reactivity plan 14)
+
+(defn prune-projector-ui
+  "state with the projector UI's references to projectors and virtual
+   projectors it no longer has let go of: the selected card
+   ([:projector-ui :active-projector]), the selected virtual projector, the
+   projector showing its test pattern, and Identify's flashes. Session UI
+   state, never saved or undone: it never selects anything. state as it is
+   when everything it names exists."
+  [state]
+  (let [{:keys [active-projector active-virtual-projector calibrating-projector-id identify]} (:projector-ui state)
+        projectors (:projectors state)
+        gone? (fn [m id] (and (some? id) (not (contains? m id))))
+        kept (into {} (filter #(contains? projectors (key %))) identify)]
+    (cond-> state
+      (gone? projectors active-projector) (assoc-in [:projector-ui :active-projector] nil)
+      (gone? (:virtual-projectors state) active-virtual-projector) (assoc-in [:projector-ui :active-virtual-projector] nil)
+      (gone? projectors calibrating-projector-id) (assoc-in [:projector-ui :calibrating-projector-id] nil)
+      (< (count kept) (count identify)) (assoc-in [:projector-ui :identify] kept))))
