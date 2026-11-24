@@ -19,9 +19,11 @@
             [laser-show.events.helpers :as h]
             [laser-show.input.devices :as devices]
             [laser-show.input.fixtures :as input-fixtures]
+            [laser-show.input.learn :as learn]
             [laser-show.input.link :as link]
             [laser-show.input.midi :as midi]
             [laser-show.input.osc :as osc]
+            [laser-show.input.router :as input-router]
             [laser-show.output.discovery :as discovery]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
@@ -309,31 +311,203 @@
                 (is (events/flush!))
                 (unchanged! "an old scan's result")))))))))
 
+(defn- wait-until
+  "Is (f) true within 3 s?"
+  [f]
+  (try
+    (ui/wait-for! f)
+    true
+    (catch clojure.lang.ExceptionInfo _ false)))
+
+(defn- start-learn!
+  "A learn's Start for target, from the show open now, as a cell's menu
+   sends it."
+  [target]
+  (events/dispatch! {:event/type :input/start-learn :target-action target
+                     :document-id (h/document-id (state/get-raw-state))}))
+
+(defn- attempt [] (input/active-learn (state/get-raw-state)))
+
+(defn- note-on [n]
+  {:type :note-on :source :midi :channel 0 :note n :velocity 1.0 :timestamp (System/currentTimeMillis)})
+
+(defn- first-call?
+  "Is this the first call counted in calls?"
+  [calls]
+  (= 1 (swap! calls inc)))
+
 (deftest retired-app-learn-capture-commits-nothing-test
   (log-test/with-log
     (let [target {:type :trigger-cue :target [0 0]}
-          old-handler (current-handler)]
-      (events/dispatch! {:event/type :input/start-learn :target-action target})
-      (is (events/flush!))
-      (let [capture @@#'input/!pending-learn]
+          release (promise)
+          held (promise)
+          waits (atom 0)
+          wait learn/wait-for-capture]
+      ;; The first attempt's waiter, once it has its input, holds it
+      (with-redefs [learn/wait-for-capture (fn [gate ms]
+                                             (let [result (wait gate ms)]
+                                               (when (first-call? waits)
+                                                 (deliver held true)
+                                                 (deref release 5000 nil))
+                                               result))]
         (try
-          ;; The app replaced by one learning the same cell before the old
-          ;; learn's input comes
-          (app/start-test! (assoc-in (starter) [:backend :input :learning-target] target))
-          (let [started (state/get-raw-state)]
-            (deliver capture {:type :note-on :source :midi :channel 0 :note 60 :velocity 100})
-            (is (dropped? :input/learn-captured) "the old learn's input comes back to the old app")
-            (handled! old-handler)
+          (start-learn! target)
+          (is (events/flush!))
+          (let [old-handler (current-handler)
+                old (:learn-id (attempt))]
+            (is (= old (input-router/learn-listener-id)))
+            (input-router/dispatch! (note-on 60))
+            (is (deref held 2000 false) "the old learn caught the input, and holds it")
+            ;; The app replaced by one learning the same cell before the old
+            ;; learn's input comes back
+            (app/start-test!)
+            (start-learn! target)
+            (is (events/flush!))
+            (let [started (state/get-raw-state)
+                  own (:learn-id (attempt))]
+              (is (= own (input-router/learn-listener-id)) "the new app's own learn listens")
+              (deliver release true)
+              (is (dropped? :input/learn-captured) "the old learn's input comes back to the old app")
+              (handled! old-handler)
+              (is (events/flush!))
+              (let [s (state/get-raw-state)]
+                (is (= (get-in started [:config :input :trigger-map]) (get-in s [:config :input :trigger-map]))
+                    "nothing bound in the new show")
+                (is (= own (:learn-id (attempt))) "whose own learn still waits")
+                (is (= own (input-router/learn-listener-id)) "with its listener")
+                (is (false? (get-in s [:project :dirty?])))
+                (is (= (:history started) (:history s)) "no undo step"))
+              (is (wait-until #(not (contains? (learn/waiting) old))) "the old waiter is gone")))
+          (finally
+            (deliver release true)
+            (when-let [{:keys [learn-id document-id]} (attempt)]
+              (events/dispatch! {:event/type :input/cancel-learn :learn-id learn-id :document-id document-id}))
+            (events/flush!)))))))
+
+(deftest stop-retires-an-outstanding-learn-test
+  (log-test/with-log
+    (let [target {:type :trigger-cue :target [0 0]}]
+      (testing "stopped while a learn waits: its listener and its waiter go"
+        (start-learn! target)
+        (is (events/flush!))
+        (let [old (:learn-id (attempt))]
+          (is (some? old))
+          (is (= old (input-router/learn-listener-id)))
+          (is (contains? (learn/waiting) old))
+          (app/stop!)
+          (is (nil? (input-router/learn-listener-id)) "no retired slot")
+          (is (wait-until #(not (contains? (learn/waiting) old))) "no retired waiter")
+          (testing "and stopped again: nothing to do"
+            (app/stop!)
+            (is (nil? (input-router/learn-listener-id))))))
+      (testing "a capture held across stop and start: no old-app result, no write through dispatch!'s fallback"
+        (app/start-test!)
+        (let [release (promise)
+              held (promise)
+              waits (atom 0)
+              wait learn/wait-for-capture]
+          (with-redefs [learn/wait-for-capture (fn [gate ms]
+                                                 (let [result (wait gate ms)]
+                                                   (when (first-call? waits)
+                                                     (deliver held true)
+                                                     (deref release 5000 nil))
+                                                   result))]
+            (try
+              (start-learn! target)
+              (is (events/flush!))
+              (let [old (:learn-id (attempt))
+                    old-handler (current-handler)]
+                (input-router/dispatch! (note-on 60))
+                (is (deref held 2000 false))
+                (app/stop!)
+                (is (nil? (input-router/learn-listener-id)))
+                (app/start-test!)
+                (let [started (state/get-raw-state)]
+                  (deliver release true)
+                  (is (dropped? :input/learn-captured) "sent through the stopped app's own dispatcher, which drops it")
+                  (handled! old-handler)
+                  (is (events/flush!))
+                  (is (wait-until #(not (contains? (learn/waiting) old))))
+                  (let [s (state/get-raw-state)]
+                    (is (= (:config started) (:config s)) "nothing bound in the next app's show")
+                    (is (= (:history started) (:history s)))
+                    (is (nil? (attempt))))
+                  (testing "the next app learns the same cell"
+                    (start-learn! target)
+                    (is (events/flush!))
+                    (is (= (:learn-id (attempt)) (input-router/learn-listener-id)))
+                    (input-router/dispatch! (note-on 61))
+                    (is (wait-until #(= target (get-in (state/get-raw-state)
+                                                       [:config :input :trigger-map {:source :midi :channel 0 :note 61}]))))
+                    (is (wait-until #(nil? (input-router/learn-listener-id))) "its listener retired by its capture")
+                    (is (nil? (get-in (state/get-raw-state) [:config :input :trigger-map {:source :midi :channel 0 :note 60}]))))))
+              (finally
+                (deliver release true)))))))))
+
+(deftest new-show-learn-survives-the-old-callback-test
+  ;; The 19 app -> 20 document -> 24 learn check (plans 00-overview): a
+  ;; capture started, its show replaced and another capture started for
+  ;; the same cell before the old callback returns
+  (let [target {:type :trigger-cue :target [0 0]}
+        entered (promise)
+        resume (promise)
+        waited (promise)
+        release (promise)
+        deliveries (atom 0)
+        waits (atom 0)
+        deliver-capture learn/deliver-capture!
+        wait learn/wait-for-capture]
+    (with-redefs [learn/deliver-capture! (fn [gate event]
+                                           (deliver-capture gate event)
+                                           ;; The old callback, after it delivered and before it returns
+                                           (when (first-call? deliveries)
+                                             (deliver entered true)
+                                             (deref resume 5000 nil)))
+                  learn/wait-for-capture (fn [gate ms]
+                                           (let [result (wait gate ms)]
+                                             ;; Its waiter, holding the capture
+                                             (when (first-call? waits)
+                                               (deliver waited true)
+                                               (deref release 5000 nil))
+                                             result))]
+      (try
+        (start-learn! target)
+        (is (events/flush!))
+        (let [old (:learn-id (attempt))
+              old-show (h/document-id (state/get-raw-state))
+              input-thread (future (input-router/dispatch! (note-on 60)))]
+          (is (deref entered 2000 false) "the old callback delivered, and hasn't returned")
+          (is (deref waited 2000 false) "its waiter has the capture")
+          (events/dispatch! {:event/type :file/new-project :force? true})
+          (is (events/flush!))
+          (is (not= old-show (h/document-id (state/get-raw-state))) "another show")
+          (is (nil? (input-router/learn-listener-id)) "the old show's listener went with it")
+          (start-learn! target)
+          (is (events/flush!))
+          (let [fresh (:learn-id (attempt))]
+            (is (= fresh (input-router/learn-listener-id)))
+            (deliver resume true)
+            (is (deref input-thread 2000 false) "the old callback returned")
+            (deliver release true)
+            (is (wait-until #(not (contains? (learn/waiting) old))) "the old waiter sent its capture and went")
             (is (events/flush!))
             (let [s (state/get-raw-state)]
-              (is (= (get-in started [:config :input :trigger-map]) (get-in s [:config :input :trigger-map]))
-                  "nothing bound in the new show")
-              (is (= target (get-in s [:backend :input :learning-target])) "whose own learn still waits")
+              (is (= fresh (input-router/learn-listener-id)) "the new listener survives the old callback and its capture")
+              (is (= fresh (:learn-id (attempt))))
+              (is (empty? (get-in s [:config :input :trigger-map])) "the old capture bound nothing")
               (is (false? (get-in s [:project :dirty?])))
-              (is (= (:history started) (:history s)) "no undo step")))
-          (finally
-            (events/dispatch! {:event/type :input/cancel-learn})
-            (events/flush!)))))))
+              (is (empty? (get-in s [:history :undo-stack]))))
+            (input-router/dispatch! (note-on 61))
+            (is (wait-until #(= {{:source :midi :channel 0 :note 61} target}
+                                (get-in (state/get-raw-state) [:config :input :trigger-map])))
+                "the new binding")
+            (is (= ["Learn Trigger"] (map :description (get-in (state/get-raw-state) [:history :undo-stack]))))))
+        (finally
+          (deliver resume true)
+          (deliver release true)
+          (when-let [{:keys [learn-id document-id]} (attempt)]
+            (events/dispatch! {:event/type :input/cancel-learn :learn-id learn-id :document-id document-id}))
+          (events/flush!))))))
 
 (defn- with-temp-rig
   "(f path) with path a rig.edn in a new temp folder, deleted after an app

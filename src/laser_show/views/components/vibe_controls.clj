@@ -2,9 +2,10 @@
   "The Vibes tab's Controls panel: a row for each of the five controls
    (HIT, ACCENT, FLASH, VIBE, BLACKOUT) with the keys it answers to, Learn
    (Cancel while it waits for a key) and Clear; and Learn all, which learns
-   the five in a row (:vibe/learn-all; handlers/input.clj starts each next
-   learn), saying which key it waits for, and when a key pressed is another
-   control's already.
+   the five in a row (:vibe/learn-all; handlers/input.clj begins each next
+   step's learn attempt), saying which key it waits for, and when a key
+   pressed is another control's already. Learn sends the show it is in
+   (:document-id), Cancel the attempt it shows (subs/learn-for-target).
 
    Then the two faders (plans/2026-11-18-vibe-mode/05), each learned on its
    own: a fader, a knob, a gamepad trigger or an OSC value that moves
@@ -21,6 +22,8 @@
   "One control (props: :role)."
   [{:keys [fx/context role]}]
   (let [{:keys [label bindings learning?]} (fx/sub-ctx context subs/vibe-control role)
+        learn (fx/sub-ctx context subs/learn-for-target {:type :vibe :role role})
+        document-id (fx/sub-ctx context subs/document-id)
         id (str "vibe-control-" (name role))]
     {:fx/type :h-box
      :id id
@@ -46,8 +49,9 @@
                  :focus-traversable false
                  :text (if learning? "Cancel" "Learn")
                  :on-action (if learning?
-                              {:event/type :input/cancel-learn}
-                              {:event/type :input/start-learn :target-action {:type :vibe :role role}})}
+                              (merge {:event/type :input/cancel-learn} learn)
+                              {:event/type :input/start-learn :target-action {:type :vibe :role role}
+                               :document-id document-id})}
                 {:fx/type :button
                  :id (str id "-clear")
                  :style-class "button-secondary"
@@ -60,10 +64,13 @@
   (str/upper-case (name role)))
 
 (defn- learn-all
-  "Learn all, or while it runs, the key it waits for and Cancel."
+  "Learn all, or while it runs, the key it waits for and Cancel (for the
+   attempt it shows)."
   [{:keys [fx/context]}]
   (let [{:keys [role step of refused]} (fx/sub-ctx context subs/vibe-wizard)
-        running? (some? role)]
+        running? (some? role)
+        learn (when running? (fx/sub-ctx context subs/learn-for-target {:type :vibe :role role}))
+        document-id (fx/sub-ctx context subs/document-id)]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
@@ -73,7 +80,7 @@
                  :text "Learn all"
                  :visible (not running?)
                  :managed (not running?)
-                 :on-action {:event/type :vibe/learn-all}}
+                 :on-action {:event/type :vibe/learn-all :document-id document-id}}
                 {:fx/type :label
                  :id "vibe-wizard-status"
                  :style-class "vibe-wizard-status"
@@ -90,13 +97,15 @@
                  :text "Cancel"
                  :visible running?
                  :managed running?
-                 :on-action {:event/type :vibe/wizard-cancel}}]}))
+                 :on-action (merge {:event/type :vibe/wizard-cancel} learn)}]}))
 
 (defn- fader-row
   "One fader (props: :slot): the control learned for it, Learn (Cancel
    while it waits for a control to move) and Clear."
   [{:keys [fx/context slot]}]
   (let [{:keys [label bindings learning?]} (fx/sub-ctx context subs/vibe-fader-control slot)
+        learn (fx/sub-ctx context subs/learn-for-target {:type :macro :slot slot})
+        document-id (fx/sub-ctx context subs/document-id)
         id (str "vibe-control-" (name slot))]
     {:fx/type :h-box
      :id id
@@ -122,8 +131,9 @@
                  :focus-traversable false
                  :text (if learning? "Cancel" "Learn")
                  :on-action (if learning?
-                              {:event/type :input/cancel-learn}
-                              {:event/type :input/start-learn :target-action {:type :macro :slot slot} :capture :continuous})}
+                              (merge {:event/type :input/cancel-learn} learn)
+                              {:event/type :input/start-learn :target-action {:type :macro :slot slot} :capture :continuous
+                               :document-id document-id})}
                 {:fx/type :button
                  :id (str id "-clear")
                  :style-class "button-secondary"

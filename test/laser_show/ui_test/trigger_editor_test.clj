@@ -3,6 +3,8 @@
    setting its behaviour."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.input :as input]
+            [laser-show.input.learn :as learn]
             [laser-show.input.router :as input-router]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
@@ -202,3 +204,97 @@
     (is (= {:type :trigger-cue :target [0 0] :behavior :momentary} (binding)))
     (ui/wait-for! #(= while-held (behavior-shown)))
     (is (= while-held (behavior-shown)))))
+
+
+;; One learn attempt, the behaviour shown (reactivity plan 24, case 4)
+
+(defn- app-state [] (state/get-raw-state))
+(defn- attempt [] (input/active-learn (app-state)))
+(defn- undo-count [] (count (get-in (app-state) [:history :undo-stack])))
+
+(defn- key-press! [id]
+  (input-router/dispatch! {:type :trigger :source :keyboard :id id :state :pressed
+                           :timestamp (System/currentTimeMillis)}))
+
+(defn- with-held-captures
+  "(f release!): while f runs, a learn attempt's waiter that has caught an
+   input (input.learn/wait-for-capture) holds it, at most 5 s, until
+   release! is called."
+  [f]
+  (let [gate (promise)
+        wait learn/wait-for-capture]
+    (with-redefs [learn/wait-for-capture (fn [g ms]
+                                           (let [result (wait g ms)]
+                                             (when (map? result)
+                                               (deref gate 5000 nil))
+                                             result))]
+      (try
+        (f #(deliver gate true))
+        (finally
+          (deliver gate true))))))
+
+(deftest behavior-changed-while-waiting-is-the-binding-learned-test
+  (let [robot (ui/robot)
+        binding #(get-in (app-state) [:config :input :trigger-map {:source :keyboard :id %}])]
+    (testing "While held chosen while the learn waits on Follow: the same attempt, and the binding is While held"
+      (open-trigger-editor! 0 0 :cue)
+      (ui/wait-for! #(= follow (behavior-shown)))
+      (ui/click! robot "#trigger-learn-button")
+      (ui/assert-visible! "#trigger-learning-panel")
+      (ui/wait-for! #(= :follow (get-in (attempt) [:target-action :behavior])))
+      (let [waiting (:learn-id (attempt))]
+        (ui/wait-for! #(= waiting (input-router/learn-listener-id)))
+        (ui/select! robot "#trigger-behavior-selector" while-held)
+        (ui/wait-for! #(= :momentary (get-in (attempt) [:target-action :behavior])))
+        (ui/wait-for! #(= while-held (behavior-shown)))
+        (is (= waiting (:learn-id (attempt))) "the same attempt")
+        (is (= waiting (input-router/learn-listener-id)) "with its listener")
+        (ui/assert-visible! "#trigger-learning-panel")
+        (is (zero? (undo-count)) "the choice alone on a cell with no binding: no undo step")
+        (is (false? (get-in (app-state) [:project :dirty?])))
+        (space-press!)
+        (ui/wait-for! #(some? (binding :space)))
+        (is (= {:type :trigger-cue :target [0 0] :behavior :momentary} (binding :space)))
+        (ui/wait-for! #(nil? (attempt)))
+        (is (= while-held (behavior-shown)) "shown as learned")
+        (is (= 1 (undo-count)) "the binding: one step")))
+    (testing "captured first, then While held: the existing binding changes, in a step of its own"
+      (events/dispatch! {:event/type :ui/open-dialog :dialog-id :trigger-editor
+                         :data {:col 1 :row 0 :cell-mode :cue :behavior :follow}})
+      (ui/wait-for! #(= [1 0] ((juxt :col :row) (get-in (app-state) [:ui :dialogs :trigger-editor]))))
+      (ui/wait-for! #(= follow (behavior-shown)))
+      (ui/click! robot "#trigger-learn-button")
+      (ui/wait-for! #(= {:type :trigger-cue :target [1 0] :behavior :follow} (:target-action (attempt))))
+      (ui/wait-for! #(= (:learn-id (attempt)) (input-router/learn-listener-id)))
+      (key-press! :b)
+      (ui/wait-for! #(= {:type :trigger-cue :target [1 0] :behavior :follow} (binding :b)))
+      (ui/wait-for! #(nil? (attempt)))
+      (is (= follow (behavior-shown)))
+      (is (= 2 (undo-count)))
+      (ui/select! robot "#trigger-behavior-selector" while-held)
+      (ui/wait-for! #(= :momentary (:behavior (binding :b))))
+      (ui/wait-for! #(= while-held (behavior-shown)))
+      (is (= 3 (undo-count)) "the choice changed a binding: a step of its own")
+      (is (nil? (attempt))))
+    (testing "the editor closed, or on another cell, while its learn waits: the held capture binds nothing"
+      (doseq [[cell key-id away!] [[[2 0] :c #(ui/click! robot "#trigger-editor-done")]
+                                   [[3 0] :d #(events/dispatch! {:event/type :ui/open-dialog :dialog-id :trigger-editor
+                                                                 :data {:col 4 :row 0 :cell-mode :cue}})]]]
+        (with-held-captures
+          (fn [release!]
+            (let [before (get-in (app-state) [:config :input])]
+              (open-trigger-editor! (first cell) (second cell) :cue)
+              (ui/wait-for! #(= [(first cell) (second cell)] ((juxt :col :row) (get-in (app-state) [:ui :dialogs :trigger-editor]))))
+              (ui/click! robot "#trigger-learn-button")
+              (ui/wait-for! #(= {:type :trigger-cue :target cell} (input/learning-target (app-state))))
+              (ui/wait-for! #(= (:learn-id (attempt)) (input-router/learn-listener-id)))
+              (let [held (:learn-id (attempt))]
+                (key-press! key-id)
+                (away!)
+                (ui/wait-for! #(nil? (attempt)))
+                (ui/wait-for! #(nil? (input-router/learn-listener-id)))
+                (release!)
+                (ui/wait-for! #(not (contains? (learn/waiting) held)))
+                (is (events/flush!))
+                (is (= before (get-in (app-state) [:config :input])) (str "neither cell changes, " cell))
+                (is (nil? (binding key-id)))))))))))

@@ -42,7 +42,10 @@
         typing? (keys/typing-target? e)
         mods (modifiers e)
         claimed? (or (contains? window-keys id) (keys/claims? (.getFocusOwner scene) id))
-        learning (get-in s [:backend :input :learning-capture])
+        ;; A learn that binds a control, as it is at key time; Settings'
+        ;; identify leaves the keys as they are
+        attempt (get-in s [:ui :input-learn :active])
+        learning (when (and attempt (not= :settings (:owner attempt))) (:capture attempt))
         {:keys [consume? emit cancel-learn?]}
         (keyboard/decide {:key-id id :phase phase :enabled? enabled? :modifiers mods
                           :text-target? typing? :claimed? claimed? :held? (some? owner) :learning learning
@@ -51,7 +54,8 @@
                           :bound? (and enabled? (= :pressed phase) (nil? owner) (nil? learning)
                                        (not typing?) (not claimed?) (triggers/bound? s event))})]
     (when consume? (.consume e))
-    (when cancel-learn? (events/dispatch! {:event/type :input/cancel-learn}))
+    (when cancel-learn?
+      (events/dispatch! (merge {:event/type :input/cancel-learn} (select-keys attempt [:learn-id :document-id]))))
     (case emit
       :pressed (do (vswap! held assoc id (if (= :press learning) :learn :binding))
                    ;; A learn handler may finish on the event thread before

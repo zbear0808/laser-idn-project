@@ -307,10 +307,7 @@
                   leaves (atom [])]
               (walk/postwalk #(do (when-not (coll? %) (swap! leaves conj %)) %)
                              (-> (get-in (state/get-raw-state) [:backend :input])
-                                 (select-keys [:midi :osc])
-                                 ;; Learn's promise is reactivity plan 24's
-                                 (update :midi dissoc :learn-mode)
-                                 (update :osc dissoc :learn-mode)))
+                                 (select-keys [:midi :osc])))
               (is (seq @leaves))
               (is (every? plain? @leaves) (str "no device, server or fn in app state: " (remove plain? @leaves))))))))))
 

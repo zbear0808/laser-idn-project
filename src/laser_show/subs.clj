@@ -38,6 +38,7 @@
             [laser-show.animation.presets :as presets]
             [laser-show.animation.safety :as safety]
             [laser-show.events.handlers.chain.helpers :as chain-helpers]
+            [laser-show.events.handlers.input :as input]
             [laser-show.output.driver :as driver]
             [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
@@ -185,6 +186,45 @@
    - :retrigger - Override all cues to retrigger mode"
   [context]
   (fx/sub-val context get-in [:config :cue :trigger-mode] :default))
+
+
+;; Learning an input (reactivity plan 24): every control that can be
+;; learned reads the one attempt waiting to bind a control through
+;; binding-learn, so only its own result changes when another one's learn
+;; starts or ends. Its Start sends the show it is in (document-id); its
+;; Cancel the attempt it shows (learn-for-target).
+
+(defn document-id
+  "The open show's identity ([:project :document-id]), which a control that
+   starts work for the show (a learn) sends with its event."
+  [context]
+  (fx/sub-val context get-in [:project :document-id]))
+
+(defn- binding-learn
+  "The learn waiting to bind a control (handlers.input/binding-attempt):
+   {:target :learn-id :document-id}, or nil."
+  [context]
+  (fx/sub-val context input/binding-attempt))
+
+(defn input-learning-target
+  "The target of the learn waiting to bind a control (handlers.input/
+   learn-target: {:type :target}, {:type :role}, {:type :slot}), or nil."
+  [context]
+  (:target (fx/sub-ctx context binding-learn)))
+
+(defn learn-for-target
+  "The learn waiting for target ({:type :trigger-cue :target [0 0]},
+   {:type :vibe :role :hit}, ...) as its Cancel names it: {:learn-id
+   :document-id}, or nil."
+  [context target]
+  (let [attempt (fx/sub-ctx context binding-learn)]
+    (when (and attempt (= target (:target attempt)))
+      (dissoc attempt :target))))
+
+(defn- learning?
+  "Is a learn waiting for target?"
+  [context target]
+  (some? (fx/sub-ctx context learn-for-target target)))
 
 
 ;; Level 2: Computed Subscriptions
@@ -1171,7 +1211,7 @@
      :active? (and (some? marker) (= id marker))
      :pending (when (= id (:map pending)) (if (:bar? pending) :bar :beat))
      :bar? (true? (fx/sub-val context get-in [:config :zone-map-pads id :bar?]))
-     :learning? (= {:type :zone-map :target id} (fx/sub-val context get-in [:backend :input :learning-target]))
+     :learning? (learning? context {:type :zone-map :target id})
      :bindings (fx/sub-ctx context map-pad-bindings id)}))
 
 (defn- cue-ref-sets
@@ -1368,7 +1408,7 @@
      :pending (when (and pending (= pad (zone-patterns/style-pad (:style pending))))
                 (if (:bar? pending) :bar :beat))
      :bar? (true? (fx/sub-val context get-in [:config :pattern-pads pad :bar?]))
-     :learning? (= {:type :pattern-pad :target pad} (fx/sub-val context get-in [:backend :input :learning-target]))
+     :learning? (learning? context {:type :pattern-pad :target pad})
      :bindings (fx/sub-ctx context pattern-pad-bindings pad)}))
 
 (defn step-pad
@@ -1376,7 +1416,7 @@
    it shows is the newest tick's."
   [context]
   {:bindings (fx/sub-ctx context pattern-pad-bindings :step)
-   :learning? (= {:type :zone-step} (fx/sub-val context get-in [:backend :input :learning-target]))})
+   :learning? (learning? context {:type :zone-step})})
 
 (defn map-cycle-state
   "The CYCLE pad (07 §7.4): {:on? (a Map cycle cell is on) :running? (it
@@ -1396,7 +1436,7 @@
      :paused? (and on? paused?)
      :pending (when (= :cycle (:map pending)) (if (:bar? pending) :bar :beat))
      :bar? (true? (fx/sub-val context get-in [:config :zone-map-pads :cycle :bar?]))
-     :learning? (= {:type :zone-map :target :cycle} (fx/sub-val context get-in [:backend :input :learning-target]))
+     :learning? (learning? context {:type :zone-map :target :cycle})
      :bindings (fx/sub-ctx context map-pad-bindings :cycle)
      :maps (if running-cycle
              (into [] (keep #(:name (zone-maps/map-by-id state %))) (:maps (:params running-cycle)))
@@ -1655,11 +1695,17 @@
   [context]
   (fx/sub-val context get-in [:backend :input :midi :channel-filter]))
 
-(defn midi-learning?
-  "Check if MIDI learn mode is active.
-   Depends on: backend domain"
-  [context]
-  (boolean (fx/sub-val context get-in [:backend :input :midi :learn-mode])))
+(defn settings-learn
+  "Settings' identify of an input of source (:midi, :osc; reactivity plan
+   24), for its card: {:learn-id (while it waits, the one its Cancel
+   names; else nil) :result (what it identified last, {:status :captured
+   :input-event} or {:status :timeout|:failed}; nil when ready)
+   :available? (the source can send one now: MIDI on with an input
+   connected, OSC on and listening)}."
+  [context source]
+  {:learn-id (fx/sub-val context input/identify-id source)
+   :result (fx/sub-val context get-in [:ui :input-learn :settings source])
+   :available? (fx/sub-val context input/source-available? source)})
 
 (defn osc-config
   "Get the complete OSC configuration.
@@ -1691,12 +1737,6 @@
   [context]
   (fx/sub-val context get-in [:backend :input :osc :address-mappings]))
 
-(defn osc-learning?
-  "Check if OSC learn mode is active.
-   Depends on: backend domain"
-  [context]
-  (boolean (fx/sub-val context get-in [:backend :input :osc :learn-mode])))
-
 
 ;; Level 2: Generic Input Subscriptions
 
@@ -1707,11 +1747,12 @@
   [context]
   (fx/sub-val context get-in [:config :input :trigger-map] {}))
 
-(defn input-learning-target
-  "Get the current learning target for generalized inputs, if any.
-   Depends on: backend domain"
-  [context]
-  (fx/sub-val context get-in [:backend :input :learning-target]))
+(defn trigger-editor-behavior
+  "The behaviour the trigger editor shows for the cell target, :momentary
+   or :follow (handlers.input/cell-behavior: the learn's waiting for it,
+   else its first binding's, else the editor's choice)."
+  [context target]
+  (fx/sub-val context input/cell-behavior target))
 
 (def ^:private cell-action-types
   "The actions that trigger a grid cell: a cue cell, an effects cell."
@@ -1877,8 +1918,8 @@
 
 (defn- learning-role
   "The vibe role a learn is for, or nil."
-  [state]
-  (let [{:keys [type role]} (get-in state [:backend :input :learning-target])]
+  [context]
+  (let [{:keys [type role]} (fx/sub-ctx context input-learning-target)]
     (when (= :vibe type) role)))
 
 (defn vibe-header
@@ -1900,7 +1941,7 @@
                (zero? lit) "BLACKOUT"
                (= 1 lit) "BLACKOUT · vibe keys off · a grid cue is playing"
                :else (str "BLACKOUT · vibe keys off · " lit " grid cues are playing"))
-     :learning (fx/sub-val context learning-role)}))
+     :learning (fx/sub-ctx context learning-role)}))
 
 (defn vibe-rotation
   "The Perform tab's auto-advance (vibes.rotation): {:auto? (the switch, or
@@ -1941,8 +1982,10 @@
     (when (and run (= run (get-in state [:playback :active-cues cell :run])))
       cell)))
 
-(defn- vibe-learning? [state role]
-  (= role (learning-role state)))
+(defn- vibe-learning?
+  "Is a learn waiting for role's control?"
+  [context role]
+  (learning? context {:type :vibe :role role}))
 
 (defn- vibe-problem
   "Why role's last press had nothing to play (:empty-pool), until the next
@@ -2061,7 +2104,7 @@
              :bindings (fx/sub-ctx context vibe-role-bindings role)
              :held? (fx/sub-val context vibe-held? role)
              :playing (fx/sub-val context vibe-playing-cell role)
-             :learning? (fx/sub-val context vibe-learning? role)
+             :learning? (vibe-learning? context role)
              :problem (fx/sub-val context vibe-problem role)
              :dim? (or (not (fx/sub-val context vibes?))
                        (and blackout? (not= :blackout role)))
@@ -2361,17 +2404,24 @@
   {:role role
    :label (vibe-role-labels role)
    :bindings (fx/sub-ctx context vibe-role-bindings role)
-   :learning? (fx/sub-val context vibe-learning? role)})
+   :learning? (vibe-learning? context role)})
+
+(defn- learn-all-attempt
+  "The learn attempt of Learn all while it waits, or nil."
+  [state]
+  (let [attempt (input/active-learn state)]
+    (when (= :learn-all (:owner attempt))
+      (select-keys attempt [:target-action :wizard]))))
 
 (defn vibe-wizard
   "Learn all, while it waits for a key: {:role (the one learned now) :step
    (from 1) :of :refused (the role a key pressed for it is already)}; nil
-   otherwise."
+   otherwise. All of it is its learn attempt's ([:ui :input-learn
+   :active]); its Cancel names the attempt (learn-for-target)."
   [context]
-  (let [{:keys [queue done refused]} (fx/sub-val context get-in [:ui :vibes :wizard])
-        learning (fx/sub-val context learning-role)]
-    (when (and (seq queue) (= learning (first queue)))
-      {:role learning :step (inc (count done)) :of (+ (count queue) (count done)) :refused refused})))
+  (when-let [{:keys [target-action wizard]} (fx/sub-val context learn-all-attempt)]
+    (let [{:keys [queue done refused]} wizard]
+      {:role (:role target-action) :step (inc (count done)) :of (+ (count queue) (count done)) :refused refused})))
 
 
 ;; The faders (plans/2026-11-18-vibe-mode/05): the Controls panel's fader
@@ -2391,9 +2441,6 @@
        (sort-by pr-str)
        vec))
 
-(defn- fader-learning? [state slot]
-  (= {:type :macro :slot slot} (get-in state [:backend :input :learning-target])))
-
 (defn vibe-fader-control
   "A fader row of the Vibes tab's Controls panel: {:slot :label :bindings
    (input store keys) :learning?}."
@@ -2401,7 +2448,7 @@
   {:slot slot
    :label (fader-labels slot)
    :bindings (fx/sub-ctx context vibe-fader-bindings slot)
-   :learning? (fx/sub-val context fader-learning? slot)})
+   :learning? (learning? context {:type :macro :slot slot})})
 
 (defn vibe-meter
   "A meter of the Perform tab: {:slot :label :wired?}, :wired? while

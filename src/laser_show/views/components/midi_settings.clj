@@ -5,11 +5,12 @@
    - Enable/disable MIDI input
    - Device discovery and connection
    - Channel filter configuration
-   - MIDI learn mode"
+   - Identify MIDI input: what a control sends (views/components/identify_input.clj)"
   (:require [cljfx.api :as fx]
             [laser-show.events.core :as events]
             [laser-show.subs :as subs]
             [laser-show.css.core :as css]
+            [laser-show.views.components.identify-input :as identify-input]
             [clojure.string :as str]))
 
 
@@ -23,7 +24,6 @@
   (let [color (case status
                 :connected "#4CAF50"
                 :disconnected "#808080"
-                :learning "#2196F3"
                 "#808080")]
     {:fx/type :circle
      :radius (/ size 2)
@@ -92,7 +92,6 @@
         enabled? (:enabled? midi-config)
         connected-devices (:connected-devices midi-config #{})
         available-devices (:available-devices midi-config [])
-        learning? (fx/sub-ctx context subs/midi-learning?)
         channel-filter (:channel-filter midi-config)]
     {:fx/type :v-box
      :spacing 12
@@ -175,31 +174,14 @@
                                :style (str "-fx-text-fill: " (css/text-muted) "; "
                                            "-fx-font-size: 10;")}]}]}
       
-      ;; MIDI Learn Mode
+      ;; Identify an input: what a control sends, binding nothing
       {:fx/type :v-box
        :spacing 4
        :children [{:fx/type :label
-                   :text "MIDI Learn"
+                   :text "Identify"
                    :style (str "-fx-text-fill: " (css/text-secondary) ";")}
-                  {:fx/type :h-box
-                   :spacing 8
-                   :alignment :center-left
-                   :children (filterv some?
-                               [{:fx/type :button
-                                 :text (if learning? "Cancel Learn" "Start Learn Mode")
-                                 :style-class [(if learning? "button-warning" "button-primary")]
-                                 :on-action {:event/type (if learning?
-                                                          :input/midi-cancel-learn
-                                                          :input/midi-start-learn)}}
-                                (when learning?
-                                  {:fx/type :h-box
-                                   :spacing 4
-                                   :alignment :center-left
-                                   :children [{:fx/type status-indicator
-                                               :status :learning}
-                                              {:fx/type :label
-                                               :text "Waiting for MIDI input..."
-                                               :style (str "-fx-text-fill: " (css/selection-bg) ";")}]})])}]}
+                  {:fx/type identify-input/identify-input
+                   :source :midi}]}
       
       ;; Auto-connect button
       {:fx/type :h-box

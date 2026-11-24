@@ -31,6 +31,7 @@
             [laser-show.output.driver :as driver]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.devices :as devices]
+            [laser-show.input.learn :as learn]
             [laser-show.input.link :as link]
             [laser-show.input.gamepad :as gamepad]
             [laser-show.input.router :as router]
@@ -328,8 +329,9 @@
    the UI, the show clock, the input mapper, the gamepad poller, the
    streaming engines (the output runtime is drained), the add-ons' drivers
    (unregistered, their jars closed), input devices, the Carabiner link,
-   the rig file (its pending change written and the write running finished,
-   then its lock let go: stop-rig-file!) and the open press's deadline
+   a learn attempt's listener and waiter (input.learn/retire!), the rig
+   file (its pending change written and the write running finished, then
+   its lock let go: stop-rig-file!) and the open press's deadline
    wake-up (events/dispose-gesture-alarm!). dispatch!
    falls back to the synchronous handler afterwards, and the write guard
    start! or start-test! installed is removed.
@@ -361,6 +363,9 @@
       (events/flush! 1000)
       (release-devices! (state/get-raw-state)))
     (events/retire!)
+    ;; A learn attempt's listener and waiter go with the app: whatever it
+    ;; caught is dropped with the app's late events, never sent elsewhere
+    (learn/retire!)
     (stop-rig-file!)
     (events/dispose-gesture-alarm!)
     (events/set-exit-fn! nil)

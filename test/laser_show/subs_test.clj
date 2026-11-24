@@ -40,6 +40,15 @@
 (defn- context [s]
   (fx/create-context s state/cache-factory))
 
+(defn- waiting-to-learn
+  "s with a learn attempt waiting to bind target-action ([:ui :input-learn
+   :active], handlers/input.clj), a cell's or a pad's."
+  [s target-action]
+  (assoc-in s [:ui :input-learn :active] {:learn-id #uuid "00000000-0000-0000-0000-0000000024c1" :owner :binding
+                                          :capture (if (= :macro (:type target-action)) :continuous :press)
+                                          :document-id (get-in s [:project :document-id])
+                                          :target-action target-action}))
+
 (defn- status-write
   "What a playing show changes in app state: the show clock's status (the beat
    square, the stats)."
@@ -342,9 +351,9 @@
                ["its behavior alone: a walk, the same cells" (bindings {note-60 (assoc cue-a2 :behavior :momentary)})
                 [#{[:trigger-cue [1 0]]} 1]]
                ["a selection: no walk" #(assoc-in % [:grid :selected-cell] [1 0]) [#{[:trigger-cue [1 0]]} 0]]
-               ["a learn starting: no walk" #(assoc-in % [:backend :input :learning-target] fx-a2)
+               ["a learn starting: no walk" #(waiting-to-learn % fx-a2)
                 [#{[:trigger-cue [1 0]]} 0]]
-               ["and ending: none" #(update-in % [:backend :input] dissoc :learning-target) [#{[:trigger-cue [1 0]]} 0]]
+               ["and ending: none" #(assoc-in % [:ui :input-learn :active] nil) [#{[:trigger-cue [1 0]]} 0]]
                ["a key for the cue that plays, as for any" (bindings {key-h {:type :trigger-cue :target [0 0]}
                                                                       note-60 (assoc cue-a2 :behavior :momentary)})
                 [#{[:trigger-cue [0 0]] [:trigger-cue [1 0]]} 1]]
@@ -415,7 +424,7 @@
                           [:next :locked?])))
       (is (false? (:on? (fx/sub-ctx ctx subs/vibe-pad :blackout)))))
     (testing "the pad being learned, and only that one"
-      (let [ctx' (fx/swap-context ctx assoc-in [:backend :input :learning-target] {:type :vibe :role :accent})]
+      (let [ctx' (fx/swap-context ctx waiting-to-learn {:type :vibe :role :accent})]
         (is (= {:hit false :accent true :flash false :vibe false :blackout false}
                (update-vals (pads ctx') :learning?)))))
     (testing "a press with nothing to play says so on its own pad"
@@ -455,9 +464,9 @@
     (testing "the header"
       (is (= {:name "Shapes" :color "#4A90D9" :energy 2 :rotation :active :blackout? false :banner nil :learning nil}
              (fx/sub-ctx ctx subs/vibe-header)))
-      (is (= :hit (:learning (fx/sub-ctx (fx/swap-context ctx assoc-in [:backend :input :learning-target] {:type :vibe :role :hit})
+      (is (= :hit (:learning (fx/sub-ctx (fx/swap-context ctx waiting-to-learn {:type :vibe :role :hit})
                                          subs/vibe-header))))
-      (is (nil? (:learning (fx/sub-ctx (fx/swap-context ctx assoc-in [:backend :input :learning-target] {:type :trigger-cue :target [0 0]})
+      (is (nil? (:learning (fx/sub-ctx (fx/swap-context ctx waiting-to-learn {:type :trigger-cue :target [0 0]})
                                        subs/vibe-header)))
           "a cell's learn isn't a role's"))))
 
@@ -693,19 +702,57 @@
         (is (= :vibe-1 (fx/sub-ctx lines-play subs/vibe-edited-id)))
         (is (identical? moves (fx/sub-ctx lines-play subs/vibe-edited-reactions)))))))
 
+;; Learning an input (reactivity plan 24): each control shows the attempt
+;; active in [:ui :input-learn], the one its Cancel names
+
+(deftest learn-selectors-follow-the-active-attempt-test
+  (let [cue {:type :trigger-cue :target [0 0]}
+        doc #uuid "00000000-0000-0000-0000-0000000024c0"
+        ctx (context (assoc-in (domains/build-initial-state) [:project :document-id] doc))
+        waiting (fx/swap-context ctx waiting-to-learn cue)]
+    (testing "a learn waiting to bind: its target, and its Cancel's identity, for that target only"
+      (is (nil? (fx/sub-ctx ctx subs/input-learning-target)))
+      (is (= cue (fx/sub-ctx waiting subs/input-learning-target)))
+      (is (= {:learn-id #uuid "00000000-0000-0000-0000-0000000024c1" :document-id doc}
+             (fx/sub-ctx waiting subs/learn-for-target cue)))
+      (is (nil? (fx/sub-ctx waiting subs/learn-for-target {:type :trigger-cue :target [1 0]})))
+      (is (nil? (fx/sub-ctx waiting subs/learn-for-target {:type :trigger-effect :target [0 0]}))))
+    (testing "Settings' identify is no control's learn: it is its card's"
+      (let [l #uuid "00000000-0000-0000-0000-0000000024c3"
+            identify (fx/swap-context ctx assoc-in [:ui :input-learn :active] {:learn-id l :owner :settings :capture :observe :source :midi})
+            shown (fx/swap-context identify #(-> %
+                                                 (assoc-in [:ui :input-learn :active] nil)
+                                                 (assoc-in [:ui :input-learn :settings :midi] {:status :captured :input-event {:type :note-on :source :midi :channel 1 :note 60}})
+                                                 (assoc-in [:backend :input :midi :connected-devices] #{"Pad"})))]
+        (is (nil? (fx/sub-ctx identify subs/input-learning-target)))
+        (is (= {:learn-id l :result nil :available? false} (fx/sub-ctx identify subs/settings-learn :midi)))
+        (is (nil? (:learn-id (fx/sub-ctx identify subs/settings-learn :osc))))
+        (is (= {:learn-id nil :result {:status :captured :input-event {:type :note-on :source :midi :channel 1 :note 60}} :available? true}
+               (fx/sub-ctx shown subs/settings-learn :midi)))))
+    (testing "the trigger editor's behaviour: the waiting learn's choice, else the cell's binding's, else the editor's"
+      (let [bound (fx/swap-context ctx assoc-in [:config :input :trigger-map {:source :keyboard :id :q}] (assoc cue :behavior :quantized-decay))
+            chosen #(fx/swap-context % assoc-in [:ui :dialogs :trigger-editor :behavior] :momentary)]
+        (is (= :follow (fx/sub-ctx ctx subs/trigger-editor-behavior cue)))
+        (is (= :momentary (fx/sub-ctx (chosen ctx) subs/trigger-editor-behavior cue)))
+        (is (= :follow (fx/sub-ctx (chosen bound) subs/trigger-editor-behavior cue)) "an older project's binding plays the cue's mode")
+        (is (= :momentary (fx/sub-ctx (fx/swap-context bound waiting-to-learn (assoc cue :behavior :momentary)) subs/trigger-editor-behavior cue))
+            "the learn waiting for the cell")))))
+
 (deftest vibe-controls-sub-test
   (let [ctx (context (vibe-state))
         wizard {:queue [:accent :flash :vibe :blackout] :done [:hit] :refused :hit}]
     (is (= {:role :hit :label "HIT" :bindings [hit-key] :learning? false} (fx/sub-ctx ctx subs/vibe-control :hit)))
     (is (= {:role :blackout :label "BLACKOUT" :bindings [] :learning? false} (fx/sub-ctx ctx subs/vibe-control :blackout)))
     (is (nil? (fx/sub-ctx ctx subs/vibe-wizard)))
-    (let [ctx' (fx/swap-context ctx #(-> %
-                                         (assoc-in [:ui :vibes :wizard] wizard)
-                                         (assoc-in [:backend :input :learning-target] {:type :vibe :role :accent})))]
+    (let [ctx' (fx/swap-context ctx assoc-in [:ui :input-learn :active]
+                                {:learn-id #uuid "00000000-0000-0000-0000-0000000024c2" :owner :learn-all :capture :press
+                                 :target-action {:type :vibe :role :accent} :wizard wizard})]
       (is (= {:role :accent :step 2 :of 5 :refused :hit} (fx/sub-ctx ctx' subs/vibe-wizard)))
       (is (true? (:learning? (fx/sub-ctx ctx' subs/vibe-control :accent))))
-      (is (nil? (fx/sub-ctx (fx/swap-context ctx' update-in [:backend :input] dissoc :learning-target) subs/vibe-wizard))
-          "nothing learning: no wizard shows, whatever is left in the UI state"))))
+      (is (nil? (fx/sub-ctx (fx/swap-context ctx' assoc-in [:ui :input-learn :active :owner] :binding) subs/vibe-wizard))
+          "ACCENT's own learn, not Learn all's: no wizard shows")
+      (is (nil? (fx/sub-ctx (fx/swap-context ctx' assoc-in [:ui :input-learn :active] nil) subs/vibe-wizard))
+          "nothing learning: no wizard shows"))))
 
 (deftest fader-subs-test
   (let [ctx (context (-> (vibe-state)
@@ -716,7 +763,7 @@
              (fx/sub-ctx ctx subs/vibe-fader-control :slider-1)))
       (is (= {:slot :slider-2 :label "MORPH" :bindings [] :learning? false}
              (fx/sub-ctx ctx subs/vibe-fader-control :slider-2)))
-      (let [learning (fx/swap-context ctx assoc-in [:backend :input :learning-target] {:type :macro :slot :slider-2})]
+      (let [learning (fx/swap-context ctx waiting-to-learn {:type :macro :slot :slider-2})]
         (is (true? (:learning? (fx/sub-ctx learning subs/vibe-fader-control :slider-2))))
         (is (false? (:learning? (fx/sub-ctx learning subs/vibe-fader-control :slider-1))))
         (is (false? (:learning? (fx/sub-ctx learning subs/vibe-control :hit))) "a role's row doesn't wait")
@@ -1992,7 +2039,7 @@
               (assoc-in [:zone-map :pending] {:id 3 :map :map/unison :at-beat 8.0 :bar? true})
               (assoc-in [:config :zone-map-pads :map/custom-1 :bar?] true)
               (assoc-in [:config :input :trigger-map key48] {:type :zone-map :target :map/left-right})
-              (assoc-in [:backend :input :learning-target] {:type :zone-map :target :map/custom-1}))
+              (waiting-to-learn {:type :zone-map :target :map/custom-1}))
         ctx (context s)
         pad #(fx/sub-ctx ctx subs/map-pad %)]
     (is (= [:map/left-right :map/odd-even :map/unison :map/custom-1] (fx/sub-ctx ctx subs/map-pad-ids))
@@ -2023,7 +2070,7 @@
               (assoc-in [:config :pattern-pads :random :bar?] true)
               (assoc-in [:config :input :trigger-map key40] {:type :pattern-pad :target :chase})
               (assoc-in [:config :input :trigger-map key41] {:type :zone-step})
-              (assoc-in [:backend :input :learning-target] {:type :pattern-pad :target :swap}))
+              (waiting-to-learn {:type :pattern-pad :target :swap}))
         ctx (context s)
         pad #(fx/sub-ctx ctx subs/pattern-pad %)]
     (is (= {:id :chase :name "Chase" :active? true :pending nil :bar? false :learning? false :bindings [key40]}
@@ -2042,7 +2089,7 @@
                                         subs/pattern-pad :as-set)))))
     (testing "STEP: its keys, and learning one"
       (is (= {:bindings [key41] :learning? false} (fx/sub-ctx ctx subs/step-pad)))
-      (is (:learning? (fx/sub-ctx (context (assoc-in s [:backend :input :learning-target] {:type :zone-step})) subs/step-pad))))
+      (is (:learning? (fx/sub-ctx (context (waiting-to-learn s {:type :zone-step})) subs/step-pad))))
     (testing "booleans and keys only: where the waiting switch lands isn't in it"
       (let [ctx' (fx/swap-context ctx assoc-in [:pattern-pads :pending :at-beat] 40.0)]
         (is (= (pad :off) (fx/sub-ctx ctx' subs/pattern-pad :off)))))))

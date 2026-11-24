@@ -2,8 +2,10 @@
   (:require [clojure.test :refer [deftest testing is]]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.input :as input]
+            [laser-show.events.helpers :as h]
             [laser-show.input.events :as input-events]
             [laser-show.input.fixtures :as fixtures]
+            [laser-show.input.learn :as learn]
             [laser-show.input.midi :as midi]
             [laser-show.input.osc :as osc]
             [laser-show.input.router :as router]
@@ -154,50 +156,193 @@
       (is (true? (get-in (handle (:state connected) {:event/type :input/midi-disconnect-all})
                          [:input/midi-disconnect :all?]))))))
 
-(def ^:private registered-effects
-  "Effect keys registered in laser-show.events.core/event-handler that these
-   handlers may return."
-  #{:state :dispatch :dispatch-later})
 
-(deftest learn-handlers-return-only-registered-effects
-  (try
-    (doseq [[start cancel] [[:input/midi-start-learn :input/midi-cancel-learn]
-                            [:input/osc-start-learn :input/osc-cancel-learn]]]
-      (testing (str start)
-        (let [started (input/handle {:event/type start :state (initial-state)})
-              cancelled (input/handle {:event/type cancel :state (:state started)})]
-          (is (every? registered-effects (keys started)))
-          (is (every? registered-effects (keys cancelled))))))
-    (finally
-      (router/clear-handlers!))))
+;; Learning an input (reactivity plan 24): one attempt at a time, each with
+;; an id of its own. Its events go through the real pipeline, which gives
+;; a Start its id (events/new-learn-id) and asks the router's learn slot
+;; to follow (:input/sync-learn); a test that needs the slot puts the
+;; listener there as that effect does (armed).
 
-(deftest learn-cancel-releases-waiting-promise
-  (try
-    (testing "MIDI learn"
-      (let [started (:state (input/handle {:event/type :input/midi-start-learn
-                                           :state (initial-state)}))
-            p (get-in started [:backend :input :midi :learn-mode])]
-        (input/handle {:event/type :input/midi-cancel-learn :state started})
-        (is (realized? p))
-        (is (nil? @p))))
-    (testing "generalized learn: cancel and restart release the pending future"
-      (let [target {:type :trigger-cue :target [0 0]}
-            pending #(deref @#'input/!pending-learn)
-            started (:state (input/handle {:event/type :input/start-learn
-                                           :state (initial-state)
-                                           :target-action target}))
-            p1 (pending)
-            _ (input/handle {:event/type :input/start-learn
-                             :state started
-                             :target-action target})
-            p2 (pending)]
-        (is (realized? p1))
-        (is (not (realized? p2)))
-        (input/handle {:event/type :input/cancel-learn :state started})
-        (is (realized? p2))
-        (is (nil? (pending)))))
-    (finally
-      (router/clear-handlers!))))
+(defn- shown
+  "state as a show the app has open: an identity of its own
+   (persistent/begin-document), saved (clean)."
+  ([] (shown (initial-state)))
+  ([state] (-> state persistent/begin-document history/mark-clean)))
+
+(defn- pipe
+  "The pipeline's effects for event on state."
+  [state event]
+  (events/handle-event-pipeline (merge {:time 0} event {:state state})))
+
+(defn- piped
+  "state after event through the pipeline, then each event it dispatches
+   (:dispatch, :dispatch-n), as the agent runs them."
+  [state event]
+  (let [effects (pipe state event)
+        s (or (:state effects) state)]
+    (reduce piped s (cond-> [] (:dispatch effects) (conj (:dispatch effects)) (:dispatch-n effects) (into (:dispatch-n effects))))))
+
+(defn- with-learn-ids
+  "(f) with the pipeline giving new learn attempts ids, in order
+   (events/new-learn-id): fixture ids a test can name."
+  [ids f]
+  (let [left (atom ids)]
+    (with-redefs [events/new-learn-id (fn [] (let [[[id]] (swap-vals! left rest)] id))]
+      (f))))
+
+(defn- active [state] (input/active-learn state))
+(defn- learning-target [state] (input/learning-target state))
+(defn- wizard [state] (:wizard (active state)))
+
+(defn- start-learn
+  "The Start of a learn for target-action, as a view of the show open in
+   state sends it (its :document-id)."
+  [state target-action & {:as opts}]
+  (merge {:event/type :input/start-learn :target-action target-action :document-id (h/document-id state)} opts))
+
+(defn- learning
+  "state after a Start of a learn for target (opts: :capture ...)."
+  [state target & opts]
+  (piped state (apply start-learn state target opts)))
+
+(defn- caught
+  "What the waiter of the attempt active in state sends once its listener
+   takes input-event (laser-show.input.learn): the capture, with the
+   attempt's identity."
+  [state input-event]
+  (let [{:keys [learn-id document-id]} (active state)]
+    (cond-> {:event/type :input/learn-captured :learn-id learn-id :input-event input-event}
+      document-id (assoc :document-id document-id))))
+
+(defn- captured
+  "state after the attempt waiting in state caught input."
+  [state input]
+  (piped state (caught state input)))
+
+(defn- cancelled
+  "The Cancel of the attempt active in state, as its view names it."
+  [state]
+  (merge {:event/type :input/cancel-learn} (select-keys (active state) [:learn-id :document-id])))
+
+(defn- armed
+  "[state sent]: event through the pipeline, its learn listener put in the
+   router's slot as the :input/sync-learn effect does (the slot emptied
+   first, as a new app's is); sent gets the first event the attempt's
+   waiter dispatches."
+  [state event]
+  (learn/retire!)
+  (let [effects (pipe state event)
+        sent (promise)]
+    (learn/sync! (:input/sync-learn effects) #(deliver sent %))
+    [(:state effects) sent]))
+
+(defn- sent
+  "The event the waiter dispatched (within 2 s), or nil."
+  [p]
+  (deref p 2000 nil))
+
+(defn- nothing-sent?
+  "Has the waiter dispatched nothing yet (in 150 ms)?"
+  [p]
+  (nil? (deref p 150 nil)))
+
+(defn- note [n] {:type :note-on :source :midi :channel 0 :note n :velocity 1.0})
+(defn- note-key [n] {:source :midi :channel 0 :note n})
+
+(defn- trigger-map [state] (get-in state [:config :input :trigger-map]))
+
+(defn- stop-learning!
+  "Retire the attempt in the router's learn slot (its waiter exits), and
+   the test's handlers."
+  []
+  (learn/retire!)
+  (router/clear-handlers!))
+
+
+;; Settings' identify (reactivity plan 24 §2): it waits for one input of its
+;; source, says what it was on its card, and binds nothing
+
+(defn- devices-up
+  "state with a MIDI input connected and the OSC server listening, as the
+   device worker reports them, on the Settings tab."
+  [state]
+  (-> state
+      (assoc-in [:backend :input :midi :connected-devices] #{"Pad"})
+      (update-in [:backend :input :osc] assoc :enabled? true :server-running? true)
+      (assoc-in [:ui :active-tab] :settings)))
+
+(defn- card [state source] (get-in state [:ui :input-learn :settings source]))
+
+(deftest identify-waits-for-its-source-and-binds-nothing-test
+  (let [s0 (devices-up (shown))
+        start (pipe s0 {:event/type :input/midi-start-learn})
+        s1 (:state start)
+        l1 (:learn-id (active s1))]
+    (testing "Identify MIDI input: one attempt, for MIDI, that binds nothing; only registered effects"
+      (is (uuid? l1))
+      (is (= {:learn-id l1 :owner :settings :capture :observe :source :midi} (active s1)))
+      (is (= l1 (input/identify-id s1 :midi)))
+      (is (nil? (input/identify-id s1 :osc)))
+      (is (nil? (learning-target s1)) "no control waits to be bound")
+      (is (= {:retire nil :arm {:learn-id l1 :capture :observe :source :midi}} (:input/sync-learn start)))
+      (is (every? (set (keys events/effects)) (keys start))))
+    (testing "an input of the other source is no MIDI input: nothing shown, it ends as failed"
+      (let [s (captured s1 {:type :trigger :source :osc :id "/1/push1" :path "/1/push1" :value 1.0})]
+        (is (nil? (active s)))
+        (is (= {:status :failed} (card s :midi)))))
+    (testing "the MIDI input: on the card, as it is; nothing bound, nothing to undo or save"
+      (let [s2 (captured s1 {:type :note-on :source :midi :channel 1 :note 60 :velocity 1.0 :timestamp 5})]
+        (is (nil? (active s2)))
+        (is (= {:status :captured :input-event {:type :note-on :source :midi :channel 1 :note 60}} (card s2 :midi)))
+        (is (= (get-in s0 [:config :input]) (get-in s2 [:config :input])))
+        (is (= (get-in s0 [:backend :input :osc :address-mappings]) (get-in s2 [:backend :input :osc :address-mappings])))
+        (is (empty? (get-in s2 [:history :undo-stack])))
+        (is (false? (get-in s2 [:project :dirty?])))
+        (is (= {} (pipe s2 (caught s1 (note 61)))) "a later input changes nothing")
+        (testing "a new Identify starts with nothing on its card"
+          (is (nil? (card (piped s2 {:event/type :input/midi-start-learn}) :midi))))))
+    (testing "Cancel with the id it shows: ready again; any other: {}"
+      (is (= {} (pipe s1 {:event/type :input/midi-cancel-learn})))
+      (is (= {} (pipe s1 {:event/type :input/midi-cancel-learn :learn-id #uuid "00000000-0000-0000-0000-0000000024ff"})))
+      (is (= {} (pipe s1 {:event/type :input/osc-cancel-learn :learn-id l1})) "not OSC's")
+      (let [s (piped s1 {:event/type :input/midi-cancel-learn :learn-id l1})]
+        (is (nil? (active s)))
+        (is (nil? (card s :midi)))))))
+
+(deftest identify-needs-its-source-and-ends-with-it-test
+  (let [s0 (devices-up (shown))
+        midi (piped s0 {:event/type :input/midi-start-learn})
+        osc (piped s0 {:event/type :input/osc-start-learn})
+        cell {:type :trigger-cue :target [0 0]}]
+    (testing "a source that can't send: {}, superseding nothing"
+      (let [s (learning (assoc-in s0 [:backend :input :midi :connected-devices] #{}) cell)]
+        (is (= {} (pipe s {:event/type :input/midi-start-learn})) "no MIDI input connected")
+        (is (= {} (pipe (assoc-in s [:backend :input :midi :enabled?] false) {:event/type :input/midi-start-learn})))
+        (is (= {} (pipe (assoc-in s [:backend :input :osc :server-running?] false) {:event/type :input/osc-start-learn})) "not listening")
+        (is (= cell (learning-target s)))))
+    (testing "OSC's identify supersedes MIDI's: one attempt"
+      (let [s (piped midi {:event/type :input/osc-start-learn})]
+        (is (= :osc (:source (active s))))
+        (is (nil? (input/identify-id s :midi)))))
+    (testing "leaving Settings, or MIDI going (off, or its last input gone), ends MIDI's identify"
+      (doseq [event [{:event/type :ui/set-active-tab :tab-id :grid}
+                     {:event/type :input/midi-disable}]]
+        (let [effects (pipe midi event)]
+          (is (nil? (active (:state effects))) (str (:event/type event)))
+          (is (= {:retire (:learn-id (active midi)) :arm nil} (:input/sync-learn effects)))))
+      (let [asked (pipe midi {:event/type :input/midi-disconnect-all})
+            gone (pipe (:state asked) {:event/type :input/midi-disconnected
+                                       :request-id (get-in asked [:input/midi-disconnect :request-id])
+                                       :connected-devices #{}})]
+        (is (some? (active (:state asked))) "until the worker says so")
+        (is (nil? (active (:state gone))))
+        (is (= {:event/type :trigger/retire :source :midi} (:dispatch gone)) "and its keys still let go (reactivity plan 26)")))
+    (testing "OSC stopping ends OSC's only"
+      (is (nil? (active (piped osc {:event/type :input/osc-stop-server}))))
+      (is (= :midi (:source (active (piped midi {:event/type :input/osc-stop-server}))))))
+    (testing "another tab change, or the device lists, leave it waiting"
+      (is (= (active midi) (active (piped midi {:event/type :ui/set-active-tab :tab-id :settings}))))
+      (is (= (active midi) (active (piped midi {:event/type :input/midi-refresh-devices})))))))
 
 (deftest gamepad-enable-disable-test
   (let [state (initial-state)
@@ -226,43 +371,26 @@
 
 ;; Learning a vibe role (Phase 2)
 
-(defn- learning
-  "state as :input/start-learn leaves it for target."
-  [state target]
-  (:state (input/handle {:event/type :input/start-learn :target-action target :state state})))
-
-(defn- captured
-  "state after the learn for target captured input."
-  [state target input]
-  (:state (input/handle {:event/type :input/learn-captured :target-action target :input-event input :state state})))
-
-(defn- note [n] {:type :note-on :source :midi :channel 0 :note n :velocity 1.0})
-(defn- note-key [n] {:source :midi :channel 0 :note n})
-
-(defn- trigger-map [state] (get-in state [:config :input :trigger-map]))
-
-(defn- stop-learning! []
-  (input/handle {:event/type :input/cancel-learn :state (initial-state)})
-  (router/clear-handlers!))
-
 (deftest relearning-a-role-moves-its-binding-test
   (try
     (let [hit {:type :vibe :role :hit}
           accent {:type :vibe :role :accent}
-          s0 (assoc-in (initial-state) [:config :input :trigger-map]
+          s0 (assoc-in (shown) [:config :input :trigger-map]
                        {(note-key 36) hit {:source :keyboard :id :h} hit (note-key 37) accent})
           learning-hit (learning s0 hit)]
-      (is (= hit (get-in learning-hit [:backend :input :learning-target])) "learn aims at the role")
-      (let [s1 (captured learning-hit hit (note 50))]
+      (is (= hit (learning-target learning-hit)) "learn aims at the role")
+      (is (= {:owner :binding :capture :press :target-action hit :document-id (h/document-id s0)}
+             (dissoc (active learning-hit) :learn-id)))
+      (let [s1 (captured learning-hit (note 50))]
         (is (= {(note-key 50) hit (note-key 37) accent} (trigger-map s1))
             "invariant 6: exactly one key bound to HIT, and ACCENT keeps its own")
-        (is (nil? (get-in s1 [:backend :input :learning-target]))))
-      (testing "a capture for HIT while ACCENT is being learned is ignored: they are different targets"
-        (is (= (trigger-map s0) (trigger-map (captured (learning s0 accent) hit (note 50))))))
+        (is (nil? (active s1))))
+      (testing "HIT's capture, once ACCENT's learn has started, is another attempt's: nothing"
+        (is (= {} (pipe (learning learning-hit accent) (caught learning-hit (note 50))))))
       (testing "a cell still gets a second key"
         (let [cue {:type :trigger-cue :target [0 0]}
-              s (assoc-in (initial-state) [:config :input :trigger-map] {(note-key 60) cue})]
-          (is (= {(note-key 60) cue (note-key 61) cue} (trigger-map (captured (learning s cue) cue (note 61))))))))
+              s (assoc-in (shown) [:config :input :trigger-map] {(note-key 60) cue})]
+          (is (= {(note-key 60) cue (note-key 61) cue} (trigger-map (captured (learning s cue) (note 61))))))))
     (finally
       (stop-learning!))))
 
@@ -270,13 +398,11 @@
   (try
     (let [hit {:type :vibe :role :hit}
           learn (fn [bound target]
-                  (let [s (-> (initial-state)
+                  (let [s (-> (shown)
                               (assoc-in [:config :input :trigger-map] (if bound {(note-key 36) bound} {}))
                               (history/mark-clean)
                               (learning target))
-                        s' (:state (events/handle-event-pipeline
-                                    {:event/type :input/learn-captured :target-action target
-                                     :input-event (note 36) :state s}))]
+                        s' (captured s (note 36))]
                     [(get (trigger-map s') (note-key 36)) (history/undo-label (:history s'))]))]
       (is (= [hit "Learn Trigger (replaces cue A1)"] (learn {:type :trigger-cue :target [0 0]} hit)))
       (is (= [hit "Learn Trigger (replaces effect B3)"] (learn {:type :trigger-effect :target [2 1]} hit)))
@@ -290,66 +416,71 @@
       (stop-learning!))))
 
 
-;; Learn all (Phase 3)
+;; Learn all (Phase 3): one attempt a step, its queue in the attempt
 
-(defn- piped
-  "state after event through the pipeline, then each event it dispatches
-   (:dispatch, :dispatch-n), as the agent runs them."
-  [state event]
-  (let [effects (events/handle-event-pipeline (merge {:time 0} event {:state state}))
-        s (or (:state effects) state)]
-    (reduce piped s (cond-> [] (:dispatch effects) (conj (:dispatch effects)) (:dispatch-n effects) (into (:dispatch-n effects))))))
-
-(defn- learning-target [state] (get-in state [:backend :input :learning-target]))
-(defn- wizard [state] (get-in state [:ui :vibes :wizard]))
+(defn- learn-all
+  "Learn all, as the Vibes tab sends it from the show open in state."
+  [state]
+  {:event/type :vibe/learn-all :document-id (h/document-id state)})
 
 (defn- press-key
-  "state after the learn waiting now caught note n, as :input/await-learn
-   hands it on."
+  "state after the attempt waiting now caught note n."
   [state n]
-  (piped state {:event/type :input/learn-captured :target-action (learning-target state) :input-event (note n)}))
+  (captured state (note n)))
 
-(def ^:private learn-all {:event/type :vibe/learn-all})
 (def ^:private hit-role {:type :vibe :role :hit})
 (def ^:private accent-role {:type :vibe :role :accent})
 
 (deftest learn-all-chains-the-five-roles-test
   (try
-    (let [s1 (piped (history/mark-clean (initial-state)) learn-all)
+    (let [s0 (shown)
+          s1 (piped s0 (learn-all s0))
           steps (reductions press-key s1 [36 37 38 39 40])
           done (last steps)]
       (is (= {:queue [:hit :accent :flash :vibe :blackout] :done []} (wizard s1)))
       (is (= hit-role (learning-target s1)) "it starts with HIT")
+      (is (= :learn-all (:owner (active s1))))
       (is (empty? (get-in s1 [:history :undo-stack])) "starting it is no undo step")
       (is (= [:accent :flash :vibe :blackout nil] (map (comp :role learning-target) (rest steps)))
-          "each key caught starts the next role's learn")
+          "each key caught begins the next role's attempt, in the same state")
+      (is (= 5 (count (distinct (keep (comp :learn-id active) steps)))) "each step an attempt of its own")
       (is (= [[:hit] [:hit :accent] [:hit :accent :flash] [:hit :accent :flash :vibe]]
              (map (comp :done wizard) (butlast (rest steps)))))
       (is (= (zipmap (map note-key [36 37 38 39 40]) (map #(hash-map :type :vibe :role %) [:hit :accent :flash :vibe :blackout]))
              (trigger-map done)))
-      (is (nil? (wizard done)) "it ends after BLACKOUT")
-      (is (nil? (learning-target done)) "invariant 8")
+      (is (nil? (active done)) "invariant 8: it ends after BLACKOUT, nothing left learning")
       (is (= ["Learn Trigger"] (distinct (map :description (get-in done [:history :undo-stack])))))
-      (is (= 5 (count (get-in done [:history :undo-stack]))) "one undo step a key"))
+      (is (= 5 (count (get-in done [:history :undo-stack]))) "one undo step a key")
+      (testing "Undo takes a binding back, never an attempt"
+        (let [undone (piped done {:event/type :edit/undo})]
+          (is (= 4 (count (trigger-map undone))))
+          (is (nil? (active undone))))))
     (finally
       (stop-learning!))))
 
 (deftest learn-all-refuses-a-key-twice-test
   (try
-    (let [s1 (-> (initial-state) (piped learn-all) (press-key 36))
-          s2 (press-key s1 36)
+    (let [s0 (shown)
+          s1 (-> s0 (piped (learn-all s0)) (press-key 36))
+          refused (pipe s1 (caught s1 (note 36)))
+          s2 (:state refused)
           s3 (press-key s2 37)]
       (is (= accent-role (learning-target s2)) "invariant 7: HIT's key pressed for ACCENT: the step waits for another key")
       (is (= :hit (:refused (wizard s2))) "and says it is HIT's already")
+      (is (= (:queue (wizard s1)) (:queue (wizard s2))) "the same queue")
+      (is (not= (:learn-id (active s1)) (:learn-id (active s2))) "a fresh attempt for the same step")
+      (is (= {:retire (:learn-id (active s1)) :arm (select-keys (active s2) [:learn-id :document-id :capture])}
+             (:input/sync-learn refused))
+          "its listener in the slot, the step's last one retired")
       (is (= {(note-key 36) hit-role} (trigger-map s2)))
+      (is (= (:history s1) (:history s2)) "no edit")
+      (is (= {} (pipe s2 (caught s1 (note 37)))) "the refused attempt's capture, again, is nothing now")
       (is (= {:type :vibe :role :flash} (learning-target s3)))
       (is (nil? (:refused (wizard s3))))
       (is (= {(note-key 36) hit-role (note-key 37) accent-role} (trigger-map s3))))
     (testing "a key bound before Learn all moves to the role it is pressed for, as a re-learn does"
-      (let [s (-> (initial-state)
-                  (assoc-in [:config :input :trigger-map] {(note-key 50) accent-role})
-                  (piped learn-all)
-                  (press-key 50))]
+      (let [s0 (assoc-in (shown) [:config :input :trigger-map] {(note-key 50) accent-role})
+            s (-> s0 (piped (learn-all s0)) (press-key 50))]
         (is (= {(note-key 50) hit-role} (trigger-map s)))
         (is (= accent-role (learning-target s)))))
     (finally
@@ -357,28 +488,30 @@
 
 (deftest cancel-leaves-no-learning-target-test
   (try
-    (let [s1 (-> (initial-state) (piped learn-all) (press-key 36))]
-      (testing "Cancel"
-        (let [s (piped s1 {:event/type :vibe/wizard-cancel})]
-          (is (nil? (learning-target s)) "invariant 8")
-          (is (nil? (wizard s)))
+    (let [s0 (shown)
+          s1 (-> s0 (piped (learn-all s0)) (press-key 36))]
+      (testing "Cancel, for the attempt it shows"
+        (let [s (piped s1 (assoc (cancelled s1) :event/type :vibe/wizard-cancel))]
+          (is (nil? (active s)) "invariant 8")
           (is (= {(note-key 36) hit-role} (trigger-map s)) "what was learned stays")
-          (testing "and the capture of the cancelled learn, if it comes late, binds nothing and starts nothing"
-            (let [s' (piped s {:event/type :input/learn-captured :target-action accent-role :input-event (note 37)})]
-              (is (= (trigger-map s) (trigger-map s')))
-              (is (nil? (learning-target s')))))))
+          (testing "and the capture of the cancelled step, if it comes late, binds nothing and starts nothing"
+            (is (= {} (pipe s (caught s1 (note 37))))))))
+      (testing "a Cancel that names no attempt, or not this show's, does nothing"
+        (is (= {} (pipe s1 {:event/type :vibe/wizard-cancel})))
+        (is (= {} (pipe s1 {:event/type :input/cancel-learn})))
+        (is (= {} (pipe s1 (dissoc (cancelled s1) :document-id))))
+        (is (= {} (pipe s1 (assoc (cancelled s1) :learn-id (random-uuid))))))
       (testing "a pad's Cancel learning ends it too"
-        (let [s (piped s1 {:event/type :input/cancel-learn})]
-          (is (nil? (learning-target s)))
-          (is (nil? (wizard s)))))
-      (testing "and so does a learn for anything else: that one's key is learned, and nothing follows"
-        (doseq [target [{:type :trigger-cue :target [0 0]} {:type :vibe :role :vibe}]]
-          (let [s (piped s1 {:event/type :input/start-learn :target-action target})
+        (is (nil? (active (piped s1 (cancelled s1))))))
+      (testing "and so does a Start for anything, ACCENT's own too: that one's key is learned, and nothing follows"
+        (doseq [target [{:type :trigger-cue :target [0 0]} {:type :vibe :role :vibe} accent-role]]
+          (let [s (learning s1 target)
                 s' (press-key s 60)]
             (is (= target (learning-target s)))
+            (is (= :binding (:owner (active s))))
             (is (nil? (wizard s)))
             (is (= target (get (trigger-map s') (note-key 60))))
-            (is (nil? (learning-target s')))))))
+            (is (nil? (active s')))))))
     (finally
       (stop-learning!))))
 
@@ -389,11 +522,10 @@
 (def ^:private slider-2 {:type :macro :slot :slider-2})
 
 (defn- start-fader-learn
-  "[state promise]: the learn for a fader slot started on state, its router
-   handler registered; promise gets what it catches."
+  "[state sent]: the learn for a fader slot started on state, its listener
+   in the router's slot (armed)."
   [state target]
-  (let [effects (input/handle {:event/type :input/start-learn :target-action target :capture :continuous :state state})]
-    [(:state effects) (get-in effects [:input/await-learn :promise])]))
+  (armed state (start-learn state target :capture :continuous)))
 
 (defn- move!
   "MIDI CC control on channel moved through values, through the router."
@@ -401,74 +533,81 @@
   (doseq [v values]
     (router/dispatch! (input-events/control-change :midi channel control v))))
 
-(defn- caught [p] (deref p 0 nil))
+(defn- taken
+  "The input the attempt's listener took, as its waiter sent it."
+  [p]
+  (:input-event (sent p)))
 
 (defn- macro-map [state] (get-in state [:config :input :macro-map]))
 
 (deftest learning-capture-mode-test
   (try
-    (let [mode #(get-in % [:backend :input :learning-capture])
-          [continuous _] (start-fader-learn (initial-state) hit-role)
+    (let [mode #(:capture (active %))
+          s0 (shown)
+          continuous (learning s0 hit-role :capture :continuous)
           press (learning continuous hit-role)
           fader (learning press slider-1)]
       (is (= :continuous (mode continuous)) "an explicit continuous request, even for a non-macro target")
-      (is (= hit-role (learning-target continuous)) "the views and Learn all still recognize the target")
+      (is (= hit-role (learning-target continuous)) "the views still recognize the target")
       (is (= :press (mode press)) "restarting the same target as an ordinary learn replaces its mode")
       (is (= :continuous (mode fader)) "a macro always waits for movement")
-      (is (nil? (mode (captured press hit-role (note 36)))) "a completed learn clears the mode")
-      (is (nil? (mode (run fader :input/cancel-learn))) "so does cancel"))
+      (is (nil? (active (press-key press 36))) "a completed learn ends it")
+      (is (nil? (active (piped fader (cancelled fader)))) "so does cancel"))
     (finally
       (stop-learning!))))
 
 (defn- fader-learned
   "state after the learn for target caught a move of MIDI CC control on
-   channel 0 from a to b, as :input/await-learn hands it on."
+   channel 0 from a to b, as its waiter sends it."
   [state target control a b]
   (let [[s p] (start-fader-learn state target)]
     (move! 0 control a b)
-    (piped s {:event/type :input/learn-captured :target-action target :input-event (caught p)})))
+    (piped s (sent p))))
 
 (deftest learn-cc-needs-movement-test
   (try
-    (let [[s p] (start-fader-learn (initial-state) slider-1)]
+    (let [[s p] (start-fader-learn (shown) slider-1)]
       (is (= slider-1 (learning-target s)) "the learn aims at the slot")
+      (is (= (:learn-id (active s)) (router/learn-listener-id)) "its listener is in the router's slot")
       (testing "the doc's example: CC 7 at 0.50, then 0.52: nothing; CC 1 at 0.10, then 0.31: caught"
         (move! 0 7 0.50 0.52 0.47 0.55)
-        (is (nil? (caught p)) "invariant 9: a noisy CC that wiggles by less than 0.08 is never captured")
         (move! 0 1 0.10)
-        (is (nil? (caught p)) "a first value is no movement")
+        (is (nothing-sent? p) "invariant 9: a noisy CC that wiggles by less than 0.08 is never captured; a first value is no movement")
         (move! 0 1 0.31)
-        (is (= [:midi 0 1] (:store-key (caught p))))
-        (is (= 0.31 (:value (caught p))))
-        (is (not-any? #{::input/generalized-input-learn} (:global-handlers (router/list-handlers)))
-            "it stops listening once it caught")))
+        (is (= [:midi 0 1] (:store-key (taken p))))
+        (is (= 0.31 (:value (taken p))))
+        (is (= (select-keys (active s) [:learn-id :document-id]) (select-keys (sent p) [:learn-id :document-id]))
+            "sent with the attempt's identity")
+        (is (= (:learn-id (active s)) (router/learn-listener-id))
+            "the listener takes itself out of nothing: the capture's turn retires it")
+        (is (= {:retire (:learn-id (active s)) :arm nil} (:input/sync-learn (pipe s (sent p)))))))
     (testing "about 10 of a CC's 127 steps: 10 aren't enough, 11 are, either way"
-      (let [[_ p] (start-fader-learn (initial-state) slider-1)
+      (let [[_ p] (start-fader-learn (shown) slider-1)
             step! #(router/dispatch! (midi/midi-msg->event (fixtures/control-change 0 9 %)))]
         (step! 64)
         (step! 74)
         (step! 54)
-        (is (nil? (caught p)))
+        (is (nothing-sent? p))
         (step! 75)
-        (is (= [:midi 0 9] (:store-key (caught p))))))
+        (is (= [:midi 0 9] (:store-key (taken p))))))
     (testing "an OSC fader on an address of its own, and a gamepad trigger"
-      (let [[_ p] (start-fader-learn (initial-state) slider-2)]
+      (let [[_ p] (start-fader-learn (shown) slider-2)]
         (run! router/dispatch! (osc/osc-msg->events (fixtures/osc-msg "/fader/1" (float 0.2)) {}))
         (run! router/dispatch! (osc/osc-msg->events (fixtures/osc-msg "/fader/1" (float 0.5)) {}))
-        (is (= [:osc "/fader/1"] (:store-key (caught p)))))
-      (let [[_ p] (start-fader-learn (initial-state) slider-2)]
+        (is (= [:osc "/fader/1"] (:store-key (taken p)))))
+      (let [[_ p] (start-fader-learn (shown) slider-2)]
         (router/dispatch! (input-events/control-change :gamepad 0 :trigger-left 0.0))
         (router/dispatch! (input-events/control-change :gamepad 0 :trigger-left 0.9))
-        (is (= [:gamepad 0 :trigger-left] (:store-key (caught p))))))
+        (is (= [:gamepad 0 :trigger-left] (:store-key (taken p))))))
     (finally
       (stop-learning!))))
 
 (deftest learn-cc-binds-a-slot-and-replaces-its-old-source-test
   (try
-    (let [s0 (history/mark-clean (initial-state))
+    (let [s0 (shown)
           s1 (fader-learned s0 slider-1 1 0.10 0.31)]
       (is (= {[:midi 0 1] :slider-1} (macro-map s1)))
-      (is (nil? (learning-target s1)))
+      (is (nil? (active s1)))
       (is (= "Learn Fader" (history/undo-label (:history s1))) "one undo step")
       (is (true? (get-in s1 [:project :dirty?])) "a saved, undoable edit")
       (is (= {} (trigger-map s1)) "the trigger map isn't touched")
@@ -482,17 +621,17 @@
         (let [again (fader-learned s1 slider-1 1 0.2 0.6)]
           (is (= (macro-map s1) (macro-map again)))
           (is (= 1 (count (get-in again [:history :undo-stack]))))))
-      (testing "a capture for slider-1 while slider-2 is learned binds nothing"
-        (let [[s p] (start-fader-learn s1 slider-2)]
+      (testing "slider-1's capture, once slider-2's learn has started, binds nothing"
+        (let [[s p] (start-fader-learn s1 slider-1)]
           (move! 0 5 0.0 0.5)
-          (is (= (macro-map s1)
-                 (macro-map (piped s {:event/type :input/learn-captured :target-action slider-1 :input-event (caught p)}))))))
+          (is (= {} (pipe (learning s slider-2 :capture :continuous) (sent p))))))
       (testing "undone: no binding"
         (is (empty? (macro-map (piped s1 {:event/type :edit/undo}))))))
     (testing "a fader's learn ends Learn all, as any other learn does"
-      (let [s (piped (initial-state) {:event/type :vibe/learn-all})
-            [s' _] (start-fader-learn s slider-1)]
-        (is (some? (get-in s [:ui :vibes :wizard])))
+      (let [s0 (shown)
+            s (piped s0 (learn-all s0))
+            s' (learning s slider-1 :capture :continuous)]
+        (is (some? (wizard s)))
         (is (nil? (wizard s')))
         (is (= slider-1 (learning-target s')))))
     (finally
@@ -500,41 +639,44 @@
 
 (deftest learn-continuous-ignores-notes-test
   (try
-    (let [[s p] (start-fader-learn (initial-state) slider-1)]
+    (let [[s p] (start-fader-learn (shown) slider-1)]
       (router/dispatch! (input-events/note-on :midi 0 36 1.0))
       (router/dispatch! (input-events/note-off :midi 0 36))
       (router/dispatch! (input-events/trigger :osc "/hit" :pressed))
       (router/dispatch! (input-events/trigger :gamepad [0 :a] :pressed))
       (router/dispatch! (input-events/note-on :midi 0 37 0.2))
-      (is (nil? (caught p)) "invariant 8: notes and buttons never bind a fader")
-      (testing "and a note handed to a fader's learn binds nothing, and ends it"
-        (let [s' (captured s slider-1 (note 36))]
+      (is (nothing-sent? p) "invariant 8: notes and buttons never bind a fader")
+      (testing "and a note handed to a fader's learn binds nothing, and ends it, saying so"
+        (let [s' (captured s (note 36))]
           (is (empty? (macro-map s')))
           (is (= (trigger-map s) (trigger-map s')))
-          (is (nil? (learning-target s')))))
+          (is (nil? (active s')))
+          (is (= {:text "Learn stopped: that input can't be learned" :level :warning}
+                 (dissoc (get-in s' [:ui :notice]) :id)))))
       (testing "even with a :store-key: a note writes no store key"
-        (is (empty? (macro-map (captured s slider-1 (assoc (note 36) :store-key [:midi 0 36])))))))
+        (is (empty? (macro-map (captured s (assoc (note 36) :store-key [:midi 0 36])))))))
     (finally
       (stop-learning!))))
 
 (deftest learn-a-role-ignores-cc-test
   (try
-    (let [effects (input/handle {:event/type :input/start-learn :target-action hit-role :state (initial-state)})
-          s (:state effects)
-          p (get-in effects [:input/await-learn :promise])]
+    (let [s0 (shown)
+          [s p] (armed s0 (start-learn s0 hit-role))]
       (move! 0 1 0.1 0.9 0.0 1.0)
-      (is (nil? (caught p)) "probe v6, now pinned: a CC never captures a role's learn")
+      (is (nothing-sent? p) "probe v6, now pinned: a CC never captures a role's learn")
       (router/dispatch! (input-events/note-on :midi 0 36 1.0))
-      (is (= :note-on (:type (caught p))) "a note does")
-      (testing "and a CC handed to a role's learn binds nothing, even caught by a fader's catcher"
-        (let [[_ fp] (start-fader-learn (initial-state) hit-role)]
+      (is (= :note-on (:type (taken p))) "a note does")
+      (testing "and a CC handed to a role's learn binds nothing, even caught as a fader's learn catches one"
+        (let [f0 (shown)
+              [fs fp] (armed f0 (start-learn f0 hit-role :capture :continuous))]
           (move! 0 1 0.1 0.9)
-          (let [cc (caught fp)
-                s' (captured s hit-role cc)]
+          (let [cc (taken fp)]
             (is (= [:midi 0 1] (:store-key cc)))
-            (is (= (trigger-map s) (trigger-map s')))
-            (is (empty? (macro-map s')))
-            (is (nil? (learning-target s')))))))
+            (doseq [[learning-state capture] [[fs (sent fp)] [s (caught s cc)]]]
+              (let [s' (piped learning-state capture)]
+                (is (= (trigger-map learning-state) (trigger-map s')))
+                (is (empty? (macro-map s')))
+                (is (nil? (active s')))))))))
     (finally
       (stop-learning!))))
 
@@ -543,28 +685,25 @@
   (try
     (let [odd-even {:type :zone-map :target :map/odd-even}
           unison {:type :zone-map :target :map/unison}
-          s0 (assoc-in (initial-state) [:config :input :trigger-map]
+          s0 (assoc-in (shown) [:config :input :trigger-map]
                        {(note-key 36) odd-even (note-key 37) unison})
           learning-it (learning s0 odd-even)]
-      (is (= odd-even (get-in learning-it [:backend :input :learning-target])) "learn aims at the pad")
-      (is (= {(note-key 50) odd-even (note-key 37) unison} (trigger-map (captured learning-it odd-even (note 50))))
+      (is (= odd-even (learning-target learning-it)) "learn aims at the pad")
+      (is (= {(note-key 50) odd-even (note-key 37) unison} (trigger-map (captured learning-it (note 50))))
           "Z4-Q2 A: one key a pad, so learning it again moves it; another pad keeps its own")
       (testing "learned over HIT's key: the key is the pad's now, and the label says so"
-        (let [s (-> (initial-state)
+        (let [s (-> (shown)
                     (assoc-in [:config :input :trigger-map] {(note-key 36) {:type :vibe :role :hit}})
                     (history/mark-clean)
                     (learning odd-even))
-              s' (:state (events/handle-event-pipeline
-                          {:event/type :input/learn-captured :target-action odd-even :input-event (note 36) :state s :time 1}))]
+              s' (captured s (note 36))]
           (is (= {(note-key 36) odd-even} (trigger-map s')))
           (is (= "Learn Trigger (replaces HIT)" (history/undo-label (:history s'))))))
       (testing "the label names a pad over another pad's key"
-        (let [s (-> (assoc-in (initial-state) [:config :input :trigger-map] {(note-key 37) unison})
+        (let [s (-> (assoc-in (shown) [:config :input :trigger-map] {(note-key 37) unison})
                     (history/mark-clean)
-                    (learning odd-even))
-              s' (:state (events/handle-event-pipeline
-                          {:event/type :input/learn-captured :target-action odd-even :input-event (note 37) :state s :time 1}))]
-          (is (= "Learn Trigger (replaces zone map Unison)" (history/undo-label (:history s')))))))
+                    (learning odd-even))]
+          (is (= "Learn Trigger (replaces zone map Unison)" (history/undo-label (:history (captured s (note 37)))))))))
     (finally
       (stop-learning!))))
 
@@ -573,41 +712,38 @@
     (let [chase {:type :pattern-pad :target :chase}
           off {:type :pattern-pad :target :off}
           step {:type :zone-step}
-          s0 (assoc-in (initial-state) [:config :input :trigger-map]
+          s0 (assoc-in (shown) [:config :input :trigger-map]
                        {(note-key 36) chase (note-key 37) off (note-key 38) step})]
-      (is (= chase (get-in (learning s0 chase) [:backend :input :learning-target])) "learn aims at the pad")
-      (is (= {(note-key 50) chase (note-key 37) off (note-key 38) step} (trigger-map (captured (learning s0 chase) chase (note 50))))
+      (is (= chase (learning-target (learning s0 chase))) "learn aims at the pad")
+      (is (= {(note-key 50) chase (note-key 37) off (note-key 38) step} (trigger-map (captured (learning s0 chase) (note 50))))
           "zones plan Z5: one key a pad, so learning it again moves it; the other pads keep theirs")
-      (is (= {(note-key 36) chase (note-key 37) off (note-key 51) step} (trigger-map (captured (learning s0 step) step (note 51))))
+      (is (= {(note-key 36) chase (note-key 37) off (note-key 51) step} (trigger-map (captured (learning s0 step) (note 51))))
           "the Zone step key moves too")
       (testing "the label names a pad over another one's key"
-        (let [s (-> (assoc-in (initial-state) [:config :input :trigger-map] {(note-key 37) off (note-key 38) step})
+        (let [s (-> (assoc-in (shown) [:config :input :trigger-map] {(note-key 37) off (note-key 38) step})
                     (history/mark-clean)
                     (learning chase))
-              label (fn [k] (history/undo-label (:history (:state (events/handle-event-pipeline
-                                                                    {:event/type :input/learn-captured :target-action chase
-                                                                     :input-event (note k) :state s :time 1})))))]
+              label (fn [k] (history/undo-label (:history (captured s (note k)))))]
           (is (= "Learn Trigger (replaces pattern pad Off)" (label 37)))
           (is (= "Learn Trigger (replaces zone step)" (label 38)))
           (is (= "Learn Trigger (replaces zone map CYCLE)"
-                 (history/undo-label (:history (:state (events/handle-event-pipeline
-                                                        {:event/type :input/learn-captured :target-action chase :input-event (note 39) :time 1
-                                                         :state (-> (assoc-in (initial-state) [:config :input :trigger-map]
-                                                                              {(note-key 39) {:type :zone-map :target :cycle}})
-                                                                    (history/mark-clean)
-                                                                    (learning chase))})))))))))
+                 (history/undo-label (:history (-> (assoc-in (shown) [:config :input :trigger-map]
+                                                             {(note-key 39) {:type :zone-map :target :cycle}})
+                                                   (history/mark-clean)
+                                                   (learning chase)
+                                                   (captured (note 39))))))))))
     (finally
       (stop-learning!))))
 
 (deftest map-pad-learn-ignores-a-cc-test
   (try
     (let [odd-even {:type :zone-map :target :map/odd-even}
-          effects (input/handle {:event/type :input/start-learn :target-action odd-even :state (initial-state)})
-          p (get-in effects [:input/await-learn :promise])]
+          s0 (shown)
+          [_ p] (armed s0 (start-learn s0 odd-even))]
       (move! 0 1 0.1 0.9 0.0 1.0)
-      (is (nil? (caught p)) "moving a control is how a fader learns: a pad never takes it")
+      (is (nothing-sent? p) "moving a control is how a fader learns: a pad never takes it")
       (router/dispatch! (input-events/note-on :midi 0 36 1.0))
-      (is (= :note-on (:type (caught p))) "a note does"))
+      (is (= :note-on (:type (taken p))) "a note does"))
     (finally
       (stop-learning!))))
 
@@ -615,7 +751,7 @@
 ;; (plans/2026-11-18-vibe-mode/07)
 
 (defn- vibe-world []
-  (-> (initial-state)
+  (-> (shown)
       (templates/apply-starter-cue-chains)
       (templates/apply-starter-vibes)
       (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)))
@@ -675,36 +811,183 @@
       (stop-learning!))))
 
 
-;; A learn binds into the show it was started in (reactivity plan 20)
+;; One attempt, one owner (reactivity plan 24 §7)
 
 (deftest a-capture-after-new-or-open-binds-nothing-test
-  ;; Before: the old learn's input bound in the new show, which became
-  ;; unsaved and got a "Learn Trigger" undo step
+  ;; Before (reactivity plan 20): the old learn's input bound in the new
+  ;; show, which became unsaved and got a "Learn Trigger" undo step
   (try
-    (let [show (history/mark-clean (initial-state))
-          cell {:type :trigger-cue :target [0 0]}
-          pending #(deref @#'input/!pending-learn)]
+    (let [show (shown)
+          cell {:type :trigger-cue :target [0 0]}]
       (doseq [[label replace] [["File > New" {:event/type :file/new-project :force? true}]
                                ["File > Open" {:event/type :file/project-loaded :file-path "other.zip"
                                                :contents (persistent/project-files show)}]]
-              [what start target input!] [["a cell's learn" {:event/type :input/start-learn :target-action cell}
-                                           cell #(router/dispatch! (note 36))]
-                                          ["Learn all" learn-all hit-role #(router/dispatch! (note 37))]
-                                          ["a fader's learn" {:event/type :input/start-learn :target-action slider-1}
-                                           slider-1 #(move! 0 1 0.1 0.5)]]]
+              [what start target input!] [["a cell's learn" (start-learn show cell) cell #(router/dispatch! (note 36))]
+                                          ["Learn all" (learn-all show) hit-role #(router/dispatch! (note 37))]
+                                          ["a fader's learn" (start-learn show slider-1) slider-1 #(move! 0 1 0.1 0.5)]]]
         (testing (str label ", during " what)
-          (let [learning (piped show start)
-                p (pending)
+          (let [[learning p] (armed show start)
+                replacing (pipe learning replace)
                 replaced (piped learning replace)
                 _ (input!)
-                late (piped replaced {:event/type :input/learn-captured :target-action target :input-event (caught p)})]
+                late (sent p)]
             (is (= target (learning-target learning)))
-            (is (some? (caught p)) "the old learn's listener still caught the input")
-            (is (nil? (learning-target replaced)) "the new show isn't learning")
-            (is (nil? (get-in replaced [:backend :input :learning-capture])) "so its keys play their bindings")
-            (is (nil? (wizard replaced)))
-            (is (= (get-in replaced [:config :input]) (get-in late [:config :input])) "the late capture binds nothing")
-            (is (false? (get-in late [:project :dirty?])))
-            (is (empty? (get-in late [:history :undo-stack])))))))
+            (is (some? late) "the old attempt's listener, left in the slot here, still caught the input")
+            (is (nil? (active replaced)) "the new show isn't learning, so its keys play their bindings")
+            (is (= {:retire (:learn-id (active learning)) :arm nil} (:input/sync-learn replacing))
+                "and the old attempt's listener goes in the same turn")
+            (is (= {} (pipe replaced late)) "the late capture is the old show's: no commit at all")))))
+    (finally
+      (stop-learning!))))
+
+(def ^:private l1 #uuid "00000000-0000-0000-0000-0000000024b1")
+(def ^:private l2 #uuid "00000000-0000-0000-0000-0000000024b2")
+(def ^:private l3 #uuid "00000000-0000-0000-0000-0000000024b3")
+(def ^:private l4 #uuid "00000000-0000-0000-0000-0000000024b4")
+
+(defn- registered
+  "Run the registered :input/sync-learn effect (events/core.clj) on the
+   change effects asks for, its waiter sending through dispatch."
+  [effects dispatch]
+  ((get events/effects :input/sync-learn) (:input/sync-learn effects) dispatch))
+
+(defn- settles?
+  "Is (f) true within 2 s?"
+  [f]
+  (loop [n 0]
+    (cond
+      (f) true
+      (< n 200) (do (Thread/sleep 10) (recur (inc n)))
+      :else false)))
+
+(deftest same-target-restart-refuses-retired-results-test
+  ;; Case 3: before, the target was the attempt: a Cancel and a Start for
+  ;; the same cell let the first attempt's capture bind
+  (try
+    (with-learn-ids [l1 l2 l3 l4]
+      (fn []
+        (let [cell {:type :trigger-cue :target [0 0]}
+              s0 (shown)
+              d1 (h/document-id s0)
+              s1 (learning s0 cell)
+              held {:event/type :input/learn-captured :learn-id l1 :document-id d1 :input-event (note 60)}
+              s2 (piped s1 (cancelled s1))
+              s3 (learning s2 cell)]
+          (is (= l1 (:learn-id (active s1))))
+          (is (nil? (active s2)))
+          (is (= {:learn-id l2 :document-id d1 :owner :binding :capture :press :target-action cell} (active s3))
+              "the same cell, the same show, another attempt")
+          (testing "L1's capture, timeout and Cancel, late: nothing, L2's attempt included"
+            (doseq [event [held
+                           {:event/type :input/learn-ended :learn-id l1 :document-id d1 :reason :timeout}
+                           {:event/type :input/cancel-learn :learn-id l1 :document-id d1}]]
+              (is (= {} (pipe s3 event)) (str (:event/type event)))))
+          (testing "untagged results and Cancels: nothing"
+            (doseq [event [(dissoc held :learn-id)
+                           (assoc held :learn-id l2 :document-id nil)
+                           (dissoc (assoc held :learn-id l2) :document-id)
+                           {:event/type :input/learn-ended :reason :timeout}
+                           {:event/type :input/cancel-learn}
+                           {:event/type :input/cancel-learn :learn-id l2}]]
+              (is (= {} (pipe s3 event)) (pr-str (dissoc event :input-event)))))
+          (testing "only 61, for L2, binds, once"
+            (let [l2-capture (assoc held :learn-id l2 :input-event (note 61))
+                  s4 (piped s3 l2-capture)]
+              (is (= {(note-key 61) cell} (trigger-map s4)))
+              (is (nil? (active s4)))
+              (is (= ["Learn Trigger"] (map :description (get-in s4 [:history :undo-stack]))))
+              (is (= {} (pipe s4 l2-capture)) "the second delivery: L2 is over")
+              (is (= (get-in s0 [:config :input :macro-map]) (get-in s4 [:config :input :macro-map]))))))))
+    (finally
+      (stop-learning!)))
+  (testing "through the registered effect: a retired attempt's waiter exits; a timeout ends its own attempt; other listeners stay"
+    (try
+      (router/register-global-handler! ::unrelated (fn [_]))
+      (let [cell {:type :trigger-cue :target [0 0]}
+            s0 (shown)
+            out (atom [])
+            dispatch #(swap! out conj %)
+            started (pipe s0 (start-learn s0 cell))
+            s1 (:state started)
+            a (:learn-id (active s1))
+            cancel (pipe s1 (cancelled s1))
+            idle (:state cancel)]
+        (learn/retire!)
+        (registered started dispatch)
+        (is (= a (router/learn-listener-id)))
+        (is (contains? (learn/waiting) a) "its waiter waits")
+        (testing "Cancel before any input: no listener, no waiter, nothing sent"
+          (registered cancel dispatch)
+          (is (nil? (router/learn-listener-id)))
+          (is (settles? #(not (contains? (learn/waiting) a))) "the waiter woke and went")
+          (router/dispatch! (note 60))
+          (is (empty? @out))
+          (testing "and the same change again, stale, does nothing"
+            (registered cancel dispatch)
+            (is (nil? (router/learn-listener-id)))))
+        (testing "no input until the deadline (a controlled wait): the attempt ends, saying so, and leaves nothing"
+          (let [release (promise)]
+            (with-redefs [learn/wait-for-capture (fn [_gate _ms] (deref release 2000 nil) :laser-show.input.learn/timeout)]
+              (let [restarted (pipe idle (start-learn idle cell))
+                    s2 (:state restarted)
+                    b (:learn-id (active s2))]
+                (registered restarted dispatch)
+                (is (= b (router/learn-listener-id)))
+                (deliver release true)
+                (is (settles? #(seq @out)))
+                (is (= [{:event/type :input/learn-ended :learn-id b :document-id (h/document-id s0) :reason :timeout}] @out))
+                (let [ended (pipe s2 (first @out))]
+                  (is (nil? (active (:state ended))))
+                  (is (= {:text "Learn stopped: no input came in" :level :info} (dissoc (get-in ended [:state :ui :notice]) :id)))
+                  (is (= (trigger-map s2) (trigger-map (:state ended))))
+                  (registered ended dispatch)
+                  (is (nil? (router/learn-listener-id)))
+                  (is (settles? #(empty? (learn/waiting)))))))))
+        (is (contains? (set (:global-handlers (router/list-handlers))) ::unrelated) "the other listeners stay"))
+      (finally
+        (stop-learning!)))))
+
+(deftest old-document-capture-cannot-bind-or-cancel-a-fresh-fader-test
+  ;; Case 5: before, a capture coming back after New or Open bound in the
+  ;; new show: a binding, an undo step and an unsaved show
+  (try
+    (let [path "show-24.zip"
+          d1-show (-> (shown) (assoc-in [:project :current-file] path) history/mark-clean)
+          cc! #(router/dispatch! (midi/midi-msg->event (fixtures/control-change 15 7 %)))]
+      (doseq [[label replace] [["File > New" {:event/type :file/new-project :force? true}]
+                               ["File > Open" {:event/type :file/project-loaded :file-path "other.zip"
+                                               :contents (persistent/project-files d1-show)}]
+                               ["File > Open, the same file again" {:event/type :file/project-loaded :file-path path
+                                                                    :contents (persistent/project-files d1-show)}]]]
+        (testing label
+          (let [[s1 p1] (start-fader-learn d1-show slider-1)
+                _ (run! cc! [64 74 75])
+                held (sent p1)
+                d2 (piped s1 replace)
+                [s2 p2] (start-fader-learn d2 slider-1)
+                l2 (:learn-id (active s2))
+                d2-id (h/document-id s2)]
+            (is (= [:midi 15 7] (get-in held [:input-event :store-key])) "the 11-step movement, on channel 15 (16 to the user)")
+            (is (not= (h/document-id s1) d2-id) "another show")
+            (is (nil? (active d2)) "the replaced show's attempt ended with it")
+            (is (= {:retire (:learn-id (active s1)) :arm nil} (:input/sync-learn (pipe s1 replace))) "its listener retired in the same turn")
+            (testing "the old pair, held till now: nothing at all"
+              (is (= {} (pipe s2 held))))
+            (testing "each check on its own: L2 with D1, then L1 with D2"
+              (is (= {} (pipe s2 (assoc held :learn-id l2))))
+              (is (= {} (pipe s2 (assoc held :document-id d2-id)))))
+            (testing "nor can the old attempt's Cancel end L2"
+              (is (= {} (pipe s2 {:event/type :input/cancel-learn :learn-id (:learn-id held) :document-id (:document-id held)}))))
+            (is (= slider-1 (learning-target s2)) "D2/L2 still waits")
+            (is (empty? (macro-map s2)))
+            (is (false? (get-in s2 [:project :dirty?])))
+            (is (empty? (get-in s2 [:history :undo-stack])))
+            (testing "the same movement for D2/L2 binds"
+              (run! cc! [64 74 75])
+              (let [s3 (piped s2 (sent p2))]
+                (is (= {[:midi 15 7] :slider-1} (macro-map s3)))
+                (is (= ["Learn Fader"] (map :description (get-in s3 [:history :undo-stack]))))
+                (is (true? (get-in s3 [:project :dirty?])))
+                (is (nil? (active s3)))))))))
     (finally
       (stop-learning!))))

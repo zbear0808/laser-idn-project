@@ -259,8 +259,11 @@
     (testing "Stream, Play, and learning a key"
       (is (contains? (handle (lock s0) {:event/type :idn/start-multi-streaming}) :multi-engine/start))
       (is (true? (get-in (run (lock (run s0 {:event/type :transport/stop})) {:event/type :transport/play}) [:playback :playing?])))
-      (is (contains? (handle (lock s0) {:event/type :input/start-learn :target-action {:type :vibe :role :hit}})
-                     :input/await-learn)))
+      (let [shown (lock (persistent/begin-document s0))]
+        (is (contains? (handle shown {:event/type :input/start-learn :target-action {:type :vibe :role :hit}
+                                      ;; The show the pad's menu was in
+                                      :document-id (get-in shown [:project :document-id])})
+                       :input/sync-learn))))
     (testing "nothing a performer does leaves a notice"
       (let [s (reduce run (lock s0) [{:event/type :vibe/press :role :hit} {:event/type :vibe/release :role :hit}
                                      {:event/type :vibe/press :role :blackout} {:event/type :vibe/press :role :blackout}])]

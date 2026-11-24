@@ -12,6 +12,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.input :as input]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.events :as input-events]
             [laser-show.input.router :as input-router]
@@ -226,7 +227,7 @@
       (is (zero? (rt :started))))
     (ui/right-click-node! robot (ui/query "#vibe-pad-hit"))
     (ui/click! robot "#vibe-pad-hit-learn")
-    (ui/wait-for! #(= {:type :vibe :role :hit} (get-in (app-state) [:backend :input :learning-target])))
+    (ui/wait-for! #(= {:type :vibe :role :hit} (input/learning-target (app-state))))
     (ui/assert-text! "#vibe-pad-hit-badge" "LEARN")
     (ui/assert-text! "#vibe-learn-prompt" "Press the key for HIT")
     (is (ui/has-style-class? "#vibe-pad-hit" "vibe-pad-learning"))

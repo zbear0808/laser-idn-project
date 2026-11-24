@@ -4,6 +4,7 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.tools.logging :as log]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.input :as input]
             [laser-show.input.router :as input-router]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
@@ -572,7 +573,7 @@
 
 (deftest cell-learn-and-trigger-badges-follow-the-target-test
   (let [robot (ui/robot)
-        learning #(get-in (state/get-raw-state) [:backend :input :learning-target])
+        learning #(input/learning-target (state/get-raw-state))
         bound (fn [id] (some-> (get-in (state/get-raw-state) [:config :input :trigger-map {:source :keyboard :id id}])
                                (select-keys [:type :target])))
         waiting {:learn? true :trigger? false :menu ["Cancel Learning Trigger"]}
@@ -595,9 +596,15 @@
         cue-a2 "#grid-cell-1-0"
         fx-a2 "#effects-cell-1-0"]
     (try
-      (testing "the Grid tab: a learn from cue A2's menu, then a key press"
+      (testing "the Grid tab: the waiting cell's Cancel ends its learn (it names the attempt it shows, reactivity plan 24)"
         (ui/assert-visible! cue-a2)
         (is (= unmarked (trigger-marks cue-a2)))
+        (fire-menu-item! cue-a2 "Learn Trigger...")
+        (ui/wait-for! #(= waiting (trigger-marks cue-a2)))
+        (fire-menu-item! cue-a2 "Cancel Learning Trigger")
+        (ui/wait-for! #(nil? (learning)))
+        (ui/wait-for! #(= unmarked (trigger-marks cue-a2))))
+      (testing "the Grid tab: a learn from cue A2's menu, then a key press"
         (learn! cue-a2 {:type :trigger-cue :target [1 0]} :h))
       (testing "the Effects tab: the effects cell at the same place is unmarked, and learns a key of its own"
         (ui/click! robot "#effects-tab")
@@ -614,7 +621,8 @@
       (finally
         ;; Release a learn still waiting, when a step failed
         (when (learning)
-          (events/dispatch! {:event/type :input/cancel-learn})
+          (events/dispatch! (merge {:event/type :input/cancel-learn}
+                                   (select-keys (input/active-learn (state/get-raw-state)) [:learn-id :document-id])))
           (events/flush!))))))
 
 

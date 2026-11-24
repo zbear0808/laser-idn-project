@@ -62,6 +62,11 @@
                          [[type [col row]] (fx/sub-ctx ctx cell col row)]))]
     [descs (set @described)]))
 
+(def ^:private doc
+  "The show the grids are in (reactivity plan 20): what a Learn and a
+   Cancel name."
+  #uuid "00000000-0000-0000-0000-0000000035d1")
+
 (def ^:private plain-grids
   "No cues, no effects, no bindings, both selections on A1."
   (-> (domains/build-initial-state)
@@ -69,20 +74,27 @@
       (assoc-in [:chains :effect-chains] {})
       (assoc-in [:config :input :trigger-map] {})
       (assoc-in [:grid :selected-cell] [0 0])
-      (assoc-in [:effects :selected-cell] [0 0])))
+      (assoc-in [:effects :selected-cell] [0 0])
+      (assoc-in [:project :document-id] doc)))
 
 (def ^:private key-h {:source :keyboard :id :h})
 (def ^:private note-60 {:source :midi :channel 0 :note 60})
 (def ^:private cue-a2 {:type :trigger-cue :target [1 0]})
 (def ^:private fx-a2 {:type :trigger-effect :target [1 0]})
 (def ^:private vibe-hit {:type :vibe :role :hit})
+(def ^:private l1 #uuid "00000000-0000-0000-0000-0000000035a1")
+(def ^:private l2 #uuid "00000000-0000-0000-0000-0000000035a2")
 
 (defn- bindings [m] #(assoc-in % [:config :input :trigger-map] m))
 
-(defn- learning [target]
-  (if target
-    #(assoc-in % [:backend :input :learning-target] target)
-    #(update-in % [:backend :input] dissoc :learning-target)))
+(defn- learning
+  "A learn attempt (id, l1 unless given) waiting to bind target
+   ([:ui :input-learn :active], reactivity plan 24); nil: none."
+  ([target] (learning target l1))
+  ([target id]
+   #(assoc-in % [:ui :input-learn :active]
+              (when target
+                {:learn-id id :owner :binding :capture :press :document-id doc :target-action target}))))
 
 (defn- showing
   "The cells whose description shows k of its display data (:learning?,
@@ -140,10 +152,10 @@
               [true false]]
              ["its behavior alone" (bindings {note-60 (assoc cue-a2 :behavior :momentary)}) #{} [true false]]])
       (let [[descs] (grids (fx/swap-context ctx (bindings {key-h cue-a2})))]
-        (is (= {"Learn Trigger..." {:event/type :input/start-learn :target-action cue-a2}
+        (is (= {"Learn Trigger..." {:event/type :input/start-learn :target-action cue-a2 :document-id doc}
                 "Clear Triggers" {:event/type :input/clear-cell-triggers :target-action cue-a2}}
                (trigger-items (descs C))))
-        (is (= {"Learn Trigger..." {:event/type :input/start-learn :target-action fx-a2}}
+        (is (= {"Learn Trigger..." {:event/type :input/start-learn :target-action fx-a2 :document-id doc}}
                (trigger-items (descs E))))))
     (testing "learns (§7 input 4): the cells whose LEARN changes, no other"
       (walk ctx #(showing % :learning?)
@@ -153,6 +165,14 @@
              ["none" (learning nil) #{E} #{}]
              ["cue A2's again" (learning cue-a2) #{C} #{C}]
              ["a Vibe role's while cue A2's waits: its LEARN goes" (learning vibe-hit) #{C} #{}]]))
+    (testing "Learn restarted on the same cell, a new attempt (reactivity plan 24): only that cell's Cancel changes"
+      (let [waiting (fx/swap-context ctx (learning cue-a2 l1))
+            [descs] (grids waiting)]
+        (is (= {"Cancel Learning Trigger" {:event/type :input/cancel-learn :learn-id l1 :document-id doc}}
+               (trigger-items (descs C))))
+        (walk waiting #(trigger-items (% C))
+              [["restarted" (learning cue-a2 l2) #{C}
+                {"Cancel Learning Trigger" {:event/type :input/cancel-learn :learn-id l2 :document-id doc}}]])))
     (testing "a capture at the effects cell (§7 input 5): LEARN and Cancel go, ⚡ and Clear come, in one state"
       (let [waiting (fx/swap-context ctx (learning fx-a2))
             [descs] (grids waiting)
@@ -160,10 +180,12 @@
             captured (fx/swap-context waiting (comp (bindings {key-h momentary}) (learning nil)))
             [descs' ran] (grids captured)]
         (is (= [true false] ((juxt :learning? :has-trigger?) (:display-data (descs E)))))
-        (is (= {"Cancel Learning Trigger" {:event/type :input/cancel-learn}} (trigger-items (descs E))))
+        (is (= {"Cancel Learning Trigger" {:event/type :input/cancel-learn :learn-id l1 :document-id doc}}
+               (trigger-items (descs E)))
+            "Cancel names the attempt it shows")
         (is (= #{E} ran))
         (is (= [false true] ((juxt :learning? :has-trigger?) (:display-data (descs' E)))))
-        (is (= {"Learn Trigger..." {:event/type :input/start-learn :target-action fx-a2}
+        (is (= {"Learn Trigger..." {:event/type :input/start-learn :target-action fx-a2 :document-id doc}
                 "Clear Triggers" {:event/type :input/clear-cell-triggers :target-action fx-a2}}
                (trigger-items (descs' E))))
         (is (= momentary (fx/sub-val captured get-in [:config :input :trigger-map key-h]))
