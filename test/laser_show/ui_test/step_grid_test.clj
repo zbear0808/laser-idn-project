@@ -2,13 +2,15 @@
   "The step grid window (zones plan Z6, 08 §7): opened from a cue's pattern
    (its Pattern chip, its pattern window) and from an effects cell's, to
    click, drag or type a pattern, with each row's zone and where it goes."
-  (:require [clojure.string :as str]
+  (:require [cljfx.api :as fx]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.animation.show-time :as show-time]
             [laser-show.events.core :as events]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
             [laser-show.state.history :as history]
+            [laser-show.subs :as subs]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]
             [laser-show.views.components.shortcuts :as shortcuts]
@@ -585,7 +587,39 @@
   (testing "while the pattern's keyframes are on, the grid is greyed out and says why"
     (events/write-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :keyframe-modulator] {:enabled? true :keyframes []})
     (ui/assert-text! "#step-grid-guard" "This pattern's keyframes are on. Switch them off to edit its grid.")
-    (is (ui/on-fx-thread #(.isDisabled (body))))))
+    (is (ui/on-fx-thread #(.isDisabled (body)))))
+  (testing "a pattern that isn't a grid yet, Every laser over three lasers: rows A, B and C, and the fold says where they
+            go. Each window asks the fold for the lane it shows, the same one after each rate (reactivity plan 37)"
+    (let [lanes (atom [])
+          sub-ctx fx/sub-ctx
+          hints #(let [nodes (ui/query-all ".zone-pattern-hint")]
+                   (ui/on-fx-thread (fn [] (into [] (keep (fn [n] (when (instance? Labeled n) (.getText ^Labeled n)))) nodes))))
+          step-grid-fold "This rig (3 lasers, Left / Right): A is Laser 1 and the left half of Laser 2; B the right half of Laser 2 and Laser 3; C Laser 1 and the left half of Laser 2."
+          pattern-fold "This rig (3 lasers): Laser 1, Laser 2 and Laser 3, left to right."]
+      (with-redefs [fx/sub-ctx (fn [context f & args]
+                                 (when (= f subs/pattern-fold) (swap! lanes conj (first args)))
+                                 (apply sub-ctx context f args))]
+        (events/write-state! #(-> %
+                                  (assoc :projectors (into {} (for [k (range 1 4)]
+                                                                [(keyword (str "p" k)) {:name (str "Laser " k) :host (str "10.0.0." k)
+                                                                                        :enabled? true :zone-groups []}])))
+                                  (assoc-in [:zone-map :active] :map/left-right)
+                                  (assoc-in [:chains :cue-chains [0 0] :zone-patterns]
+                                            [(assoc (zone-patterns/preset-instance :chase :cue) :id (:effect-instance-id cue-target))])))
+        (ui/assert-text! "#step-grid-fold" step-grid-fold)
+        (ui/assert-text! "#step-row-0" "A → Left")
+        (ui/assert-text! "#step-row-1" "B → Right")
+        (ui/assert-text! "#step-row-2" "C → Left")
+        (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
+        (ui/wait-for! #(= pattern-fold (text-anywhere "#zone-pattern-fold")))
+        (doseq [[rate words] [[0.5 "1 step every 2 beats"] [0.25 "1 step every 4 beats"] [2.0 "2 steps a beat"]]]
+          (events/write-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :params :rate] rate)
+          (ui/wait-for! #(= 2 (count (filter #{words} (hints)))))))
+      (is (= step-grid-fold (text-anywhere "#step-grid-fold")))
+      (is (= pattern-fold (text-anywhere "#zone-pattern-fold")))
+      (is (<= 6 (count @lanes)) "each window, at each rate")
+      (is (= #{[:zone/a :zone/b :zone/c] [:lane/lasers]} (set @lanes)) "the grid's rows, and the pattern's lane: never params")
+      (is (every? vector? @lanes)))))
 
 
 ;; The playhead and the pattern window's small grid (08 §7)
