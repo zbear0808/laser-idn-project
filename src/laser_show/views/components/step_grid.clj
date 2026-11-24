@@ -369,7 +369,8 @@
                :params-map (param-controls/params-vector->map zone-patterns/pattern-parameters)
                :on-change-event (assoc keys :event/type :chain/update-param)
                :on-text-event (assoc keys :event/type :chain/update-param-from-text)
-               :modulator-event-base keys}
+               ;; The modulators' field edits name the pattern shown (reactivity plan 07)
+               :modulator-event-base (assoc keys :effect-instance-id (:id grid))}
         ev (fn [type & {:as more}] (merge {:event/type type :target target} more))]
     {:fx/type :v-box
      :spacing 8

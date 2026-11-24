@@ -396,7 +396,7 @@
               (assoc field :event/type :chain/update-param-from-text)
               #(get-in % (conj path :params :amount))]
              ["a modulator's that is off" {:amount config} nil
-              (assoc field :event/type :modulator/update-static-value :current-value config)
+              (assoc field :event/type :modulator/update-static-value :effect-instance-id (:id effect))
               #(get-in % (conj path :params :amount :value))]
              ["a keyframe's" {:amount 1.0} {:enabled? true :keyframes [{:position 0.0 :params {:amount 0.3}}
                                                                         {:position 1.0 :params {:amount 0.9}}]}
@@ -415,6 +415,45 @@
           (is (false? (get-in undone [:project :dirty?])))
           (is (= (:history undone) (:history refused)) "text that isn't a number adds no step and keeps Redo")
           (is (= 0.42 (read (run refused {:event/type :edit/redo})))))))))
+
+(deftest modulator-field-undo-boundaries-test
+  ;; Reactivity plan 07: each field edit writes its own field of what is
+  ;; stored, so each is its own undo step; one that changes nothing is none
+  (let [path [:chains :effect-chains [1 0] :items 0]
+        id #uuid "88888888-8888-8888-8888-888888888888"
+        triangle {:type :triangle :active? true :period 7.0 :min 0.2 :max 0.8}
+        initial (history/mark-clean (assoc-in (test-state) path {:id id :effect-id :intensity :enabled? true
+                                                                 :params {:amount triangle}}))
+        ;; What the Min and Max sliders send, from one render
+        field (fn [k v] {:event/type :modulator/update-param :domain :effect-chains :entity-key [1 0]
+                         :effect-instance-id id :param-key :amount :mod-param-key k :fx/event v})
+        amount #(get-in % (conj path :params :amount))
+        edited (-> initial (run (field :min 0.3)) (run (field :max 0.9)))
+        undo-max (run edited {:event/type :edit/undo})
+        undo-min (run undo-max {:event/type :edit/undo})]
+    (is (= (assoc triangle :min 0.3 :max 0.9) (amount edited)))
+    (is (= 2 (undo-count edited)) "two edits, two steps")
+    (is (true? (get-in edited [:project :dirty?])))
+    (is (= (assoc triangle :min 0.3) (amount undo-max)) "Undo takes back Max; Min stays")
+    (is (= (history/extract-document-state initial) (history/extract-document-state undo-min))
+        "Undo again: the saved show")
+    (is (false? (get-in undo-min [:project :dirty?])))
+    (testing "an edit that changes nothing between Undo and Redo keeps Redo"
+      (let [ignored (reduce run undo-min [(field :min 0.2)            ; the value it has
+                                          (field :duty-cycle 0.3)     ; not a Triangle's
+                                          (assoc (field :max 0.9) :effect-instance-id #uuid "99999999-9999-9999-9999-999999999999")])
+            redone (-> ignored (run {:event/type :edit/redo}) (run {:event/type :edit/redo}))]
+        (is (= undo-min ignored))
+        (is (= (assoc triangle :min 0.3 :max 0.9) (amount redone)) "Redo puts both back")
+        (is (true? (get-in redone [:project :dirty?])))))
+    (testing "Min's changes inside one press and release are one step"
+      (let [s (reduce run initial [{:event/type :history/begin-transaction :label "Adjust Min" :source-id [:modulator-slider :min]}
+                                   (field :min 0.25) (field :min 0.3) (field :min 0.35)
+                                   {:event/type :history/commit-transaction :source-id [:modulator-slider :min]}])]
+        (is (= (assoc triangle :min 0.35) (amount s)))
+        (is (= 1 (undo-count s)))
+        (is (= "Adjust Min" (history/undo-label (:history s))))
+        (is (= triangle (amount (run s {:event/type :edit/undo}))))))))
 
 (deftest timeline-nudge-coalesces-test
   (let [base (-> (test-state)

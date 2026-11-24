@@ -8,7 +8,9 @@
    with Enter, while its modulator is off or keyframes set it: a number is
    stored, other text is put back. And the selected keyframe's Value and
    Interp controls: each change edits that keyframe once, and Undo and Redo
-   show in them."
+   show in them. And a modulator's fields: two edits from one render both
+   stay, and what is typed into one is stored in it alone (reactivity plan
+   07)."
   (:require [cljfx.api :as fx]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
@@ -464,3 +466,47 @@
     (choose! "#modulator-amount-slot" :slider-2)
     (ui/wait-for! #(= :slider-2 (:slot (amount))))
     (ui/wait-for! #(= "2: Morph" (shown "#modulator-amount-slot")))))
+
+
+;; Two edits to a modulator's fields from one render (reactivity plan 07)
+
+
+(deftest min-and-max-from-one-render-both-stick-test
+  (let [config {:type :triangle :active? true :period 7.0 :min 0.2 :max 0.8}
+        lo "#modulator-amount-min"
+        hi "#modulator-amount-max"]
+    (open-amount-editor! config)
+    (ui/wait-for! #(and (some? (node lo)) (some? (node hi))))
+    ;; Both real sliders of one render, moved before the editor can render again
+    (ui/on-fx-thread #(let [^Slider min-slider (node lo)
+                            ^Slider max-slider (node hi)]
+                        (.setValue min-slider 0.3)
+                        (.setValue max-slider 0.9)))
+    (is (ui/wait-for! #(and (= [0.3 0.9] ((juxt :min :max) (amount)))
+                            (== 0.3 (slider-value lo))
+                            (== 0.9 (slider-value hi))))
+        "the stored Min and Max are both the new ones, and so are the sliders")
+    (is (= (assoc config :min 0.3 :max 0.9) (amount)) "the rest of the modulator stays")))
+
+(deftest modulator-fields-store-what-is-typed-test
+  (let [robot (ui/robot)
+        config {:type :triangle :active? true :period 7.0 :min 0.2 :max 0.8}
+        field "#modulator-amount-min-field"]
+    (open-amount-editor! config)
+    (ui/wait-for! #(some? (node field)))
+    (is (= "0.20" (text-of field)))
+    (ui/fill! robot field "0.35")
+    (ui/submit! robot field)
+    (is (ui/wait-for! #(and (= (assoc config :min 0.35) (amount)) (= "0.35" (text-of field))
+                            (== 0.35 (slider-value "#modulator-amount-min"))))
+        "Enter stores the typed number, in Min only, and the slider shows it")
+    (ui/fill! robot field "abc")
+    (ui/submit! robot field)
+    (is (ui/wait-for! #(= "0.35" (text-of field))) "text that isn't a number is put back")
+    (events/flush!)
+    (is (= (assoc config :min 0.35) (amount)) "and changes nothing")
+    (testing "a text field: an OSC modulator's path"
+      (open-amount-editor! {:type :osc :active? true :path "/control" :min 0.0 :max 1.0})
+      (ui/fill! robot "#modulator-amount-path" "/fader/1")
+      (ui/submit! robot "#modulator-amount-path")
+      (is (ui/wait-for! #(and (= "/fader/1" (:path (amount))) (= "/fader/1" (text-of "#modulator-amount-path"))))))))

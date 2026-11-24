@@ -63,8 +63,8 @@
    app's Undo and Redo (undo-filter).
    
    Props: :id, :text, :on-commit, :pref-width, :disable, :style-class
-   (default [\"text-field-dark\"]), :style"
-  [{:keys [id text on-commit pref-width disable style-class style]
+   (default [\"text-field-dark\"]), :style, :prompt-text"
+  [{:keys [id text on-commit pref-width disable style-class style prompt-text]
     :or {style-class ["text-field-dark"]}}]
   (let [commit! (fn [^TextField field]
                   (let [typed (.getText field)]
@@ -93,4 +93,5 @@
                     :user-data {:commit! commit! :text text}
                     :on-action (fn [^javafx.event.ActionEvent e]
                                  (commit! (.getSource e)))}
-             style (assoc :style style))}))
+             style (assoc :style style)
+             prompt-text (assoc :prompt-text prompt-text))}))

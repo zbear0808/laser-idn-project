@@ -465,3 +465,43 @@
         (is (nil? (get-in released [:history :transaction])) "it let go")
         (is (nil? (get-in released [:ui :step-grid :drag])))
         (is (= 1 (count (get-in released [:history :undo-stack]))) "what was painted before the lock is one undo step")))))
+
+(deftest lock-classifies-reordered-modulator-target-test
+  ;; Reactivity plan 07: a modulator's field edits name their effect by its
+  ;; instance, so the lock judges the effect they edit where it is now, not
+  ;; what holds the place it had when its editor rendered
+  (let [pattern-id #uuid "0000000a-0000-0000-0000-000000000001"
+        point-id #uuid "0000000a-0000-0000-0000-000000000002"
+        wave {:type :triangle :active? true :period 7.0 :min 0.2 :max 0.8}
+        pattern (-> (zone-patterns/preset-instance :swap :cell)
+                    (assoc :id pattern-id)
+                    (assoc-in [:params :offset] (assoc wave :min -4.0 :max 4.0)))
+        point {:id point-id :effect-id :intensity :enabled? true :params {:amount wave}}
+        ;; Rendered as [point pattern]; swapped since
+        s0 (-> (starter)
+               (assoc-in [:chains :effect-chains [4 2]] {:active? false :items [pattern point]})
+               (history/mark-clean))
+        edit (fn [type id param rendered-at & {:as more}]
+               (merge {:event/type type :domain :effect-chains :entity-key [4 2] :effect-instance-id id
+                       :param-key param :effect-path [rendered-at]}
+                      more))
+        pattern-edits [(edit :modulator/update-param pattern-id :offset 1 :mod-param-key :max :fx/event 8.0)
+                       (edit :modulator/set-type pattern-id :offset 1 :mod-type :square :param-spec {:min -64.0 :max 64.0})]
+        point-edits [(edit :modulator/update-param point-id :amount 0 :mod-param-key :max :fx/event 0.9)
+                     (edit :modulator/set-type point-id :amount 0 :mod-type :square :param-spec {:min 0.0 :max 3.0})]]
+    (doseq [event pattern-edits]
+      (testing (str "the pattern's " (:event/type event) ", now where the point effect was rendered")
+        (is (not= (history/extract-document-state s0) (history/extract-document-state (run s0 event))) "unlocked, a real edit")
+        (let [effects (handle (lock s0) event)
+              s (:state effects)]
+          (is (= (lock s0) (without-notices s)) "locked, only the notice")
+          (is (= {:text "Zone pattern edit refused" :event (:event/type event)} (get-in s [:ui :show-lock-notice])))
+          (is (= #{:state :dispatch-later} (set (keys effects)))))))
+    (doseq [event point-edits]
+      (testing (str "the point effect's " (:event/type event) ", now where the pattern was rendered")
+        (let [s (run (lock s0) event)]
+          (is (nil? (get-in s [:ui :show-lock-notice])) "goes through")
+          (is (not= (history/extract-document-state s0) (history/extract-document-state s)) "a real edit")
+          (is (= (history/extract-document-state (run s0 event)) (history/extract-document-state s)) "as it does unlocked")
+          (is (= pattern (get-in s [:chains :effect-chains [4 2] :items 0]))
+              "on the point effect, where it is now: the pattern is untouched"))))))
