@@ -13,7 +13,8 @@
      rig read only.
    - The writer: one daemon thread, rig-writer. submit! keeps only the newest
      rig and writes it write-delay-ms after the last submit; flush! writes the
-     pending one now (app/stop!, and a shutdown hook)."
+     pending one now and waits for the one running (Exit, app/stop!, and a
+     shutdown hook)."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -252,6 +253,10 @@
   "How long after the last change the rig is written."
   500)
 
+(def flush-ms
+  "How long Exit and shutdown wait for the rig writer to finish (flush!)."
+  2000)
+
 (defn- daemon-factory [thread-name]
   (reify ThreadFactory
     (newThread [_ r]
@@ -262,9 +267,13 @@
   !writer
   (delay (java.util.concurrent.Executors/newSingleThreadScheduledExecutor (daemon-factory "rig-writer"))))
 
-(defonce ^{:private true :doc "{:path :doc :on-result :task}: the newest rig not written yet."}
+(defonce ^{:private true :doc "{:path :doc :on-result :n :task}: the newest rig not written yet, the nth submitted (!submitted)."}
   !pending
   (atom nil))
+
+(defonce ^{:private true :doc "How many rigs submit! was given: the newest one's :n."}
+  !submitted
+  (atom 0))
 
 (defn- write-pending!
   "Take the pending rig and write it (on the rig-writer thread)."
@@ -280,42 +289,53 @@
   "Keep doc as the rig to write to path, in place of one not written yet,
    and write it delay-ms (write-delay-ms) after the last submit, on the
    rig-writer thread. on-result gets {:at ms} or {:error reason} there; a
-   superseded rig's never does."
+   superseded rig's never does. The rig is kept before its write is
+   scheduled, so a write due at once (delay-ms 0) that starts straight away
+   finds it."
   ([path doc on-result] (submit! path doc on-result write-delay-ms))
   ([path doc on-result delay-ms]
    (let [^ScheduledExecutorService writer @!writer]
      (locking !pending
        (when-let [^ScheduledFuture task (:task @!pending)]
          (.cancel task false))
-       (reset! !pending {:path path :doc doc :on-result on-result
-                         :task (.schedule writer ^Runnable write-pending! (long delay-ms) TimeUnit/MILLISECONDS)})))))
+       (let [n (swap! !submitted inc)]
+         (reset! !pending {:path path :doc doc :on-result on-result :n n})
+         (let [task (.schedule writer ^Runnable write-pending! (long delay-ms) TimeUnit/MILLISECONDS)]
+           ;; unless the writer has taken it already
+           (swap! !pending #(cond-> % (= n (:n %)) (assoc :task task)))))))))
 
 (defn flush!
-  "Write the pending rig now, waiting up to timeout-ms for it (and for a
-   write already running). True when nothing is left to write."
+  "Write the pending rig now, and wait up to timeout-ms until the writer has
+   finished every rig submitted before this call: the pending one, and the
+   one it may be writing already (it has one thread, so the task flush!
+   gives it runs after that one). Their results are reported before it
+   returns. True when they are done (at once when nothing was ever
+   submitted), false when that took longer (logged). Not for the rig-writer
+   thread itself."
   [timeout-ms]
-  (let [^Future task (locking !pending
-                       (when-let [{:keys [^ScheduledFuture task]} @!pending]
-                         (when task (.cancel task false))
-                         (.submit ^ExecutorService @!writer ^Runnable write-pending!)))]
-    (if task
+  (if-not (realized? !writer)
+    true
+    (let [^Future done (locking !pending
+                         (when-let [^ScheduledFuture task (:task @!pending)]
+                           (.cancel task false))
+                         (.submit ^ExecutorService @!writer ^Runnable write-pending!))]
       (try
-        (.get task (long timeout-ms) TimeUnit/MILLISECONDS)
+        (.get done (long timeout-ms) TimeUnit/MILLISECONDS)
         true
         (catch TimeoutException _
           (log/warn "The rig file was not written within" timeout-ms "ms")
-          false))
-      true)))
+          false)))))
 
 (defonce ^:private !shutdown-hook (atom nil))
 
 (defn install-shutdown-hook!
-  "Register (once) a JVM shutdown hook that writes the pending rig, so a
-   change made just before the app ends still reaches the file."
+  "Register (once) a JVM shutdown hook that writes the pending rig, and
+   waits for the write running (flush!), so a change made just before the
+   app ends still reaches the file."
   []
   (locking !shutdown-hook
     (when-not @!shutdown-hook
-      (let [hook (Thread. ^Runnable #(flush! 2000) "rig-flush-on-shutdown")]
+      (let [hook (Thread. ^Runnable #(flush! flush-ms) "rig-flush-on-shutdown")]
         (.addShutdownHook (Runtime/getRuntime) hook)
         (reset! !shutdown-hook hook))))
   @!shutdown-hook)
