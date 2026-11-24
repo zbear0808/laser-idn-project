@@ -26,7 +26,10 @@
 ;; [:ui :dialogs :unsaved-confirm :pending] and the dialog is opened. The dialog's
 ;; buttons then drop it (:file/confirm-cancel), re-dispatch it with :force? true
 ;; (:file/confirm-discard), or save first and re-dispatch it once the write
-;; succeeded (:file/confirm-save).
+;; succeeded (:file/confirm-save). Open's chooser comes back later, so its
+;; result carries the permission it was opened with (discard-authorization),
+;; and :file/project-loaded asks again when that no longer covers the show
+;; open by then (may-discard?), parked as an Open of the file picked.
 
 (def ^:private confirm-path [:ui :dialogs :unsaved-confirm])
 
@@ -44,13 +47,14 @@
        (= :write-failed (get-in state [:rig-file :status]))))
 
 (defn- ask-first
-  "Open the unsaved-changes dialog for event (ignored if it is already open)."
+  "Open the unsaved-changes dialog for event (ignored if it is already open),
+   parked with its :file-path when it has one."
   [state event]
   (if (get-in state (conj confirm-path :open?))
     {:state state}
     {:state (update-in state confirm-path assoc
                        :open? true
-                       :pending (select-keys event [:event/type]))}))
+                       :pending (select-keys event [:event/type :file-path]))}))
 
 (defn- ask-about-the-rig
   "Open the same dialog with the rig's question (reason :rig): its last
@@ -68,6 +72,27 @@
 (defn- close-confirm [state]
   (update-in state confirm-path #(-> % (assoc :open? false :pending nil) (dissoc :reason :error))))
 
+(defn- discard-authorization
+  "The permission to throw the open show away, as it was when given (Open's
+   chooser opening: the guard passed, or its dialog confirmed): which show
+   (h/document-id), and whether it had unsaved changes then, which the
+   unsaved-changes dialog had let go. Plain data, checked later by
+   may-discard?."
+  [state]
+  {:document-id (h/document-id state)
+   :dirty? (boolean (get-in state [:project :dirty?]))})
+
+(defn- may-discard?
+  "May the show open in state still be thrown away under authorized
+   (discard-authorization)? Yes when it has no unsaved changes (nothing
+   would be lost), or when its unsaved changes were let go for this same
+   show. No when the show was replaced meanwhile by one with unsaved
+   changes, or when unsaved changes came after the permission was given
+   for a show without any."
+  [state {:keys [document-id dirty?]}]
+  (or (not (get-in state [:project :dirty?]))
+      (and dirty? (= document-id (h/document-id state)))))
+
 (defn- handle-file-new-project
   "Replace the document with a fresh starter project.
    Backend/runtime state (streaming, Link, MIDI/OSC) is left untouched.
@@ -81,7 +106,9 @@
 
 (defn- handle-file-open
   "Open a project from disk using file chooser dialog.
-   Asks first (before the chooser) when the project has unsaved changes."
+   Asks first (before the chooser) when the project has unsaved changes.
+   The chooser's result carries the permission this gave (:authorized,
+   discard-authorization), for :file/project-loaded to check."
   [{:keys [state] :as event}]
   (if (guard-needed? state event)
     (ask-first state event)
@@ -93,16 +120,22 @@
                                                     (System/getProperty "user.home"))
                               :extension-filters [{:description "Laser Show Projects"
                                                   :extensions ["*.zip"]}]
-                              :on-result {:event/type :file/open-result}}})))
+                              :on-result {:event/type :file/open-result
+                                          :authorized (discard-authorization state)}}})))
 
 (defn- handle-file-open-result
-  "Handle result from open file dialog by requesting a project read."
-  [{:keys [file-path]}]
+  "Handle result from open file dialog by requesting a project read. The
+   chooser's :authorized goes on to :file/project-loaded with the contents.
+   An Open without one replaces the show unchecked: that is the Open the
+   unsaved-changes dialog goes on with once it has just allowed it (asked
+   about again: handle-file-project-loaded)."
+  [{:keys [file-path authorized]}]
   (if file-path
     (do
       (log/info "Opening project:" file-path)
       {:project/load {:file-path file-path
-                      :on-loaded {:event/type :file/project-loaded}
+                      :on-loaded (cond-> {:event/type :file/project-loaded}
+                                   authorized (assoc :authorized authorized))
                       :on-failed {:event/type :file/project-load-failed}}})
     {}))
 
@@ -111,28 +144,55 @@
   [file-path]
   (or (some-> file-path java.io.File. .getName) "the project"))
 
-(defn- handle-file-project-loaded
-  "Replace the show with the loaded project contents. This machine's rig,
-   its safety zones and calibration with it, stays as it is (D-30): the
-   show's copy of a rig is only read, to match the show onto this one. It is
-   kept in [:ui :dialogs :rig-report] while the show is open (rig-file):
-   on a rig with no laser on, and a show made with lasers, it opens the
-   set-up question (Q-ZR-3); on a rig that is set up, the report, when
-   something doesn't fit (a ⚠ row: rig-file/warning-count)."
-  [{:keys [state file-path contents]}]
-  (log/info "Project loaded:" file-path)
+(defn prepare-open
+  "The state File > Open of contents (read-project's {filename data}) from
+   file-path gives: the show replaced by the loaded project contents
+   (persistent/apply-loaded-project, which checks them first). This
+   machine's rig, its safety zones and calibration with it, stays as it is
+   (D-30): the show's copy of a rig is only read, to match the show onto
+   this one. It is kept in [:ui :dialogs :rig-report] while the show is open
+   (rig-file): on a rig with no laser on, and a show made with lasers, it
+   opens the set-up question (Q-ZR-3); on a rig that is set up, the report,
+   when something doesn't fit (a ⚠ row: rig-file/warning-count).
+   Pure, but for the opened show's new identity (a random UUID,
+   persistent/begin-document). Throws when contents can't be opened: no show
+   in them, or data this build can't convert or report on. Save runs it on
+   what it is about to write, and discards the result."
+  [state contents file-path]
   (let [loaded (persistent/apply-loaded-project state contents file-path)
         hardware (get contents (:hardware persistent/zip-filenames))
         chains (get-in contents [(:content persistent/zip-filenames) :chains :projector-effects])
         set-up? (boolean (and (not (rig-file/set-up? loaded)) (rig-file/set-up-question loaded hardware)))
         warnings? (and (not set-up?) (pos? (rig-file/warning-count (rig-file/match-report loaded hardware chains))))]
-    {:state (assoc-in loaded [:ui :dialogs :rig-report]
-                      {:open? (or set-up? warnings?)
-                       :mode (if set-up? :set-up :report)
-                       :file (file-name file-path)
-                       :hardware hardware
-                       :chains chains
-                       :pins (rig-file/pin-map state hardware)})}))
+    (assoc-in loaded [:ui :dialogs :rig-report]
+              {:open? (or set-up? warnings?)
+               :mode (if set-up? :set-up :report)
+               :file (file-name file-path)
+               :hardware hardware
+               :chains chains
+               :pins (rig-file/pin-map state hardware)})))
+
+(defn- handle-file-project-loaded
+  "Replace the show with the loaded project contents (prepare-open). When
+   they can't be opened, nothing is replaced: :file/project-load-failed
+   says so, and the show, its selection and its history stay. When the
+   chooser's :authorized no longer covers the show open now (may-discard?:
+   it was replaced, or has unsaved changes it didn't have when the chooser
+   opened), nothing is replaced either: the unsaved-changes dialog asks
+   again, parked as an Open of file-path, so Don't Save and Save go on to
+   that file."
+  [{:keys [state file-path contents authorized]}]
+  (if (and authorized (not (may-discard? state authorized)))
+    (do (log/info "The show changed while" (file-name file-path) "was being chosen: asking before opening it")
+        (ask-first state {:event/type :file/open-result :file-path file-path}))
+    (if-let [opened (try
+                      (prepare-open state contents file-path)
+                      (catch Exception e
+                        (log/error "Project can't be opened:" file-path "-" (ex-message e))
+                        nil))]
+      (do (log/info "Project loaded:" file-path)
+          {:state opened})
+      {:dispatch {:event/type :file/project-load-failed :file-path file-path}})))
 
 (defn- handle-file-project-load-failed
   "The project couldn't be read: the document stays, and a notice says so."
@@ -141,34 +201,44 @@
   (h/show-notice state (str "Could not open " (file-name file-path)) :error))
 
 (defn- save-to
-  "Mark the project saved to file-path and request the zip write.
-   If the write fails, :file/save-failed restores the previous project status.
-   An optional :then event on the event is dispatched only after the write
-   succeeded (the unsaved-changes dialog uses it to continue New/Open/Exit)."
-  [{:keys [state then] :as event} file-path]
+  "Request the zip write of the project to file-path. The project status
+   (its file, the time, the saved baseline, the unsaved flag) changes only
+   once the file is written and reads back: the :project/save effect then
+   runs :project/mark-clean. The write is first opened as a dry run
+   (prepare-open on the files and this rig, discarded): a show this build
+   couldn't open again isn't written, and :file/save-failed says so, as it
+   does when the write fails. An optional :then event on the event is
+   dispatched only after the write succeeded (the unsaved-changes dialog
+   uses it to continue New/Open/Exit)."
+  [{:keys [state then]} file-path]
   (log/info "Saving project to:" file-path)
-  {:state (persistent/mark-saved state file-path (h/current-time-ms event))
-   :project/save (cond-> {:file-path file-path
-                          :files (persistent/project-files state)
-                          :on-failed {:event/type :file/save-failed
-                                      :previous-project (:project state)}}
-                   then (assoc :on-saved then))})
+  (if-let [files (try
+                   (let [files (persistent/project-files state)]
+                     (prepare-open state files file-path)
+                     files)
+                   (catch Exception e
+                     (log/error "Not saving" file-path "- this build couldn't open it again:" (ex-message e))
+                     nil))]
+    {:state state
+     :project/save (cond-> {:file-path file-path
+                            :files files
+                            :on-failed {:event/type :file/save-failed}}
+                     then (assoc :on-saved then))}
+    {:state state
+     :dispatch {:event/type :file/save-failed :file-path file-path}}))
 
 (defn- handle-file-save-failed
-  "Restore the project status from before the failed save, including the
-   previous saved baseline; the pipeline then re-derives :dirty?. A notice
-   says the save failed."
-  [{:keys [state file-path previous-project]}]
+  "The project couldn't be saved: a notice says so. Nothing else changes,
+   as nothing changed before the write: the file there, the project's file,
+   its saved baseline and unsaved flag are as they were."
+  [{:keys [state file-path]}]
   (log/error "Failed to save project:" file-path)
-  (h/show-notice (update state :project merge
-                         (into {} (map (fn [k] [k (get previous-project k)]))
-                               [:current-file :last-saved :saved-document :dirty?]))
-                 (str "Could not save " (file-name file-path))
-                 :error))
+  (h/show-notice state (str "Could not save " (file-name file-path)) :error))
 
 (defn- handle-file-save-as
   "Save the project to a new location using file chooser dialog.
-   An optional :then event is carried through the chooser to the write."
+   An optional :then event is carried through the chooser to the write. The
+   chooser's result is stamped for the show open now (h/for-document)."
   [{:keys [state then]}]
   (log/info "File > Save As")
   (let [current-file (get-in state [:project :current-file])
@@ -185,8 +255,9 @@
                             :extension-filters [{:description "Laser Show Projects"
                                                 :extensions ["*.zip"]}]
                             :mode :save
-                            :on-result (cond-> {:event/type :file/save-as-result}
-                                         then (assoc :then then))}}))
+                            :on-result (h/for-document (cond-> {:event/type :file/save-as-result}
+                                                         then (assoc :then then))
+                                                       state)}}))
 
 (defn- handle-file-save
   "Save the current project."
@@ -197,11 +268,15 @@
     (handle-file-save-as event)))
 
 (defn- handle-file-save-as-result
-  "Handle result from save-as file dialog."
+  "Handle result from save-as file dialog. A result for a show that New or
+   Open replaced while the chooser was open does nothing ({}): that show is
+   gone, so nothing is written and its :then doesn't run."
   [{:keys [state file-path] :as event}]
-  (if file-path
-    (save-to event file-path)
-    {:state state}))
+  (cond
+    (not file-path) {:state state}
+    (not (h/same-document? state event)) (do (log/info "Not saving" file-path "- the show it was chosen for is no longer open")
+                                             {})
+    :else (save-to event file-path)))
 
 (defn- handle-file-exit
   "Exit the application. Asks first when the project has unsaved changes,

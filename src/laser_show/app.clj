@@ -141,13 +141,15 @@
                      :dir dir}))
 
 (defn- starter-state
-  "A fresh starter document: the starter cues, vibes and the Master."
+  "A fresh starter document: the starter cues, vibes and the Master, with
+   an identity of its own (persistent/begin-document)."
   []
   (-> (domains/build-initial-state)
       (templates/apply-starter-cue-chains)
       (templates/apply-starter-vibes)
       (templates/apply-starter-effects)
-      (history/mark-clean)))
+      (history/mark-clean)
+      (persistent/begin-document)))
 
 (defn- load-rig
   "state on this machine's rig, the file at path (plans/2026-11-19-zones/09):
