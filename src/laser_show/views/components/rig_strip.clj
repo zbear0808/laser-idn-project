@@ -443,7 +443,7 @@
                            :on-drag-detected (fn [^MouseEvent e]
                                                (dnd/start-drag! (.getSource e) :rig-card {:projector-id id} [TransferMode/MOVE])
                                                (.consume e))
-                           :on-drag-done (fn [_] (dnd/end-drag! :rig-card))
+                           :on-drag-done (fn [^DragEvent e] (dnd/end-drag! (.getSource e)))
                            :on-drag-over (fn [^DragEvent e]
                                            (when (dnd/has-payload? (.getDragboard e) :rig-card)
                                              (.acceptTransferModes e (into-array TransferMode [TransferMode/MOVE]))
@@ -453,7 +453,7 @@
                                            (.consume e))
                            :on-drag-exited (fn [_] (events/dispatch! {:event/type :rig/drag-exit}))
                            :on-drag-dropped (fn [^DragEvent e]
-                                              (if-let [{from :projector-id} (dnd/read-payload (.getDragboard e) :rig-card drag-payload?)]
+                                              (if-let [{from :projector-id} (dnd/read-payload e :rig-card drag-payload?)]
                                                 (do (events/dispatch! {:event/type :rig/move-projector
                                                                        :projector-id from :target id :side (side-of e)})
                                                     (.setDropCompleted e true))

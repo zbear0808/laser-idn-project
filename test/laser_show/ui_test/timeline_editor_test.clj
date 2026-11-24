@@ -606,6 +606,117 @@
           (ui/sync-fx!)
           (is (= (+ 2 before) (count (items)))))))))
 
+;; A bank drag whose content the targets can't see: the button that started
+;; it supplies it until its drag is done (plans/2026-11-23-cljfx-reactivity/38)
+
+(defn- hidden-bank
+  "A board's content announcing the :bank-item format with the content
+   itself hidden (nil), as a platform may until the drop."
+  []
+  (doto (javafx.scene.input.ClipboardContent.)
+    (.put (key (first (bank-content :effect :scale :shape))) nil)))
+
+(defn- bank-button [text]
+  (first (filter #(= text (.getText ^javafx.scene.control.Labeled %)) (ui/query-all ".bank-item-btn"))))
+
+(defn- start-bank-drag!
+  "A drag detected on a bank button, the platform's part of its start
+   (drag-drop-cell's private open-dragboard!) answered by a test board: the
+   button's handler and start-drag! run."
+  [button]
+  (with-redefs-fn {#'dd/open-dragboard! (fn [_ modes] (ui/test-dragboard {} modes))}
+    #(ui/fire-drag-detected! button)))
+
+(defn- drag-kept?
+  "Does scene keep a drag for a hidden drop?"
+  [^javafx.scene.Scene scene]
+  (ui/on-fx-thread #(.containsKey (.getProperties scene) ::dd/active-drag)))
+
+(deftest hidden-bank-preview-follows-the-gesture-source-test
+  (let [robot (ui/robot)
+        hidden (hidden-bank)]
+    (open-timeline!)
+    (open-browser! robot)
+    (ui/wait-for! #(pos? (canvas-width)))
+    (let [clip-id (add-clip-at-zero!)]
+      (ui/wait-for! #(ui/visible? "#timeline-device-hint"))
+      (ui/wait-for! #(some? (bank-button "Scale")))
+      (let [scale (bank-button "Scale")
+            scene (ui/on-fx-thread #(.getScene ^javafx.scene.Node scale))
+            canvas #(ui/query "#timeline-canvas")
+            header #(ui/query "#timeline-track-header-1")
+            chain #(ui/query "#timeline-device-chain")
+            marked? #(boolean (or (some-> (ui/query "#timeline-device-hint") (pseudo-class? "drop-target"))
+                                  (some (fn [card] (or (pseudo-class? card "drop-before") (pseudo-class? card "drop-after")))
+                                        (ui/query-all ".tl-device"))))
+            over! (fn [target x y] (ui/fire-drop! (target) hidden x y :drop? false :exit? false :gesture-source scale))
+            leave! (fn [target x y] (ui/fire-drop! (target) hidden x y :drop? false :gesture-source scale))
+            drop! (fn [target x y & opts] (apply ui/fire-drop! (target) hidden x y opts))
+            doc #(vector (items) (tracks) (undo-count))
+            before (doc)]
+        (start-bank-drag! scale)
+        (is (drag-kept? scene) "the button's drag, kept on its window's scene")
+        (testing "over the lanes, the clip under the pointer is marked; leaving clears the mark, not the drag"
+          (is (:accepted? (over! canvas 100 first-track-y)))
+          (is (= {:highlight-clip clip-id} (canvas-drop-preview)))
+          (leave! canvas 100 first-track-y)
+          (is (nil? (canvas-drop-preview)))
+          (is (drag-kept? scene)))
+        (testing "over a track header: that header, until the drag leaves it"
+          (is (:accepted? (over! header 100 10)))
+          (is (pseudo-class? (header) "drop-target"))
+          (leave! header 100 10)
+          (is (not (pseudo-class? (header) "drop-target"))))
+        (testing "over the selected clip's device chain: where it would go; the drop adds once"
+          (is (:accepted? (over! chain 100 60)))
+          (is (marked?) "the empty chain's hint")
+          (is (= before (doc)) "no edit while it hovers")
+          (is (:completed? (drop! chain 100 60 :gesture-source scale)))
+          (ui/wait-for! #(= [:scale] (effect-ids (clip-by-id clip-id))))
+          (is (= (inc (peek before)) (undo-count)) "one undo step")
+          (is (not (marked?)) "and no mark left"))
+        (testing "the button's done ends its drag, the button unarmed; the next click adds once"
+          (ui/fire-drag-done! scale javafx.scene.input.TransferMode/COPY)
+          (is (not (drag-kept? scene)))
+          (is (not (.isArmed ^javafx.scene.control.ButtonBase scale)))
+          (click-bank-button! robot "Scale")
+          (ui/wait-for! #(= [:scale :scale] (effect-ids (clip-by-id clip-id))))
+          (Thread/sleep 100)
+          (ui/sync-fx!)
+          (is (= [:scale :scale] (effect-ids (clip-by-id clip-id)))))
+        (testing "after that, the hidden board has no source: no target offers to take it"
+          (let [then (doc)]
+            (is (not (:accepted? (drop! canvas 100 first-track-y :gesture-source scale))))
+            (is (nil? (canvas-drop-preview)))
+            (is (not (:accepted? (drop! header 100 10 :gesture-source scale))))
+            (is (not (:accepted? (drop! chain 100 60 :gesture-source scale))))
+            (is (= then (doc)))))
+        (testing "a readable board needs no source"
+          (is (:completed? (ui/fire-drop! (canvas) (bank-content :effect :rotation :shape) 100 first-track-y)))
+          (ui/wait-for! #(= [:scale :scale :rotation] (effect-ids (clip-by-id clip-id))))))
+      (testing "a button that goes away (the browser closes) ends the drag it started"
+        (let [old (bank-button "Scale")
+              scene (ui/on-fx-thread #(.getScene ^javafx.scene.Node old))
+              then (vector (items) (tracks) (undo-count))]
+          (start-bank-drag! old)
+          (is (drag-kept? scene))
+          (ui/click! robot "#timeline-add-content")
+          (ui/wait-for! #(nil? (ui/on-fx-thread (fn [] (.getScene ^javafx.scene.Node old)))))
+          (is (not (drag-kept? scene)))
+          (is (not (:accepted? (ui/fire-drop! (ui/query "#timeline-canvas") hidden 100 first-track-y
+                                              :gesture-source old))))
+          (is (= then (vector (items) (tracks) (undo-count))))))
+      (testing "and so does closing the window it is in"
+        (open-browser! robot)
+        (ui/wait-for! #(some? (bank-button "Scale")))
+        (let [button (bank-button "Scale")
+              scene (ui/on-fx-thread #(.getScene ^javafx.scene.Node button))]
+          (start-bank-drag! button)
+          (is (drag-kept? scene))
+          (events/dispatch! {:event/type :ui/close-dialog :dialog-id :timeline-cue-editor})
+          (ui/wait-for! #(not-any? (fn [t] (and t (.startsWith ^String t "Timeline Editor"))) (ui/window-titles)))
+          (is (not (drag-kept? scene))))))))
+
 (deftest timeline-track-reorder-survives-bank-drop-targets
   (open-timeline!)
   (events/dispatch! {:event/type :timeline/add-track :col 0 :row 0})

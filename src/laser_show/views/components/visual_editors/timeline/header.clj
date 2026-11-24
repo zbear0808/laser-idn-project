@@ -129,7 +129,7 @@
   "The browser drop on this row, or nil. The row's cell and track are in its
    userData (set every render, so they're never stale)."
   [^Node node ^DragEvent e]
-  (when-let [payload (dd/read-payload (.getDragboard e) :bank-item drop/valid-payload?)]
+  (when-let [payload (dd/read-payload e :bank-item drop/valid-payload?)]
     (let [{:keys [col row track-id]} (.getUserData node)]
       (drop/drop-target payload {:type :header :track-id track-id} {:col col :row row}))))
 

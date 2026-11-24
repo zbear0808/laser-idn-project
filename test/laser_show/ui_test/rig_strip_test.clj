@@ -15,7 +15,7 @@
   (:import [javafx.event Event]
            [javafx.scene Node]
            [javafx.scene.control CheckBox ComboBox Slider TextField]
-           [javafx.scene.input KeyCode KeyEvent TransferMode]))
+           [javafx.scene.input ClipboardContent KeyCode KeyEvent TransferMode]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -154,7 +154,32 @@
       (ui/assert-visible! "#rig-drop-bar-before-c")
       (drop! :a :c 5 :drop? false)
       (ui/wait-for! #(nil? (get-in (app-state) [:rig-ui :drop])))
-      (is (= [:a :b :c] (order)) "nothing moved"))))
+      (is (= [:a :b :c] (order)) "nothing moved"))
+    (testing "its own drag with the content hidden at the target: the card that started it (plans/2026-11-23-cljfx-reactivity/38)"
+      (let [hidden (doto (ClipboardContent.) (.put (key (first (dnd/drag-content :rig-card {}))) nil))
+            c (ui/query "#rig-card-c")
+            scene (ui/on-fx-thread #(.getScene ^Node c))
+            kept? #(ui/on-fx-thread (fn [] (.containsKey (.getProperties scene) ::dnd/active-drag)))]
+        (with-redefs-fn {#'dnd/open-dragboard! (fn [_ modes] (ui/test-dragboard {} modes))}
+          #(ui/fire-drag-detected! c))
+        (is (kept?))
+        (is (:completed? (ui/fire-drop! (ui/query "#rig-card-a") hidden 5 20 :mode TransferMode/MOVE :gesture-source c)))
+        (ui/wait-for! #(= [:c :a :b] (shown-order)))
+        (is (= [:c :a :b] (order)))
+        (ui/fire-drag-done! c TransferMode/MOVE)
+        (is (not (kept?)) "its done ends it")
+        (testing "; then a hidden drop after :b, with no origin, may show the bar but doesn't land"
+          (let [b (ui/query "#rig-card-b")
+                right (- (width b) 5)]
+            (is (:accepted? (ui/fire-drop! b hidden right 20 :mode TransferMode/MOVE :drop? false :exit? false)))
+            (ui/wait-for! #(= {:projector-id :b :side :after} (get-in (app-state) [:rig-ui :drop])))
+            (is (= {:accepted? true :completed? false} (ui/fire-drop! b hidden right 20 :mode TransferMode/MOVE)))
+            (is (= {:accepted? true :completed? false}
+                   (ui/fire-drop! b hidden right 20 :mode TransferMode/MOVE :gesture-source c))
+                "nor from the card whose drag is done")
+            (ui/wait-for! #(nil? (get-in (app-state) [:rig-ui :drop])))
+            (is (events/flush!))
+            (is (= [:c :a :b] (order)) "nothing moved")))))))
 
 (deftest alt-arrow-moves-the-selected-card-test
   (let [robot (ui/robot)

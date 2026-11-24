@@ -2,6 +2,7 @@
   "Cue grid on the grid tab, and the effects grid."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [clojure.tools.logging :as log]
             [laser-show.events.core :as events]
             [laser-show.input.router :as input-router]
             [laser-show.routing.zone-patterns :as zone-patterns]
@@ -9,12 +10,13 @@
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]
             [laser-show.views.components.drag-drop-cell :as drag-drop])
-  (:import [javafx.event Event]
-           [javafx.scene Node]
+  (:import [java.io File]
+           [javafx.scene Group Node Scene]
            [javafx.scene.control Labeled MenuItem SplitPane]
-           [javafx.scene.input KeyCode MouseButton MouseEvent TransferMode]
+           [javafx.scene.input ClipboardContent KeyCode MouseButton TransferMode]
            [javafx.scene.layout BackgroundFill BorderStroke Region]
            [javafx.scene.paint Color]
+           [javafx.stage Stage]
            [org.testfx.api FxRobot FxRobotInterface]
            [org.testfx.robot Motion]))
 
@@ -474,20 +476,11 @@
   "What a drag gesture detected on the cell at selector starts, recorded
    instead of started: [drag-type payload modes] for each start-drag! call."
   [selector]
-  (let [started (atom [])
-        cell (node selector)]
+  (let [started (atom [])]
     (with-redefs [drag-drop/start-drag! (fn [_ drag-type payload modes]
                                           (swap! started conj [drag-type payload (vec modes)])
                                           nil)]
-      (ui/on-fx-thread
-       #(let [b (.getBoundsInLocal cell)
-              x (/ (+ (.getMinX b) (.getMaxX b)) 2)
-              y (/ (+ (.getMinY b) (.getMaxY b)) 2)
-              scene (.localToScene cell (double x) (double y))
-              screen (.localToScreen cell (double x) (double y))]
-          (Event/fireEvent cell (MouseEvent. MouseEvent/DRAG_DETECTED (.getX scene) (.getY scene)
-                                             (.getX screen) (.getY screen) MouseButton/PRIMARY 1
-                                             false false false false true false false false false false nil)))))
+      (ui/fire-drag-detected! (node selector)))
     @started))
 
 (defn- texts-of
@@ -623,3 +616,288 @@
         (when (learning)
           (events/dispatch! {:event/type :input/cancel-learn})
           (events/flush!))))))
+
+
+;; A cell's drag when the target can't see its content: only the live node
+;; that started it can supply it (plans/2026-11-23-cljfx-reactivity/38)
+
+(defn- format-of
+  "drag-type's private DataFormat, the one drag-content puts on a board."
+  [drag-type]
+  (key (first (drag-drop/drag-content drag-type {}))))
+
+(defn- hidden
+  "A board's content announcing drag-type's private format with the
+   content itself hidden (nil), as a platform may until the drop."
+  [drag-type]
+  (doto (ClipboardContent.) (.put (format-of drag-type) nil)))
+
+(defn- native
+  "A board's content with v under drag-type's private format, as a
+   platform hands it over (a readable payload is a string)."
+  [drag-type v]
+  (doto (ClipboardContent.) (.put (format-of drag-type) v)))
+
+(def ^:private !native-starts
+  "How often a drag start asked the platform for a dragboard."
+  (atom 0))
+
+(defn- start!
+  "A drag detected on node, the platform's part of its start (drag-drop-cell's
+   private open-dragboard!) answered by a test dragboard, how :ok, :refuse
+   (it can't take the content) or :throw. The rest is the app's: the
+   node's drag-detected handler, start-drag! and what it keeps."
+  ([node] (start! node :ok))
+  ([node how]
+   (with-redefs-fn {#'drag-drop/open-dragboard!
+                    (fn [_ modes]
+                      (swap! !native-starts inc)
+                      (case how
+                        :ok (ui/test-dragboard {} modes)
+                        :refuse (ui/test-dragboard {} modes :put? false)
+                        :throw (throw (UnsupportedOperationException. "no drag-and-drop here"))))}
+     #(ui/fire-drag-detected! node))))
+
+(defn- main-scene ^Scene [] (.getScene (ui/main-window)))
+
+(defn- kept?
+  "Does scene keep a drag for a hidden drop at all?"
+  [^Scene scene]
+  (ui/on-fx-thread #(.containsKey (.getProperties scene) ::drag-drop/active-drag)))
+
+(defn- kept
+  "The drag scene keeps, as {:source :drag-type}, or nil."
+  [^Scene scene]
+  (ui/on-fx-thread #(some-> (.get (.getProperties scene) ::drag-drop/active-drag)
+                            (select-keys [:source :drag-type]))))
+
+(defn- doc
+  "What a drop can change, once the events queued are handled: the grid's
+   cells (chains: :cue-chains or :effect-chains), the undo depth and the
+   unsaved flag."
+  [chains]
+  (is (events/flush!))
+  (let [[undo dirty?] (edit-marks)]
+    {:cells (get-in (state/get-raw-state) [:chains chains]) :undo undo :dirty? dirty?}))
+
+(defn- cue [preset-id]
+  {:items [{:id (random-uuid) :type :preset :preset-id preset-id :enabled? true :params {} :effects []}]})
+
+(defn- fx [effect-id]
+  {:active? false :items [{:id (random-uuid) :type :effect :effect-id effect-id :enabled? true :params {}}]})
+
+(def ^:private grids
+  "Both grids for the drag tests: the tab, the cells' id prefix, the chains,
+   the drag type and the other grid's, and a cell's content."
+  [{:tab "#grid-tab" :prefix "grid" :chains :cue-chains :drag-type :grid-cell :other :effects-cell
+    :a (cue :circle) :b (cue :wave)}
+   {:tab "#effects-tab" :prefix "effects" :chains :effect-chains :drag-type :effects-cell :other :grid-cell
+    :a (fx :scale) :b (fx :rotation)}])
+
+(def ^:private refused {:accepted? true :completed? false})
+(def ^:private ignored {:accepted? false :completed? false})
+(def ^:private moved {:accepted? true :completed? true})
+
+(deftest hidden-cell-drop-requires-its-live-source-test
+  (let [robot (ui/robot)]
+    (doseq [{:keys [tab prefix chains drag-type other a b]} grids]
+      (testing (str "the " prefix " grid:")
+        (let [sel (fn [col row] (format "#%s-cell-%d-%d" prefix col row))
+              cell (fn [col row] (node (sel col row)))
+              drop! (fn [[col row] content & opts]
+                      (apply ui/fire-drop! (cell col row) content 20 20 :mode TransferMode/MOVE opts))
+              payload (fn [col row] (drag-drop/encode-payload drag-type col row))]
+          (events/write-state! #(-> %
+                                    (assoc-in [:chains chains [2 1]] a)
+                                    (assoc-in [:chains chains [5 0]] b)
+                                    (update-in [:chains chains] dissoc [7 3] [6 3] [6 2])))
+          (ui/click! robot tab)
+          (ui/wait-for! #(and (ui/has-style-class? (sel 2 1) "grid-cell-content")
+                              (ui/has-style-class? (sel 7 3) "grid-cell-empty")))
+          (let [A (cell 2 1)]
+            (start! A)
+            (is (= {:source A :drag-type drag-type} (kept (main-scene))) "A's drag, kept on its scene")
+            (testing " hidden, from no origin or another node, or not this grid's: nothing (§7 case 3)"
+              (let [before (doc chains)]
+                (is (= refused (drop! [7 3] (hidden drag-type))) "no gesture source: a drag from outside")
+                (is (= refused (drop! [7 3] (hidden drag-type) :gesture-source (cell 0 1))) "another cell")
+                (is (= ignored (drop! [7 3] (doto (ClipboardContent.) (.putString (payload 2 1))) :gesture-source A))
+                    "text only")
+                (is (= ignored (drop! [7 3] (doto (ClipboardContent.) (.putFiles [(File. "show.zip")])) :gesture-source A))
+                    "files only")
+                (is (= ignored (drop! [7 3] (drag-drop/drag-content other {:col 2 :row 1}) :gesture-source A))
+                    "the other grid's")
+                (is (= before (doc chains)))))
+            (testing " a readable board is the payload, whatever A's drag keeps (§7 case 2)"
+              (let [before (doc chains)]
+                (doseq [bad ["{" (drag-drop/encode-payload other 2 1) (payload -1 0) 42]]
+                  (is (= refused (drop! [7 3] (native drag-type bad) :gesture-source A)) (pr-str bad)))
+                (is (= before (doc chains)) "an unreadable one is none: never A's")
+                (is (= moved (drop! [7 3] (native drag-type (payload 5 0)) :gesture-source A)))
+                (let [after (doc chains)]
+                  (is (= [b nil a] (map (:cells after) [[7 3] [5 0] [2 1]])) "the board's cell moved, not A")
+                  (is (= [(inc (:undo before)) true] [(:undo after) (:dirty? after)]) "one undo step, unsaved")
+                  (testing ", from no gesture source too"
+                    (is (= moved (drop! [6 3] (native drag-type (payload 7 3)))))
+                    (let [then (doc chains)]
+                      (is (= [b nil a] (map (:cells then) [[6 3] [7 3] [2 1]])))
+                      (is (= (inc (:undo after)) (:undo then))))))))
+            (testing " hidden, from A itself: A's cell moves once; A's done ends it (§7 case 1)"
+              (let [before (doc chains)]
+                (is (= moved (drop! [7 3] (hidden drag-type) :gesture-source A)))
+                (let [after (doc chains)]
+                  (is (= [a nil] (map (:cells after) [[7 3] [2 1]])))
+                  (is (= (dissoc (:cells before) [2 1]) (dissoc (:cells after) [7 3])) "no other cell changed")
+                  (is (= (inc (:undo before)) (:undo after)) "one undo step")
+                  (ui/wait-for! #(ui/has-style-class? (sel 2 1) "grid-cell-empty"))
+                  (ui/fire-drag-done! A TransferMode/MOVE)
+                  (is (not (kept? (main-scene))) "A's emptied cell still ends its drag")
+                  (is (= refused (drop! [6 2] (hidden drag-type) :gesture-source A))
+                      "the same hidden drop again: offered, never completed")
+                  (is (= after (doc chains))))))))))))
+
+(deftest done-detach-and-failed-start-retire-only-the-origin-test
+  (let [robot (ui/robot)
+        stage ^Stage (ui/main-window)
+        scene (main-scene)
+        a (cue :circle) b (cue :star)
+        sel (fn [col row] (format "#grid-cell-%d-%d" col row))
+        cell (fn [col row] (node (sel col row)))
+        hidden-drop (fn [origin [col row]]
+                      (ui/fire-drop! (cell col row) (hidden :grid-cell) 20 20
+                                     :mode TransferMode/MOVE :gesture-source origin))]
+    (events/write-state! #(-> %
+                              (assoc-in [:chains :cue-chains [2 1]] a)
+                              (assoc-in [:chains :cue-chains [4 2]] b)))
+    (ui/wait-for! #(ui/has-style-class? (sel 4 2) "grid-cell-content"))
+    (testing "the source's done ends its drag: dropped (MOVE), or cancelled or released on nothing (no mode)"
+      (let [A (cell 2 1)
+            before (doc :cue-chains)]
+        (doseq [mode [TransferMode/MOVE nil]]
+          (start! A)
+          (is (kept? scene))
+          (ui/fire-drag-done! A mode)
+          (is (not (kept? scene)) (str "nothing kept after " (or mode "a cancel")))
+          (is (= refused (hidden-drop A [7 3]))))
+        (is (= before (doc :cue-chains)) "and nothing edited")))
+    (testing "rendered again in between, the source still ends its drag"
+      (let [A (cell 2 1)]
+        (start! A)
+        (events/write-state! assoc-in [:chains :cue-chains [2 1] :name] "Renamed")
+        (ui/wait-for! #(= "Renamed" (label-text (str (sel 2 1) " .grid-cell-label"))))
+        (is (identical? A (cell 2 1)) "the same node")
+        (is (= {:source A :drag-type :grid-cell} (kept scene)))
+        (ui/fire-drag-done! A nil)
+        (is (not (kept? scene)))))
+    (testing "§7 case 4: B's drag after A's of the same type; A's cleanup again leaves B's alone"
+      (let [A (cell 2 1) B (cell 4 2)]
+        (start! A)
+        (ui/fire-drag-done! A nil)
+        (start! B)
+        (ui/fire-drag-done! A nil)
+        (is (= {:source B :drag-type :grid-cell} (kept scene)))
+        (is (= refused (hidden-drop A [7 3])) "A's drag is over")
+        (is (= moved (hidden-drop B [7 3])))
+        (is (events/flush!))
+        (is (= [b nil] (map #(get-in (state/get-raw-state) [:chains :cue-chains %]) [[7 3] [4 2]])) "B's cell moved")
+        (ui/fire-drag-done! B TransferMode/MOVE)
+        (is (not (kept? scene)))))
+    (testing "a start that fails keeps nothing, and the drag before it ended"
+      (let [A (cell 2 1) C (cell 0 0)]
+        (doseq [how [:throw :refuse]]
+          (start! A)
+          (is (kept? scene))
+          (start! C how)
+          (is (not (kept? scene)) (name how))
+          (is (= refused (hidden-drop A [6 3])))
+          (is (= refused (hidden-drop C [6 3]))))))
+    (testing "the source leaves its scene, without a done: another tab"
+      ;; Projectors, not Effects: the Effects tab's cells are the Grid tab's
+      ;; nodes, described again
+      (let [A (cell 2 1)
+            before (doc :cue-chains)]
+        (start! A)
+        (ui/click! robot "#projectors-tab")
+        (ui/wait-for! #(nil? (ui/on-fx-thread (fn [] (.getScene ^Node A)))))
+        (is (not (kept? scene)))
+        (ui/click! robot "#grid-tab")
+        (ui/wait-for! #(some? (cell 2 1)))
+        (is (not (identical? A (cell 2 1))) "the tab's cells are new ones")
+        (is (= refused (hidden-drop A [6 3])) "the old node supplies nothing")
+        (is (not (kept? scene)))
+        (is (= before (doc :cue-chains)))))
+    (testing "the scene leaves its window, and is back"
+      (let [A (cell 2 1)]
+        (start! A)
+        (ui/on-fx-thread #(do (.setScene stage (Scene. (Group.))) (.setScene stage scene)))
+        (is (not (kept? scene)))
+        (is (= refused (hidden-drop A [6 3])))))
+    (testing "the window hides, and shows again"
+      (let [A (cell 2 1)]
+        (start! A)
+        (ui/on-fx-thread #(.hide stage))
+        (is (not (kept? scene)))
+        (ui/on-fx-thread #(.show stage))
+        (ui/wait-for! #(some? (ui/main-window)))
+        (is (not (kept? scene)) "and nothing comes back")
+        (is (= refused (hidden-drop A [6 3])))))
+    (testing "an empty cell starts no drag"
+      (reset! !native-starts 0)
+      (start! (cell 1 1))
+      (is (zero? @!native-starts))
+      (is (not (kept? scene))))
+    (testing "the Vibes picker's cells have no drag handlers at all, and still take clicks"
+      (let [library #(get-in (state/get-raw-state) [:config :vibes :library])]
+        (ui/click! robot "#vibes-tab")
+        (ui/wait-for! #(some? (node "#pick-cell-5-0")))
+        (let [pick (node "#pick-cell-5-0")
+              before (library)]
+          (is (= [nil nil nil nil]
+                 (ui/on-fx-thread #(vector (.getOnDragDetected pick) (.getOnDragDone pick)
+                                           (.getOnDragOver pick) (.getOnDragDropped pick)))))
+          (ui/click! robot "#pick-cell-5-0")
+          (ui/wait-for! #(not= before (library))))))))
+
+(defn- escape-drag!
+  "A real drag from source towards target, cancelled with Escape before the
+   button is released."
+  [^FxRobot robot ^Node source ^Node target]
+  (.moveTo robot source)
+  (.press robot (into-array MouseButton [MouseButton/PRIMARY]))
+  (.moveBy robot 12.0 0.0)
+  (.moveTo robot target)
+  (ui/sync-fx!)
+  (ui/press! robot KeyCode/ESCAPE)
+  (.release robot (into-array MouseButton [MouseButton/PRIMARY]))
+  (ui/sync-fx!))
+
+(deftest native-cell-drag-clears-on-drop-and-escape-test
+  (if (ui/headless?)
+    (log/info "Skipping native-cell-drag-clears-on-drop-and-escape-test: the headless glass platform can't run a real drag-and-drop (windowed only)")
+    (let [robot (ui/robot)
+          scene (main-scene)]
+      (doseq [{:keys [tab prefix chains a]} grids]
+        (testing (str "the " prefix " grid:")
+          (let [sel (fn [col row] (format "#%s-cell-%d-%d" prefix col row))
+                cell (fn [col row] (node (sel col row)))
+                at (fn [col row] (get-in (state/get-raw-state) [:chains chains [col row]]))]
+            (events/write-state! #(-> %
+                                      (assoc-in [:chains chains [2 1]] a)
+                                      (update-in [:chains chains] dissoc [7 3])))
+            (ui/click! robot tab)
+            (ui/wait-for! #(ui/has-style-class? (sel 2 1) "grid-cell-content"))
+            (testing " a drop moves the cell, and the source's done ends its drag"
+              (ui/drag-node-to! robot (cell 2 1) (cell 7 3) 20 20)
+              (ui/wait-for! 5000 #(= a (at 7 3)))
+              (is (nil? (at 2 1)))
+              (ui/wait-for! #(not (kept? scene))))
+            (testing " Escape cancels it: nothing moves, nothing is kept"
+              (let [before (doc chains)]
+                (escape-drag! robot (cell 7 3) (cell 2 1))
+                (ui/wait-for! #(not (kept? scene)))
+                (is (= before (doc chains)))))
+            (testing " released where nothing takes it: the same"
+              (let [before (doc chains)]
+                (ui/drag-node-to! robot (cell 7 3) (node "#grid-hint") 5 5)
+                (ui/wait-for! #(not (kept? scene)))
+                (is (= before (doc chains)))))))))))
