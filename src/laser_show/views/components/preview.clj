@@ -4,8 +4,10 @@
    group's cell shows what is sent to that group, as drawn; a laser's cell
    (:auto.laser/<id>) what that laser draws, its halves fitted, before its
    calibration (zones plan Z3). The cells' canvases are square and as big as
-   the pane lets them be. Also the rig cards' thumbnails of what each laser
-   really sent (output-thumbnail).
+   the pane lets them be. Also the rig cards' thumbnails: the frame each
+   laser's driver was passed in its last call that returned normally, after
+   calibration and safety, which says nothing of what the device drew
+   (output-thumbnail).
 
    Features:
    - Zone group filtering per cell (the label opens a zone picker)
@@ -16,6 +18,8 @@
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.animation.show-time :as show-time]
+            [laser-show.backend.output-runtime :as output-runtime]
+            [laser-show.common.timing :as timing]
             [laser-show.routing.rig :as rig]
             [laser-show.routing.targets :as targets]
             [laser-show.subs :as subs]
@@ -24,7 +28,10 @@
             [laser-show.views.components.target-control :as target-control]
             [laser-show.views.components.zone-chips :as zone-chips]
             [laser-show.views.components.measured :as measured])
-  (:import [javafx.scene.canvas Canvas GraphicsContext]
+  (:import [javafx.scene Node]
+           [javafx.scene.canvas Canvas GraphicsContext]
+           [javafx.scene.control Labeled]
+           [javafx.scene.layout Pane]
            [javafx.scene.paint Color]
            [javafx.scene.text Font]
            [javafx.util StringConverter]))
@@ -175,15 +182,18 @@
           (.setAccessibleText canvas text))))))
 
 
-;; A rig card's thumbnail: what its laser sent (zones plan Z3)
+;; A rig card's thumbnail: the last driver call that returned normally
+;; (zones plan Z3; reactivity plan 18). What it can say is that frame and
+;; when the call returned: no device reports what it received or drew.
 
 (def ^:private limit-color
   "The safety limit's outline: dim, so it never reads as light."
   (Color/rgb 70 70 70))
 
 (defn- draw-thumbnail!
-  "points (what the laser sent, in its output space) on canvas, on black,
-   inside the grey outline of its safety limit [x0 y0 x1 y1] (none for nil)."
+  "points (the frame a driver was passed, in its output space) on canvas,
+   on black, inside the grey outline of the configured safety limit [x0 y0
+   x1 y1] (none for nil)."
   [^Canvas canvas points limit]
   (let [gc (.getGraphicsContext2D canvas)
         w (.getWidth canvas)
@@ -198,37 +208,128 @@
     (when (seq points)
       (draw-lines! gc (if (vector? points) points (vec points)) w h))))
 
+(def ^:const RETURN_FRESH_MS
+  "How long a driver call's normal return keeps a thumbnail fresh: from this
+   age on it is Stale."
+  250)
+
+(def ^:private thumbnail-looks
+  "Each kind of thumbnail presentation's caption and its canvas's accessible
+   text."
+  {:frame {:caption "Driver frame" :text "Last successful driver call: frame"}
+   :empty {:caption "Empty frame" :text "Last successful driver call: empty frame"}
+   :empty-retry {:caption "Empty (retry)" :text "Last successful driver call: empty recovery frame"}
+   :unknown {:caption "Unknown" :text "Output unknown: no current driver result"}
+   :stale {:caption "Stale" :text "No recent successful driver return"}
+   :off {:caption "Not streaming" :text "Not streaming"}})
+
+(def ^:private thumbnail-tooltip
+  "What a thumbnail's caption says it shows."
+  "Frame passed to the last driver call that returned normally. Device delivery is not reported.")
+
+(defn thumbnail-presentation
+  "What a rig card's thumbnail shows of observation
+   (output-runtime/thumbnail-observation) at now-ns, on the clock its
+   returns are stamped on (timing/nanotime): {:kind :caption :text :points
+   :owner}. :kind is
+   - :frame, a fresh return of a nonempty frame (an all-dark one too),
+     which is :points;
+   - :empty or :empty-retry, a fresh return of an empty frame: a regular
+     one, or the one sent to recover from an error;
+   - :stale, the last return is RETURN_FRESH_MS old or more;
+   - :unknown, an output with no return known now: opening, after an error
+     until the next return, or a stamp that is missing or in the future;
+   - :off, no output (observation :off).
+   Fresh is 0 <= now-ns - :at-ns < RETURN_FRESH_MS. :points is nil but for
+   :frame, so no other kind keeps a frame; :owner is the observation's
+   [run-token session-token], nil without one. Pure."
+  [observation now-ns]
+  (let [{:keys [knowledge last-ok run-token session-token]} (when (map? observation) observation)
+        {:keys [frame at-ns source]} last-ok
+        age (when (and (int? at-ns) (int? now-ns)) (- (long now-ns) (long at-ns)))
+        kind (cond
+               (= :off observation) :off
+               (or (not= :returned knowledge) (nil? age) (neg? age)) :unknown
+               (>= age (* RETURN_FRESH_MS 1000000)) :stale
+               (seq frame) :frame
+               (= :recovery source) :empty-retry
+               :else :empty)]
+    (assoc (thumbnail-looks kind)
+           :kind kind
+           :points (when (= :frame kind) frame)
+           :owner (when (map? observation) [run-token session-token]))))
+
+(defn- thumbnail-parts
+  "The canvas, the caption and the meter slot of a thumbnail row
+   (output-thumbnail). A Parent's children aren't a list nth reads."
+  [^Pane row]
+  (let [children (.getChildren row)
+        info (.getChildren ^Pane (.get children 1))]
+    [(.get children 0) (.get info 0) (.get info 1)]))
+
 (defn- redraw-thumbnail!
-  "A thumbnail's canvas from what projector-id's provider produced last
-   (show-time/output-frame, after calibration and safety) while that is
-   newer than show-time/STALE_MS; otherwise only the limit, and the canvas
-   says \"Not streaming\" (Q-Z3-2 A). It draws only when that changed."
-  [^Canvas canvas _snapshot {:keys [projector-id limit]}]
-  (let [{:keys [frame at-ns]} (show-time/output-frame projector-id)
-        live? (boolean (and at-ns (< (- (System/nanoTime) (long at-ns)) (* show-time/STALE_MS 1000000))))
-        points (when live? frame)
-        drawn [(System/identityHashCode points) live? limit (.getWidth canvas) (.getHeight canvas)]
-        props (.getProperties canvas)]
-    (when (not= drawn (.get props ::drawn))
-      (.put props ::drawn drawn)
-      (draw-thumbnail! canvas points limit)
-      (let [text (if live? "Laser output" "Not streaming")]
-        (when (not= text (.getAccessibleText canvas))
-          (.setAccessibleText canvas text))))))
+  "One sample of a rig card's thumbnail row (output-thumbnail): its
+   projector's observation, read once, then the time, and from that one
+   presentation (thumbnail-presentation) the canvas, its accessible text,
+   the caption and the meter slot. The canvas is drawn again only when what
+   it shows changed: the projector, the owner, the kind, the limit, the
+   canvas's size, and the very frame shown (identical?), so a fresh return
+   of the same frame keeps it fresh without a repaint. Expiry is decided
+   here, when it is read; nothing is cleared at the source. The caption's
+   text and the meter slot's visibility (none while off) are this
+   painter's alone."
+  [^Pane row _snapshot {:keys [projector-id limit]}]
+  (let [observation (output-runtime/thumbnail-observation projector-id)
+        {:keys [kind caption text points owner]} (thumbnail-presentation observation (timing/nanotime))
+        [^Canvas canvas ^Labeled label ^Node slot] (thumbnail-parts row)
+        props (.getProperties canvas)
+        k [projector-id owner kind limit (.getWidth canvas) (.getHeight canvas)]
+        {drawn-key :key drawn-points :points} (.get props ::drawn)]
+    (when-not (and (= k drawn-key) (identical? points drawn-points))
+      (.put props ::drawn {:key k :points points})
+      (draw-thumbnail! canvas points limit))
+    (when (not= text (.getAccessibleText canvas))
+      (.setAccessibleText canvas text))
+    (when (not= caption (.getText label))
+      (.setText label caption))
+    (let [meter? (not= :off kind)]
+      (when (not= meter? (.isVisible slot))
+        (.setVisible slot meter?)
+        (.setManaged slot meter?)))))
 
 (defn output-thumbnail
-  "What projector-id really sent, after calibration and safety (C-10), on a
-   size × size canvas, with its safety limit outlined; redrawn at most 10
-   times a second."
-  [{:keys [projector-id limit size]}]
-  {:fx/type clock-view/ext-clock-redraw
-   :redraw! #'redraw-thumbnail!
-   :every-ms 100
-   :desc {:fx/type :canvas
-          :id (str "rig-card-thumbnail-" (name projector-id))
-          :width size
-          :height size
-          :user-data {:projector-id projector-id :limit limit}}})
+  "A rig card's thumbnail row: on a size × size canvas, the frame
+   projector-id's driver was passed in its last call that returned
+   normally, after calibration and safety (C-10), inside the grey outline
+   of its configured safety limit; beside it a one-line caption of what that
+   is (thumbnail-presentation), with meter (a description, or nil) under
+   it, hidden while the output is off. One timer samples it at most 10
+   times a second (redraw-thumbnail!), whatever the show clock does. It
+   says nothing of what the device received or drew."
+  [{:keys [projector-id limit size meter]}]
+  (let [id (name projector-id)]
+    {:fx/type clock-view/ext-clock-redraw
+     :redraw! #'redraw-thumbnail!
+     :every-ms 100
+     :sample-every-interval? true
+     :desc {:fx/type :h-box
+            :id (str "rig-card-output-" id)
+            :spacing 6
+            :alignment :top-left
+            :user-data {:projector-id projector-id :limit limit}
+            :children [{:fx/type :canvas
+                        :id (str "rig-card-thumbnail-" id)
+                        :width size
+                        :height size}
+                       {:fx/type :v-box
+                        :spacing 3
+                        :children [{:fx/type :label
+                                    :id (str "rig-card-return-" id)
+                                    :style-class ["text-small" "label-hint"]
+                                    :tooltip {:fx/type :tooltip :text thumbnail-tooltip}}
+                                   {:fx/type :v-box
+                                    :id (str "rig-card-meter-" id)
+                                    :children (if meter [meter] [])}]}]}}))
 
 
 ;; Zone Group Dropdown Helpers
