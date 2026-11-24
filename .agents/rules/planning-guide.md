@@ -17,10 +17,10 @@ Before writing, grep `plans/` (especially the latest `*-improvement-review/`) fo
 3. **Reuse before you create.** List what already exists that you'll reuse or extend. Justify every NEW namespace or function.
 4. **State placement.** For each new or changed key, say:
    - **where it lives:** document (saved + undo), UI state, or a runtime atom (threads, devices, sockets, high-frequency data);
-   - **who writes it:** a handler, an effect, or a background thread;
+   - **who writes it:** for app state, which handler returns the change to the event pipeline; for a runtime resource, which effect or thread owns it;
    - **whether it enters undo/dirty tracking.**
 
-   Check against `docs/CLJFX_STATE_MANAGEMENT.md`. Never `swap!` app state from outside the event flow.
+   Check against [Reactive state in this app](../../docs/CLJFX_STATE_MANAGEMENT.md#reactive-state-in-this-app). For UI state, name the consuming view's subscription. For async writes, identify the completion event and how it recognizes the current request. Never `swap!` app state from outside the event flow.
 5. **Handlers are pure; side effects are registered effects.** List each side effect (file I/O, clipboard, dialogs, devices, network) as a named effect key, and say whether it already exists in `events/core.clj`.
 6. **Trace the call path.** For every event you change or hook, name its dispatcher (`file:line`).
 7. **Algorithms get examples and invariants.** Give 3–5 input → output examples as data, plus the invariants (e.g. "never removes items", "channels are 0-based internally"). These become the tests.

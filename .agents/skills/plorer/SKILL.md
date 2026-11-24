@@ -21,7 +21,7 @@ clj -M:dev .agents/skills/app-repl/nrepl_eval.clj @debug-output/step.clj
 - Each call takes about two seconds, so put several forms in one call. The call prints what the forms print, then each form's value.
 - Inside the shell's single quotes, write `(quote x)` for `'x`. Put multi-line forms, and forms with single quotes, in a file under `debug-output/` (gitignored) and pass `@path`.
 - A form that throws doesn't stop the later forms in the same call, but the call exits with status 1. Wrap steps that depend on each other in `(do ...)`.
-- `def`s and the app persist between calls: `(def dlg ...)` in one call, use `dlg` in the next.
+- `def`s and the app persist between calls. A `dlg` reference is useful while that window remains mounted; after a close/reopen or editor retarget, find the window and its controls again and check which entity is displayed.
 
 If you reach the REPL another way, such as Calva or an MCP eval tool, evaluate the same forms in the `user` namespace.
 
@@ -34,7 +34,7 @@ clj -M:dev .agents/skills/app-repl/nrepl_eval.clj '(windows)'
 
 The helpers file also requires plorer as `p`.
 
-`(windows)` should list a `"Laser Show"` stage. If no window is open, start the app in test mode, which runs no hardware or network services, and wait for its window:
+`(windows)` should list the main stage. In your own fresh test REPL, start the test app and wait for its window as shown below. In a shared REPL, check with the user before remounting; `start-test!` replaces the current state.
 
 ```clojure
 (require 'laser-show.app)
@@ -50,15 +50,15 @@ Ask the user before running `(start)`, which starts the real app: it scans the n
 
 1. Look: `(windows)`, `(ids)`, `(outline (main-window) :depth 4)`, `(shot!)`.
 2. Act: `click!`, `right-click!`, `double-click!`, `choose!`, `type!`, `fill!`, or plorer's own input functions.
-3. Wait: events and rendering run asynchronously. `(wait-for #(...))` until the result shows up, rather than sleeping.
-4. Check: `text-of`, `p/props`, `(state [...])` or another screenshot.
+3. Wait: event handling, worker completion and JavaFX rendering are separate. `events/flush!` only waits for events ahead of its marker. Use `wait-for` with the state or visible result you need.
+4. Check both sides of an edit: the committed value via `(state path)` and the displayed value via `text-of` or `p/props` on a freshly queried control. A JavaFX control may change itself before the app accepts or rejects the input.
 
 For example, set the tempo and confirm it:
 
 ```clojure
 (fill! "#bpm-input" "128")                    ; click, select all, type, Enter
-(wait-for #(= 128.0 (state [:timing :bpm])))  ; => true
-(text-of "#bpm-input")                        ; => "128.0"
+(wait-for #(and (= 128.0 (state [:timing :bpm]))
+                (= "128.0" (text-of "#bpm-input"))))
 (shot! (main-window) "bpm")                   ; => "debug-output/bpm.png"
 ```
 
@@ -101,7 +101,7 @@ Open a screenshot with the `read` tool to see it.
 
 ## App state
 
-Confirm what an action did by reading the state with `(state path)`:
+`(state path)` reads a `get-raw-state` snapshot for inspection. It does not establish a render dependency. If the database changed but the control didn't, check that the production view subscribes via its supplied `:fx/context`. If the wrong entity changed, repeat on disposable data: open A, retarget the same editor to B, invoke the real shortcut, then compare A and B. See [Reactive state in this app](../../../docs/CLJFX_STATE_MANAGEMENT.md#reactive-state-in-this-app).
 
 | What | Path |
 |---|---|
@@ -117,7 +117,7 @@ Confirm what an action did by reading the state with `(state path)`:
 
 ## Recipes
 
-Each of these was run against the app in test mode.
+These examples use test mode. Exercise the input that actually triggers the change (Enter, selection, focus loss or a key in the focused list); dispatching an equivalent event by hand would skip the listener under investigation.
 
 ```clojure
 ;; Switch tabs.
@@ -210,7 +210,7 @@ Input functions take a window or scene and a position in that scene's coordinate
 - `(p/one javafx.stage.Window)` fails as soon as a dialog, menu or combo list is open, because each of them is a window.
 - `(click! target :secondary)` opens no context menu. A real right-click also sends a context-menu request, which `right-click!` adds.
 - A double-click is two clicks at one point in quick succession, which is what `double-click!` sends. Clicks in separate calls stay single clicks.
-- Drag-and-drop can't be driven: moving cells, reordering lists, dragging from the timeline browser. In headless mode, starting a drag throws `UnsupportedOperationException`. In a visible window, the OS drag doesn't follow plorer's synthetic mouse. Dispatch the event the drop would send instead, or cover the drop in a UI test with `fire-drop!` from `test/laser_show/ui_test/testfx.clj`.
+- Drag-and-drop can't be driven: moving cells, reordering lists, dragging from the timeline browser. In headless mode, starting a drag throws `UnsupportedOperationException`. In a visible window, the OS drag doesn't follow plorer's synthetic mouse. Dispatching the intended event checks the handler only; to check the installed drop handler and its target, use `fire-drop!` from `test/laser_show/ui_test/testfx.clj` on the actual node.
 - The app's text fields apply their value on Enter. `fill!` presses it. After `type!`, press it yourself with `(p/key-tap! window :enter)`.
 - Keys go to the focused node of the window you pass, so click the field first. To see what has focus: `(describe (:focus-owner (p/props (.getScene (main-window)) :only [:focus-owner])))`.
 - Escape sent to a popup's own window doesn't close it. Send it to the main window, or click somewhere else in the main window.

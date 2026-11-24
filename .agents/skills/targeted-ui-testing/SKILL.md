@@ -55,10 +55,18 @@ Always include a platform alias (`:win`, `:mac`, `:mac-arm` or `:linux`); withou
 - Use the shared helpers in `laser-show.ui-test.testfx`; do not cache JavaFX nodes across renders.
 - Put new UI tests in the feature namespace they belong to (or a new `laser-show.ui-test.<feature>-test`), with `(use-fixtures :once fixtures/with-toolkit)` and `(use-fixtures :each fixtures/with-app)` from `laser-show.ui-test.fixtures`, so each test mounts a fresh app and can run on its own.
 - Use `KeyCode/SHORTCUT` (Cmd on macOS, Ctrl elsewhere) for shortcut-modifier clicks; never hard-code `KeyCode/CONTROL`.
-- Wrap every state assertion that follows an interaction in `ui/wait-for!`; events are processed asynchronously.
-- Set up app state with `events/write-state!` and wait for a dispatched event with `events/flush!`; a direct `state/swap-state!` throws while the app from `with-app` runs.
+- Wrap state assertions after an interaction in `ui/wait-for!`. When a control accepts or rejects an edit, also re-query its displayed value (`ui/assert-text!`, or `ui/wait-for!` with `ui/selected?`). An unchanged model alone doesn't prove the widget reverted; wait for the refusal or completion first.
+- Use `events/write-state!` for fixture setup, not for the edit under test; it bypasses undo, dirty and persistence effects. A direct `state/swap-state!` from the test thread throws while `with-app` runs. `events/flush!` waits for events ahead of its marker, not pending workers or renders. Wait for their observable result separately.
 - Failure screenshots are written to `test-results/<ns>/<test>.png`.
 - Keep hardware, network discovery, MIDI, OSC, Link, and gamepad services disabled or mocked in UI tests.
+
+### Choosing the regression for a reactive change
+
+Use the [project's reactive state rules](../../../docs/CLJFX_STATE_MANAGEMENT.md#reactive-state-in-this-app) to choose the smallest test that can see the failure:
+
+- **Control → document:** exercise the native input, not only a prebuilt handler event. For numeric Enter, `ui/fill!` sets text and `ui/submit!` fires the action; assert that the stored value is a number. If it is saved, round-trip that edit and assert the content survives.
+- **Callback lifetime:** open A, reuse the editor for B, then press the key or commit the edit. Assert that B changed and A did not. For an asynchronous operation, delay the original result until after replacement/cancellation and assert it cannot overwrite the current state.
+- **Subscriptions:** use a real `fx/create-context` and derive successors with `fx/swap-context`. Check a relevant change updates the selector and an unrelated change doesn't repeat expensive work. For a cache-size claim, count view calls on a representative mounted tree as well: one selector in isolation can't reveal eviction across a whole tab.
 
 ## Completion evidence
 

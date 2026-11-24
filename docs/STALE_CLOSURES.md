@@ -2,7 +2,7 @@
 
 ## Overview
 
-Stale closures are a common source of bugs in cljfx applications. This document explains what they are, how they manifest, and patterns to avoid them.
+For project code, use [Reactive state in this app](CLJFX_STATE_MANAGEMENT.md#reactive-state-in-this-app). There are two different opportunities for staleness: a JavaFX node can outlive the render that installed its callback, and a queued event can outlive the data used to build it. Recreating a closure or replacing it with a map only addresses the first.
 
 ## What is a Stale Closure?
 
@@ -66,11 +66,11 @@ The `on-created` callback runs **once** when the JavaFX node is first created. E
 ### 4. UI Buttons Work but Keyboard Shortcuts Don't
 
 This is a strong indicator because:
-- **Buttons**: Handlers are recreated on each render (no stale closure)
+- **Buttons**: Declarative handler props advance with the description. A queued action can still contain data from an older render.
 - **Keyboard**: Handler was set up once in `on-created` (stale closure)
 
 ```clojure
-;; Button - WORKS (new handler on each render)
+;; A declarative handler sees the items from its latest description
 {:fx/type :button
  :on-action (fn [_] (do-something items))}  ; Fresh items each render
 
@@ -82,9 +82,9 @@ This is a strong indicator because:
 
 ## Solutions
 
-### Solution 1: Atom-Based State for Imperative Handlers
+### Historical workaround: atom-based state for imperative handlers
 
-Store current values in atoms and update them on each render:
+The example below illustrates the indirection used by older list code. Do not use a render-time registry write as a component lifecycle hook: a cache hit may skip it, a reopened node can miss its entry, and a retargeted node can still look up the previous ID. Prefer declarative event props. If a native listener must be installed once, bind its current command or ID via declarative `:user-data` and read that from the node at event time; see [the commit-field focus listener](../src/laser_show/views/components/commit_field.clj#L76-L95).
 
 ```clojure
 ;; Registry of atoms per component
@@ -126,35 +126,29 @@ Store current values in atoms and update them on each render:
 
 ### Solution 2: Event Dispatch Instead of Direct Mutation
 
-Instead of capturing data, dispatch events that read current state:
+Instead of capturing selected items, put the current target on the node and dispatch its ID. The handler resolves the selection from its `:state` co-effect. This works even when the node is reused for a different list:
 
 ```clojure
-;; BAD - Captures items at setup time
-:on-created (fn [node]
-              (.setOnKeyPressed node
-                (fn [e]
-                  (when (ctrl+g? e)
-                    (group-items! items)))))  ; Stale!
-
-;; GOOD - Dispatch event that reads current state
-:on-created (fn [node]
-              (.setOnKeyPressed node
-                (fn [e]
-                  (when (ctrl+g? e)
-                    (events/dispatch! {:event/type :ui/group-selected
-                                       :component-id component-id})))))
-                    ;; Handler reads current state from global store
+{:fx/type fx/ext-on-instance-lifecycle
+ :desc {:fx/type :v-box :user-data {:component-id component-id}}
+ :on-created
+ (fn [node]
+   (.setOnKeyPressed node
+     (reify javafx.event.EventHandler
+       (handle [_ e]
+         (when (= javafx.scene.input.KeyCode/ESCAPE (.getCode e))
+           (events/dispatch! {:event/type :list/clear-selection
+                              :component-id (:component-id (.getUserData node))}))))))}
 ```
 
 ### Solution 3: Use cljfx Event Maps (When Possible)
 
-cljfx event maps don't have stale closure issues because they're created fresh each render:
+A map installed as the handler is dispatched with `:fx/event`. Send the action the user chose; derive mutable facts in the handler when the event is processed:
 
 ```clojure
-;; This is safe - event map is recreated each render
 {:fx/type :button
- :on-action {:event/type :do-something
-             :items items}}  ; Fresh items value each render
+ :on-action {:event/type :list/clear-selection
+             :component-id component-id}}
 ```
 
 ### Solution 4: Avoid Imperative Setup When Possible
@@ -166,7 +160,7 @@ Sometimes you can avoid `on-created` entirely:
 ;; use cljfx's :on-key-pressed prop (if available)
 {:fx/type :text-field
  :on-key-pressed {:event/type :handle-key
-                  :items items}}  ; Safe - recreated each render
+                  :component-id component-id}}
 ```
 
 ## Debugging Checklist
@@ -203,7 +197,7 @@ In `list.clj`, keyboard shortcuts (Ctrl+G for grouping) stopped working after ad
  ...}
 ```
 
-### The Fix
+### The historical fix
 
 ```clojure
 ;; Store atoms per component
@@ -230,12 +224,11 @@ In `list.clj`, keyboard shortcuts (Ctrl+G for grouping) stopped working after ad
 
 ## Summary
 
-| Scenario | Risk Level | Solution |
+| Scenario | What can go wrong | Solution |
 |----------|------------|----------|
-| `on-created` with closures | HIGH | Use atoms or event dispatch |
-| Imperative `.setOnX` handlers | HIGH | Use atoms or event dispatch |
-| cljfx event maps `{:event/type ...}` | SAFE | N/A - recreated each render |
-| Function props on cljfx components | SAFE | N/A - recreated each render |
-| Timers/intervals | HIGH | Store current state in atoms |
+| `on-created` or imperative `.setOnX` | A captured target can outlive the edit | Read current node data at input time; detach on disposal |
+| cljfx map handler | Queued payload can contain an old model | Send a stable ID and the user's input; resolve against current `:state` |
+| Native function listener | Returning an event map has no effect | Call `events/dispatch!` after extracting plain input on the FX thread |
+| Timer or delayed completion | Its owner may be gone or replaced | Stop timers with the node; match completion events to the active request |
 
-Remember: If a closure is set up once but needs to access data that changes, you need a level of indirection (atoms, event dispatch, or global state queries) to avoid staleness.
+When checking the fix, keep the editor mounted, switch from A to B, then verify that the real callback changes B and leaves A alone. Also exercise close/reopen; cached descriptions need to work on a newly created node.

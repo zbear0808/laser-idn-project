@@ -39,22 +39,11 @@ Dev mode is controlled by the `laser-show.dev` system property:
 
 The `laser-show.dev-config/dev-mode?` function checks this property.
 
-### 3. Conditional Lifecycle
+### 3. Which tools are actually active?
 
-In `laser-show.app/create-renderer`, the lifecycle is conditionally selected:
+The REPL help and `explain-desc` below are usable with `:dev`. Automatic validation, component stacks and the F12 inspector also need a dev lifecycle installed on the renderer. The current [`app/create-app`](../src/laser_show/app.clj#L95-L112) computes a dev resolver but passes it as `:opts` to `fx/create-app`. [cljfx 1.10.6](https://github.com/cljfx/cljfx/blob/1.10.6/src/cljfx/api.clj#L584-L613) builds its own renderer options and ignores that key. It uses the standard context-aware function lifecycle. The supplied `:error-handler` is also ignored; the `create-app` option is `:renderer-error-handler`.
 
-```clojure
-(if (dev-config/dev-mode?)
-  ;; Dev mode: Use validating lifecycle with better errors
-  @(requiring-resolve 'cljfx.dev/type->lifecycle)
-  ;; Prod mode: Use standard lifecycle
-  #(or (fx/keyword->lifecycle %)
-       (fx/fn->lifecycle-with-context %)))
-```
-
-### 4. Error Handler Integration
-
-A custom error handler logs errors and integrates with dev tools. In dev mode, this shows component stacks from cljfx.dev.
+If changing that wiring, preserve the [context-aware rendering and event pipeline](CLJFX_STATE_MANAGEMENT.md#reactive-state-in-this-app) and verify what reaches the renderer. The startup message alone is not evidence that the inspector is active.
 
 ## Tools and Usage
 
@@ -115,7 +104,7 @@ Invoking this fn will open a window with props and types reference.
 
 ### Improved error messages with spec
 
-The application is configured to use the validating type->lifecycle opt in dev mode. This validates all cljfx component descriptions using spec and properly describes the errors.
+With the validating lifecycle installed, invalid component descriptions produce errors like the one below. With the current wiring, use `explain-desc` directly to validate a description.
 
 Example of an error in the REPL:
 
@@ -156,13 +145,13 @@ You can also validate individual descriptions while developing using `explain-de
 
 ### Cljfx component inspector
 
-Using the same dev type->lifecycle opt, you also get cljfx component tree inspector that can be opened by pressing **F12** while the application is focused.
+With a dev type->lifecycle installed, **F12** opens the component tree inspector while the application is focused. For the current app, the [plorer skill](../.agents/skills/plorer/SKILL.md) inspects the live JavaFX scene graph independently of that option.
 
 Inspector shows a live tree of components and their props.
 
 ## CSS Hot-Reload Integration
 
-The dev tools work seamlessly with the project's CSS hot-reload:
+CSS hot-reload works independently of the inspector:
 
 ```clojure
 ;; Enable CSS watching
@@ -170,8 +159,7 @@ The dev tools work seamlessly with the project's CSS hot-reload:
 
 ;; Now edit src/laser_show/css/title_bar.clj
 ;; Eval the (def menu-theme ...) form
-;; UI updates instantly with new styles!
-;; Dev tools will validate the new CSS descriptions
+;; The watch dispatches :dev/reloaded; the next render picks up the new CSS URL.
 ```
 
 ## Production Builds

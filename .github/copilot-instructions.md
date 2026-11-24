@@ -23,7 +23,7 @@ UI Events → Event Handlers (pure) → Effects → State Update → Subscriptio
 | `src/laser_show/vibes/` | Vibe mode: the vibes (`library.clj`), the five keys' engine (`engine.clj`), tap reactions, faders, auto-advance (`rotation.clj`), the stuck-key watchdog. All pure |
 
 ### State Management Pattern
-- **UI reads**: Use subscriptions in `subs.clj` with `fx/sub-ctx` (memoized)
+- **UI reads**: Subscribe through the component's supplied `:fx/context`: `fx/sub-val` for cheap lookups, `fx/sub-ctx` for derived values. Child components get their own context. See [Reactive state in this app](../docs/CLJFX_STATE_MANAGEMENT.md#reactive-state-in-this-app).
 - **Backend reads**: Use `state/get-raw-state` with extractors (thread-safe, no memoization)
 - **Writes**: Only through events: a handler returns `{:state new-state}` and the event pipeline writes it on the event thread. Never call `state/swap-state!`, `assoc-in-state!` or `reset-state!` directly: while an app runs they throw off the event thread (dev mode, tests) or log an ERROR (production), and kondo flags them in `src/`. From another thread, dispatch an event. Tests and the REPL use `events/write-state!` and `events/flush!` (see `docs/CLJFX_STATE_MANAGEMENT.md`)
 - **Vibe presses are pure events** (`:vibe/press`, `:vibe/release`, handled by `vibes/engine.clj`); **faders never go through the agent**: a CC goes to the input store, and the render derives each fader from it every tick
@@ -49,7 +49,7 @@ Events use namespaced keywords routed by domain in `events/handlers.clj`:
 ## Critical Conventions
 
 ### Avoid Stale Closures (see `docs/STALE_CLOSURES.md`)
-Never capture state in `on-created` callbacks. Use event dispatch instead:
+Prefer event maps carrying a stable target ID and typed input. The handler reads current `:state`; a queued map can carry a stale value just like a closure. A native handler installed once on a retargetable node can read the current ID from declarative `:user-data` when the event arrives:
 ```clojure
 ;; ❌ BAD - stale closure
 :on-created (fn [node] (.setOnKeyPressed node (fn [_] (do-something items))))
