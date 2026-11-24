@@ -53,12 +53,53 @@
                :output/write-status
                :project/save :project/load :fx/show-file-chooser :system/exit :system/open-url
                :dev/reload :dev/deliver :dev/swap-state :clipboard/write :clipboard/read
-               :projectors/scan :addons/install :system/open-folder :window/set-fullscreen]))
+               :projectors/scan :addons/install :system/open-folder :window/set-fullscreen
+               :history/gesture-alarm]))
   (is (not-any? #(contains? events/effects %) [:clipboard/copy-effects :clipboard/paste-effects])
       "no effect copies or pastes behind the clipboard's handlers (keyboard plan Step 4a)")
   (is (not (contains? events/effects :clipboard/paste-projector-effects))
       "a projector chain pastes through the list editor's own clipboard (zones Z0)")
   (is (not (contains? events/effects :timing/calculate-bpm)) "a tap sets the BPM in its own handler's state"))
+
+(deftest gesture-alarm-replacement-and-retirement-test
+  ;; Reactivity plan 16 §6: one wake-up for the open press, through the
+  ;; dispatcher the effect was given; a cancelled or replaced one that fires
+  ;; anyway sends nothing, and a stale cancel can't cancel its successor
+  (let [tasks (atom [])
+        sent (atom [])
+        alarm (get events/effects :history/gesture-alarm)
+        g #uuid "00000000-0000-0000-0000-0000000016e1"
+        h #uuid "00000000-0000-0000-0000-0000000016e2"
+        k #uuid "00000000-0000-0000-0000-0000000016e3"
+        state-before (state/get-raw-state)]
+    (events/dispose-gesture-alarm!)
+    (with-redefs [events/schedule-gesture-wake! (fn [delay-ms task]
+                                                  (let [cancelled (atom false)]
+                                                    (swap! tasks conj {:delay delay-ms :task task :cancelled cancelled})
+                                                    #(reset! cancelled true)))]
+      (let [dispatch #(swap! sent conj %)]
+        (alarm {:arm {:gesture-id g :delay-ms 60000}} dispatch)
+        (alarm {:cancel-id g :arm {:gesture-id h :delay-ms 60000}} dispatch)
+        (let [[tg th] @tasks]
+          (is (= [60000 60000] (mapv :delay @tasks)))
+          (is (true? @(:cancelled tg)) "G's wake-up was cancelled when H's took its place")
+          (is (false? @(:cancelled th)))
+          ((:task tg))
+          (is (= [] @sent) "G's, delivered after all, sends nothing")
+          (alarm {:cancel-id g} dispatch)
+          (is (false? @(:cancelled th)) "a late cancel for G leaves H's alone")
+          ((:task th))
+          (is (= [{:event/type :history/gesture-timeout :history/gesture-id h}] @sent) "one live wake-up, H's")
+          ((:task th))
+          (is (= 1 (count @sent)) "and only once"))
+        (testing "retired with its app, a wake-up sends nothing"
+          (alarm {:arm {:gesture-id k :delay-ms 1000}} dispatch)
+          (let [tk (last @tasks)]
+            (events/dispose-gesture-alarm!)
+            (is (true? @(:cancelled tk)))
+            ((:task tk))
+            (is (= 1 (count @sent)))))))
+    (is (identical? state-before (state/get-raw-state)) "it never writes app state")))
 
 (deftest dispatch-continues-inline-test
   (testing "a :dispatch follow-up runs now, in the same call, not through the dispatcher"

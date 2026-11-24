@@ -276,12 +276,27 @@
       (is (nil? (get-in (run unlocked {:event/type :grid/clear-cell :col 0 :row 0}) [:chains :cue-chains [0 0]]))
           "and the edit works again"))))
 
+(def ^:private grid-session #uuid "00000000-0000-0000-0000-0000000010d1")
+(def ^:private grid-press #uuid "00000000-0000-0000-0000-0000000010d2")
+
+(defn- grid-press-events
+  "Valid step grid press events (with their :state), on B1's grid in its
+   open window: without them they rightly do nothing ({})."
+  []
+  (let [s (run (with-b1-grid (starter)) {:event/type :step-grid/open :target b1-grid :editor-id grid-session})
+        press {:editor-id grid-session :target b1-grid :history/gesture-id grid-press}
+        pressed (run s (assoc press :event/type :step-grid/paint-start :row 0 :step 0))]
+    {:step-grid/paint-start (assoc press :state s :row 0 :step 1)
+     :step-grid/paint (assoc press :state pressed :row 0 :step 2)}))
+
 (deftest blocked-events-name-real-events-test
-  (doseq [type show-lock/blocked-events]
-    ;; A chooser's result without a file is the one that does nothing (cancelled)
-    (let [result (try (handlers/handle-event {:event/type type :state (starter) :file-path "x.zip"})
-                      (catch Throwable _ ::threw))]
-      (is (not= {} result) (str type " is not routed to a handler (unknown events return {})"))))
+  (let [valid (grid-press-events)]
+    (doseq [type show-lock/blocked-events]
+      ;; A chooser's result without a file is the one that does nothing (cancelled)
+      (let [event (get valid type {:state (starter) :file-path "x.zip"})
+            result (try (handlers/handle-event (assoc event :event/type type))
+                        (catch Throwable _ ::threw))]
+        (is (not= {} result) (str type " is not routed to a handler (unknown events return {})")))))
   (testing "every vibe edit with an undo label is refused: the vibes are fixed for the show"
     (doseq [type (keys history-handlers/event-descriptions)
             :when (= "vibe" (namespace type))]
@@ -434,9 +449,10 @@
             s1 (-> s0
                    (assoc-in [:chains :effect-chains [6 2]] {:active? true :items [(assoc (zone-patterns/preset-instance :steps :cell) :id g2)]})
                    (history/mark-clean)
-                   (run {:event/type :step-grid/open :target target}))]
+                   (run {:event/type :step-grid/open :target target :editor-id grid-session}))]
         (doseq [event [{:event/type :step-grid/set-length :target target :n 16}
-                       {:event/type :step-grid/paint-start :target target :row 0 :step 1}
+                       {:event/type :step-grid/paint-start :target target :editor-id grid-session
+                        :history/gesture-id grid-press :row 0 :step 1}
                        {:event/type :step-grid/start-from :target target :style :all-on}
                        {:event/type :step-grid/paste :target target}]]
           (testing (str (:event/type event))
@@ -472,15 +488,17 @@
         (is (= [0 2] (get-in s [:ui :dialogs :step-grid-editor :cursor])))
         (is (= 8 (count (get-in s [:ui :clipboard :grid :steps]))))
         (is (nil? (get-in s [:ui :show-lock-notice])))))
-    (testing "a drag held when the lock goes on: its paint is refused, its release still commits it"
-      (let [held (-> s0
-                     (run {:event/type :step-grid/open :target grid-target})
-                     (run {:event/type :step-grid/paint-start :target grid-target :row 1 :step 0}))
+    (testing "a drag held when the lock goes on: its paint is refused, its matching end still commits it"
+      (let [press {:target grid-target :editor-id grid-session :history/gesture-id grid-press}
+            held (-> s0
+                     (run {:event/type :step-grid/open :target grid-target :editor-id grid-session})
+                     (run (assoc press :event/type :step-grid/paint-start :row 1 :step 0)))
             locked (run held {:event/type :vibe/set-show-lock :locked? true})
-            painted (run locked {:event/type :step-grid/paint :target grid-target :row 1 :step 2})
-            released (run painted {:event/type :step-grid/paint-end :target grid-target})]
+            painted (run locked (assoc press :event/type :step-grid/paint :row 1 :step 2))
+            other-end (run painted (assoc press :event/type :step-grid/paint-end :history/gesture-id (random-uuid)))
+            released (run painted (assoc press :event/type :step-grid/paint-end))]
         (is (some? (get-in locked [:history :transaction])))
         (is (= "Edit Step Grid refused" (get-in painted [:ui :show-lock-notice :text])))
+        (is (= (:history painted) (:history other-end)) "another press's end lets go of nothing")
         (is (nil? (get-in released [:history :transaction])) "it let go")
-        (is (nil? (get-in released [:ui :step-grid :drag])))
         (is (= 1 (count (get-in released [:history :undo-stack]))) "what was painted before the lock is one undo step")))))

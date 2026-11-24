@@ -7,7 +7,9 @@
      the project unsaved, and which is live (neither)
    - Capturing immutable snapshots
    - Pushing/popping undo and redo stacks
-   - Transaction boundary management (mouse-down -> continuous drag -> mouse-up)
+   - Gesture transactions (press -> continuous drag -> release): one open
+     whole-document baseline at a time, owned by one press, its
+     :gesture-id (reactivity plan 16)
    - Restoring snapshots while keeping live state and preferences
    - Deriving the unsaved-changes flag by comparing against the saved document
    
@@ -41,8 +43,10 @@
   1000)
 
 (def stale-transaction-ms
-  "An open transaction older than this is committed automatically
-   (guards against a missed mouse-up disabling undo)."
+  "A gesture's deadline: an open transaction with no activity from its own
+   press for this long is sealed (guards against a missed mouse-up disabling
+   undo). The event pipeline arms a wake-up for it (:history/gesture-alarm),
+   so it is sealed even while nothing else happens."
   60000)
 
 (def prefs-config-keys
@@ -429,14 +433,18 @@
   [history-state]
   (:description (peek (:redo-stack history-state))))
 
+(defn gesture-id
+  "The id of the press whose transaction is open, or nil."
+  [history-state]
+  (get-in history-state [:transaction :gesture-id]))
+
 (defn commit-transaction
-  "Commit a continuous interaction transaction on mouse-up.
-   Compares the current undoable content to the baseline snapshot.
-   If modified, pushes baseline snapshot to the undo stack.
-   Clears active transaction.
-   
-   Any mouse-up commits whatever transaction is open: if the mouse-up of the
-   control that opened it was missed, the next one closes it."
+  "Seal the open transaction, whichever press it is: compare the current
+   undoable content with its baseline snapshot, push the baseline onto the
+   undo stack if they differ, and clear the transaction. A net-zero
+   gesture leaves no step and keeps redo. For an interruption (another
+   undoable edit, expiry, Close, Undo); a press's own end goes through
+   finish-transaction, which needs its id."
   ([history-state current-state]
    (commit-transaction history-state current-state default-max-depth))
   ([history-state current-state max-depth]
@@ -450,51 +458,74 @@
          history-without-tx))
      history-state)))
 
+(defn finish-transaction
+  "A press's end (release, blur, disposal): its transaction sealed
+   (commit-transaction) when id is the open one's; nothing for a late end
+   or another press's."
+  [history-state current-state id]
+  (if (and (some? id) (= id (gesture-id history-state)))
+    (commit-transaction history-state current-state)
+    history-state))
+
 (defn begin-transaction
-  "Begin a continuous interaction transaction on mouse-down.
-   Captures a baseline document snapshot of the current state.
-   If a transaction from the same source is already open it is kept; one from
-   a different source (e.g. its mouse-up was missed) is committed first."
-  [history-state current-state {:keys [label source-id ui-context now]}]
-  (let [open-tx (:transaction history-state)]
-    (if (and open-tx (= source-id (:source-id open-tx)))
-      history-state
+  "A press's transaction, gesture-id (a fresh UUID, the press's own) its
+   owner: a baseline document snapshot of the current state, taken at now.
+   source-id describes the control, not the press. The same press again is
+   inert; another press seals the open transaction first, even on the same
+   control. Without a UUID nothing begins."
+  [history-state current-state {:keys [label gesture-id source-id ui-context now]}]
+  (let [open-tx (:transaction history-state)
+        now (or now (System/currentTimeMillis))]
+    (cond
+      (not (uuid? gesture-id)) history-state
+      (= gesture-id (:gesture-id open-tx)) history-state
+      :else
       (let [history-state (if open-tx
                             (commit-transaction history-state current-state)
                             history-state)
             baseline (make-snapshot {:state current-state
                                      :description label
-                                     :ui-context ui-context})]
+                                     :ui-context ui-context
+                                     :timestamp now})]
         (assoc history-state
-               :transaction (u/->map& label source-id
+               :transaction (u/->map& gesture-id label source-id
                                       :baseline-snapshot baseline
-                                      :start-time (or now (System/currentTimeMillis))))))))
+                                      :start-time now))))))
 
-(defn stale-transaction?
-  "True when an open transaction has had no activity (see touch-transaction)
-   for more than stale-transaction-ms before now."
-  [history-state now]
+(defn transaction-deadline
+  "When the open transaction is due: stale-transaction-ms after its press's
+   last undoable change (or its start); nil with none open."
+  [history-state]
   (when-let [tx (:transaction history-state)]
     (when-let [last-active (or (:last-activity tx) (:start-time tx))]
-      (> (- now last-active) stale-transaction-ms))))
+      (+ last-active stale-transaction-ms))))
+
+(defn stale-transaction?
+  "Is the open transaction due at now (its deadline reached)?"
+  [history-state now]
+  (when-let [deadline (transaction-deadline history-state)]
+    (>= now deadline)))
 
 (defn touch-transaction
-  "Record activity on the open transaction (a drag tick), so a long drag
-   isn't treated as stale."
-  [history-state now]
-  (if (:transaction history-state)
+  "Record activity on the open transaction when id is its press's (an
+   undoable change of that press's), so a long drag isn't sealed; nothing
+   for another press."
+  [history-state id now]
+  (if (and (some? id) (= id (gesture-id history-state)))
     (assoc-in history-state [:transaction :last-activity] now)
     history-state))
 
 (defn abort-transaction
-  "Abort an in-progress transaction without saving to undo stack.
-   Returns map with updated history state and the baseline snapshot to restore."
-  [history-state]
-  (if-let [tx (:transaction history-state)]
-    {:history (assoc history-state :transaction nil)
-     :baseline (:baseline-snapshot tx)}
-    {:history history-state
-     :baseline nil}))
+  "Abort id's transaction without saving it to the undo stack: {:history
+   (without it) :baseline (its snapshot, to restore)}; for another press,
+   or none open, {:history history-state :baseline nil}."
+  [history-state id]
+  (let [tx (:transaction history-state)]
+    (if (and tx (some? id) (= id (:gesture-id tx)))
+      {:history (assoc history-state :transaction nil)
+       :baseline (:baseline-snapshot tx)}
+      {:history history-state
+       :baseline nil})))
 
 (defn pop-undo
   "Pop the top snapshot from the undo stack to restore it.

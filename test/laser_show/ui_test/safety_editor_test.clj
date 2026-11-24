@@ -76,7 +76,15 @@
   (is (< 0.4 (get-in (zone) [:limit 2]) 0.5) "the right edge followed the mouse")
   (is (= [-0.8 -0.8] (subvec (:limit (zone)) 0 2)) "the other edges stayed")
   (testing "the field shows it"
-    (ui/wait-for! #(= (format "%.2f" (get-in (zone) [:limit 2])) (ui/node-text "#safety-limit-x1")))))
+    (ui/wait-for! #(= (format "%.2f" (get-in (zone) [:limit 2])) (ui/node-text "#safety-limit-x1"))))
+  (testing "the drag is one press, one step: Undo puts the edge back, Redo drags it in again (reactivity plan 16)"
+    (ui/wait-for! #(nil? (get-in (app-state) [:history :transaction])))
+    (is (= ["Change Safety Zone"] (mapv :description (get-in (app-state) [:history :undo-stack]))))
+    (let [dragged (get-in (zone) [:limit 2])]
+      (events/dispatch! {:event/type :edit/undo})
+      (ui/wait-for! #(= 0.8 (get-in (zone) [:limit 2])))
+      (events/dispatch! {:event/type :edit/redo})
+      (ui/wait-for! #(= dragged (get-in (zone) [:limit 2]))))))
 
 (deftest escape-puts-back-the-zone-test
   (with-projector! {:limit [-0.8 -0.8 0.8 0.8] :blocked []})

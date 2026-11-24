@@ -25,6 +25,7 @@
   (:require [clj-font-awesome.core :as fa]
             [clojure.string :as str]
             [laser-show.animation.modulator-registry :as reg]
+            [laser-show.views.components.gesture :as gesture]
             [laser-show.views.components.parameter-controls :as param-controls]))
 
 
@@ -106,19 +107,17 @@
                  :pref-width 90
                  :style-class ["text-small"]
                  :style "-fx-text-fill: #909090;"}
-                {:fx/type :slider
+                {:fx/type gesture/slider
                  :id (param-id on-change-event key)
                  :min min
                  :max max
                  :value (double value)
                  :pref-width 80
-                 ;; Event map pattern: add mod-param-key to template
-                 :on-value-changed (assoc on-change-event :mod-param-key key)
-                 :on-mouse-pressed {:event/type :history/begin-transaction
-                                    :label (str "Adjust " (or label (name key)))
-                                    :source-id [:modulator-slider key]}
-                 :on-mouse-released {:event/type :history/commit-transaction
-                                     :source-id [:modulator-slider key]}}
+                 ;; A drag is one press, one undo step (reactivity plan 16);
+                 ;; its value events add mod-param-key to the template
+                 :gesture {:label (str "Adjust " (or label (name key)))
+                           :source-id [:modulator-slider key]
+                           :on-value-changed (assoc on-change-event :mod-param-key key)}}
                 {:fx/type :text-field
                  :text (format "%.2f" (double value))
                  :pref-width 50

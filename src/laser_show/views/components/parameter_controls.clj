@@ -31,6 +31,7 @@
             [laser-show.events.core :as events]
             [laser-show.routing.targets :as targets]
             [laser-show.subs :as subs]
+            [laser-show.views.components.gesture :as gesture]
             [laser-show.views.components.target-control :as target-control]))
 
 
@@ -89,19 +90,17 @@
                  :text display-label
                  :pref-width label-w
                  :style-class ["label-secondary"]}
-                {:fx/type :slider
+                {:fx/type gesture/slider
                  :min min
                  :max max
                  :value (double value)
                  :pref-width 150
                  :snap-to-ticks is-int?
                  :major-tick-unit (if is-int? 1.0 (/ (- max min) 10.0))
-                 :on-value-changed (assoc on-change-event :param-key param-key)
-                 :on-mouse-pressed {:event/type :history/begin-transaction
-                                    :label (str "Adjust " display-label)
-                                    :source-id [:slider param-key]}
-                 :on-mouse-released {:event/type :history/commit-transaction
-                                     :source-id [:slider param-key]}}
+                 ;; A drag is one press, one undo step (reactivity plan 16)
+                 :gesture {:label (str "Adjust " display-label)
+                           :source-id [:slider param-key]
+                           :on-value-changed (assoc on-change-event :param-key param-key)}}
                 {:fx/type :text-field
                  :text (if is-int?
                          (str (int value))

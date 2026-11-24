@@ -9,7 +9,8 @@
    - Preview zone filtering
    - Preview grid layout"
   (:require [clojure.tools.logging :as log]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [laser-show.events.handlers.step-grid :as step-grid]))
 
 
 (defn- handle-ui-set-active-tab
@@ -43,10 +44,14 @@
 
 (defn- handle-ui-close-dialog
   "Close the dialog. Cancel and window close discard the Add Projector form,
-   just like a successful Add; editors keep their per-dialog UI state."
-  [{:keys [dialog-id state]}]
-  {:state (if (= :add-projector-manual dialog-id)
-            (assoc-in state [:ui :dialogs dialog-id] {:open? false})
+   just like a successful Add; editors keep their per-dialog UI state. The
+   step grid window closes by its session (:editor-id): its held press's
+   paint is sealed in the same state, and an old session's close does
+   nothing (handlers.step-grid/close-editor)."
+  [{:keys [dialog-id editor-id state]}]
+  {:state (case dialog-id
+            :add-projector-manual (assoc-in state [:ui :dialogs dialog-id] {:open? false})
+            :step-grid-editor (step-grid/close-editor state editor-id)
             (assoc-in state [:ui :dialogs dialog-id :open?] false))})
 
 (defn- handle-ui-update-dialog-data

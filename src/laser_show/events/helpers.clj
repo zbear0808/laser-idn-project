@@ -77,9 +77,11 @@
 
 (defn parked
   "event as plain data, to continue later (after a confirm, or the OS
-   clipboard's read): without its co-effects."
+   clipboard's read): without its co-effects, and without the press it came
+   from (:history/gesture-id): the continuation is a discrete edit of its
+   own, which neither revives nor needs that press (reactivity plan 16)."
   [event]
-  (dissoc event :state :time :fx/event))
+  (dissoc event :state :time :fx/event :history/gesture-id))
 
 
 ;; The clipboard (keyboard plan Phase 4, Step 4a)

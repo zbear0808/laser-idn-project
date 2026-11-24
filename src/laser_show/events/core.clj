@@ -89,7 +89,7 @@
            [java.net URI]
            [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
-           [java.util.concurrent Executors ThreadFactory TimeUnit]))
+           [java.util.concurrent Executors ScheduledExecutorService ThreadFactory TimeUnit]))
 
 ;; Co-effects (inject data INTO events)
 ;; Co-effect functions take NO arguments and return data to inject.
@@ -185,6 +185,66 @@
   (future
     (Thread/sleep delay-ms)
     (dispatch event)))
+
+;; A press's deadline (reactivity plan 16): one wake-up, for the press whose
+;; transaction is open, so a missed mouse-up is sealed even while nothing
+;; else happens. Its slot belongs to the app's dispatcher: app/stop! retires
+;; it (dispose-gesture-alarm!).
+
+(defonce ^{:private true
+           :doc "The armed wake-up: {:gesture-id :token :cancel}, or nil."}
+  !gesture-alarm
+  (atom nil))
+
+(defonce ^{:private true
+           :doc "The one daemon thread the wake-ups wait on."}
+  gesture-alarm-executor
+  (delay (Executors/newSingleThreadScheduledExecutor
+          (reify ThreadFactory
+            (newThread [_ r]
+              (doto (Thread. ^Runnable r "laser-show-gesture-alarm")
+                (.setDaemon true)))))))
+
+(defn schedule-gesture-wake!
+  "Run task once, delay-ms from now, on the wake-ups' thread; returns a fn
+   that cancels it. :history/gesture-alarm's scheduler (tests replace it
+   with a fake one)."
+  [delay-ms ^Runnable task]
+  (let [f (.schedule ^ScheduledExecutorService @gesture-alarm-executor task (long (max 0 delay-ms)) TimeUnit/MILLISECONDS)]
+    #(.cancel f false)))
+
+(defn- effect-gesture-alarm
+  "Effect that keeps the open press's one wake-up. {:cancel-id G} cancels
+   G's, and only G's (a late cancel can't cancel the one that took its
+   place); {:arm {:gesture-id H :delay-ms ms}} replaces whatever is armed
+   with H's. Once due, a wake-up still in its slot dispatches
+   {:event/type :history/gesture-timeout :history/gesture-id H} through
+   dispatch, the dispatcher this effect was given; one cancelled or
+   replaced meanwhile dispatches nothing. It reads and writes no app state."
+  [{:keys [cancel-id arm]} dispatch]
+  (when (some? cancel-id)
+    (let [[old _] (swap-vals! !gesture-alarm #(if (= cancel-id (:gesture-id %)) nil %))]
+      (when (and (= cancel-id (:gesture-id old)) (:cancel old))
+        ((:cancel old)))))
+  (when-let [{:keys [gesture-id delay-ms]} arm]
+    (let [token (Object.)
+          wake (fn []
+                 (let [[old _] (swap-vals! !gesture-alarm #(if (identical? token (:token %)) nil %))]
+                   (when (identical? token (:token old))
+                     (dispatch {:event/type :history/gesture-timeout :history/gesture-id gesture-id}))))
+          [old _] (swap-vals! !gesture-alarm (constantly {:gesture-id gesture-id :token token}))
+          _ (when-let [cancel (:cancel old)] (cancel))
+          cancel (schedule-gesture-wake! delay-ms wake)
+          kept (swap! !gesture-alarm #(if (identical? token (:token %)) (assoc % :cancel cancel) %))]
+      (when-not (identical? token (:token kept))
+        (cancel)))))
+
+(defn dispose-gesture-alarm!
+  "Cancel the armed wake-up, if any: app/stop! retires it with its app."
+  []
+  (let [[old _] (reset-vals! !gesture-alarm nil)]
+    (when-let [cancel (:cancel old)]
+      (cancel))))
 
 (defn- effect-save-project
   "Effect that writes a project zip.
@@ -690,6 +750,9 @@
    - :state - update application state
    - :dispatch - continue with another event (inline)
    - :dispatch-later - dispatch event after delay (later, future)
+   - :history/gesture-alarm - keep the open press's one wake-up: cancel
+     its, arm the next; it dispatches :history/gesture-timeout (later,
+     wake-up thread)
    - :link/sync-to-downbeat - align phase to Link's downbeat (inline)
    - :show-clock/read - continue :on-read with the show clock's beats (inline)
    - :input/await-learn - wait for a learn capture, then dispatch the binding (later, future)
@@ -724,6 +787,7 @@
   {:state effect-state
    :dispatch effect-dispatch
    :dispatch-later effect-dispatch-later
+   :history/gesture-alarm effect-gesture-alarm
    :link/sync-to-downbeat effect-link-sync-to-downbeat
    :show-clock/read effect-show-clock-read
    :input/await-learn effect-input-await-learn

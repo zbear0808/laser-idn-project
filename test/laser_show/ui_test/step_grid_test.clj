@@ -17,7 +17,8 @@
   (:import [javafx.event Event]
            [javafx.scene Node]
            [javafx.scene.control ButtonBase Control Labeled Menu MenuButton MenuItem]
-           [javafx.scene.input KeyCode KeyEvent MouseButton MouseEvent]))
+           [javafx.scene.input KeyCode KeyEvent MouseButton MouseEvent]
+           [javafx.stage Stage Window WindowEvent]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -312,6 +313,132 @@
     (key! KeyCode/Z :shortcut? true :shift? true)
     (testing "and ⇧⌘Z redoes it"
       (ui/wait-for! #(= [[] [A] [A] [A] [A] [A] [A] []] (steps))))))
+
+
+;; A press is one gesture (reactivity plan 16)
+
+(defn- record-dispatches!
+  "(f) with every event the views send through events/dispatch! recorded
+   in sent too (the grid body's are), still dispatched."
+  [sent f]
+  (let [dispatch events/dispatch!]
+    (with-redefs [events/dispatch! (fn [e] (swap! sent conj e) (dispatch e))]
+      (f))))
+
+(defn- undo-count [] (count (get-in (app-state) [:history :undo-stack])))
+
+(defn- open-press [] (get-in (app-state) [:history :transaction :gesture-id]))
+
+(defn- grid-stage
+  "The step grid's window, while it shows."
+  ^Stage []
+  (ui/on-fx-thread #(some (fn [^Window w] (when (and (instance? Stage w) (.isShowing w) (= cue-title (.getTitle ^Stage w))) w))
+                          (vec (Window/getWindows)))))
+
+(defn- lose-window-focus!
+  "What the OS does when another window takes the focus: stage's focused
+   goes false. Headless, every stage keeps it, so this is the platform's
+   own setter (com.sun.javafx.stage.WindowHelper)."
+  [^Stage stage]
+  (ui/on-fx-thread
+   #(let [setter (.getMethod (Class/forName "com.sun.javafx.stage.WindowHelper") "setFocused"
+                             (into-array Class [Window Boolean/TYPE]))]
+      (.invoke setter nil (object-array [stage false]))))
+  (ui/sync-fx!))
+
+(deftest intra-cell-motion-dispatches-nothing-test
+  (grid-on-a1! {:steps (vec (repeat 8 []))})
+  (open-grid! cue-target)
+  (let [sent (atom [])
+        [x y] (cell-centre 0 1)]
+    (record-dispatches!
+     sent
+     #(do
+        (fire-grid! MouseEvent/MOUSE_PRESSED x y)
+        (ui/wait-for! (fn [] (= [A] (nth (steps) 1))))
+        (reset! sent [])
+        (dotimes [i 100]
+          (fire-grid! MouseEvent/MOUSE_DRAGGED (+ x (- (mod i 9) 4)) (+ y (- (mod i 7) 3))))
+        (is (= [] @sent) "100 motions inside one cell: not one event")
+        (doseq [k [2 3 4 5]]
+          (fire-grid! MouseEvent/MOUSE_DRAGGED (first (cell-centre 0 k)) y))
+        (fire-grid! MouseEvent/MOUSE_RELEASED (first (cell-centre 0 5)) y)
+        (is (= [:step-grid/paint :step-grid/paint :step-grid/paint :step-grid/paint :step-grid/paint-end]
+               (mapv :event/type @sent))
+            "one paint for each new cell, then the end")
+        (is (apply = (map :history/gesture-id @sent)) "all the press's own")))
+    (ui/wait-for! #(= [[] [A] [A] [A] [A] [A] [] []] (steps)))
+    (ui/wait-for! #(every? (fn [k] (lit-cell? 0 k)) [1 2 3 4 5]))
+    (ui/wait-for! #(nil? (open-press)))
+    (is (= 1 (undo-count)) "one undo step")
+    (events/dispatch! {:event/type :edit/undo})
+    (ui/wait-for! #(= (vec (repeat 8 [])) (steps)))
+    (ui/wait-for! #(not (lit-cell? 0 3)))))
+
+(deftest interrupted-press-finishes-once-test
+  (grid-on-a1! {:zones [A B C] :steps (vec (repeat 8 []))})
+  (let [sent (atom [])
+        ends #(filterv (fn [e] (= :step-grid/paint-end (:event/type e))) @sent)
+        held! (fn [row step]
+                ;; Pressed on [row step] and dragged onto the next cell; no release
+                (let [[x y] (cell-centre row step)]
+                  (fire-grid! MouseEvent/MOUSE_PRESSED x y)
+                  (fire-grid! MouseEvent/MOUSE_DRAGGED (first (cell-centre row (inc step))) y)
+                  (ui/wait-for! #(some? (open-press)))
+                  (open-press)))
+        sealed! (fn [n]
+                  (ui/wait-for! #(and (nil? (open-press)) (= n (undo-count)))))
+        lit-pair? (fn [row step] (and (lit-cell? row step) (lit-cell? row (inc step))))]
+    (record-dispatches!
+     sent
+     #(do
+        (testing "the footer's Close"
+          (open-grid! cue-target)
+          (held! 0 0)
+          (fire! "#step-grid-close")
+          (ui/wait-for! (fn [] (not (window-open? cue-title))))
+          (sealed! 1)
+          (is (= [[A] [A]] (subvec (steps) 0 2)) "what the press painted stays"))
+        (testing "the window's own close request: consumed, then closed by its state"
+          (open-grid! cue-target)
+          (held! 0 2)
+          (let [stage (grid-stage)]
+            (ui/on-fx-thread (fn [] (Event/fireEvent stage (WindowEvent. stage WindowEvent/WINDOW_CLOSE_REQUEST)))))
+          (ui/wait-for! (fn [] (not (window-open? cue-title))))
+          (sealed! 2))
+        (testing "the focus moving within the window ends the press; the window stays"
+          (open-grid! cue-target)
+          (held! 0 4)
+          (ui/on-fx-thread (fn [] (.requestFocus ^Node (ui/query "#step-grid-close"))))
+          (sealed! 3)
+          (is (window-open? cue-title))
+          (ui/wait-for! (fn [] (lit-pair? 0 4))))
+        (testing "another window taking the focus ends it too"
+          (held! 1 0)
+          (lose-window-focus! (grid-stage))
+          (sealed! 4)
+          (is (window-open? cue-title))
+          (ui/wait-for! (fn [] (lit-pair? 1 0))))
+        (testing "and so does the body going, with no close at all"
+          (held! 1 2)
+          (events/write-state! assoc-in [:ui :dialogs :step-grid-editor :open?] false)
+          (ui/wait-for! (fn [] (not (window-open? cue-title))))
+          (sealed! 5))
+        (testing "each press sent its end once"
+          (is (= 5 (count (ends))))
+          (is (= 5 (count (distinct (map :history/gesture-id (ends)))))))
+        (testing "an old end, delivered after a reopen and a new press, ends nothing"
+          (let [old-end (first (ends))]
+            (open-grid! cue-target)
+            (let [new-press (held! 2 0)]
+              (events/dispatch! old-end)
+              (events/flush!)
+              (is (= new-press (open-press)) "the new press is still open")
+              (fire-grid! MouseEvent/MOUSE_RELEASED (first (cell-centre 2 1)) (second (cell-centre 2 1)))
+              (sealed! 6))))))
+    (is (= (vec (repeat 6 "Edit Step Grid")) (mapv :description (get-in (app-state) [:history :undo-stack])))
+        "six presses, six steps")
+    (is (= [[A B C] [A B C] [A B] [A B] [A] [A] [] []] (steps)) "every no-release paint survived")))
 
 
 ;; The keys

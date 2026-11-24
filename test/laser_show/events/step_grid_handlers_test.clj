@@ -4,8 +4,10 @@
    cell (reactivity plan 05), a cue's or an effects cell's alike, as one
    undo step \"Edit Step Grid\" (a drag too), and does nothing while the
    pattern's keyframes are on (08 invariant 9), once the window shows
-   another, or once the pattern is gone. Every event runs through the real
-   pipeline, as the agent runs it."
+   another, or once the pattern is gone. A drag is one press, by its id: its
+   step ends with it, with its window's close, or with any other undoable
+   edit, and nothing of an ended press reaches a later one (reactivity plan
+   16). Every event runs through the real pipeline, as the agent runs it."
   (:require [cljfx.api :as fx]
             [clojure.test :refer [deftest is testing]]
             [laser-show.animation.chains :as chains]
@@ -18,8 +20,7 @@
             [laser-show.state.history :as history]
             [laser-show.state.templates :as templates]
             [laser-show.subs :as subs]
-            [laser-show.views.components.step-grid :as grid-view])
-  (:import [javafx.scene.input MouseButton MouseEvent]))
+            [laser-show.views.components.step-grid :as grid-view]))
 
 (defn- fresh
   "A new show, its starter cues and effects, saved, at 120 BPM."
@@ -31,9 +32,10 @@
       (history/mark-clean)))
 
 (defn- handle
-  "The pipeline's effects for event on state."
+  "The pipeline's effects for event on state, at its :time (1000 unless it
+   says)."
   [state event]
-  (events/handle-event-pipeline (assoc event :state state :time 1000)))
+  (events/handle-event-pipeline (assoc event :state state :time (or (:time event) 1000))))
 
 (defn- run
   "state after event through the pipeline, and what it dispatches."
@@ -71,10 +73,34 @@
        (assoc-in [:chains :effect-chains [2 1]] {:active? true :items [(assoc (grid-pattern steps) :id cell-grid-id)]})
        (history/mark-clean))))
 
+(def ^:private session
+  "The window's session (:editor-id) open opens it in."
+  #uuid "00000000-0000-0000-0000-0000000016f0")
+
 (defn- open
-  "state with the step grid window open on target, as its openers ask."
-  [state target]
-  (run state {:event/type :step-grid/open :target target}))
+  "state with the step grid window open on target, as its openers ask, in
+   session (or the one given)."
+  ([state target] (open state target session))
+  ([state target editor-id]
+   (run state {:event/type :step-grid/open :target target :editor-id editor-id})))
+
+;; Presses (reactivity plan 16): each has its own id, which its start, its
+;; drags and its end carry, as the grid body sends them
+
+(def ^:private g1 #uuid "00000000-0000-0000-0000-0000000016f1")
+(def ^:private g2 #uuid "00000000-0000-0000-0000-0000000016f2")
+(def ^:private g3 #uuid "00000000-0000-0000-0000-0000000016f3")
+
+(defn- stroke
+  "Press id's event of type on target's grid in session (or :editor-id
+   given): :step-grid/paint-start or :paint on [row step], :paint-end with
+   no cell."
+  ([type target id] {:event/type type :editor-id session :target target :history/gesture-id id})
+  ([type target id [row step]] (assoc (stroke type target id) :row row :step step)))
+
+(defn- press [state target id cell] (run state (stroke :step-grid/paint-start target id cell)))
+(defn- drag-to [state target id cell] (run state (stroke :step-grid/paint target id cell)))
+(defn- release [state target id] (run state (stroke :step-grid/paint-end target id)))
 
 (defn- owner-items
   "The patterns of target's cell: a cue's :zone-patterns, a cell's :items."
@@ -121,53 +147,41 @@
         (is (= (steps-at s0 cue-target) (steps-at s cue-target)))
         (is (= 0 (undo-depth s)))))))
 
-(defn- mouse
-  "A primary-button MouseEvent of type at the grid body's (x, y)."
-  [type x y]
-  (MouseEvent. type (double x) (double y) (double x) (double y) MouseButton/PRIMARY 1
-               false false false false
-               (not= type MouseEvent/MOUSE_RELEASED) false false
-               false false true nil))
-
-(defn- pointer
-  "The grid body's mouse on target's grid (cue-target's unless said), its
-   cells 20 × 10."
-  ([state type x y] (pointer state cue-target type x y))
-  ([state target type x y]
-   (run state {:event/type :step-grid/pointer :target target :cell-w 20.0 :cell-h 10.0 :fx/event (mouse type x y)})))
-
 (deftest drag-paint-is-one-undo-step-test
   (let [s0 (open (with-grids (vec (repeat 8 []))) cue-target)
-        dragged (-> s0
-                    (pointer MouseEvent/MOUSE_PRESSED 25.0 5.0)
-                    (pointer MouseEvent/MOUSE_DRAGGED 32.0 6.0)
-                    (pointer MouseEvent/MOUSE_DRAGGED 95.0 4.0)
-                    (pointer MouseEvent/MOUSE_DRAGGED 105.0 5.0))]
+        pressed (press s0 cue-target g1 [0 1])
+        dragged (-> pressed
+                    (drag-to cue-target g1 [0 4])
+                    (drag-to cue-target g1 [0 5]))]
     (testing "pressing an unlit cell lights it, and every cell the drag crosses (Z6-Q3 A)"
       (is (= [[] [A] [A] [A] [A] [A] [] []] (steps-at dragged cue-target)) "steps 1 to 5 of row A, the jump from 1 to 4 too")
-      (is (some? (get-in dragged [:history :transaction])) "one transaction while the button is down"))
-    (let [released (pointer dragged MouseEvent/MOUSE_RELEASED 105.0 5.0)]
+      (is (= g1 (history/gesture-id (:history dragged))) "one transaction, the press's, while the button is down"))
+    (testing "the press's cell again, or its start again: no effect at all (a queued duplicate)"
+      (is (= {} (handle dragged (stroke :step-grid/paint cue-target g1 [0 5]))))
+      (is (= {} (handle pressed (stroke :step-grid/paint-start cue-target g1 [0 1])))))
+    (let [released (release dragged cue-target g1)]
       (is (nil? (get-in released [:history :transaction])))
       (is (= 1 (undo-depth released)) "one drag, one undo step")
       (is (= "Edit Step Grid" (undo-label released)))
       (is (true? (get-in released [:project :dirty?])))
       (is (= (vec (repeat 8 [])) (steps-at (run released {:event/type :edit/undo}) cue-target)) "undo reverts the whole drag")
+      (is (= released (release released cue-target g1)) "a second end does nothing")
       (testing "pressing a lit cell clears it, and every cell crossed"
         (let [cleared (-> released
-                          (pointer MouseEvent/MOUSE_PRESSED 45.0 5.0)
-                          (pointer MouseEvent/MOUSE_DRAGGED 85.0 5.0)
-                          (pointer MouseEvent/MOUSE_RELEASED 85.0 5.0))]
+                          (press cue-target g2 [0 2])
+                          (drag-to cue-target g2 [0 4])
+                          (release cue-target g2))]
           (is (= [[] [A] [] [] [] [A] [] []] (steps-at cleared cue-target)))
           (is (= 2 (undo-depth cleared))))))
-    (testing "a press outside the grid, or with another button, paints nothing"
-      (is (= (steps-at s0 cue-target) (steps-at (pointer s0 MouseEvent/MOUSE_PRESSED 165.0 5.0) cue-target)) "past step 8")
-      (is (= (steps-at s0 cue-target) (steps-at (pointer s0 MouseEvent/MOUSE_PRESSED 25.0 35.0) cue-target)) "below the rows")
-      (let [right (MouseEvent. MouseEvent/MOUSE_PRESSED 25.0 5.0 25.0 5.0 MouseButton/SECONDARY 1
-                               false false false false false false true false true true nil)]
-        (is (= (steps-at s0 cue-target)
-               (steps-at (run s0 {:event/type :step-grid/pointer :target cue-target :cell-w 20.0 :cell-h 10.0 :fx/event right}) cue-target)))))
-    (testing "a drag with no press before it does nothing"
-      (is (= s0 (pointer s0 MouseEvent/MOUSE_DRAGGED 45.0 5.0))))))
+    (testing "a press outside the grid paints nothing (the body sends none: it only presses a cell)"
+      (is (= {} (handle s0 (stroke :step-grid/paint-start cue-target g1 [0 8]))) "past step 8")
+      (is (= {} (handle s0 (stroke :step-grid/paint-start cue-target g1 [3 1]))) "below the rows"))
+    (testing "a drag or an end with no press before it does nothing"
+      (is (= {} (handle s0 (stroke :step-grid/paint cue-target g1 [0 2]))))
+      (is (= {} (handle s0 (stroke :step-grid/paint-end cue-target g1)))))
+    (testing "nor a press without its id, or from another session of the window"
+      (is (= {} (handle s0 (dissoc (stroke :step-grid/paint-start cue-target g1 [0 1]) :history/gesture-id))))
+      (is (= {} (handle s0 (assoc (stroke :step-grid/paint-start cue-target g1 [0 1]) :editor-id (random-uuid))))))))
 
 
 ;; A cue's pattern and a cell's alike
@@ -220,7 +234,7 @@
         (is (= (params-at s0 cue-target) (params-at s cue-target)) (str (:event/type event) ": nothing"))
         (is (= 0 (undo-depth s)))))
     (testing "nor by a drag"
-      (let [s (-> s0 (pointer MouseEvent/MOUSE_PRESSED 25.0 5.0) (pointer MouseEvent/MOUSE_RELEASED 25.0 5.0))]
+      (let [s (-> s0 (press cue-target g1 [0 1]) (release cue-target g1))]
         (is (= (params-at s0 cue-target) (params-at s cue-target)))
         (is (nil? (get-in s [:history :transaction])))))
     (testing "and opening it makes no grid of a keyframed pattern"
@@ -521,29 +535,28 @@
                 q (instance-at s0 q-target)
                 moved (set-items s0 domain [q (instance-at s0 p-target)])
                 released (-> moved
-                             (pointer p-target MouseEvent/MOUSE_PRESSED 5.0 5.0)
-                             (pointer p-target MouseEvent/MOUSE_DRAGGED 45.0 5.0)
-                             (pointer p-target MouseEvent/MOUSE_RELEASED 45.0 5.0))
+                             (press p-target g1 [0 0])
+                             (drag-to p-target g1 [0 2])
+                             (release p-target g1))
                 undone (run released {:event/type :edit/undo})]
             (is (= [[A] [A] [A]] (steps-at released p-target)))
             (is (= q (instance-at released q-target)))
             (is (nil? (get-in released [:history :transaction])))
-            (is (nil? (get-in released [:ui :step-grid :drag])))
             (is (= (inc (undo-depth moved)) (undo-depth released)))
             (is (= [[] [] []] (steps-at undone p-target)) "undo: P's three rests")
             (is (= [Q P] (mapv :id (owner-items undone p-target))) "and the reorder stays")))
         (testing "P removed between the press and the drag: the drag paints nothing, Q in its place neither"
           (let [s0 (open (two-grids domain [[] [] []] [[] [] []]) p-target)
-                pressed (pointer s0 p-target MouseEvent/MOUSE_PRESSED 5.0 5.0)
+                pressed (press s0 p-target g1 [0 0])
                 q (instance-at pressed q-target)
                 removed (set-items pressed domain [q])
-                dragged (pointer removed p-target MouseEvent/MOUSE_DRAGGED 45.0 5.0)
-                released (pointer dragged p-target MouseEvent/MOUSE_RELEASED 45.0 5.0)]
+                dragged (drag-to removed p-target g1 [0 2])
+                released (release dragged p-target g1)]
             (is (= [[A] [] []] (steps-at pressed p-target)) "the press painted P")
             (is (= [q] (owner-items dragged q-target)) "Q as it was")
             (is (= removed dragged))
-            (is (nil? (get-in released [:history :transaction])) "the release lets go")
-            (is (nil? (get-in released [:ui :step-grid :drag])))
+            (is (nil? (get-in removed [:history :transaction])) "the removal ended the press (reactivity plan 16)")
+            (is (= removed released) "so its release does nothing")
             (is (= [q] (owner-items released q-target)))))
         (testing "example 5: P gone, Q in its place: the keys, a press and the toolbar do nothing"
           (let [removed (set-items s0 domain [q])]
@@ -559,7 +572,7 @@
                 (is (= (get-in removed [:ui :clipboard]) (get-in s [:ui :clipboard])))
                 (is (= (get-in removed [:project :dirty?]) (get-in s [:project :dirty?])))))
             (is (= {} (handle removed (rate-edit s0 p-target 3.0))) "the toolbar's edit: no effect at all")
-            (is (= removed (pointer removed p-target MouseEvent/MOUSE_PRESSED 5.0 5.0)) "a press paints nothing")
+            (is (= {} (handle removed (stroke :step-grid/paint-start p-target g1 [0 0]))) "a press paints nothing")
             (is (= [[] [A]] (steps-at (-> removed
                                           (set-items domain [q p])
                                           (run {:event/type :step-grid/toggle :target p-target :row A :step 1}))
@@ -582,7 +595,7 @@
                            (rate-edit s0 p-target 3.0)]]
               (is (= (:chains kf) (:chains (run kf event))) (str (:event/type event))))
             (is (= {} (handle kf (rate-edit s0 p-target 3.0))))
-            (is (nil? (get-in (pointer kf p-target MouseEvent/MOUSE_PRESSED 5.0 5.0) [:history :transaction])))))
+            (is (= {} (handle kf (stroke :step-grid/paint-start p-target g1 [0 0]))) "nor a press")))
         (testing "the show lock on, P moved: the grid's edits and the toolbar's are refused as P's"
           (let [locked (-> s0 (set-items domain [q p]) (assoc-in [:ui :show-lock?] true))]
             (let [s (run locked {:event/type :step-grid/toggle :target p-target :row A :step 0})]
@@ -638,3 +651,172 @@
             effects (handle retargeted {:event/type :step-grid/paste :target p-target})]
         (is (not (contains? effects :clipboard/read)))
         (is (= retargeted (or (:state effects) retargeted)))))))
+
+
+;; A press's step ends with the press (reactivity plan 16)
+
+(def ^:private modulated-id #uuid "00000000-0000-0000-0000-0000000016f9")
+
+(defn- with-keyframed-amount
+  "state with an Intensity in the effects cell F4 ([5 3]) whose amount has an
+   inactive modulator while its keyframes are on: what 7b320b3's Modulate
+   switches in one edit (history-handlers-test's fixture)."
+  [state]
+  (assoc-in state [:chains :effect-chains [5 3]]
+            {:active? false
+             :items [{:id modulated-id :effect-id :intensity :enabled? true
+                      :params {:amount {:type :triangle :period 7.0 :min 0.2 :max 0.8 :value 0.6 :active? false}}
+                      :keyframe-modulator {:enabled? true :keyframes [{:position 0.0 :params {:amount 0.3}}
+                                                                      {:position 1.0 :params {:amount 0.9}}]}}]}))
+
+(defn- labels [state] (mapv :description (get-in state [:history :undo-stack])))
+
+(def ^:private rename {:event/type :cue-chain/set-name :col 1 :row 0 :name "After"})
+
+(def ^:private modulate
+  {:event/type :modulator/toggle :domain :effect-chains :entity-key [5 3] :effect-path [0]
+   :param-key :amount :param-spec {:min 0.0 :max 1.0} :fx/event true})
+
+(deftest close-or-interrupt-paint-preserves-undo-order-test
+  (let [rests (vec (repeat 5 []))
+        painted [[] [A] [A] [A] []]
+        s0 (-> (with-grids rests) (with-keyframed-amount) (history/mark-clean) (open cue-target))
+        name-of #(get-in % [:chains :cue-chains [1 0] :name])
+        modulating? #(true? (get-in % [:chains :effect-chains [5 3] :items 0 :params :amount :active?]))
+        stroke! #(-> % (press cue-target g1 [0 1]) (drag-to cue-target g1 [0 3]))
+        close {:event/type :ui/close-dialog :dialog-id :step-grid-editor :editor-id session}]
+    (doseq [[why act label value-of]
+            [["released, then a rename"
+              #(-> % stroke! (release cue-target g1) (run rename)) "Rename Cue" name-of]
+             ["closed before the release, then a rename"
+              #(-> % stroke! (run close) (run rename)) "Rename Cue" name-of]
+             ["renamed while still held, before the deadline; then the press's late drag and release"
+              #(-> % stroke! (run (assoc rename :time 30000)) (drag-to cue-target g1 [0 4]) (release cue-target g1))
+              "Rename Cue" name-of]
+             ["Modulate (one edit since 7b320b3) while still held"
+              #(-> % stroke! (run modulate) (release cue-target g1)) "Toggle Modulation" modulating?]]]
+      (testing why
+        (let [s (act s0)
+              u1 (run s {:event/type :edit/undo})
+              u2 (run u1 {:event/type :edit/undo})
+              r1 (run u2 {:event/type :edit/redo})
+              r2 (run r1 {:event/type :edit/redo})
+              before (value-of s0)
+              after (value-of s)]
+          (is (not= before after) "the second edit applied")
+          (is (= ["Edit Step Grid" label] (labels s)) "the paint, then the other edit: two steps")
+          (is (= painted (steps-at s cue-target)))
+          (is (nil? (get-in s [:history :transaction])))
+          (testing "the first Undo takes back only the second edit; the paint stays"
+            (is (= [painted before] [(steps-at u1 cue-target) (value-of u1)])))
+          (testing "the second takes back the paint: the saved show"
+            (is (= [rests before] [(steps-at u2 cue-target) (value-of u2)]))
+            (is (false? (get-in u2 [:project :dirty?]))))
+          (testing "Redo paints, then makes the second edit"
+            (is (= [painted before] [(steps-at r1 cue-target) (value-of r1)]))
+            (is (= [painted after] [(steps-at r2 cue-target) (value-of r2)]))))))
+    (testing "the close hid the window and ended its session in the same state"
+      (let [closed (-> s0 stroke! (run close))]
+        (is (false? (get-in closed [:ui :dialogs :step-grid-editor :open?])))
+        (is (nil? (get-in closed [:ui :dialogs :step-grid-editor :editor-id])))
+        (is (= cue-target (get-in closed [:ui :dialogs :step-grid-editor :target])) "its target stays for a reopen")
+        (is (= ["Edit Step Grid"] (labels closed)))))
+    (testing "Undo while the first stroke is held restores the grid and leaves one Redo"
+      (let [undone (run (stroke! s0) {:event/type :edit/undo})]
+        (is (= rests (steps-at undone cue-target)))
+        (is (= 1 (count (get-in undone [:history :redo-stack]))))
+        (is (nil? (get-in undone [:history :transaction])))
+        (is (= undone (-> undone (drag-to cue-target g1 [0 4]) (release cue-target g1))) "the press's later events do nothing")
+        (is (= painted (steps-at (run undone {:event/type :edit/redo}) cue-target)))))
+    (testing "a rename in a run of its own after the deadline has its own step too"
+      (let [later (run (stroke! s0) (assoc rename :time (+ 1000 history/stale-transaction-ms)))]
+        (is (= ["Edit Step Grid" "Rename Cue"] (labels later)))
+        (is (nil? (get-in later [:history :transaction])))))))
+
+(deftest retired-paint-cannot-end-or-edit-successor-test
+  (let [s0 (open (with-grids (vec (repeat 5 []))) cue-target)
+        session-2 #uuid "00000000-0000-0000-0000-0000000016fa"
+        first-press (-> s0 (press cue-target g1 [0 1]) (drag-to cue-target g1 [0 2]))
+        closed (run first-press {:event/type :ui/close-dialog :dialog-id :step-grid-editor :editor-id session})
+        reopened (open closed cue-target session-2)
+        second-press (run reopened (assoc (stroke :step-grid/paint-start cue-target g2 [1 0]) :editor-id session-2))
+        unchanged? (fn [state event]
+                     (let [effects (handle state event)]
+                       (and (= state (or (:state effects) state))
+                            (not (contains? effects :history/gesture-alarm)))))]
+    (testing "two presses on one pattern across a reopen: each its own step"
+      (is (= ["Edit Step Grid"] (labels second-press)) "the first press's, sealed by the close")
+      (is (= g2 (history/gesture-id (:history second-press))))
+      (is (= [[B] [A] [A] [] []] (steps-at second-press cue-target))))
+    (testing "the first press's late paint, end, abort, commit and wake-up, and the old session's close, do nothing"
+      (doseq [event [(stroke :step-grid/paint cue-target g1 [0 4])
+                     (stroke :step-grid/paint-end cue-target g1)
+                     (assoc (stroke :step-grid/paint cue-target g1 [0 4]) :editor-id session-2)
+                     (assoc (stroke :step-grid/paint-end cue-target g2) :editor-id session)
+                     {:event/type :history/abort-transaction :history/gesture-id g1}
+                     {:event/type :history/commit-transaction :history/gesture-id g1}
+                     {:event/type :history/gesture-timeout :history/gesture-id g1 :time 5000}
+                     {:event/type :ui/close-dialog :dialog-id :step-grid-editor :editor-id session}]]
+        (is (unchanged? second-press event) (pr-str (dissoc event :target)))))
+    (testing "closing a different window leaves the press alone"
+      (is (= g2 (history/gesture-id (:history (run second-press {:event/type :ui/close-dialog :dialog-id :zone-pattern-editor}))))))
+    (testing "a slider's press after it seals it; the grid press's events then do nothing"
+      (let [slider (run second-press {:event/type :history/begin-transaction :label "Adjust Rate"
+                                      :source-id [:slider :rate] :history/gesture-id g3})]
+        (is (= g3 (history/gesture-id (:history slider))))
+        (is (= ["Edit Step Grid" "Edit Step Grid"] (labels slider)))
+        (doseq [event [(assoc (stroke :step-grid/paint cue-target g2 [1 3]) :editor-id session-2)
+                       (assoc (stroke :step-grid/paint-end cue-target g2) :editor-id session-2)]]
+          (is (unchanged? slider event) (str (:event/type event))))))
+    (testing "a second pattern beside the press's: reorder or delete it, and the press's queued sample touches neither"
+      (let [p-target (target-of :effect-chains P)
+            q-target (target-of :effect-chains Q)
+            s (-> (two-grids :effect-chains [[] [] []] [[B] [] []]) (open p-target) (press p-target g1 [0 0]))
+            p (instance-at s p-target)
+            q (instance-at s q-target)]
+        (doseq [[why items] [["reordered" [q p]] ["deleted" [q]]]]
+          (let [changed (set-items s :effect-chains items)
+                sample (stroke :step-grid/paint p-target g1 [0 2])]
+            (is (nil? (get-in changed [:history :transaction])) (str why ": the edit ended the press"))
+            (is (= {} (handle changed sample)) why)
+            (is (= q (instance-at (run changed sample) q-target)) why)))))))
+
+(deftest editor-target-and-gesture-undo-integration-test
+  ;; 00-overview's "05 editor -> 16 history" check: open A, reorder it,
+  ;; paint, close before the mouse-up, receive clock beats, then edit B
+  (let [a (target-of :effect-chains P)
+        b (target-of :effect-chains Q)
+        s0 (open (two-grids :effect-chains [[] [] []] [[] [] []]) a)
+        moved (set-items s0 :effect-chains [(instance-at s0 b) (instance-at s0 a)])
+        stroke! #(-> % (press a g1 [0 0]) (drag-to a g1 [0 2]))
+        beats (fn [s from to]
+                (reduce (fn [s t] (run s {:event/type :show-clock/status :time t
+                                          :status {:beat-index (mod (quot t 500) 4) :frame-stats {}
+                                                   :mtc {:state :stopped :fps nil :text nil} :cue-warnings nil}}))
+                        s (range from to 500)))
+        edit-b #(-> % (open b #uuid "00000000-0000-0000-0000-0000000016fb")
+                    (run {:event/type :step-grid/toggle :target b :row A :step 1 :time 126000}))]
+    (doseq [[why paint!] [["closed before the mouse-up"
+                           #(run (stroke! %) {:event/type :ui/close-dialog :dialog-id :step-grid-editor :editor-id session})]
+                          ["never released nor closed: its deadline seals it" stroke!]]]
+      (testing why
+        (let [painted (paint! moved)
+              beaten (beats painted 1500 126000)
+              edited (edit-b beaten)
+              u1 (run edited {:event/type :edit/undo})
+              u2 (run u1 {:event/type :edit/undo})]
+          (is (nil? (get-in beaten [:history :transaction])) "125 s of beats kept no press open")
+          (is (= [[A] [A] [A]] (steps-at edited a)) "only A was painted")
+          (is (= [[] [A] []] (steps-at edited b)) "B has only its own edit")
+          (is (= ["Modify Chain" "Edit Step Grid" "Edit Step Grid"] (labels edited)))
+          (is (= [[[A] [A] [A]] [[] [] []]] [(steps-at u1 a) (steps-at u1 b)]) "undoing B's edit keeps A's paint")
+          (is (= [[[] [] []] [[] [] []]] [(steps-at u2 a) (steps-at u2 b)]) "the next Undo takes the paint back")
+          (is (= [Q P] (mapv :id (owner-items u2 a))) "and the reorder stays"))))
+    (testing "A deleted mid-drag: the deletion is a step of its own, not folded into the paint's"
+      (let [deleted (-> moved stroke! (set-items :effect-chains [(instance-at moved b)]) (release a g1))
+            u1 (run deleted {:event/type :edit/undo})
+            u2 (run u1 {:event/type :edit/undo})]
+        (is (= ["Modify Chain" "Edit Step Grid" "Modify Chain"] (labels deleted)))
+        (is (= [[A] [A] [A]] (steps-at u1 a)) "the first Undo brings A back as painted")
+        (is (= [[] [] []] (steps-at u2 a)) "the second takes the paint back")
+        (is (= [Q P] (mapv :id (owner-items u2 a))))))))

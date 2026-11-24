@@ -13,9 +13,11 @@
    (\"Step 5 of 8\", \"Not playing\") come from the show clock's newest
    tick, never from app state."
   (:require [cljfx.api :as fx]
+            [laser-show.events.core :as events]
             [laser-show.subs :as subs]
             [laser-show.views.components.step-grid :as step-grid]
-            [laser-show.views.dialogs.common :as common]))
+            [laser-show.views.dialogs.common :as common])
+  (:import [javafx.stage WindowEvent]))
 
 (def ^:private dialog-id :step-grid-editor)
 
@@ -46,10 +48,10 @@
 
 (defn- content
   [{:keys [fx/context]}]
-  (let [{:keys [target]} (fx/sub-ctx context subs/dialog-data dialog-id)
+  (let [{:keys [target editor-id]} (fx/sub-ctx context subs/dialog-data dialog-id)
         grid (when target (fx/sub-ctx context subs/step-grid target))
         guard (when grid (guard-text grid))
-        close {:event/type :ui/close-dialog :dialog-id dialog-id}]
+        close {:event/type :ui/close-dialog :dialog-id dialog-id :editor-id editor-id}]
     {:fx/type :v-box
      :spacing 0
      :style-class "dialog-content"
@@ -73,7 +75,7 @@
               :spacing 12
               :disable (some? guard)
               :children [{:fx/type step-grid/toolbar :target target :grid grid}
-                         {:fx/type step-grid/grid-view :target target :grid grid}
+                         {:fx/type step-grid/grid-view :editor-id editor-id :target target :grid grid}
                          {:fx/type step-grid/moves-and-pads :target target :grid grid}]}]
             (when guard
               [(note "step-grid-guard" guard "zone-pattern-warning" "zone-pattern-warning-warn")])
@@ -105,10 +107,20 @@
                                    :style-class "button-primary"
                                    :on-action close}]))}]}))
 
+(defn- close-request
+  "The window's own close (its title bar) in session editor-id: consumed at
+   once, so the window stays until the close's state hides it, with the
+   paint its press holds sealed in the same state (handlers.step-grid/
+   close-editor). An event map would be dispatched too late to cancel it."
+  [editor-id]
+  (fn [^WindowEvent e]
+    (.consume e)
+    (events/dispatch! {:event/type :ui/close-dialog :dialog-id dialog-id :editor-id editor-id})))
+
 (defn step-grid-editor-dialog
   "The step grid window."
   [{:keys [fx/context]}]
-  (let [{:keys [target]} (fx/sub-ctx context subs/dialog-data dialog-id)
+  (let [{:keys [target editor-id]} (fx/sub-ctx context subs/dialog-data dialog-id)
         [col row] (:entity-key target)
         chain-name (if (= :effect-chains (:domain target))
                      (:name (fx/sub-ctx context subs/effect-cell-chain col row))
@@ -118,4 +130,5 @@
      :title (window-title target chain-name)
      :min-width 720
      :min-height 460
+     :on-close-request (close-request editor-id)
      :content {:fx/type content}}))

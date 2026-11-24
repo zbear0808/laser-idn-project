@@ -1,15 +1,17 @@
 (ns laser-show.views.components.step-grid
   "The step grid window's parts (zones plan Z6, plans/2026-11-19-zones/08
    §4, §7): the grid body, one pane that takes the mouse itself (so a drag
-   paints across cells, :step-grid/pointer) with a region per cell,
-   #step-cell-<row>-<step>, and the beat and bar lines under them; the row
-   labels (each row's zone and where it goes, with its menu), the step
-   numbers (with theirs) and + Row; the toolbar: length, Rate, Step on,
-   Restart on (while Step on is the beat), Offset, Start from, Copy, Paste,
-   Clear; the playhead over the cells and the window's Now line, drawn from
-   the show clock's newest tick (clock-view/ext-clock-redraw on the
-   snapshot's :zone-steps), never from app state. What a key does on the
-   grid is key-event, a pure function."
+   paints across cells) with a region per cell, #step-cell-<row>-<step>,
+   and the beat and bar lines under them; the row labels (each row's zone
+   and where it goes, with its menu), the step numbers (with theirs) and
+   + Row; the toolbar: length, Rate, Step on, Restart on (while Step on is
+   the beat), Offset, Start from, Copy, Paste, Clear; the playhead over the
+   cells and the window's Now line, drawn from the show clock's newest tick
+   (clock-view/ext-clock-redraw on the snapshot's :zone-steps), never from
+   app state. What a key does on the grid is key-event, a pure function.
+   The body turns its mouse into a press's events itself, on the FX thread
+   (reactivity plan 16): a press, each other cell the drag reaches, and its
+   end, nothing for motion inside a cell."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.animation.show-time :as show-time]
@@ -19,6 +21,7 @@
             [laser-show.subs :as subs]
             [laser-show.views.components.clock-view :as clock-view]
             [laser-show.views.components.commit-field :as commit-field]
+            [laser-show.views.components.gesture :as gesture]
             [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.views.components.shortcuts :as shortcuts]
             [laser-show.views.components.target-control :as target-control]
@@ -28,7 +31,7 @@
            [javafx.scene Node]
            [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.control Labeled]
-           [javafx.scene.input KeyCode KeyEvent MouseEvent]
+           [javafx.scene.input KeyCode KeyEvent MouseButton MouseEvent]
            [javafx.scene.paint Color]))
 
 (def cell-w "A cell's width, px: 32 steps fit the window." 22.0)
@@ -126,41 +129,93 @@
    :mouse-transparent true
    :style-class [(if (= :bar kind) "step-grid-bar-line" "step-grid-beat-line")]})
 
+(defn- body-cell
+  "The [row step] of the grid body node under mouse event e, by the body's
+   own coordinates and the rows × length its user data says it shows; nil
+   outside."
+  [^Node node ^MouseEvent e]
+  (let [{:keys [rows length]} (.getUserData node)]
+    (step-grid/cell-at (.getX e) (.getY e) cell-w cell-h rows length)))
+
+(defn- paint-end-event
+  "The end of a captured press (its release, the body's blur or its
+   disposal): its ids and why, no cell."
+  [{:keys [gesture-id address]} reason]
+  (assoc address :event/type :step-grid/paint-end :history/gesture-id gesture-id :reason reason))
+
+(defn- body-pressed!
+  "A press on the grid body: it takes the focus (consumed: the scroll pane
+   around the grid would take the focus the grid's keys need). A primary
+   press on a cell (a popup trigger too: the body has no menu, and every
+   headless robot press is one) is a new press: its id
+   (gesture/capture!, with the session and target the body shows now) and
+   its start on that cell."
+  [^MouseEvent e]
+  (let [^Node node (.getSource e)]
+    (.requestFocus node)
+    (.consume e)
+    (when (= MouseButton/PRIMARY (.getButton e))
+      (when-let [[row step :as at] (body-cell node e)]
+        (let [{:keys [editor-id target]} (.getUserData node)
+              address {:editor-id editor-id :target target}
+              {:keys [gesture-id]} (gesture/capture! node address #(events/dispatch! (paint-end-event %1 %2))
+                                                     :last-cell at)]
+          (events/dispatch! (assoc address :event/type :step-grid/paint-start
+                                   :history/gesture-id gesture-id :row row :step step)))))))
+
+(defn- body-dragged!
+  "The captured press dragged onto another cell of the grid: it paints on.
+   Nothing for the cell it last sent, outside the grid, or with no press:
+   moving within a cell sends no event."
+  [^MouseEvent e]
+  (let [^Node node (.getSource e)]
+    (when-let [{:keys [gesture-id address last-cell]} (gesture/capture node)]
+      (when (.isPrimaryButtonDown e)
+        (when-let [[row step :as at] (body-cell node e)]
+          (when (not= at last-cell)
+            (gesture/update-capture! node gesture-id assoc :last-cell at)
+            (events/dispatch! (assoc address :event/type :step-grid/paint
+                                     :history/gesture-id gesture-id :row row :step step))))))))
+
+(defn- body-released!
+  "A primary release ends the captured press, wherever the mouse is."
+  [^MouseEvent e]
+  (when (= MouseButton/PRIMARY (.getButton e))
+    (gesture/finish! (.getSource e) nil :release)))
+
 (defn grid-body
   "The cells, rows × length, in one pane that takes the mouse and the keys
-   itself (#step-grid-body). Props: :target :grid (subs/step-grid)."
-  [{:keys [target grid]}]
+   itself (#step-grid-body). Its mouse is a press's events, each with the
+   press's id (gesture/capture!) and the session it was pressed in; its
+   blur, the window's, or its going end the press. Props: :editor-id
+   :target :grid (subs/step-grid); key it by :editor-id, so a new session
+   gets a new body and the old one's press ends."
+  [{:keys [editor-id target grid]}]
   (let [{:keys [rows lit length cursor params]} grid
         n (count rows)
         w (* length cell-w)
         h (* n cell-h)
-        pointer {:event/type :step-grid/pointer :target target :cell-w cell-w :cell-h cell-h}
         [cr cs] cursor]
-    {:fx/type fx/ext-on-instance-lifecycle
-     ;; The grid has the keys when the window opens
-     :on-created (fn [^Node node]
-                   (keys/claim-keys! node #{:left :right :up :down :space :enter :delete :back_space :home :end})
-                   (Platform/runLater #(.requestFocus node)))
-     :desc
+    (gesture/wrap-owner
      {:fx/type :pane
-     :id "step-grid-body"
-     :focus-traversable true
-     :min-width w :pref-width w :max-width w
-     :min-height h :pref-height h :max-height h
-     :style-class ["step-grid-body"]
-     :on-mouse-pressed (fn [^MouseEvent e]
-                         ;; Consumed: the scroll pane around the grid would
-                         ;; take the focus the grid's keys need
-                         (.requestFocus ^Node (.getSource e))
-                         (.consume e)
-                         (events/dispatch! (assoc pointer :fx/event e)))
-     :on-mouse-dragged pointer
-     :on-mouse-released pointer
-     :on-key-pressed (on-key target)
-     :children (into (mapv (fn [[k kind]] (line k kind h)) (sort (beat-lines params length)))
-                     (for [r (range n)
-                           k (range length)]
-                       (cell r k (contains? (nth lit k) (:ref (nth rows r))) (and (= r cr) (= k cs)))))}}))
+      :id "step-grid-body"
+      :focus-traversable true
+      :min-width w :pref-width w :max-width w
+      :min-height h :pref-height h :max-height h
+      :style-class ["step-grid-body"]
+      :user-data {:editor-id editor-id :target target :rows n :length length}
+      :on-mouse-pressed body-pressed!
+      :on-mouse-dragged body-dragged!
+      :on-mouse-released body-released!
+      :on-key-pressed (on-key target)
+      :children (into (mapv (fn [[k kind]] (line k kind h)) (sort (beat-lines params length)))
+                      (for [r (range n)
+                            k (range length)]
+                        (cell r k (contains? (nth lit k) (:ref (nth rows r))) (and (= r cr) (= k cs)))))}
+     ;; The grid has the keys when the window opens
+     {:on-created (fn [^Node node]
+                    (keys/claim-keys! node #{:left :right :up :down :space :enter :delete :back_space :home :end})
+                    (Platform/runLater #(.requestFocus node)))})))
 
 
 ;; The playhead (08 §7, invariant 7): from the snapshot only
@@ -448,8 +503,8 @@
 (defn grid-view
   "The row labels and the grid (its numbers over its cells, the playhead
    over them), side by side; past 32 steps the grid scrolls sideways.
-   Props: :target :grid."
-  [{:keys [target grid]}]
+   Props: :editor-id (the window's session) :target :grid."
+  [{:keys [editor-id target grid]}]
   {:fx/type :h-box
    :spacing 6
    :children [{:fx/type row-labels :target target :grid grid}
@@ -465,5 +520,6 @@
                          :children [{:fx/type step-numbers :target target :grid grid}
                                     {:fx/type :stack-pane
                                      :alignment :top-left
-                                     :children [{:fx/type grid-body :target target :grid grid}
-                                                {:fx/type playhead :grid grid}]}]}}]})
+                                     :children [{:fx/type grid-body :fx/key [:body editor-id]
+                                                 :editor-id editor-id :target target :grid grid}
+                                                {:fx/type playhead :fx/key :playhead :grid grid}]}]}}]})
