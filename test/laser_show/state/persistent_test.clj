@@ -660,6 +660,64 @@
     (is (= {:random {:bar? true}} (get-in loaded [:config :pattern-pads])) "a pad's setting is the show's")
     (is (false? (get-in loaded [:project :dirty?])))))
 
+(defn- pinned-patterns
+  "plans/2026-11-23-cljfx-reactivity/28 §7.1's pattern fields, every pin
+   to pin: a cue's step grid (a rest first and last), an effect cell's
+   pattern in a group, a base source and two sparse keyframes."
+  [pin]
+  {:cue [{:id #uuid "00000000-0000-0000-0000-0000000000b1" :effect-id :zone-pattern :enabled? false
+          :params {:style :steps :from pin :zones [:zone/c pin] :steps [[] [:zone/c pin] [pin] []]}}]
+   :cell [{:id #uuid "00000000-0000-0000-0000-0000000000b2" :type :group :enabled? false
+           :items [{:id #uuid "00000000-0000-0000-0000-0000000000b3" :effect-id :zone-pattern :enabled? true
+                    :params {:from pin}
+                    :keyframe-modulator {:enabled? false
+                                         :keyframes [{:position 0.0 :params {:zones [pin]}}
+                                                     {:position 1.0 :params {:steps [[pin] []]}}]}}]}]})
+
+(defn- with-pinned-patterns [state pin]
+  (let [{:keys [cue cell]} (pinned-patterns pin)]
+    (-> state
+        (assoc-in [:chains :cue-chains [2 0]] {:items [{:type :preset :id #uuid "00000000-0000-0000-0000-0000000000b4" :preset-id :circle}]
+                                               :zone-patterns cue})
+        (assoc-in [:chains :effect-chains [2 0]] {:active? false :items cell}))))
+
+(deftest pattern-pins-round-trip-across-rigs-test
+  (let [rig-a (-> (domains/build-initial-state)
+                  (assoc :projectors {:projector-10-0-0-5-1 {:name "Laser L" :host "10.0.0.5" :port 7255 :service-id 1
+                                                             :unit-id unit-l :stable-id [:unit unit-l 1] :enabled? true
+                                                             :zone-groups [] :exclude-from-all? false}})
+                  (history/mark-clean))
+        pin-a :auto.laser/projector-10-0-0-5-1
+        pin-b :auto.laser/projector-10-0-0-57-1
+        zip (fn [n] (doto (java.io.File/createTempFile (str "pattern-pins-" n) ".zip") (.deleteOnExit)))
+        [zip-1 zip-2] [(zip 1) (zip 2)]
+        patterns (fn [s] {:cue (get-in s [:chains :cue-chains [2 0] :zone-patterns])
+                          :cell (get-in s [:chains :effect-chains [2 0] :items])})
+        opened-clean (fn [here loaded label]
+                       (doseq [path rig-paths]
+                         (is (identical? (get-in here path) (get-in loaded path)) (str label ": " path " is this machine's")))
+                       (is (empty? (get-in loaded [:history :undo-stack])) label)
+                       (is (false? (get-in loaded [:project :dirty?])) (str label ": renamed before the baseline")))]
+    (try
+      (is (some? (save! (with-pinned-patterns rig-a pin-a) (str zip-1))) "made on rig A, where Laser L is .5")
+      (let [rig-b (on-a-rig)
+            on-b (open rig-b (str zip-1))]
+        (testing "opened on rig B, where the same unit is .57: both grids, every keyframe, order and rests kept"
+          (is (= (pinned-patterns pin-b) (patterns on-b)))
+          (opened-clean rig-b on-b "on B"))
+        (is (some? (save! on-b (str zip-2))) "saved again on B: its copy of the rig is B's now")
+        (testing "reopened on B: as it was"
+          (let [again (open rig-b (str zip-2))]
+            (is (= (pinned-patterns pin-b) (patterns again)))
+            (opened-clean rig-b again "again on B")))
+        (testing "and opened on A again: back on the unit's id there"
+          (let [back (open rig-a (str zip-2))]
+            (is (= (pinned-patterns pin-a) (patterns back)))
+            (opened-clean rig-a back "back on A"))))
+      (finally
+        (.delete zip-1)
+        (.delete zip-2)))))
+
 (deftest pattern-pads-are-not-saved-test
   (let [show (-> (domains/build-initial-state)
                  (assoc :pattern-pads {:style :chase :pending {:id 1 :style :off :at-beat 9.0 :bar? false}})

@@ -481,24 +481,91 @@
   (or (#{:edit/undo :edit/redo} type)
       (= "history" (some-> type namespace))))
 
+(defn- versioned
+  "state with the cue at cell following timecode as the next version."
+  [state cell]
+  (let [n (get-in state [:playback :chase-sources :next] 1)]
+    (-> state
+        (assoc-in [:playback :chase-sources :cells cell] n)
+        (assoc-in [:playback :chase-sources :next] (inc n)))))
+
+(defn- unversioned
+  "state with no version for cell, whose cue is gone or doesn't follow
+   timecode, and without the chase marker there that still followed the old
+   one, stopped as any cue stops (cue-timing/deactivate-cue: the last one
+   stops the transport). Another intent there (a run the same edit started
+   or moved in) stays."
+  [state cell]
+  (cond-> state
+    (contains? (get-in state [:playback :chase-sources :cells]) cell)
+    (update-in [:playback :chase-sources :cells] dissoc cell)
+
+    (:chasing? (get-in state [:playback :active-cues cell]))
+    (update :playback cue-timing/deactivate-cue cell)))
+
+(defn reconcile-chase-sources
+  "after, the state an event left (normalized, or as undo or redo restored
+   it), with [:playback :chase-sources] following its cues (reactivity plan
+   15): every cue at a cell the event changed (not identical? to before's)
+   that follows timecode gets the next version, even one equal to the cue it
+   replaced; one gone or not following loses its version, and its chase
+   marker goes (unversioned), so the next grid toggle or editor Play finds
+   the cell free before any tick. The show clock chases a cue only at its
+   current version (show-time/step), so an old episode never draws a new
+   cue. A follower's marker stays for the clock to rebind or retire. Other
+   cells keep theirs; :next never goes back. A new show (another
+   [:project :document-id]: New, Open) starts its followers at 0."
+  [before after]
+  (let [old-ccs (get-in before [:chains :cue-chains])
+        new-ccs (get-in after [:chains :cue-chains])]
+    (cond
+      (not= (h/document-id before) (h/document-id after))
+      (assoc-in after [:playback :chase-sources]
+                {:next (get-in after [:playback :chase-sources :next] 1)
+                 :cells (into {} (keep (fn [[cell cue]] (when (playback/chases-mtc? cue) [cell 0]))) new-ccs)})
+
+      (identical? old-ccs new-ccs)
+      after
+
+      :else
+      (reduce (fn [state cell]
+                (let [cue (get new-ccs cell ::none)]
+                  (cond
+                    (identical? cue (get old-ccs cell ::none)) state
+                    (playback/chases-mtc? (get new-ccs cell)) (versioned state cell)
+                    :else (unversioned state cell))))
+              after
+              (distinct (concat (keys new-ccs) (keys old-ccs)))))))
+
 (defn wrap-normalize-timelines
   "Middleware: after the handler runs, enforce the timeline invariants
-   (model/normalize-timeline-cue) on every cue chain the event changed. Runs
-   innermost, so undo snapshots and the unsaved flag see normalized state.
-   Events that don't touch cue chains only pay one identical? check."
+   (model/normalize-timeline-cue) on every cue chain the event changed, and
+   follow the change with the versions of the cues that follow timecode
+   (reconcile-chase-sources). Undo and redo restore their chains as they
+   were (not normalized again), and are versioned too, as is a new show.
+   Runs innermost, so undo snapshots and the unsaved flag see normalized
+   state. Events that don't touch cue chains or replace the show only pay an
+   identical? check and a document id comparison."
   [handler]
   (fn [event]
     (let [effects (handler event)
-          old-ccs (get-in event [:state :chains :cue-chains])
-          new-ccs (get-in effects [:state :chains :cue-chains])]
-      (if (or (nil? (:state effects))
-              (identical? old-ccs new-ccs)
-              (restores-history? event))
+          before (:state event)
+          after (:state effects)
+          old-ccs (get-in before [:chains :cue-chains])
+          new-ccs (get-in after [:chains :cue-chains])]
+      (if (or (nil? after)
+              (and (identical? old-ccs new-ccs)
+                   (= (h/document-id before) (h/document-id after))))
         effects
-        (let [normalized (model/normalize-timeline-cues old-ccs new-ccs)]
-          (if (identical? normalized new-ccs)
+        (let [normalized (if (restores-history? event)
+                           new-ccs
+                           (model/normalize-timeline-cues old-ccs new-ccs))
+              after' (reconcile-chase-sources before (cond-> after
+                                                       (not (identical? normalized new-ccs))
+                                                       (assoc-in [:chains :cue-chains] normalized)))]
+          (if (identical? after' after)
             effects
-            (assoc-in effects [:state :chains :cue-chains] normalized)))))))
+            (assoc effects :state after')))))))
 
 
 ;; Public API

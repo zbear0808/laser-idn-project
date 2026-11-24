@@ -7,9 +7,9 @@
    switches at once; Delete asks first (:zone-maps/request-delete)."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
-            [laser-show.events.core :as events]
             [laser-show.routing.targets :as targets]
             [laser-show.subs :as subs]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.commit-field :as commit-field]
             [laser-show.views.components.target-control :as target-control]))
 
@@ -150,17 +150,21 @@
 
 (defn- override-zone-combo
   "The zone an override is for: the zones listed, less those another
-   override has."
+   override has. A zone the app refused (the show lock) goes back to the
+   one the override has (applied-value)."
   [{:keys [id zone ref choices]}]
-  {:fx/type :combo-box
-   :id (str "zone-map-override-zone-" (id-text zone))
-   :items choices
+  {:fx/type applied-value/applied-control
+   :property :value
+   :address [id :override zone]
    :value zone
-   :button-cell (fn [z] {:text (targets/zone-letter z)})
-   :cell-factory {:fx/cell-type :list-cell :describe (fn [z] {:text (targets/zone-letter z)})}
-   :on-value-changed (fn [z]
-                       (when (and z (not= z zone))
-                         (events/dispatch! {:event/type :zone-maps/set-override :map id :from zone :zone z :target ref})))})
+   :on-change (fn [z]
+                (when (and z (not= z zone))
+                  {:event/type :zone-maps/set-override :map id :from zone :zone z :target ref}))
+   :desc {:fx/type :combo-box
+          :id (str "zone-map-override-zone-" (id-text zone))
+          :items choices
+          :button-cell (fn [z] {:text (targets/zone-letter z)})
+          :cell-factory {:fx/cell-type :list-cell :describe (fn [z] {:text (targets/zone-letter z)})}}})
 
 (defn- overrides-row
   "Overrides: a zone, the group it goes to whatever its lane, ×; and +

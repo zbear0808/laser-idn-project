@@ -3,9 +3,12 @@
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
             [laser-show.state.persistent :as persistent]
+            [laser-show.state.templates :as templates]
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.history :as history-handlers]
             [laser-show.events.core :as events]
+            [laser-show.routing.zone-patterns :as zp]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.timeline.model :as model]))
 
 (def item-id #uuid "11111111-1111-1111-1111-111111111111")
@@ -46,6 +49,28 @@
 
 (defn- size-of [s] (get-in s [:chains :cue-chains [0 0] :items 0 :params :size]))
 
+;; A press (reactivity plan 16): its begin, its own edits and its end carry
+;; its id
+
+(def ^:private press-g #uuid "00000000-0000-0000-0000-0000000016c1")
+(def ^:private press-h #uuid "00000000-0000-0000-0000-0000000016c2")
+
+(defn- begin
+  ([id] (begin id nil))
+  ([id t] (cond-> {:event/type :history/begin-transaction :label "Adjust Size" :source-id [:slider :size]
+                   :history/gesture-id id}
+            t (assoc :time t))))
+
+(defn- member
+  "Press id's slider edit of the size to value."
+  ([id value] (member id value nil))
+  ([id value t] (cond-> (assoc edit-size :value value :history/gesture-id id) t (assoc :time t))))
+
+(defn- commit
+  ([id] (commit id nil))
+  ([id t] (cond-> {:event/type :history/commit-transaction :source-id [:slider :size] :history/gesture-id id}
+            t (assoc :time t))))
+
 (deftest discrete-event-automatic-history-test
   (testing "discrete event automatically captures pre-action snapshot on undo stack"
     (let [s0 (test-state)
@@ -70,14 +95,13 @@
           (is (false? (history/can-redo? h3))))))))
 
 (deftest continuous-transaction-lifecycle-test
-  (testing "mouse-down and mouse-up group intermediate changes into one undo step"
-    (let [s1 (run (test-state) {:event/type :history/begin-transaction
-                                :label "Adjust Size" :source-id [:slider :size]})
+  (testing "a press's begin and end group its own changes into one undo step"
+    (let [s1 (run (test-state) (begin press-g))
           _ (is (some? (get-in s1 [:history :transaction])))
-          s2 (run s1 (assoc edit-size :value 1.5))
-          s3 (run s2 (assoc edit-size :value 2.0))
+          s2 (run s1 (member press-g 1.5))
+          s3 (run s2 (member press-g 2.0))
           _ (is (= 0 (undo-count s3)) "no snapshots while the transaction is open")
-          s4 (run s3 {:event/type :history/commit-transaction :source-id [:slider :size]})]
+          s4 (run s3 (commit press-g))]
       (is (nil? (get-in s4 [:history :transaction])))
       (is (= 1 (undo-count s4)))
       (is (= "Adjust Size" (history/undo-label (:history s4))))
@@ -87,14 +111,15 @@
 
 (deftest continuous-transaction-abort-test
   (testing "abort-transaction reverts document back to baseline snapshot"
-    (let [s1 (run (test-state) {:event/type :history/begin-transaction
-                                :label "Adjust Size" :source-id [:slider :size]})
-          s2 (run s1 edit-size)
-          s3 (run s2 {:event/type :history/abort-transaction})]
+    (let [s1 (run (test-state) (begin press-g))
+          s2 (run s1 (member press-g 2.0))
+          s3 (run s2 {:event/type :history/abort-transaction :history/gesture-id press-g})]
       (is (= 2.0 (size-of s2)))
       (is (nil? (get-in s3 [:history :transaction])))
       (is (= 1.0 (size-of s3)))
-      (is (false? (history/can-undo? (:history s3)))))))
+      (is (false? (history/can-undo? (:history s3))))
+      (testing "another press's abort does nothing"
+        (is (= s2 (run s2 {:event/type :history/abort-transaction :history/gesture-id press-h})))))))
 
 (deftest runtime-events-do-not-trigger-history-test
   (testing "runtime events such as selection do not push undo snapshots"
@@ -110,10 +135,11 @@
     (is (false? (get-in s1 [:project :dirty?])) "BPM is live: not an unsaved change")
     (testing "a slider transaction with only a BPM change creates no step"
       (let [s (-> s0
-                  (run {:event/type :history/begin-transaction :label "x" :source-id :bpm})
+                  (run {:event/type :history/begin-transaction :label "x" :source-id :bpm :history/gesture-id press-g})
                   (run {:event/type :timing/set-bpm :bpm 140.0})
-                  (run {:event/type :history/commit-transaction :source-id :bpm}))]
-        (is (= 0 (undo-count s)))))))
+                  (run {:event/type :history/commit-transaction :source-id :bpm :history/gesture-id press-g}))]
+        (is (= 0 (undo-count s)))
+        (is (nil? (get-in s [:history :transaction])))))))
 
 (deftest effect-toggle-is-not-undoable-test
   (let [s0 (clean-state)
@@ -249,12 +275,30 @@
                   (keys effects))
         label)))
 
+(def ^:private grid-id #uuid "00000000-0000-0000-0000-0000000016d1")
+(def ^:private grid-session #uuid "00000000-0000-0000-0000-0000000016d2")
+(def ^:private grid-target {:domain :cue-zone-patterns :entity-key [0 0] :effect-instance-id grid-id})
+
+(defn- grid-press-events
+  "Valid step grid press events (with their :state): they do nothing ({})
+   without the window open on the grid, and :paint without its press."
+  []
+  (let [s (-> (test-state)
+              (assoc-in [:chains :cue-chains [0 0] :zone-patterns] [(assoc (zp/preset-instance :steps :cue) :id grid-id)])
+              (run {:event/type :step-grid/open :target grid-target :editor-id grid-session}))
+        press {:editor-id grid-session :target grid-target :history/gesture-id press-g}
+        pressed (run s (assoc press :event/type :step-grid/paint-start :row 0 :step 0))]
+    {:step-grid/paint-start (assoc press :state s :row 0 :step 1)
+     :step-grid/paint (assoc press :state pressed :row 0 :step 2)}))
+
 (deftest history-labels-name-real-events-test
-  (doseq [event-type (keys history-handlers/event-descriptions)]
-    (let [result (try (handlers/handle-event {:event/type event-type :state (test-state)})
-                      (catch Throwable _ ::threw))]
-      (is (not= {} result)
-          (str event-type " is not routed to a handler (unknown events return {})")))))
+  (let [valid (grid-press-events)]
+    (doseq [event-type (keys history-handlers/event-descriptions)]
+      (let [event (get valid event-type {:state (test-state)})
+            result (try (handlers/handle-event (assoc event :event/type event-type))
+                        (catch Throwable _ ::threw))]
+        (is (not= {} result)
+            (str event-type " is not routed to a handler (unknown events return {})"))))))
 
 ;; Regression tests for the 2026-11-08 review
 
@@ -262,34 +306,89 @@
 (def scan {:event/type :projectors/scan-complete :devices devices})
 
 (deftest drag-back-to-saved-value-is-clean-test
-  (let [begin {:event/type :history/begin-transaction :label "Size" :source-id :size}
-        commit {:event/type :history/commit-transaction :source-id :size}]
-    (testing "clean -> drag away and back -> commit is clean"
-      (let [s (-> (clean-state) (run begin) (run (assoc edit-size :value 2.0))
-                  (run (assoc edit-size :value 1.0)) (run commit))]
-        (is (false? (get-in s [:project :dirty?])))
-        (is (= 0 (undo-count s)))))
-    (testing "dirty -> drag back to the saved value -> commit is clean"
-      (let [s (-> (clean-state) (run (assoc edit-size :value 3.0)) (run begin)
-                  (run (assoc edit-size :value 1.0)) (run commit))]
-        (is (false? (get-in s [:project :dirty?])))))))
+  (testing "clean -> drag away and back -> commit is clean"
+    (let [s (-> (clean-state) (run (begin press-g)) (run (member press-g 2.0))
+                (run (member press-g 1.0)) (run (commit press-g)))]
+      (is (false? (get-in s [:project :dirty?])))
+      (is (= 0 (undo-count s)))))
+  (testing "dirty -> drag back to the saved value -> commit is clean"
+    (let [s (-> (clean-state) (run (assoc edit-size :value 3.0)) (run (begin press-g))
+                (run (member press-g 1.0)) (run (commit press-g)))]
+      (is (false? (get-in s [:project :dirty?]))))))
 
 (deftest long-drag-stays-one-step-test
   (let [t0 1000000
-        s (reduce (fn [s n] (run s (assoc edit-size :value (+ 1.0 (* n 0.01)) :time (+ t0 (* n 1000)))))
-                  (run (clean-state) {:event/type :history/begin-transaction :label "Size" :source-id :size :time t0})
+        s (reduce (fn [s n] (run s (member press-g (+ 1.0 (* n 0.01)) (+ t0 (* n 1000)))))
+                  (run (clean-state) (begin press-g t0))
                   (range 1 100))
-        s (run s {:event/type :history/commit-transaction :source-id :size :time (+ t0 100000)})]
+        s (run s (commit press-g (+ t0 100000)))]
     (is (= 1 (undo-count s)) "a 100 s drag with activity is one step")))
 
 (deftest stale-transaction-auto-commits-after-inactivity-test
   (let [t0 1000000
         s (-> (clean-state)
-              (run {:event/type :history/begin-transaction :label "Size" :source-id :size :time t0})
-              (run (assoc edit-size :time (+ t0 10))))
+              (run (begin press-g t0))
+              (run (member press-g 2.0 (+ t0 10))))
         s (run s {:event/type :grid/clear-cell :col 0 :row 0 :time (+ t0 history/stale-transaction-ms 100)})]
     (is (nil? (get-in s [:history :transaction])))
     (is (= 2 (undo-count s)) "the stale drag, then the clear as its own step")))
+
+(defn- beat-report
+  "The show clock's status report with beat in the bar beat, at t: what
+   :show-clock/status writes (the beat into [:timing], a document root)."
+  [beat t]
+  {:event/type :show-clock/status :time t
+   :status {:beat-index beat :frame-stats {} :mtc {:state :stopped :fps nil :text nil} :cue-warnings nil}})
+
+(deftest only-owned-undoable-changes-renew-the-deadline-test
+  ;; Reactivity plan 16 §4.4: the deadline is the press's last undoable
+  ;; change + 60 s; beats, UI and other presses never move it
+  (let [begun (-> (clean-state) (run (begin press-g 0)) (run (member press-g 2.0 0)))
+        beats (fn [s from to] (reduce (fn [s t] (run s (beat-report (mod (quot t 500) 4) t))) s (range from to 500)))]
+    (testing "beats until 59,999 ms: status updates, the press's activity doesn't"
+      (let [s (-> begun (beats 500 60000) (run (beat-report 3 59999)))]
+        (is (= 3 (get-in s [:timing :beat-index])) "the beat still shows")
+        (is (= 0 (get-in s [:history :transaction :last-activity])) "the last activity is the press's own")
+        (is (= press-g (history/gesture-id (:history s))) "still open")
+        (is (= 0 (undo-count s)))
+        (let [due (run s (beat-report 0 60000))]
+          (is (nil? (get-in due [:history :transaction])) "at 60,000 ms the press's step is sealed")
+          (is (= 1 (undo-count due)))
+          (is (= 0 (get-in due [:timing :beat-index])) "and the report applied"))))
+    (testing "an event that returns no state at the deadline still publishes the seal"
+      (let [effects (pipeline {:event/type :ui/clear-notice :id (random-uuid) :state begun :time 60000})]
+        (is (nil? (get-in effects [:state :history :transaction])))
+        (is (= 1 (undo-count (:state effects))))
+        (is (= {:cancel-id press-g} (:history/gesture-alarm effects)) "and its wake-up is cancelled")))
+    (testing "the press's wake-up with nothing else happening seals it"
+      (let [effects (pipeline {:event/type :history/gesture-timeout :history/gesture-id press-g :state begun :time 60000})]
+        (is (nil? (get-in effects [:state :history :transaction])))
+        (is (= 1 (undo-count (:state effects))))
+        (is (= 2.0 (size-of (:state effects))) "the value it set stays")))
+    (testing "an early wake-up after the press's own change waits the rest of its time, writing nothing"
+      (let [later (run begun (member press-g 2.5 50000))
+            effects (pipeline {:event/type :history/gesture-timeout :history/gesture-id press-g :state later :time 60000})]
+        (is (= 50000 (get-in later [:history :transaction :last-activity])))
+        (is (= {:history/gesture-alarm {:arm {:gesture-id press-g :delay-ms 50000}}} effects))
+        (let [held (-> later (run (member press-g 3.0 100000)) (run (commit press-g 100001)))]
+          (is (= 1 (undo-count held)) "every value of the press is one step")
+          (is (= 1.0 (size-of (run held {:event/type :edit/undo})))))))
+    (testing "a wake-up for an older press while H is held does nothing"
+      (let [h (run begun (begin press-h 1000))]
+        (is (= press-h (history/gesture-id (:history h))) "H's begin sealed G")
+        (is (= {} (pipeline {:event/type :history/gesture-timeout :history/gesture-id press-g :state h :time 60000})))
+        (is (= {} (pipeline (assoc (member press-g 9.0 2000) :state h))) "nor an old press's edit")
+        (is (= {} (pipeline (assoc (commit press-g 2000) :state h))) "nor its end")))
+    (testing "the alarm follows the open press: armed on begin, cancelled on its end, handed over to the next"
+      (is (= {:arm {:gesture-id press-g :delay-ms history/stale-transaction-ms}}
+             (:history/gesture-alarm (pipeline (assoc (begin press-g 0) :state (clean-state))))))
+      (is (= {:cancel-id press-g} (:history/gesture-alarm (pipeline (assoc (commit press-g 10) :state begun)))))
+      (is (= {:cancel-id press-g :arm {:gesture-id press-h :delay-ms history/stale-transaction-ms}}
+             (:history/gesture-alarm (pipeline (assoc (begin press-h 10) :state begun))))))
+    (testing "a drag moved back to its saved value is no step, and the project is clean"
+      (let [s (-> begun (run (member press-g 1.0 10)) (run (commit press-g 20)))]
+        (is (= 0 (undo-count s)))
+        (is (false? (get-in s [:project :dirty?])))))))
 
 (deftest scan-backfill-survives-undo-and-redo-test
   (testing "edit -> undo -> scan -> redo keeps the projectors"
@@ -360,6 +459,54 @@
     (is (some? (get-in s [:chains :effect-chains [1 0]])))
     (is (true? (get-in s [:chains :effect-chains [1 0] :active?])))))
 
+(deftest stored-effect-actions-use-the-current-cell-test
+  (let [tree {:active? true
+              :items [{:id #uuid "77777777-0000-0000-0000-000000000001" :type :group :name "Outer"
+                       :items [{:id #uuid "77777777-0000-0000-0000-000000000002" :type :group :name "Off" :enabled? false
+                                :items [(assoc (zone-patterns/preset-instance :chase :cell)
+                                               :id #uuid "77777777-0000-0000-0000-000000000003")
+                                        {:id #uuid "77777777-0000-0000-0000-000000000004" :effect-id :scale}]}]}]}
+        cell #(get-in %1 [:chains :effect-chains %2])
+        kept (fn [s] {:cells (get-in s [:chains :effect-chains])
+                      :selected (get-in s [:effects :selected-cell])
+                      :editor (get-in s [:ui :dialogs :effect-chain-editor])
+                      :history (select-keys (:history s) [:undo-stack :redo-stack])
+                      :dirty? (get-in s [:project :dirty?])})
+        reaction {:event/type :effects/new-reaction :col 2 :row 1 :kind :step-colour}
+        pattern {:event/type :zone-patterns/new-cell :col 2 :row 1 :style :chase}
+        seeded #(history/mark-clean (assoc-in (clean-state) [:chains :effect-chains [2 1]] %))]
+    (testing "both New menus, chosen while [2 1] was empty, find a disabled tree there: nothing happens"
+      (let [s0 (seeded tree)]
+        (doseq [intent [reaction pattern]]
+          (is (= (kept s0) (kept (run s0 intent))) (str (:event/type intent))))))
+    (testing "a named cell with no items is empty: each creates, in one step, and only the pattern opens its editor"
+      (let [s0 (seeded {:name "Old" :items []})
+            reacted (run s0 reaction)
+            patterned (run s0 pattern)]
+        (is (= ["Step colour" 1] [(:name (cell reacted [2 1])) (undo-count reacted)]))
+        (is (not (get-in reacted [:ui :dialogs :effect-chain-editor :open?])))
+        (is (= [:zone-pattern 1] [(get-in (cell patterned [2 1]) [:items 0 :effect-id]) (undo-count patterned)]))
+        (is (true? (get-in patterned [:ui :dialogs :effect-chain-editor :open?])))))
+    (testing "a move takes the whole stored tree, its ids and the vibe that names it, in one step"
+      (let [fx #(get-in % [:config :vibes :library :vibe-1 :fx])
+            s0 (-> (clean-state)
+                   (templates/apply-starter-vibes)
+                   (assoc-in [:chains :effect-chains [2 1]] tree)
+                   (assoc-in [:config :vibes :library :vibe-1 :fx] [[2 1]])
+                   (history/mark-clean))
+            move {:event/type :effects/move-cell :from-col 2 :from-row 1 :to-col 3 :to-row 1}
+            moved (run s0 move)
+            undone (run moved {:event/type :edit/undo})]
+        (is (= [nil tree [[3 1]] 1] [(cell moved [2 1]) (cell moved [3 1]) (fx moved) (undo-count moved)]))
+        (is (= [tree nil [[2 1]]] [(cell undone [2 1]) (cell undone [3 1]) (fx undone)]) "Undo puts both back")
+        (is (false? (get-in undone [:project :dirty?])) "the saved show again")
+        (testing "; its source emptied before the drop, it moves nothing"
+          (let [emptied (run s0 {:event/type :chain/set-items :domain :effect-chains :entity-key [2 1] :items []})
+                dropped (run emptied move)]
+            (is (= [] (:items (cell emptied [2 1]))))
+            (is (= (kept emptied) (kept dropped)))
+            (is (= (fx emptied) (fx dropped)) "the vibe still names [2 1]")))))))
+
 (deftest modulator-toggle-is-one-undoable-edit-test
   (let [before {:id item-id :effect-id :intensity :enabled? true
                 :params {:amount {:type :triangle :period 7.0 :min 0.2 :max 0.8 :value 0.6 :active? false}}
@@ -384,6 +531,88 @@
     (is (zero? (undo-count undone)))
     (is (= "Toggle Modulation" (history/redo-label (:history undone))))
     (is (= after (get-in (run undone {:event/type :edit/redo}) path)))))
+
+(deftest typed-number-is-one-undo-step-test
+  (let [path [:chains :effect-chains [1 0] :items 0]
+        field {:domain :effect-chains :entity-key [1 0] :effect-path [0] :param-key :amount
+               :min 0.0 :max 3.0 :is-int? false}
+        config {:type :sine :active? false :value 0.2 :min 0.0 :max 1.0 :period 1.0}
+        effect {:id #uuid "77777777-7777-7777-7777-777777777777" :effect-id :intensity :enabled? true}]
+    (doseq [[what params kf event read]
+            [["a plain field" {:amount 0.5} nil
+              (assoc field :event/type :chain/update-param-from-text)
+              #(get-in % (conj path :params :amount))]
+             ["a modulator's that is off" {:amount config} nil
+              (assoc field :event/type :modulator/update-static-value :effect-instance-id (:id effect))
+              #(get-in % (conj path :params :amount :value))]
+             ["a keyframe's" {:amount 1.0} {:enabled? true :keyframes [{:position 0.0 :params {:amount 0.3}}
+                                                                        {:position 1.0 :params {:amount 0.9}}]}
+              (assoc field :event/type :keyframe/update-param :keyframe-idx 1)
+              #(get-in % (conj path :keyframe-modulator :keyframes 1 :params :amount))]]]
+      (testing what
+        (let [initial (history/mark-clean (assoc-in (test-state) path (cond-> (assoc effect :params params)
+                                                                         kf (assoc :keyframe-modulator kf))))
+              typed (run initial (assoc event :text "0.42"))
+              undone (run typed {:event/type :edit/undo})
+              refused (run undone (assoc event :text "abc"))]
+          (is (= 0.42 (read typed)))
+          (is (= 1 (undo-count typed)) "one undo step")
+          (is (true? (get-in typed [:project :dirty?])))
+          (is (= (read initial) (read undone)) "Undo takes back the typed number")
+          (is (false? (get-in undone [:project :dirty?])))
+          (is (= (:history undone) (:history refused)) "text that isn't a number adds no step and keeps Redo")
+          (is (= 0.42 (read (run refused {:event/type :edit/redo})))))))))
+
+(deftest modulator-field-undo-boundaries-test
+  ;; Reactivity plan 07: each field edit writes its own field of what is
+  ;; stored, so each is its own undo step; one that changes nothing is none
+  (let [path [:chains :effect-chains [1 0] :items 0]
+        id #uuid "88888888-8888-8888-8888-888888888888"
+        triangle {:type :triangle :active? true :period 7.0 :min 0.2 :max 0.8}
+        initial (history/mark-clean (assoc-in (test-state) path {:id id :effect-id :intensity :enabled? true
+                                                                 :params {:amount triangle}}))
+        ;; What the Min and Max sliders send, from one render
+        field (fn [k v] {:event/type :modulator/update-param :domain :effect-chains :entity-key [1 0]
+                         :effect-instance-id id :param-key :amount :mod-param-key k :fx/event v})
+        amount #(get-in % (conj path :params :amount))
+        edited (-> initial (run (field :min 0.3)) (run (field :max 0.9)))
+        undo-max (run edited {:event/type :edit/undo})
+        undo-min (run undo-max {:event/type :edit/undo})]
+    (is (= (assoc triangle :min 0.3 :max 0.9) (amount edited)))
+    (is (= 2 (undo-count edited)) "two edits, two steps")
+    (is (true? (get-in edited [:project :dirty?])))
+    (is (= (assoc triangle :min 0.3) (amount undo-max)) "Undo takes back Max; Min stays")
+    (is (= (history/extract-document-state initial) (history/extract-document-state undo-min))
+        "Undo again: the saved show")
+    (is (false? (get-in undo-min [:project :dirty?])))
+    (testing "an edit that changes nothing between Undo and Redo keeps Redo"
+      (let [ignored (reduce run undo-min [(field :min 0.2)            ; the value it has
+                                          (field :duty-cycle 0.3)     ; not a Triangle's
+                                          (assoc (field :max 0.9) :effect-instance-id #uuid "99999999-9999-9999-9999-999999999999")])
+            redone (-> ignored (run {:event/type :edit/redo}) (run {:event/type :edit/redo}))]
+        (is (= undo-min ignored))
+        (is (= (assoc triangle :min 0.3 :max 0.9) (amount redone)) "Redo puts both back")
+        (is (true? (get-in redone [:project :dirty?])))))
+    (testing "Min's changes inside one press and release are one step: each carries the press's id"
+      (let [press #(assoc (field :min %) :history/gesture-id press-g)
+            s (reduce run initial [{:event/type :history/begin-transaction :label "Adjust Min" :source-id [:modulator-slider :min]
+                                    :history/gesture-id press-g}
+                                   (press 0.25) (press 0.3) (press 0.35)
+                                   {:event/type :history/commit-transaction :source-id [:modulator-slider :min]
+                                    :history/gesture-id press-g}])]
+        (is (= (assoc triangle :min 0.35) (amount s)))
+        (is (= 1 (undo-count s)))
+        (is (nil? (get-in s [:history :transaction])))
+        (is (= "Adjust Min" (history/undo-label (:history s))))
+        (is (= triangle (amount (run s {:event/type :edit/undo}))))
+        (testing "and the Max set meanwhile, with no press, is a step of its own"
+          (let [s (reduce run initial [{:event/type :history/begin-transaction :label "Adjust Min" :source-id [:modulator-slider :min]
+                                        :history/gesture-id press-g}
+                                       (press 0.25) (field :max 0.9) (press 0.3)
+                                       {:event/type :history/commit-transaction :source-id [:modulator-slider :min]
+                                        :history/gesture-id press-g}])]
+            (is (= (assoc triangle :min 0.25 :max 0.9) (amount s)) "the press's later change does nothing")
+            (is (= 2 (undo-count s)))))))))
 
 (deftest timeline-nudge-coalesces-test
   (let [base (-> (test-state)
@@ -412,6 +641,33 @@
     (is (true? (get-in (run dirty {:event/type :timing/set-bpm :bpm 90.0}) [:project :dirty?])))
     (is (true? (get-in (run dirty {:event/type :effects/toggle-cell :col 1 :row 0}) [:project :dirty?])))
     (is (false? (get-in (run (clean-state) {:event/type :effects/toggle-cell :col 1 :row 0}) [:project :dirty?])))))
+
+(deftest grid-press-keeps-document-history-test
+  (let [kept (fn [s0 s]
+               (is (= (get-in s0 [:chains :cue-chains]) (get-in s [:chains :cue-chains])) "the cues")
+               (is (= (select-keys (:history s0) [:undo-stack :redo-stack])
+                      (select-keys (:history s) [:undo-stack :redo-stack]))
+                   "undo and redo")
+               (is (= (get-in s0 [:project :dirty?]) (get-in s [:project :dirty?])) "unsaved or not"))]
+    (doseq [[label s0] [["clean" (clean-state)]
+                        ["unsaved, after an edit" (run (clean-state) edit-size)]]]
+      (testing label
+        (let [started (run s0 {:event/type :grid/trigger-cell :col 0 :row 0})
+              stopped (run started {:event/type :grid/trigger-cell :col 0 :row 0})
+              selected (run stopped {:event/type :grid/trigger-cell :col 1 :row 0})]
+          (is (some? (get-in started [:playback :active-cues [0 0]])))
+          (is (nil? (get-in stopped [:playback :active-cues [0 0]])))
+          (is (= [1 0] (get-in selected [:grid :selected-cell])) "an empty neighbour, selected")
+          (doseq [s [started stopped selected]]
+            (kept s0 s)))))
+    (testing "a press after Clear, by the click shown before it: nothing starts, nothing is recorded"
+      (let [cleared (run (clean-state) {:event/type :grid/clear-cell :col 0 :row 0})
+            pressed (run cleared {:event/type :grid/cell-clicked :col 0 :row 0 :has-content? true})]
+        (is (= 1 (undo-count cleared)))
+        (is (true? (get-in cleared [:project :dirty?])))
+        (is (= [0 0] (get-in pressed [:grid :selected-cell])))
+        (is (= (:playback cleared) (:playback pressed)))
+        (kept cleared pressed)))))
 (defn- timeline-state []
   (-> (test-state)
       (assoc-in [:chains :cue-chains [0 0]]
@@ -510,8 +766,68 @@
 
 (deftest safety-events-have-undo-labels-test
   (doseq [[event-type label] [[:projectors/set-safety "Change Safety Zone"]
+                              [:projectors/set-safety-coordinate "Change Safety Zone"]
+                              [:projectors/reset-safety "Reset Safety Zone"]
                               [:projectors/add-blocked-area "Add Blocked Area"]
                               [:projectors/remove-blocked-area "Remove Blocked Area"]
                               [:projectors/copy-safety "Copy Safety Zone"]]]
     (is (= label (get history-handlers/event-descriptions event-type)) (str event-type))))
+
+(deftest coordinate-edits-are-separate-rig-undo-steps-test
+  ;; plans/2026-11-23-cljfx-reactivity/08 §5: each field commit that changes
+  ;; the zone, and Reset, is one undo step of the rig. The show stays saved,
+  ;; the rig file follows, the engines aren't rebuilt. Effects are only
+  ;; looked at, never run
+  (let [rig-path (.getPath (java.io.File. (System/getProperty "java.io.tmpdir") "coordinate-edits-test/rig.edn"))
+        s0 (-> (clean-state)
+               (assoc-in [:projectors :p1] {:name "Laser L" :host "10.0.0.5" :port 7255 :enabled? true
+                                            :zone-groups [:all] :safety {:limit [-0.5 -0.5 0.5 0.5] :blocked []}})
+               (assoc-in [:rig-file :path] rig-path)
+               history/mark-clean)
+        coord (fn [path value] {:event/type :projectors/set-safety-coordinate :projector-id :p1 :path path :value value})
+        live #(assoc-in % [:backend :streaming :running?] true)
+        zone #(get-in % [:projectors :p1 :safety])
+        labels #(mapv :description (get-in % [:history :undo-stack]))
+        redo #(get-in % [:history :redo-stack])
+        x0 (coord [:limit 0] -0.4)
+        y1 (coord [:limit 3] 0.3)
+        s1 (run s0 x0)
+        s2 (run s1 y1)]
+    (testing "two edits, two steps"
+      (is (= {:limit [-0.4 -0.5 0.5 0.3] :blocked []} (zone s2)))
+      (is (= ["Change Safety Zone" "Change Safety Zone"] (labels s2)))
+      (is (false? (get-in s2 [:project :dirty?])) "the rig is no unsaved change of the show"))
+    (testing "the rig file gets both edits; streaming, the engines aren't rebuilt"
+      (let [effects (pipeline (assoc y1 :state (live s1)))]
+        (is (= rig-path (get-in effects [:rig/write :path])))
+        (is (= {:limit [-0.4 -0.5 0.5 0.3] :blocked []} (get-in effects [:rig/write :doc :projectors :p1 :safety])))
+        (is (not (contains? effects :multi-engine/refresh)))))
+    (testing "the value it has again: no step"
+      (is (= (labels s2) (labels (run s2 y1)))))
+    (let [undone (run s2 {:event/type :edit/undo})]
+      (testing "Undo takes back the second only, and Redo puts it back"
+        (is (= {:limit [-0.4 -0.5 0.5 0.5] :blocked []} (zone undone)))
+        (is (= ["Change Safety Zone"] (labels undone)))
+        (is (= (zone s2) (zone (run undone {:event/type :edit/redo})))))
+      (testing "asking, Cancel, a refused edit, an invalid one and one that changes nothing keep Redo"
+        (let [asked (run (live undone) (coord [:limit 2] 0.75))
+              cancelled (run asked {:event/type :ui/close-dialog :dialog-id :confirm
+                                    :review-id (get-in asked [:ui :dialogs :confirm :safety-review :id])})
+              refused (run (assoc-in cancelled [:ui :show-lock?] true) (coord [:limit 2] 0.75))
+              same (run cancelled x0)
+              invalid (run cancelled (coord [:limit 0] 3.0))]
+          (is (true? (get-in asked [:ui :dialogs :confirm :open?])))
+          (is (= "Larger safety zone refused" (get-in refused [:ui :show-lock-notice :text])))
+          (doseq [[label s] [["asked" asked] ["cancelled" cancelled] ["refused" refused] ["the same" same] ["invalid" invalid]]]
+            (is (= (redo undone) (redo s)) label)
+            (is (= (labels undone) (labels s)) label)
+            (is (= (zone undone) (zone s)) label)
+            (is (false? (get-in s [:project :dirty?])) label))
+          (is (= (zone s2) (zone (run same {:event/type :edit/redo}))) "Redo still puts the second edit back"))))
+    (testing "Reset is one step"
+      (let [reset (run s2 {:event/type :projectors/reset-safety :projector-id :p1})]
+        (is (= {:limit [-1.0 -1.0 1.0 1.0] :blocked []} (zone reset)))
+        (is (= ["Change Safety Zone" "Change Safety Zone" "Reset Safety Zone"] (labels reset)))
+        (is (false? (get-in reset [:project :dirty?])))
+        (is (= (zone s2) (zone (run reset {:event/type :edit/undo}))))))))
 

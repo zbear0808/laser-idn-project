@@ -93,11 +93,16 @@
    :project (select-keys (:project state) [:current-file])})
 
 (defn report
-  "rig-file/match-report for the show that is open, or nil before one was."
+  "rig-file/match-report for the show that is open, or nil before one was.
+   It reads the effect cells' patterns as the Open handler does
+   (subs/effect-ref-inputs), so the dialog and its link show the same
+   rows."
   [context]
   (let [{:keys [file hardware chains]} (fx/sub-ctx context subs/dialog-data :rig-report)]
     (when file
-      (rig-file/match-report (fx/sub-val context report-inputs) hardware chains))))
+      (rig-file/match-report (assoc-in (fx/sub-val context report-inputs) [:chains :effect-chains]
+                                       (fx/sub-ctx context subs/effect-ref-inputs))
+                             hardware chains))))
 
 (defn warning-count
   "How many ⚠ rows the open show's report has."
@@ -113,6 +118,13 @@
 (defn- id-text [k] (if (keyword? k) (name k) (str k)))
 
 (defn- count-text [n one many] (str n " " (if (= 1 n) one many)))
+
+(defn- owners-text
+  "\"2 cues\", \"1 effect cell\", \"2 cues and 1 effect cell\": a row's owners."
+  [cues effect-cells]
+  (str/join " and " (cond-> []
+                      (pos? cues) (conj (count-text cues "cue" "cues"))
+                      (pos? effect-cells) (conj (count-text effect-cells "effect cell" "effect cells")))))
 
 (defn- names-text
   "\"Beams\", \"Beams and Crowd 2\", \"A, B and C\"."
@@ -137,10 +149,14 @@
                        :style (if (= "⚠" mark) (str "-fx-text-fill: " (css/orange) ";") "-fx-text-fill: #C8C8C8;")}]
                (seq buttons) (conj {:fx/type :h-box :spacing 8 :padding {:left 18} :children buttons}))})
 
-(defn- group-row [{:keys [group-id cues same-name] group-name :name}]
+(defn- group-row [{:keys [group-id cues effect-cells same-name] group-name :name}]
   (let [g (id-text group-id)]
     (report-row (str "rig-report-group-" g) "⚠"
-                (str group-name " (used by " (count-text cues "cue" "cues") ") has no laser on this rig.")
+                (str group-name
+                     (if effect-cells
+                       (str " (referenced by " (owners-text cues effect-cells) ")")
+                       (str " (used by " (count-text cues "cue" "cues") ")"))
+                     " has no laser on this rig.")
                 (cond-> []
                   same-name (conj (button (str "rig-report-use-group-" g)
                                           (str "Use this rig's \"" (:name same-name) "\" (" (count-text (:lasers same-name) "laser" "lasers") ")")
@@ -148,11 +164,18 @@
                   true (conj (button (str "rig-report-choose-" g) "Choose lasers…"
                                      {:event/type :rig/choose-lasers :group-id group-id}))))))
 
-(defn- pin-row [lasers {:keys [ref cues] laser-name :name}]
+(defn- pin-row
+  "A laser that isn't here: the cues pinned to it, or, when an effect cell
+   names it too, the cues and effect cells that reference it (a pattern's
+   reference is no cue playing there); Pin them to… and Send them to All
+   re-point every reference."
+  [lasers {:keys [ref cues effect-cells] laser-name :name}]
   (let [l (id-text (rig/laser-of ref))
-        them (if (= 1 cues) "it" "them")]
+        them (if (= 1 (+ cues (or effect-cells 0))) "it" "them")]
     (report-row (str "rig-report-pin-" l) "⚠"
-                (str (count-text cues "cue" "cues") (if (= 1 cues) " is" " are") " pinned to " laser-name ", which isn't on this rig.")
+                (if effect-cells
+                  (str laser-name ", which isn't on this rig, is referenced by " (owners-text cues effect-cells) ".")
+                  (str (count-text cues "cue" "cues") (if (= 1 cues) " is" " are") " pinned to " laser-name ", which isn't on this rig."))
                 [{:fx/type :menu-button
                   :id (str "rig-report-pin-to-" l)
                   :text (str "Pin " them " to…")

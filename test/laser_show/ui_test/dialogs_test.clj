@@ -119,7 +119,8 @@
   (events/dispatch! {:event/type :cue-chain/set-name :col 2 :row 0 :name "Dirty"})
   (ui/wait-for! #(true? (get-in (app-state) [:project :dirty?]))))
 
-(def ^:private a1-grid-target {:domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]})
+(def ^:private a1-grid-target
+  {:domain :cue-zone-patterns :entity-key [0 0] :effect-instance-id #uuid "00000000-0000-0000-0000-00000000d1a1"})
 
 (def ^:private opened-show
   "What the last Open kept of the show's rig, as :file/project-loaded keeps

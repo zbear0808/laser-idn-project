@@ -10,6 +10,7 @@
   (:require [clojure.string :as str]
             [laser-show.css.core :as css]
             [laser-show.routing.rig :as rig]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.zone-chips :as zone-chips]))
 
 
@@ -38,7 +39,8 @@
 (defn rig-settings
   "Middle laser (on with 3, 5, 7… lasers) and Split width (on with one
    laser, or the middle split or in both): how wide each half a laser draws
-   is (routing.rig/region-fits)."
+   is (routing.rig/region-fits). Each shows what applies after a refused
+   change too (applied-value)."
   [{:keys [settings]}]
   (let [{:keys [middle split-width middle-on? split-on?]} settings]
     {:fx/type :v-box
@@ -50,15 +52,18 @@
                                      :text "Middle laser:"
                                      :min-width :use-pref-size
                                      :style-class ["label-secondary"]}
-                                    {:fx/type :combo-box
-                                     :id "rig-middle-choice"
-                                     :items [:split :both :left :right :none]
+                                    {:fx/type applied-value/applied-control
+                                     :property :value
+                                     :address [:rig :middle]
                                      :value middle
-                                     :disable (not middle-on?)
-                                     :button-cell (fn [m] {:text (get middle-texts m "")})
-                                     :cell-factory {:fx/cell-type :list-cell
-                                                    :describe (fn [m] {:text (get middle-texts m "")})}
-                                     :on-value-changed {:event/type :rig/set-middle :middle :fx/event}}]
+                                     :on-change (fn [m] {:event/type :rig/set-middle :middle m})
+                                     :desc {:fx/type :combo-box
+                                            :id "rig-middle-choice"
+                                            :items [:split :both :left :right :none]
+                                            :disable (not middle-on?)
+                                            :button-cell (fn [m] {:text (get middle-texts m "")})
+                                            :cell-factory {:fx/cell-type :list-cell
+                                                           :describe (fn [m] {:text (get middle-texts m "")})}}}]
                             (not middle-on?) (conj {:fx/type :label
                                                     :id "rig-middle-hint"
                                                     :text "Used with 3, 5, 7… lasers"
@@ -70,16 +75,19 @@
                              :text "Split width:"
                              :min-width :use-pref-size
                              :style-class ["label-secondary"]}
-                            {:fx/type :slider
-                             :id "rig-split-width-slider"
-                             :min 0.5
-                             :max 1.0
+                            {:fx/type applied-value/applied-control
+                             :property :value
+                             :address [:rig :split-width]
                              :value split-width
-                             :pref-width 140
-                             :disable (not split-on?)
-                             :tooltip {:fx/type :tooltip
-                                       :text "How wide each half is when one laser draws Left and Right"}
-                             :on-value-changed {:event/type :rig/set-split-width :split-width :fx/event}}
+                             :on-change (fn [w] {:event/type :rig/set-split-width :split-width w})
+                             :desc {:fx/type :slider
+                                    :id "rig-split-width-slider"
+                                    :min 0.5
+                                    :max 1.0
+                                    :pref-width 140
+                                    :disable (not split-on?)
+                                    :tooltip {:fx/type :tooltip
+                                              :text "How wide each half is when one laser draws Left and Right"}}}
                             {:fx/type :label
                              :id "rig-split-width-label"
                              :text (format "%.0f%%" (* 100.0 (double split-width)))

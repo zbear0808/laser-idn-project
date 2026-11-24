@@ -21,10 +21,10 @@
 
 
 (defn- resolve-items
-  "Resolve items directly from event :items, :items-path, :on-change-params, or :component-id."
-  [{:keys [items items-path on-change-params component-id]} state]
-  (or items
-      (when items-path
+  "Resolve items from the state: at :items-path, or in the chain
+   :on-change-params or :component-id names."
+  [{:keys [items-path on-change-params component-id]} state]
+  (or (when items-path
         (get-in state items-path))
       (when-let [{:keys [domain entity-key]} on-change-params]
         (get-in state [:chains domain entity-key :items]))
@@ -34,12 +34,11 @@
 
 
 (defn- resolve-ordered-ids
-  "Resolve ordered vector of item IDs from event or state."
-  [{:keys [all-ids items items-path on-change-params component-id] :as event} state]
-  (or all-ids
-      (when (seq items)
-        (chains/collect-all-ids items))
-      (when items-path
+  "Resolve the ordered vector of item IDs from the state, never from the
+   event: IDs a render read can be another list's, or older (reactivity
+   plan 04)."
+  [{:keys [items-path on-change-params component-id] :as event} state]
+  (or (when items-path
         (let [extracted (ex/chain-ordered-ids state items-path)]
           (when (seq extracted) extracted)))
       (when-let [{:keys [domain entity-key]} on-change-params]
@@ -56,7 +55,7 @@
   "Handle item selection with different modes (single/ctrl/shift/ctrl-shift).
    
    Supports pre-computed ranges via :selected-ids-override, or computes
-   ranges directly from ordered IDs via subscription, items-path, or component-id.
+   ranges from the list's current items: items-path, or component-id.
    
    When selecting in a cue-chain component, also clears the item-effects
    selection since the selected cue item changed and old effects selection
@@ -89,9 +88,9 @@
     {:state state-final}))
 
 (defn- handle-select-all
-  "Select all items in the component."
-  [{:keys [component-id all-ids state] :as event}]
-  (let [ids (or all-ids (resolve-ordered-ids event state))]
+  "Select all items in the component: the list's items in the state."
+  [{:keys [component-id state] :as event}]
+  (let [ids (resolve-ordered-ids event state)]
     {:state (update-in state [:list-ui component-id]
                        merge {:selected-ids (set ids)
                               :last-selected-id (first ids)})}))

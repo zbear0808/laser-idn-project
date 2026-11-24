@@ -9,8 +9,10 @@
             [laser-show.events.core :as events]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
-            [laser-show.ui-test.testfx :as ui])
-  (:import [javafx.scene Node]))
+            [laser-show.ui-test.testfx :as ui]
+            [laser-show.views.components.applied-value :as applied-value])
+  (:import [javafx.scene Node]
+           [javafx.scene.control CheckBox]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -120,3 +122,74 @@
     (ui/wait-for! #(= [] (groups :a)))
     (ui/click! robot "#projectors-tab")
     (ui/wait-for! #(= "□" (ui/node-text "#rig-cell-graphics-a")))))
+
+
+;; A refused edit (plans/2026-11-23-cljfx-reactivity/13): the boxes show
+;; the rig
+
+(defn- notice-id [] (get-in (app-state) [:ui :notice :id]))
+
+(defn- ticked
+  "Whether the check box selector finds is ticked, on the FX thread; nil
+   when there is none (ui/selected? says false for a missing node too)."
+  [selector]
+  (when-let [box (ui/query selector)]
+    (ui/on-fx-thread #(.isSelected ^CheckBox box))))
+
+(defn- attempt!
+  "(act!), then wait for the show lock's new refusal of an event of type."
+  [type act!]
+  (let [before (notice-id)]
+    (act!)
+    (ui/wait-for! #(and (some? (notice-id)) (not= before (notice-id))
+                        (= type (get-in (app-state) [:ui :show-lock-notice :event]))))))
+
+(defn- lock! [locked?]
+  (events/dispatch! {:event/type :vibe/set-show-lock :locked? locked?})
+  (ui/wait-for! #(= locked? (true? (get-in (app-state) [:ui :show-lock?])))))
+
+(deftest locked-member-boxes-reflect-the-rig-test
+  (let [robot (ui/robot)
+        excluded? #(get-in (app-state) [:projectors % :exclude-from-all?])
+        vp-groups #(get-in (app-state) [:virtual-projectors :vp1 :zone-groups])
+        undo-depth #(count (get-in (app-state) [:history :undo-stack]))]
+    (with-rig!)
+    (events/write-state! assoc-in [:virtual-projectors :vp1] {:name "VP 1" :parent-projector-id :a :zone-groups []})
+    (ui/click! robot "#zones-tab")
+    (ui/click! robot "#zone-group-item-all")
+    (ui/wait-for! #(true? (ticked "#zone-output-a .check-box")))
+    (lock! true)
+    (let [depth (undo-depth)]
+      (testing "All: ticked is in All"
+        (attempt! :projectors/set-exclude-from-all #(ui/click! robot "#zone-output-a .check-box"))
+        (is (false? (excluded? :a)))
+        (ui/wait-for! #(true? (ticked "#zone-output-a .check-box")))
+        (is (= "■" (ui/node-text "#zone-mark-a"))))
+      (ui/click! robot "#zone-group-item-group-balcony")
+      (ui/wait-for! #(some? (ui/query "#zone-output-vp1 .check-box")))
+      (testing "your group: a laser's box, a virtual projector's, and a click on a laser"
+        (attempt! :projectors/toggle-zone-group #(ui/click! robot "#zone-output-a .check-box"))
+        (is (= [] (groups :a)))
+        (ui/wait-for! #(false? (ticked "#zone-output-a .check-box")))
+        (attempt! :projectors/vp-toggle-zone-group #(ui/click! robot "#zone-output-vp1 .check-box"))
+        (is (= [] (vp-groups)))
+        (ui/wait-for! #(false? (ticked "#zone-output-vp1 .check-box")))
+        (attempt! :projectors/toggle-zone-group #(ui/click! robot "#zone-output-b .label-bold"))
+        (is (= [:graphics] (groups :b)))
+        (is (false? (ticked "#zone-output-b .check-box"))))
+      (is (= depth (undo-depth)) "no undo step"))
+    (testing "unlocked, a click toggles once"
+      (lock! false)
+      (let [depth (undo-depth)]
+        (ui/click! robot "#zone-output-a .check-box")
+        (ui/wait-for! #(= [:group-balcony] (groups :a)))
+        (ui/wait-for! #(true? (ticked "#zone-output-a .check-box")))
+        ;; past the box's wait, which sends nothing
+        (Thread/sleep (+ applied-value/settle-ms 100))
+        (is (events/flush!))
+        (is (= [:group-balcony] (groups :a)))
+        (is (true? (ticked "#zone-output-a .check-box")))
+        (is (= (inc depth) (undo-depth)))
+        (ui/click! robot "#zone-output-vp1 .check-box")
+        (ui/wait-for! #(= [:group-balcony] (vp-groups)))
+        (ui/wait-for! #(true? (ticked "#zone-output-vp1 .check-box")))))))

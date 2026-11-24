@@ -65,9 +65,11 @@
 ;; Frame Generation
 
 
-;; NOTE: All these functions use get-raw-state instead of get-state because
-;; they are called from the show clock's thread, not the UI thread. Using
-;; fx/sub-val from a background thread causes assertion errors.
+;; NOTE: App state here is a snapshot, read when a frame is due, not a
+;; subscription. The show clock samples it once per tick and passes the
+;; tick's render inputs (render-context); the two-argument
+;; generate-frames-by-zone samples them itself (state/get-raw-state, the
+;; input store, the show clock), as get-preview-zone-filter does.
 
 (defn get-preview-zone-filter
   "Get the current preview zone group filter from state.

@@ -13,7 +13,7 @@
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.css PseudoClass]
            [javafx.scene Node]
-           [javafx.scene.control CheckBox Control CustomMenuItem Labeled Menu MenuButton MenuItem]
+           [javafx.scene.control CheckBox ComboBox Control CustomMenuItem Labeled Menu MenuButton MenuItem]
            [javafx.stage Window]))
 
 (use-fixtures :once fixtures/with-toolkit)
@@ -525,3 +525,71 @@
     (events/dispatch! {:event/type :timeline/select-items :col 0 :row 0 :ids #{:c1} :mode :replace})
     (ui/wait-for! #(seq (ui/query-all "#timeline-browser-effects #shape-tab")))
     (is (empty? (ui/query-all "#zone-tab")))))
+
+
+;; A refused edit (plans/2026-11-23-cljfx-reactivity/13): the controls show
+;; the targets that apply
+
+(defn- notice-id [] (get-in (app-state) [:ui :notice :id]))
+
+(defn- attempt!
+  "(act!), then wait for the show lock's new refusal of an event of type."
+  [type act!]
+  (let [before (notice-id)]
+    (act!)
+    (ui/wait-for! #(and (some? (notice-id)) (not= before (notice-id))
+                        (= type (get-in (app-state) [:ui :show-lock-notice :event]))))))
+
+(defn- lock! [locked?]
+  (events/dispatch! {:event/type :vibe/set-show-lock :locked? locked?})
+  (ui/wait-for! #(= locked? (true? (get-in (app-state) [:ui :show-lock?])))))
+
+(defn- box-ticked [selector text]
+  (when-let [^CheckBox box (get (combine-boxes selector) text)]
+    (ui/on-fx-thread #(.isSelected box))))
+
+(defn- combo-value [selector]
+  (when-let [^ComboBox combo (ui/query selector)]
+    (ui/on-fx-thread #(.getValue combo))))
+
+(deftest locked-combine-and-override-show-applied-targets-test
+  (let [robot (ui/robot)
+        undo-depth #(count (get-in (app-state) [:history :undo-stack]))]
+    (open-editor! 0 0)
+    (tick! "#target-chip-item" "A → Left")
+    (ui/wait-for! #(= :zone/a (item-target)))
+    (ui/wait-for! #(true? (box-ticked "#target-chip-item" "A → Left")))
+    (lock! true)
+    (let [depth (undo-depth)]
+      (testing "Combine, open: a second ref refused isn't left ticked"
+        ;; Found before the menus open: ui/query looks in the topmost window
+        (let [^MenuButton chip (ui/query "#target-chip-item")
+              ^Menu combine (ui/on-fx-thread #(some (fn [i] (when (and (instance? Menu i) (= "Combine" (.getText ^Menu i))) i))
+                                                     (.getItems chip)))
+              box (fn [text] (some (fn [^CustomMenuItem i] (let [^CheckBox b (.getContent i)] (when (= text (.getText b)) b)))
+                                   (.getItems combine)))
+              ^CheckBox a (ui/on-fx-thread #(box "A → Left"))
+              ^CheckBox b (ui/on-fx-thread #(box "B → Right"))]
+          (ui/on-fx-thread #(do (.show chip) (.show combine)))
+          (ui/wait-for! #(ui/on-fx-thread (fn [] (.isShowing combine))))
+          (attempt! :cue-chain/set-item-target #(do (ui/on-fx-thread (fn [] (.fire b))) (ui/sync-fx!)))
+          (is (= :zone/a (item-target)))
+          (ui/wait-for! #(false? (ui/on-fx-thread (fn [] (.isSelected b)))))
+          (is (true? (ui/on-fx-thread #(.isSelected a))))
+          (is (ui/on-fx-thread #(.isShowing combine)) "still open")
+          (ui/on-fx-thread #(.hide chip))
+          (ui/sync-fx!))
+        (events/dispatch! {:event/type :ui/close-dialog :dialog-id :cue-chain-editor})
+        (ui/wait-for! #(nil? (ui/query "#target-chip-item"))))
+      (testing "an override's zone"
+        (events/write-state! #(-> %
+                                  (assoc-in [:zone-maps :map/custom-1] {:name "Sweep" :lanes [:auto/left :auto/right]
+                                                                        :overrides {:zone/a :all}})
+                                  (assoc-in [:ui :zone-maps :selected] :map/custom-1)))
+        (open-zones-tab!)
+        (ui/wait-for! #(some? (ui/query "#zone-map-override-zone-a")))
+        (attempt! :zone-maps/set-override #(ui/select! robot "#zone-map-override-zone-a" ":zone/b"))
+        (is (= {:zone/a :all} (get-in (app-state) [:zone-maps :map/custom-1 :overrides])))
+        (ui/wait-for! #(= :zone/a (combo-value "#zone-map-override-zone-a")))
+        (is (nil? (ui/query "#zone-map-override-zone-b")) "no override for B"))
+      (is (= depth (undo-depth)) "no undo step"))))

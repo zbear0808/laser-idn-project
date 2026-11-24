@@ -19,6 +19,8 @@
    Required props:
    - :on-change-event + :on-change-params - Event to dispatch when items change
    - :items-path - Path to items in state (for handlers to read current items)
+   With :component-id they are the list's command address: its keys, clicks
+   and drops act on the list it shows when they come (list-address).
    What a list copies and pastes comes from its :component-id
    (state.clipboard/list-type).
    
@@ -45,9 +47,12 @@
 ;; State Access Helpers
 
 (defn- get-ui-state
-  "Get the list-ui state for a component."
+  "The list-ui state of component-id in the app map as it is now
+   (state/get-raw-state): for a callback, read when its input comes. A
+   snapshot, no subscription: the list's render subscribes through its
+   context (subs/list-ui-state)."
   [component-id]
-  (state/get-in-state [:list-ui component-id]))
+  (get-in (state/get-raw-state) [:list-ui component-id]))
 
 (defn- get-selected-ids
   "Get selected IDs set from component state."
@@ -55,27 +60,22 @@
   (or (:selected-ids (get-ui-state component-id)) #{}))
 
 
-;; The list's latest props, for its key filter and its row clicks, which
-;; JavaFX calls between renders (keyboard plan 03, D7 A). One writer,
-;; list-sidebar, each render, with :ordered-ids; the entry goes when the
-;; list editor's node does. FX thread only; not app state.
+;; The list's command address: which list a key, click or drop is for,
+;; {:component-id :items-path :on-change-event :on-change-params}. It is the
+;; list editor's :user-data, which each render sets. The listeners are
+;; installed once, on nodes a later render can give to another list (the
+;; Effects editor shows another cell in the same nodes, the item effects
+;; list another preset's effects), so they read it when the input comes
+;; (reactivity plan 04).
 
-(defonce ^:private !component-handler-props (atom {}))
-
-(defn- update-props-atom!
-  "Keep props as component-id's latest."
-  [component-id props]
-  (swap! !component-handler-props assoc component-id props))
-
-(defn- remove-props-atom!
-  "Forget component-id's props: its list editor is gone."
-  [component-id]
-  (swap! !component-handler-props dissoc component-id))
-
-(defn- get-handler-props
-  "component-id's latest props, or nil while it has no list on screen."
-  [component-id]
-  (get @!component-handler-props component-id))
+(defn- list-address
+  "The command address of the list editor node is in, or is: as the last
+   render set it. nil when node is in no list."
+  [^javafx.scene.Node node]
+  (loop [^javafx.scene.Node n node]
+    (when n
+      (or (::address (.getUserData n))
+          (recur (.getParent n))))))
 
 
 ;; JavaFX Event Handler Helper
@@ -93,25 +93,21 @@
   "Handle selection based on click modifiers.
    Dispatches selection event to handler to resolve directly from application state.
    Supports single click, Ctrl+click toggle, Shift+click range, and Ctrl+Shift+click range add."
-  ([component-id item-id ctrl? shift? items-path]
-   (handle-selection! component-id item-id ctrl? shift? items-path nil))
-  ([component-id item-id ctrl? shift? items-path all-ids]
-   (let [mode (cond
-                (and ctrl? shift?) :ctrl-shift
-                shift? :shift
-                ctrl? :ctrl
-                :else :single)]
-     (events/dispatch!
-      (u/->map& component-id item-id mode items-path all-ids
-                :event/type :list/select-item)))))
+  [component-id item-id ctrl? shift? items-path]
+  (let [mode (cond
+               (and ctrl? shift?) :ctrl-shift
+               shift? :shift
+               ctrl? :ctrl
+               :else :single)]
+    (events/dispatch!
+     (u/->map& component-id item-id mode items-path
+               :event/type :list/select-item))))
 
 (defn- select-all!
   "Select all items in the component by delegating to event handler with items-path."
-  ([component-id items-path]
-   (select-all! component-id items-path nil))
-  ([component-id items-path all-ids]
-   (events/dispatch! (u/->map& component-id items-path all-ids
-                               :event/type :list/select-all))))
+  [component-id items-path]
+  (events/dispatch! (u/->map& component-id items-path
+                              :event/type :list/select-all)))
 
 (defn- clear-selection!
   "Clear selection and cancel rename."
@@ -324,34 +320,32 @@
 ;; Shared UI Helpers - Click Handler
 
 (defn- setup-click-handler!
-  "Setup click handler on a node for selection and double-click rename."
-  [^javafx.scene.Node node component-id item-id items-path]
+  "Setup click handler on a node for selection and double-click rename, in
+   the list the node is in when the click comes (list-address)."
+  [^javafx.scene.Node node item-id]
   (.setOnMouseClicked node
                       (on-fx-event
                        (fn [event]
-                         (let [button (.getButton event)
-                               click-count (.getClickCount event)
-                               ctrl? (or (.isShortcutDown event) (.isControlDown event))
-                               shift? (.isShiftDown event)
-                               dynamic-props (get-handler-props component-id)
-                               effective-path (or items-path (:items-path dynamic-props))
-                               all-ids (:ordered-ids dynamic-props)
-                               selected-ids (get-selected-ids component-id)]
-                           (cond
-                             (= button MouseButton/PRIMARY)
-                             (do
-                               (if (= click-count 2)
-                                 (start-rename! component-id item-id)
-                                 (handle-selection! component-id item-id ctrl? shift? effective-path all-ids))
-                               (request-list-focus! node)
-                               (.consume event))
+                         (when-let [{:keys [component-id items-path]} (list-address node)]
+                           (let [button (.getButton event)
+                                 click-count (.getClickCount event)
+                                 ctrl? (or (.isShortcutDown event) (.isControlDown event))
+                                 shift? (.isShiftDown event)]
+                             (cond
+                               (= button MouseButton/PRIMARY)
+                               (do
+                                 (if (= click-count 2)
+                                   (start-rename! component-id item-id)
+                                   (handle-selection! component-id item-id ctrl? shift? items-path))
+                                 (request-list-focus! node)
+                                 (.consume event))
 
-                             (= button MouseButton/SECONDARY)
-                             (do
-                               ;; If item not already selected, select it on right-click
-                               (when-not (contains? (or selected-ids #{}) item-id)
-                                 (handle-selection! component-id item-id false false effective-path all-ids))
-                               (request-list-focus! node))))))))
+                               (= button MouseButton/SECONDARY)
+                               (do
+                                 ;; If item not already selected, select it on right-click
+                                 (when-not (contains? (get-selected-ids component-id) item-id)
+                                   (handle-selection! component-id item-id false false items-path))
+                                 (request-list-focus! node)))))))))
 
 
 ;; Shared UI Helpers - Rename Text Field
@@ -401,10 +395,10 @@
                       (u/->map depth selected? effectively-disabled?))
         header-node {:fx/type fx/ext-on-instance-lifecycle
                      :on-created (fn [node]
-                                   (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
-                                     (dnd/setup-drag-source! node group-id component-id (:items-path props))
-                                     (dnd/setup-drag-target! node group-id true component-id drop-props)
-                                     (setup-click-handler! node component-id group-id (:items-path props))))
+                                   (let [address #(list-address node)]
+                                     (dnd/setup-drag-source! node group-id address)
+                                     (dnd/setup-drag-target! node group-id true address)
+                                     (setup-click-handler! node group-id)))
                      :desc {:fx/type :h-box
                             :style-class header-classes
                             :alignment :center-left
@@ -488,10 +482,10 @@
                        :effectively-disabled? effectively-disabled?})
         card-node {:fx/type fx/ext-on-instance-lifecycle
                    :on-created (fn [node]
-                                 (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
-                                   (dnd/setup-drag-source! node item-id component-id (:items-path props))
-                                   (dnd/setup-drag-target! node item-id false component-id drop-props)
-                                   (setup-click-handler! node component-id item-id (:items-path props))))
+                                 (let [address #(list-address node)]
+                                   (dnd/setup-drag-source! node item-id address)
+                                   (dnd/setup-drag-target! node item-id false address)
+                                   (setup-click-handler! node item-id)))
                    :desc {:fx/type :h-box
                           :style-class item-classes
                           :children (filterv
@@ -594,6 +588,12 @@
 
 ;; Main Sidebar Component
 
+(defn- setup-background-drop!
+  "A drop on the list's background, its empty text or the space around its
+   rows, puts the dragged items at the end of the list node is in then."
+  [node]
+  (dnd/setup-container-drop-target! node #(list-address node)))
+
 (defn- list-sidebar
   "INTERNAL: Low-level list rendering component.
    External code should use list-editor instead, which wraps this
@@ -612,10 +612,7 @@
          compact? false
          scrollable? true}
     :as props}]
-  (let [ordered-ids (fx/sub-ctx context subs/list-ordered-ids component-id items-path)
-        sidebar-props (assoc props :ordered-ids ordered-ids)
-        _ (update-props-atom! component-id sidebar-props)
-        ui-state (fx/sub-ctx context subs/list-ui-state component-id)
+  (let [ui-state (fx/sub-ctx context subs/list-ui-state component-id)
         {:keys [selected-ids dragging-ids drop-target-id drop-position renaming-id]} ui-state
         selection-count (count selected-ids)
         chain-depth (chains/nesting-depth items)
@@ -632,7 +629,7 @@
                                   :fx/key [(:id item) idx]
                                   :component-id component-id
                                   :items items
-                                  :props sidebar-props
+                                  :props props
                                   :item item
                                   :depth 0
                                   :selected-ids selected-ids
@@ -643,28 +640,22 @@
                                   :parent-disabled? false
                                   :get-item-label get-item-label})
                                items)}
-        drop-props (select-keys sidebar-props [:on-change-event :on-change-params :items-path])
-        items-content (if (empty? items)
-                        {:fx/type fx/ext-on-instance-lifecycle
-                         :v-box/vgrow :always
-                         :on-created (fn [node]
-                                       (dnd/setup-container-drop-target! node component-id drop-props))
-                         :desc {:fx/type :label
-                                :text empty-text
-                                :style-class "chain-empty-text"}}
-                        (let [pane-desc (if scrollable?
-                                          {:fx/type :scroll-pane
-                                           :fit-to-width true
-                                           :fit-to-height false
-                                           :hbar-policy :as-needed
-                                           :style-class "scroll-pane-base"
-                                           :content items-vbox}
-                                          items-vbox)]
-                          {:fx/type fx/ext-on-instance-lifecycle
-                           :v-box/vgrow :always
-                           :on-created (fn [node]
-                                         (dnd/setup-container-drop-target! node component-id drop-props))
-                           :desc pane-desc}))]
+        ;; Emptying or filling the list puts a new node here: its drops too
+        items-content {:fx/type fx/ext-on-instance-lifecycle
+                       :v-box/vgrow :always
+                       :on-created setup-background-drop!
+                       :on-advanced (fn [_ node] (setup-background-drop! node))
+                       :desc (cond
+                               (empty? items) {:fx/type :label
+                                               :text empty-text
+                                               :style-class "chain-empty-text"}
+                               scrollable? {:fx/type :scroll-pane
+                                            :fit-to-width true
+                                            :fit-to-height false
+                                            :hbar-policy :as-needed
+                                            :style-class "scroll-pane-base"
+                                            :content items-vbox}
+                               :else items-vbox)}]
     {:fx/type :v-box
      :style-class "chain-sidebar"
      :children
@@ -688,7 +679,7 @@
 
         (when allow-groups?
           {:fx/type group-toolbar
-           :props sidebar-props
+           :props props
            :selection-count selection-count
            :can-create-group? can-create-group?})
 
@@ -702,7 +693,7 @@
                      :style-class "chain-toolbar-btn"
                      :tooltip {:fx/type :tooltip
                                :text (str "Copy the selected items (" (shortcuts/shortcut-text :c) ")")}
-                     :on-action (fn [_] (dispatch-copy-selected! sidebar-props))}
+                     :on-action (fn [_] (dispatch-copy-selected! props))}
                     {:fx/type :button
                      :id "chain-cut-selection"
                      :text "Cut"
@@ -711,7 +702,7 @@
                      :style-class "chain-toolbar-btn"
                      :tooltip {:fx/type :tooltip
                                :text (str "Cut the selected items (" (shortcuts/shortcut-text :x) ")")}
-                     :on-action (fn [_] (dispatch-cut-selected! sidebar-props))}
+                     :on-action (fn [_] (dispatch-cut-selected! props))}
                     {:fx/type :button
                      :id "chain-paste-items"
                      :text "Paste"
@@ -720,7 +711,7 @@
                      :style-class "chain-toolbar-btn"
                      :tooltip {:fx/type :tooltip
                                :text (str "Paste after the selection (" (shortcuts/shortcut-text :v) ")")}
-                     :on-action (fn [_] (dispatch-paste-items! sidebar-props))}
+                     :on-action (fn [_] (dispatch-paste-items! props))}
                     {:fx/type :button
                                 :id "chain-delete-selection"
                                 :text "Delete"
@@ -728,7 +719,7 @@
                      :disable (zero? selection-count)
                      :style-class "chain-toolbar-btn-danger"
                      :tooltip {:fx/type :tooltip :text "Delete the selected items (Delete)"}
-                     :on-action (fn [_] (dispatch-delete-selected! sidebar-props))}]}
+                     :on-action (fn [_] (dispatch-delete-selected! props))}]}
         items-content])}))
 
 
@@ -750,9 +741,9 @@
 (defn- setup-keyboard-handlers!
   "Handle the list's keys while the focus is anywhere inside it (on a
    toolbar button or a row's box too), except in its rename field
-   (keys/list-key-target?). The props are read when a key comes, so they are
-   the last render's."
-  [^javafx.scene.Node node component-id]
+   (keys/list-key-target?). The list a key is for is the one node shows
+   when it comes (list-address)."
+  [^javafx.scene.Node node]
   (keys/claim-keys! node #{:delete :escape})
   (.addEventFilter
    node
@@ -762,27 +753,27 @@
       (when (keys/list-key-target? node event)
         (let [code (.getCode event)
               ctrl? (or (.isShortcutDown event) (.isControlDown event))
-              props (get-handler-props component-id)
+              {:keys [component-id items-path] :as address} (list-address node)
               handled? (cond
-                         (nil? props) false
+                         (nil? address) false
 
                          (and ctrl? (= code javafx.scene.input.KeyCode/C))
-                         (do (dispatch-copy-selected! props) true)
+                         (do (dispatch-copy-selected! address) true)
 
                          (and ctrl? (= code javafx.scene.input.KeyCode/V))
-                         (do (dispatch-paste-items! props) true)
+                         (do (dispatch-paste-items! address) true)
 
                          (and ctrl? (= code javafx.scene.input.KeyCode/X))
-                         (do (dispatch-cut-selected! props) true)
+                         (do (dispatch-cut-selected! address) true)
 
                          (and ctrl? (= code javafx.scene.input.KeyCode/A))
-                         (do (select-all! component-id (:items-path props) (:ordered-ids props)) true)
+                         (do (select-all! component-id items-path) true)
 
                          (and ctrl? (= code javafx.scene.input.KeyCode/G))
-                         (do (dispatch-group-selected! props) true)
+                         (do (dispatch-group-selected! address) true)
 
                          (= code javafx.scene.input.KeyCode/DELETE)
-                         (do (dispatch-delete-selected! props) true)
+                         (do (dispatch-delete-selected! address) true)
 
                          (= code javafx.scene.input.KeyCode/ESCAPE)
                          (do (clear-selection! component-id) true)
@@ -847,14 +838,13 @@
                    :else
                    (fn [item] (or (:name item) fallback-label)))]
     {:fx/type fx/ext-on-instance-lifecycle
-     ;; The props the keys and clicks read are list-sidebar's, written each
-     ;; render with :ordered-ids (keyboard plan 03, D7 A); they go with the list
+     ;; The keys, clicks and drops installed once read the list's command
+     ;; address from the node's :user-data when they come (list-address)
      :on-created (fn [^javafx.scene.Node node]
-                   (setup-keyboard-handlers! node component-id)
+                   (setup-keyboard-handlers! node)
                    ;; Focus comes from a click on a row (request-list-focus!),
                    ;; never on creation: the Cue Chain Editor has two lists
                    (.setFocusTraversable node true))
-     :on-deleted (fn [_] (remove-props-atom! component-id))
      :desc {:fx/type :v-box
             :id (str "list-editor-"
                      (str/join "-"
@@ -862,6 +852,7 @@
                                     (if (sequential? component-id)
                                       component-id
                                       [component-id]))))
+            :user-data {::address (u/->map component-id items-path on-change-event on-change-params)}
             :children [(u/->map&
                         items header-label
                         empty-text allow-groups? component-id on-change-event on-change-params items-path

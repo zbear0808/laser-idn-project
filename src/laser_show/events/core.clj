@@ -83,7 +83,9 @@
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.history :as history-handlers]
             [laser-show.events.handlers.rig-autosave :as rig-autosave]
+            [laser-show.events.handlers.step-grid :as step-grid-handlers]
             [laser-show.events.handlers.timeline :as timeline-handlers]
+            [laser-show.events.safety-guard :as safety-guard]
             [laser-show.events.show-lock :as show-lock]
             [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.events.handlers.output-sync :as output-sync]
@@ -99,18 +101,15 @@
            [java.net URI]
            [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
-           [java.util.concurrent Executors ThreadFactory TimeUnit]))
+           [java.util.concurrent Executors ScheduledExecutorService ThreadFactory TimeUnit]))
 
 ;; Co-effects (inject data INTO events)
 ;; Co-effect functions take NO arguments and return data to inject.
 
 (defn- co-effect-state
-  "Co-effect that injects current state into event.
-   
-   Uses get-raw-state (not get-state) because:
-   - This runs on agent thread, not FX thread
-   - fx/sub-val subscription tracking is not needed for events
-   - Direct state access is thread-safe via swap!"
+  "Co-effect that injects current state into event: one app map read when
+   the event is handled (state/get-raw-state), a snapshot, no subscription.
+   The handler works on that map, and its :state effect writes the result."
   []
   (state/get-raw-state))
 
@@ -270,6 +269,66 @@
     (Thread/sleep delay-ms)
     (dispatch event)))
 
+;; A press's deadline (reactivity plan 16): one wake-up, for the press whose
+;; transaction is open, so a missed mouse-up is sealed even while nothing
+;; else happens. Its slot belongs to the app's dispatcher: app/stop! retires
+;; it (dispose-gesture-alarm!).
+
+(defonce ^{:private true
+           :doc "The armed wake-up: {:gesture-id :token :cancel}, or nil."}
+  !gesture-alarm
+  (atom nil))
+
+(defonce ^{:private true
+           :doc "The one daemon thread the wake-ups wait on."}
+  gesture-alarm-executor
+  (delay (Executors/newSingleThreadScheduledExecutor
+          (reify ThreadFactory
+            (newThread [_ r]
+              (doto (Thread. ^Runnable r "laser-show-gesture-alarm")
+                (.setDaemon true)))))))
+
+(defn schedule-gesture-wake!
+  "Run task once, delay-ms from now, on the wake-ups' thread; returns a fn
+   that cancels it. :history/gesture-alarm's scheduler (tests replace it
+   with a fake one)."
+  [delay-ms ^Runnable task]
+  (let [f (.schedule ^ScheduledExecutorService @gesture-alarm-executor task (long (max 0 delay-ms)) TimeUnit/MILLISECONDS)]
+    #(.cancel f false)))
+
+(defn- effect-gesture-alarm
+  "Effect that keeps the open press's one wake-up. {:cancel-id G} cancels
+   G's, and only G's (a late cancel can't cancel the one that took its
+   place); {:arm {:gesture-id H :delay-ms ms}} replaces whatever is armed
+   with H's. Once due, a wake-up still in its slot dispatches
+   {:event/type :history/gesture-timeout :history/gesture-id H} through
+   dispatch, the dispatcher this effect was given; one cancelled or
+   replaced meanwhile dispatches nothing. It reads and writes no app state."
+  [{:keys [cancel-id arm]} dispatch]
+  (when (some? cancel-id)
+    (let [[old _] (swap-vals! !gesture-alarm #(if (= cancel-id (:gesture-id %)) nil %))]
+      (when (and (= cancel-id (:gesture-id old)) (:cancel old))
+        ((:cancel old)))))
+  (when-let [{:keys [gesture-id delay-ms]} arm]
+    (let [token (Object.)
+          wake (fn []
+                 (let [[old _] (swap-vals! !gesture-alarm #(if (identical? token (:token %)) nil %))]
+                   (when (identical? token (:token old))
+                     (dispatch {:event/type :history/gesture-timeout :history/gesture-id gesture-id}))))
+          [old _] (swap-vals! !gesture-alarm (constantly {:gesture-id gesture-id :token token}))
+          _ (when-let [cancel (:cancel old)] (cancel))
+          cancel (schedule-gesture-wake! delay-ms wake)
+          kept (swap! !gesture-alarm #(if (identical? token (:token %)) (assoc % :cancel cancel) %))]
+      (when-not (identical? token (:token kept))
+        (cancel)))))
+
+(defn dispose-gesture-alarm!
+  "Cancel the armed wake-up, if any: app/stop! retires it with its app."
+  []
+  (let [[old _] (reset-vals! !gesture-alarm nil)]
+    (when-let [cancel (:cancel old)]
+      (cancel))))
+
 (defn- effect-save-project
   "Effect that writes a project zip (persistent/write-project!: staged
    beside the file, read back, then moved onto it).
@@ -410,12 +469,17 @@
   "Effect that continues :on-read with :clock, what the show clock has now:
    {:beats (the global clock's) :running? (a clock thread runs) :now-ms
    (the wall clock, the one an input's :timestamp is on)}, so a handler that
-   times something on the beat stays pure (zones plan Z4 SQ-3)."
-  [{:keys [on-read]} dispatch]
+   times something on the beat stays pure (zones plan Z4 SQ-3). With
+   :chase-cell, :clock is {:chase-id k} instead, the timecode episode the
+   clock chases at that cell now, nil for none (one read of its runtime,
+   show-time/chase-id), for :show-clock/apply-chase (reactivity plan 15)."
+  [{:keys [on-read] :as request} dispatch]
   (when on-read
-    (run-inline (assoc on-read :clock {:beats (show-time/global-beats)
-                                       :running? ((:running? show-time/frame-signal))
-                                       :now-ms (System/currentTimeMillis)})
+    (run-inline (assoc on-read :clock (if (contains? request :chase-cell)
+                                        {:chase-id (show-time/chase-id (:chase-cell request))}
+                                        {:beats (show-time/global-beats)
+                                         :running? ((:running? show-time/frame-signal))
+                                         :now-ms (System/currentTimeMillis)}))
                 dispatch)))
 
 ;; Input Learn Effects
@@ -748,14 +812,19 @@
 
 (def handle-event-pipeline
   "Event handler pipeline: the show lock (innermost: while it is on, the
-   events it refuses change [:ui] only, events/show_lock.clj), timeline
+   events it refuses change [:ui] only, events/show_lock.clj), the step
+   grid window's control target (just outside the lock: the window's
+   parameter controls name its pattern, found where it is now before the
+   lock classifies it, handlers/step_grid.clj), timeline
    invariants enforced on changed cue chains (so history sees normalized
    state), undo history for undoable document edits, then the
    unsaved-changes flag derived for every event
-   (see handlers/history.clj), then the output sync: a change to what the
-   engines are built from (undo included) requests a refresh while streaming
-   (handlers/output_sync.clj), and the rig autosave: a change to the rig
-   (undo included) requests a write of the rig file
+   (see handlers/history.clj), then the safety versions: a change to a
+   projector's safety zone (undo included) moves its versions on
+   (safety-guard/wrap-safety-versions), then the output sync: a change to
+   what the engines are built from (undo included) requests a refresh while
+   streaming (handlers/output_sync.clj), and the rig autosave: a change to
+   the rig (undo included) requests a write of the rig file
    (handlers/rig_autosave.clj). Then, in dev mode only, the lost-update check
    tags the :state effect with the event's snapshot. Outermost, with-fx-event
    puts a map event's :fx/event value where its view wrote the placeholder.
@@ -765,9 +834,11 @@
    co-effects and effects, so it runs on the cljfx agent."
   (-> handlers/handle-event
       show-lock/wrap-show-lock
+      step-grid-handlers/wrap-step-grid-control-target
       timeline-handlers/wrap-normalize-timelines
       history-handlers/wrap-history
       history-handlers/wrap-dirty
+      safety-guard/wrap-safety-versions
       output-sync/wrap-output-sync
       rig-autosave/wrap-rig-autosave
       wrap-lost-update-check
@@ -824,8 +895,12 @@
    - :dispatch - continue with another event (inline)
    - :dispatch-n - continue with several events, in order (inline)
    - :dispatch-later - dispatch event after delay (later, future)
+   - :history/gesture-alarm - keep the open press's one wake-up: cancel
+     its, arm the next; it dispatches :history/gesture-timeout (later,
+     wake-up thread)
    - :link/sync-to-downbeat - align phase to Link's downbeat (inline)
-   - :show-clock/read - continue :on-read with the show clock's beats (inline)
+   - :show-clock/read - continue :on-read with the show clock's beats, or
+     with :chase-cell its timecode episode there (inline)
    - :input/await-learn - wait for a learn capture, then dispatch the binding (later, future)
    - :input/midi-list, :input/midi-connect, :input/midi-disconnect,
      :input/osc-start, :input/osc-stop - list the MIDI inputs, connect or
@@ -867,6 +942,7 @@
     :dispatch effect-dispatch
     :dispatch-n effect-dispatch-n
     :dispatch-later effect-dispatch-later
+    :history/gesture-alarm effect-gesture-alarm
     :link/sync-to-downbeat effect-link-sync-to-downbeat
     :show-clock/read effect-show-clock-read
     :input/await-learn effect-input-await-learn

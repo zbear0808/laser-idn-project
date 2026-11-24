@@ -6,7 +6,11 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.events.core :as events]
+            [laser-show.state.domains :as domains]
+            [laser-show.state.history :as history]
             [laser-show.state.persistent :as persistent]
+            [laser-show.state.rig-file :as rig-file]
             [laser-show.state.rig-store :as rig-store])
   (:import [java.io File]
            [java.nio.file Files]
@@ -268,6 +272,29 @@
       (finally
         (.shutdownNow delegate)
         (.shutdownNow inline)))))
+
+(deftest restored-member-definition-survives-rig-file-round-trip-test
+  ;; Reactivity plan 23: what the Undo of a group's last member's removal
+  ;; asks to write brings the group back from disk
+  (let [balcony {:id :group-balcony :name "Balcony" :description "House" :color "#2468AC"}
+        handle (fn [state event] (events/handle-event-pipeline (assoc event :state state :time 1000)))
+        s0 (-> (domains/build-initial-state)
+               (assoc :projectors {:p {:name "Balcony L" :host "10.0.0.7" :port 7255 :enabled? false
+                                       :zone-groups [:group-balcony] :stable-id [:host "10.0.0.7" 0]}})
+               (update :rig-file assoc :path (rig-path) :group-copy {:group-balcony balcony})
+               (history/mark-clean))
+        removed (handle s0 {:event/type :projectors/remove :projector-id :p})
+        undone (handle (:state removed) {:event/type :edit/undo})
+        redone (handle (:state undone) {:event/type :edit/redo})
+        new-show-from-disk (fn [request]
+                             (is (contains? (rig-store/write! (rig-path) (:doc request)) :at))
+                             (let [{:keys [status] read-doc :doc} (rig-store/read! (rig-path))]
+                               (is (= :ok status))
+                               (persistent/new-project-state (rig-file/apply-rig-document (domains/build-initial-state) read-doc))))]
+    (is (= balcony (get-in (new-show-from-disk (:rig/write undone)) [:zone-groups :group-balcony]))
+        "Undo's request, written and read: New brings A exactly")
+    (is (not (contains? (:zone-groups (new-show-from-disk (:rig/write redone))) :group-balcony))
+        "Redo's: no Balcony")))
 
 
 ;; Where it lives

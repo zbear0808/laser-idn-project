@@ -8,6 +8,7 @@
             [laser-show.events.core :as events]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
+            [laser-show.state.persistent :as persistent]
             [laser-show.state.rig-file :as rig-file]))
 
 (def ^:private rig-path
@@ -134,3 +135,227 @@
   (let [effects (handle (rigged) {:event/type :rig/startup-notice :text "Your rig file couldn't be read." :level :warning})]
     (is (= {:text "Your rig file couldn't be read." :level :warning} (dissoc (get-in effects [:state :ui :notice]) :id)))
     (is (= {:state (rigged)} (handle (rigged) {:event/type :rig/startup-notice})) "called bare: nothing")))
+
+
+;; A group only the rig defines comes back with its last member (reactivity
+;; plan 23): its definition goes with the undo step that can bring the
+;; membership back
+
+(def ^:private balcony
+  "A: the rig's copy's definition of a group the open show doesn't define."
+  {:id :group-balcony :name "Balcony" :description "House" :color "#2468AC"})
+
+(def ^:private balcony-b
+  "B: a show's group with the same id and name."
+  {:id :group-balcony :name "Balcony" :description "Show" :color "#CC4400"})
+
+(defn- balcony-rig
+  "A saved show that doesn't define Balcony, on a rig whose one laser, :p
+   (off), is in it: the rig's copy knows A. The rig file is at path (nil:
+   none), read only with :read-only? true."
+  ([] (balcony-rig rig-path))
+  ([path & {:keys [read-only?]}]
+   (-> (domains/build-initial-state)
+       (assoc :projectors {:p {:name "Balcony L" :host "10.0.0.7" :port 7255 :enabled? false
+                               :zone-groups [:group-balcony] :stable-id [:host "10.0.0.7" 0]}})
+       (assoc-in [:chains :cue-chains [0 0]] {:items [{:type :preset :preset-id :circle}]})
+       (update :rig-file assoc :path path :read-only? (boolean read-only?) :group-copy {:group-balcony balcony})
+       (history/mark-clean))))
+
+(defn- copy [state] (get-in state [:rig-file :group-copy]))
+
+(defn- stacks [state] [(count (get-in state [:history :undo-stack])) (count (get-in state [:history :redo-stack]))])
+
+(defn- steps
+  "The effects of each event, each on the state the one before left."
+  [state events]
+  (rest (reductions (fn [effects event] (handle (:state effects) event)) {:state state} events)))
+
+(def ^:private undo {:event/type :edit/undo})
+(def ^:private redo {:event/type :edit/redo})
+(def ^:private remove-p {:event/type :projectors/remove :projector-id :p})
+
+(deftest last-rig-only-member-round-trips-through-undo-redo-test
+  (let [[_ undone :as all] (steps (balcony-rig) [remove-p undo redo undo])
+        states (map :state all)]
+    (is (= [[1 {}] [2 {:group-balcony balcony}] [3 {}] [4 {:group-balcony balcony}]]
+           (map (comp (juxt :seq (comp :zone-groups :doc)) write) all))
+        "each request's number and definitions: A comes back with its member")
+    (is (= [nil [:group-balcony] nil [:group-balcony]]
+           (map #(get-in % [:projectors :p :zone-groups]) states)
+           (map #(get-in (write %) [:doc :projectors :p :zone-groups]) all))
+        "the membership, here and in the file")
+    (is (= [{} {:group-balcony balcony} {} {:group-balcony balcony}] (map copy states)) "the local copy")
+    (is (= [[1 0] [0 1] [1 0] [0 1]] (map stacks states)))
+    (is (= [false false false false] (map #(get-in % [:project :dirty?]) states)) "the show stays saved")
+    (is (= [{:group-id :group-balcony :name "Balcony" :lasers 1}]
+           (:rig-groups-not-in-show (rig-file/match-report (:state undone) {} {})))
+        "the report names it again")
+    (testing "the removal's write result, delivered after Undo"
+      (let [late (handle (:state undone) {:event/type :rig/written :path rig-path :seq 1 :at 2000})]
+        (is (= {:group-balcony balcony} (copy (:state late))) "can't change A")
+        (is (nil? (write late)) "asks for no other write")
+        (is (= [0 1] (stacks (:state late))) "and is no undo step")))
+    (testing "an explicit Retry writes A and the membership as they are now, once"
+      (let [retried (handle (:state undone) {:event/type :rig/retry-write})]
+        (is (= [3 true {:group-balcony balcony} [:group-balcony]]
+               ((juxt :seq :now? (comp :zone-groups :doc) (comp :zone-groups :p :projectors :doc)) (write retried))))
+        (is (= 3 (get-in retried [:state :rig-file :requested])))))
+    (testing "with an unsaved show edit before it, the show stays unsaved"
+      (let [edited (:state (handle (balcony-rig) {:event/type :grid/clear-cell :col 0 :row 0}))
+            states (map :state (steps edited [remove-p undo redo]))]
+        (is (true? (get-in edited [:project :dirty?])))
+        (is (= [true true true] (map #(get-in % [:project :dirty?]) states)))
+        (is (= [{} {:group-balcony balcony} {}] (map copy states)))
+        (is (nil? (get-in (second states) [:chains :cue-chains [0 0]])) "the show edit stays")))))
+
+(def ^:private press #uuid "00000000-0000-0000-0000-0000000023a1")
+
+(deftest last-virtual-member-is-restored-on-abort-test
+  (let [s0 (-> (balcony-rig)
+               (assoc :virtual-projectors {:vp {:name "Balcony VP" :parent-projector-id :p :zone-groups [:group-balcony]}})
+               (history/mark-clean))
+        left (:state (handle s0 {:event/type :projectors/toggle-zone-group :projector-id :p :zone-group-id :group-balcony}))
+        removed (handle left remove-p)
+        vp-groups #(get-in % [:virtual-projectors :vp :zone-groups])]
+    (is (= [[] [:group-balcony]] ((juxt #(get-in % [:projectors :p :zone-groups]) vp-groups) left)))
+    (is (= {:group-balcony balcony} (copy left)) "still listed, by the virtual output")
+    (is (= {} (copy (:state removed)) (get-in (write removed) [:doc :zone-groups])) "its parent's removal took the last member")
+    (is (nil? (vp-groups (:state removed))))
+    (testing "Undo brings the virtual membership and A back together"
+      (let [undone (handle (:state removed) undo)]
+        (is (= [:group-balcony] (vp-groups (:state undone))))
+        (is (= {:group-balcony balcony} (copy (:state undone)) (get-in (write undone) [:doc :zone-groups])))))
+    (testing "a press whose edit removes it, aborted: the same, and no undo step"
+      (let [[begun during aborted] (steps left [{:event/type :history/begin-transaction :label "Remove" :history/gesture-id press}
+                                                (assoc remove-p :history/gesture-id press)
+                                                {:event/type :history/abort-transaction :history/gesture-id press}])]
+        (is (= press (history/gesture-id (:history (:state begun)))))
+        (is (= {} (copy (:state during))))
+        (is (= [:group-balcony] (vp-groups (:state aborted))))
+        (is (= {:group-balcony balcony} (copy (:state aborted)) (get-in (write aborted) [:doc :zone-groups])))
+        (is (= [1 0] (stacks left) (stacks (:state during)) (stacks (:state aborted))) "the toggle's step only")
+        (is (nil? (get-in (:state aborted) [:history :transaction])))))))
+
+(deftest undo-that-asks-first-installs-no-definition-test
+  (let [live (-> (balcony-rig)
+                 (update-in [:projectors :p] assoc :enabled? true :safety {:limit [-0.5 -0.5 0.5 0.5] :blocked []})
+                 (assoc-in [:backend :streaming :running?] true))
+        ;; One step: a press narrowed Balcony L's area and took it out of Balcony
+        edited (:state (last (steps live [{:event/type :history/begin-transaction :label "Edit" :history/gesture-id press}
+                                          {:event/type :projectors/set-safety :projector-id :p
+                                           :safety {:limit [-0.3 -0.5 0.5 0.5]} :history/gesture-id press}
+                                          {:event/type :projectors/toggle-zone-group :projector-id :p
+                                           :zone-group-id :group-balcony :history/gesture-id press}
+                                          {:event/type :history/commit-transaction :history/gesture-id press}])))
+        asked (handle edited undo)]
+    (is (= [{} [1 0]] [(copy edited) (stacks edited)]))
+    (is (true? (get-in asked [:state :ui :dialogs :confirm :open?])) "Undo would let light reach more while it is on: it asks")
+    (is (= [{} [1 0]] [(copy (:state asked)) (stacks (:state asked))]) "and neither installs A nor takes the step")
+    (is (nil? (write asked)) "nor asks for a write")
+    (testing "Allow: the step, its membership and A"
+      (let [allowed (run (:state asked) {:event/type :ui/confirm})]
+        (is (= [:group-balcony] (get-in allowed [:state :projectors :p :zone-groups])))
+        (is (= [{:group-balcony balcony} [0 1]] [(copy (:state allowed)) (stacks (:state allowed))]))
+        (is (= {:group-balcony balcony} (get-in (write allowed) [:doc :zone-groups])))))))
+
+(def ^:private upstairs
+  "Another group only the rig defines, named Balcony too, with an id of its
+   own."
+  {:id :group-balcony-2 :name "Balcony" :description "Upstairs" :color "#88AA22"})
+
+(deftest same-id-show-edit-restores-the-old-rig-definition-test
+  (let [create {:event/type :zone-groups/create-new :name "Balcony" :description "Show" :color "#CC4400"}
+        both (fn [g] {:group-balcony g :group-balcony-2 upstairs})]
+    (doseq [[mode s0] [["a rig file" (balcony-rig)]
+                       ["read only" (balcony-rig rig-path :read-only? true)]
+                       ["no rig file" (balcony-rig nil)]]]
+      (testing mode
+        (let [s0 (-> s0
+                     (assoc-in [:projectors :q] {:name "Upstairs L" :host "10.0.0.8" :port 7255 :enabled? false
+                                                 :zone-groups [:group-balcony-2] :stable-id [:host "10.0.0.8" 0]})
+                     (assoc-in [:rig-file :group-copy :group-balcony-2] upstairs)
+                     (history/mark-clean))
+              all (steps s0 [create undo redo])
+              row (fn [{s :state}] [(select-keys (:zone-groups s) [:group-balcony :group-balcony-2])
+                                    (rig-file/group-copy s)
+                                    (get-in s [:project :dirty?])])]
+          (is (= [[{:group-balcony balcony-b} (both balcony-b) true]
+                  [{} (both balcony) false]
+                  [{:group-balcony balcony-b} (both balcony-b) true]]
+                 (map row all))
+              "the show's B over the rig's id, then the rig's A again, then B; the other Balcony is another id")
+          (is (= (map (comp rig-file/group-copy :state) all) (map (comp copy :state) all)) "and the copy kept is that one")
+          (is (= (if (= "a rig file" mode) [1 2 3] [nil nil nil]) (map (comp :seq write) all))
+              "a request only for a rig file this window may write"))))
+    (testing "the report's Add on A: a show edit the rig file needn't follow"
+      (let [added (handle (balcony-rig) {:event/type :rig/add-groups-to-show :group-ids [:group-balcony]})]
+        (is (= balcony (get-in added [:state :zone-groups :group-balcony])))
+        (is (true? (get-in added [:state :project :dirty?])))
+        (is (nil? (write added)))
+        (is (= {:group-balcony balcony} (copy (:state added))))))))
+
+(defn- incoming-zip
+  "What Open reads of a show made on another rig: its laser (off), order and
+   calibration aren't this rig's; groups go into its show's."
+  [groups]
+  (persistent/project-files
+   (-> (domains/build-initial-state)
+       (assoc :projectors {:other {:name "Other L" :host "10.9.9.9" :port 7255 :enabled? false :zone-groups []
+                                   :stable-id [:host "10.9.9.9" 0]}})
+       (assoc :rig {:order [:other] :middle :none :split-width 0.9})
+       (assoc-in [:chains :projector-effects :other] {:items [{:effect-id :corner-pin :id #uuid "23232323-2323-2323-2323-232323232323"}]})
+       (assoc-in [:chains :cue-chains [1 1]] {:items [{:type :preset :preset-id :star}]})
+       (update :zone-groups merge groups))))
+
+(defn- open-zip [state contents]
+  (handle state {:event/type :file/project-loaded :file-path "/shows/incoming.zip" :contents contents}))
+
+(deftest new-and-open-start-from-the-restored-rig-test
+  (let [[undone redone] (map :state (rest (steps (balcony-rig) [remove-p undo redo])))
+        fresh? (fn [s] (and (= [0 0] (stacks s)) (nil? (get-in s [:history :transaction])) (false? (get-in s [:project :dirty?]))))
+        same-rig? (fn [before after] (every? #(identical? (get-in before %) (get-in after %)) rig-file/rig-paths))
+        report (fn [s] (let [{:keys [hardware chains]} (get-in s [:ui :dialogs :rig-report])]
+                         (rig-file/match-report s hardware chains)))]
+    (testing "the show saved after Undo: the membership in its copy of the rig, no Balcony in its groups, nothing of
+              the rig file or the undo steps"
+      (let [files (persistent/project-files undone)
+            ks (set (filter keyword? (tree-seq coll? seq files)))]
+        (is (= [:group-balcony] (get-in files ["hardware.edn" :projectors :p :zone-groups])))
+        (is (not (contains? (get-in files ["hardware.edn" :zone-groups]) :group-balcony)))
+        (is (not-any? ks [:rig-file :rig-only-group-definitions :group-copy]))))
+    (testing "New after Undo brings Balcony into the new show; New after Redo doesn't"
+      (let [after-undo (handle undone {:event/type :file/new-project})
+            after-redo (handle redone {:event/type :file/new-project})]
+        (is (= balcony (get-in after-undo [:state :zone-groups :group-balcony])))
+        (is (= #{:graphics :crowd} (set (keys (get-in after-redo [:state :zone-groups])))) "the defaults only")
+        (is (= [true true] [(fresh? (:state after-undo)) (fresh? (:state after-redo))]))
+        (is (= [true true] [(same-rig? undone (:state after-undo)) (same-rig? redone (:state after-redo))]))
+        (is (= [nil nil] [(write after-undo) (write after-redo)]) "the rig file needn't change")))
+    (testing "Open after Undo, a show from another rig without Balcony"
+      (let [opened (open-zip undone (incoming-zip {}))
+            s (:state opened)]
+        (is (= [:group-balcony] (get-in s [:projectors :p :zone-groups])) "the member is this rig's")
+        (is (= {:group-balcony balcony} (copy s)) "and so is A")
+        (is (not (contains? (:zone-groups s) :group-balcony)) "the show doesn't get it")
+        (is (= [{:group-id :group-balcony :name "Balcony" :lasers 1}] (:rig-groups-not-in-show (report s))))
+        (is (false? (get-in s [:ui :dialogs :rig-report :open?])) "a row to read: it doesn't open the report")
+        (is (nil? (write opened)) "the rig file is as it was")
+        (is (fresh? s))
+        (is (same-rig? undone s))))
+    (testing "Open after Undo, a show that defines Balcony as B: its definition wins"
+      (let [opened (open-zip undone (incoming-zip {:group-balcony balcony-b}))
+            s (:state opened)]
+        (is (= {:group-balcony balcony-b} (copy s)))
+        (is (= [3 {:group-balcony balcony-b}] ((juxt :seq (comp :zone-groups :doc)) (write opened))) "one write")
+        (is (fresh? s))
+        (is (same-rig? undone s))))
+    (testing "Open with no rig file, when only the outgoing show defines B: the incoming show doesn't get it, the rig
+              remembers it"
+      (let [here (-> (balcony-rig nil)
+                     (assoc-in [:zone-groups :group-balcony] balcony-b)
+                     (assoc-in [:rig-file :group-copy] {})
+                     (history/mark-clean))
+            s (:state (open-zip here (incoming-zip {})))]
+        (is (not (contains? (:zone-groups s) :group-balcony)))
+        (is (= {:group-balcony balcony-b} (copy s)))))))

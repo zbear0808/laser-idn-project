@@ -42,10 +42,12 @@
 (defonce ^{:private true :doc "The cljfx app instance."} *app (atom nil))
 
 (defn- default-error-handler
-  "Error handler for cljfx renderer.
+  "Error handler for cljfx renderer: what a render throws (create-app gives
+   it to fx/create-app as :renderer-error-handler).
    
-   Logs errors and prints stack trace. In dev mode, cljfx.dev provides
-   enhanced error messages with component stacks, which are stored in ex-data."
+   Logs errors and prints stack trace. In dev mode (laser-show.dev-renderer)
+   the message of an invalid description's error says what is wrong with it
+   and gives the cljfx component stack."
   [^Throwable ex]
   (log/error ex "Error in cljfx renderer:")
   (binding [*out* *err*]
@@ -56,32 +58,35 @@
     (println "Stack trace:")
     (.printStackTrace ex *out*)))
 
-(defn- get-type->lifecycle
-  "Returns the type->lifecycle function based on dev mode.
-   
-   In dev mode: Uses cljfx.dev/type->lifecycle for validation and better errors
-                on keyword types only. Function components use standard context-aware
-                lifecycle to ensure proper context propagation.
-   In prod mode: Uses standard cljfx lifecycle lookup"
+(defn- get-renderer-middleware
+  "fx/create-app's :renderer-middleware for this mount: identity, but in dev
+   mode laser-show.dev-renderer/middleware (dev/, on the :dev classpath
+   only): cljfx.dev's description validation, component stacks in render
+   errors and its F12 inspector, around cljfx's own lifecycles. Only then is
+   the dev namespace looked up, once, here. If it can't be loaded or has no
+   middleware: a warning and identity for this mount. Render errors are the
+   renderer error handler's either way."
   []
-  (let [std-lifecycle #(or (fx/keyword->lifecycle %)
-                           (fx/fn->lifecycle-with-context %))]
-    (if (dev-config/dev-mode?)
-      (if-let [dev-lifecycle (try
-                               @(requiring-resolve 'cljfx.dev/type->lifecycle)
-                               (catch Throwable t
-                                 (log/warn t "Could not load cljfx.dev tools; falling back to standard lifecycle")
-                                 nil))]
-        (do
-          (log/info "🔧 Dev mode enabled - cljfx dev tools active (Press F12 for inspector)")
-          (fn [type]
-            (if (keyword? type)
-              (dev-lifecycle type)
-              (fx/fn->lifecycle-with-context type))))
-        (do
-          (log/info "🔧 Dev mode enabled - using standard cljfx lifecycle")
-          std-lifecycle))
-      std-lifecycle)))
+  (if-not (dev-config/dev-mode?)
+    identity
+    (let [middleware (try
+                       (requiring-resolve 'laser-show.dev-renderer/middleware)
+                       (catch Throwable t
+                         (log/warn t "Dev mode: could not load laser-show.dev-renderer (dev/ and cljfx.dev, the :dev alias);"
+                                   "rendering without cljfx.dev validation or the F12 inspector")
+                         ::not-loaded))]
+      (cond
+        (var? middleware)
+        (do (log/info "🔧 Dev mode: renderer middleware laser-show.dev-renderer/middleware,"
+                      "cljfx.dev validation (F12 opens its inspector)")
+            @middleware)
+
+        (nil? middleware)
+        (do (log/warn "Dev mode: laser-show.dev-renderer has no middleware;"
+                      "rendering without cljfx.dev validation or the F12 inspector")
+            identity)
+
+        :else identity))))
 
 (defn- agent-error-handler
   "Error handler for the event processing agent.
@@ -101,7 +106,12 @@
    new app instance (events/new-instance!, for the context init-state!
    made last): its handler, the one dispatcher of this app, runs the
    pipeline through events/instance-handler, so once stop! retires it,
-   nothing that comes back to it changes the app after it."
+   nothing that comes back to it changes the app after it.
+
+   cljfx makes the renderer, mounted on the context atom, with its own
+   options: its context-aware lifecycles and that handler as the map event
+   handler. What a render throws goes to default-error-handler; in dev mode
+   get-renderer-middleware adds cljfx.dev's validation and inspector."
   []
   (fx/create-app
    (state/get-context-atom)
@@ -109,8 +119,8 @@
    :co-effects (assoc events/co-effects :fx/context (constantly nil))
    :effects events/effects
    :desc-fn (fn [_] {:fx/type root/root-view})
-   :opts {:fx.opt/type->lifecycle (get-type->lifecycle)}
-   :error-handler default-error-handler
+   :renderer-middleware (get-renderer-middleware)
+   :renderer-error-handler default-error-handler
    :async-agent-options {:error-handler agent-error-handler
                          :fx/executor events/event-executor}))
 
@@ -317,9 +327,10 @@
   "Stop the mounted cljfx application and release application-owned services:
    the UI, the show clock, the input mapper, the gamepad poller, the
    streaming engines (the output runtime is drained), the add-ons' drivers
-   (unregistered, their jars closed), input devices, the Carabiner link and
+   (unregistered, their jars closed), input devices, the Carabiner link,
    the rig file (its pending change written and the write running finished,
-   then its lock let go: stop-rig-file!). dispatch!
+   then its lock let go: stop-rig-file!) and the open press's deadline
+   wake-up (events/dispose-gesture-alarm!). dispatch!
    falls back to the synchronous handler afterwards, and the write guard
    start! or start-test! installed is removed.
 
@@ -351,6 +362,7 @@
       (release-devices! (state/get-raw-state)))
     (events/retire!)
     (stop-rig-file!)
+    (events/dispose-gesture-alarm!)
     (events/set-exit-fn! nil)
     (events/set-dispatch-fn! nil)
     (state/guard-writes! nil)

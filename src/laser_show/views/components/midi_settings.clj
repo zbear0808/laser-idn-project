@@ -76,10 +76,10 @@
         nil))))
 
 (defn- format-channel-filter
-  "Format channel filter set as comma-separated string."
+  "Format channel filter set as comma-separated string, \"\" for none: the
+   field's :text is a string (dev mode's validation rejects nil)."
   [channels]
-  (when (and channels (seq channels))
-    (str/join ", " (sort channels))))
+  (str/join ", " (sort channels)))
 
 
 ;; MIDI Settings Section

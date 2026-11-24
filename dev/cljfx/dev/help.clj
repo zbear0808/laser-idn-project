@@ -1,3 +1,11 @@
+;; cljfx/dev/help.clj of io.github.cljfx/dev 1.10.6.42 (github.com/cljfx/dev
+;; at 9ea975a) with one change: the :color help lists the public Color fields
+;; of javafx.scene.paint.Color instead of reading its private NAMED_COLORS
+;; map, which the jar's copy can't do on JavaFX 28. cljfx.dev builds that help
+;; while it loads, so with the jar's copy it doesn't load. dev/ comes before
+;; the jars on the :dev classpath, so cljfx.dev loads this copy
+;; (laser-show.dev-renderer, reactivity plan 31).
+
 (in-ns 'cljfx.dev)
 
 (defmethod short-keyword-prop-help-string :desc [{:keys [of]}]
@@ -138,6 +146,8 @@
 - instance of javafx.scene.text.Font"])
 
 (defmethod long-keyword-prop-help-syntax :color [_]
+  ;; Changed from the jar's copy: the named colors are Color's public Color
+  ;; fields, not its private NAMED_COLORS map (see the top of this file)
   (str "A color, either:
 - string in either format:
   - 0x0000FF - 0x-prefixed hex web value
@@ -162,7 +172,7 @@
                       (str/replace #"_" "-")
                       keyword)))
            sort
-           (str/join "\n  - ")))))
+           (str/join "\n  - "))))
 
 (defmethod long-keyword-prop-help-syntax :key-combination [_]
   ["Key combination, either:

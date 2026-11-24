@@ -452,6 +452,65 @@
         (is (= :mtc (run :mtc)))
         (is (nil? (run nil)))))))
 
+(deftest reconcile-chase-sources-test
+  (testing "reactivity plan 15 §4 step 1: each changed follower gets the next version, a cue that stops following loses its own"
+    (let [follower {:editor-type :timeline :timeline/chase :mtc :items []}
+          ordinary {:editor-type :timeline :items []}
+          marker {:chasing? true :timeline? true :chase-id [:d [0 0] 0 nil 1]}
+          s0 (-> base-state
+                 (assoc-in [:project :document-id] :d)
+                 (assoc-in [:chains :cue-chains] {[0 0] follower [1 0] follower [2 0] ordinary})
+                 (assoc-in [:playback :chase-sources] {:next 5 :cells {[0 0] 3 [1 0] 4}})
+                 (assoc-in [:playback :active-cues] {[0 0] marker [2 0] {:run :r}})
+                 (assoc-in [:playback :playing?] true)
+                 (assoc-in [:playback :active-cell] [0 0]))
+          sources #(get-in % [:playback :chase-sources])
+          edit (fn [s cell cue] (timeline/reconcile-chase-sources s (assoc-in s [:chains :cue-chains cell] cue)))]
+      (is (identical? s0 (timeline/reconcile-chase-sources s0 s0)) "nothing changed")
+      (let [after (assoc-in s0 [:ui :notice] {:text "x"})]
+        (is (identical? after (timeline/reconcile-chase-sources s0 after)) "the cues identical: nothing to version"))
+      (testing "an edited follower, even one equal to the cue it replaced, is a new version; its marker stays"
+        (let [s (edit s0 [0 0] (into {} follower))]
+          (is (= {:next 6 :cells {[0 0] 5 [1 0] 4}} (sources s)))
+          (is (= marker (get-in s [:playback :active-cues [0 0]])))))
+      (testing "Follow off: its version and its marker go, as a cue stops; another cell's stays"
+        (let [s (edit s0 [0 0] ordinary)]
+          (is (= {:next 5 :cells {[1 0] 4}} (sources s)) ":next never goes back")
+          (is (= {[2 0] {:run :r}} (get-in s [:playback :active-cues])))
+          (is (= [true [2 0]] ((juxt :playing? :active-cell) (:playback s))) "another cue plays on, with the focus")))
+      (testing "the last marker going stops the transport"
+        (let [alone (update-in s0 [:playback :active-cues] dissoc [2 0])
+              s (timeline/reconcile-chase-sources alone (update-in alone [:chains :cue-chains] dissoc [0 0]))]
+          (is (= [false {} nil] ((juxt :playing? :active-cues :active-cell) (:playback s))))
+          (is (= {:next 5 :cells {[1 0] 4}} (sources s)))))
+      (testing "a run at the cell (written by the edit itself, or moved there) stays"
+        (let [s (timeline/reconcile-chase-sources s0 (-> s0
+                                                         (assoc-in [:chains :cue-chains [0 0]] ordinary)
+                                                         (assoc-in [:playback :active-cues [0 0]] {:run :r2})))]
+          (is (= {:run :r2} (get-in s [:playback :active-cues [0 0]])))))
+      (testing "an ordinary cue's edit, and a follower made at an empty cell"
+        (is (= (sources s0) (sources (edit s0 [2 0] (assoc ordinary :name "x")))))
+        (is (= {:next 6 :cells {[0 0] 3 [1 0] 4 [3 0] 5}} (sources (edit s0 [3 0] follower)))))
+      (testing "a new show: its followers start at 0, the counter at the new show's"
+        (let [s (timeline/reconcile-chase-sources s0 (-> s0
+                                                         (assoc-in [:project :document-id] :d2)
+                                                         (assoc :playback (:playback base-state))))]
+          (is (= {:next 1 :cells {[0 0] 0 [1 0] 0}} (sources s)))))))
+  (testing "through the pipeline: Follow on and off, undo and redo"
+    (let [s0 (-> base-state
+                 (assoc-in [:project :document-id] :d)
+                 (assoc-in [:chains :cue-chains [0 0]] {:editor-type :timeline :items []}))
+          run (fn [s event] (:state (events/handle-event-pipeline (assoc event :state s))))
+          follow (fn [s src] (run s {:event/type :timeline/apply-op :col 0 :row 0 :op {:op :set-chase :source src}}))
+          version #(get-in % [:playback :chase-sources :cells [0 0]])
+          on (follow s0 :mtc)
+          off (follow on nil)
+          undone (run off {:event/type :edit/undo})
+          redone (run undone {:event/type :edit/redo})]
+      (is (= [1 nil 2 nil] (map version [on off undone redone])) "undo and redo are versioned too")
+      (is (= 3 (get-in redone [:playback :chase-sources :next])))
+      (is (= :mtc (get-in undone [:chains :cue-chains [0 0] :timeline/chase]))))))
+
 (deftest add-effect-to-track-test
   (let [run (fn [extra] (get-in (timeline/handle (merge {:event/type :timeline/add-effect-to-item :col 0 :row 0
                                                           :item-id :scale

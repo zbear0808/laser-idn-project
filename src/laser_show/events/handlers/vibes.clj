@@ -25,7 +25,8 @@
    :vibe/set-show-lock is the Perform tab's show lock (events/show_lock.clj),
    and :vibe/release with :reason :watchdog the show clock's report of a
    stuck key (vibes.watchdog)."
-  (:require [laser-show.events.helpers :as h]
+  (:require [laser-show.animation.chains :as chains]
+            [laser-show.events.helpers :as h]
             [laser-show.vibes.engine :as engine]
             [laser-show.vibes.faders :as faders]
             [laser-show.vibes.library :as library]
@@ -153,14 +154,25 @@
   [{:keys [cell col row]}]
   (or cell (when (and col row) [col row])))
 
+(defn- occupied?
+  "Does the cell of grid (:cue-chains or :effect-chains) hold something to
+   put in a slot? A cue cell by its items; an effects cell by what it
+   stores, on or off (chains/stored-effect-content)."
+  [state grid cell]
+  (let [items (get-in state [:chains grid cell :items])]
+    (if (= :effect-chains grid)
+      (:has-content? (chains/stored-effect-content items))
+      (boolean (seq items)))))
+
 (defn- handle-toggle
   "A click on the picker: the cell in or out of the vibe's slot (f:
    library/toggle-cell on the cue grid, toggle-fx on the effects grid). An
-   empty cell isn't put in: it has nothing to play."
+   empty cell isn't put in: it has nothing to play. One in the slot comes
+   out, whatever it holds now."
   [{:keys [state vibe slot] :as event} f grid]
   (let [cell (event-cell event)]
     {:state (if (or (library/in-slot? (get-in state [:config :vibes]) vibe slot cell)
-                    (seq (get-in state [:chains grid cell :items])))
+                    (occupied? state grid cell))
               (edit event f vibe slot cell)
               state)}))
 

@@ -140,36 +140,29 @@
         (is (= :item-10 (get-in result [:state :list-ui [:cue-chain 0 0] :last-selected-id])))))))
 
 
-(deftest select-item-shift-with-all-ids-test
-  (let [all-ids [:id-1 :id-2 :id-3 :id-4 :id-5 :id-6 :id-7 :id-8]
-        base-state {:list-ui {:my-list {:selected-ids #{:id-2}
-                                        :last-selected-id :id-2}}}]
-    (testing "Shift+click top-to-bottom using explicit :all-ids vector"
-      (let [event {:event/type :list/select-item
-                   :component-id :my-list
-                   :item-id :id-6
-                   :mode :shift
-                   :all-ids all-ids
-                   :state base-state}
-            result (list-handlers/handle event)]
-        (is (= #{:id-2 :id-3 :id-4 :id-5 :id-6}
-               (get-in result [:state :list-ui :my-list :selected-ids])))
-        (is (= :id-2 (get-in result [:state :list-ui :my-list :last-selected-id])))))
-
-    (testing "Shift+click bottom-to-top using explicit :all-ids vector"
-      (let [bottom-state (assoc-in base-state [:list-ui :my-list]
-                                   {:selected-ids #{:id-7}
-                                    :last-selected-id :id-7})
-            event {:event/type :list/select-item
-                   :component-id :my-list
-                   :item-id :id-3
-                   :mode :shift
-                   :all-ids all-ids
-                   :state bottom-state}
-            result (list-handlers/handle event)]
-        (is (= #{:id-3 :id-4 :id-5 :id-6 :id-7}
-               (get-in result [:state :list-ui :my-list :selected-ids])))
-        (is (= :id-7 (get-in result [:state :list-ui :my-list :last-selected-id])))))))
+(deftest select-item-shift-range-ignores-rendered-ids-test
+  ;; The range is the list's items in the state. IDs an event brings, which
+  ;; a render read, can be another list's (reactivity plan 04)
+  (let [items-path [:chains :effect-chains [1 0] :items]
+        state {:chains {:effect-chains {[1 0] {:items [{:id :id-1} {:id :id-2} {:id :id-3}
+                                                        {:id :id-4} {:id :id-5}]}}}
+               :list-ui {[:effect-chain 1 0] {:selected-ids #{:id-2}
+                                               :last-selected-id :id-2}}}
+        shift-click (fn [item-id]
+                      (get-in (list-handlers/handle {:event/type :list/select-item
+                                                     :component-id [:effect-chain 1 0]
+                                                     :item-id item-id
+                                                     :mode :shift
+                                                     :items-path items-path
+                                                     :all-ids [:other-1 :id-4 :other-2 :id-2]
+                                                     :state state})
+                              [:state :list-ui [:effect-chain 1 0]]))]
+    (testing "Shift+click top-to-bottom"
+      (is (= {:selected-ids #{:id-2 :id-3 :id-4} :last-selected-id :id-2}
+             (shift-click :id-4))))
+    (testing "Shift+click bottom-to-top"
+      (is (= {:selected-ids #{:id-1 :id-2} :last-selected-id :id-2}
+             (shift-click :id-1))))))
 
 
 (deftest select-item-shift-fallback-to-component-id-test
@@ -209,15 +202,17 @@
 
 
 (deftest select-all-test
-  (testing "Select all sets all IDs"
-    (let [state {:list-ui {:test-list {:selected-ids #{}}}}
+  (testing "Select all selects the list's items in the state, not IDs the event brings"
+    (let [state {:chains {:effect-chains {[1 0] {:items [{:id :x} {:id :y}]}}}
+                 :list-ui {[:effect-chain 1 0] {:selected-ids #{}}}}
           event {:event/type :list/select-all
-                 :component-id :test-list
+                 :component-id [:effect-chain 1 0]
+                 :items-path [:chains :effect-chains [1 0] :items]
                  :all-ids [:a :b :c :d]
                  :state state}
           result (list-handlers/handle event)]
-      (is (= #{:a :b :c :d} (get-in result [:state :list-ui :test-list :selected-ids])))
-      (is (= :a (get-in result [:state :list-ui :test-list :last-selected-id]))))))
+      (is (= #{:x :y} (get-in result [:state :list-ui [:effect-chain 1 0] :selected-ids])))
+      (is (= :x (get-in result [:state :list-ui [:effect-chain 1 0] :last-selected-id]))))))
 
 
 (deftest select-all-state-items-test

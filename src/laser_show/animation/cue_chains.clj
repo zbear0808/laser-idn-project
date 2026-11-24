@@ -23,6 +23,7 @@
              :enabled? true
              :collapsed? false}]}"
   (:require
+   [laser-show.animation.chains :as chains]
    [laser-show.animation.presets :as presets]
    [laser-show.common.util :as u]))
 
@@ -73,3 +74,22 @@
                           (contains? item :timeline/duration)
                           (contains? item :track-id)))
                     (:items cue-chain [])))))))
+
+(defn grid-content
+  "What the cue-grid cell holding cue (its cue-chain map, nil when there is
+   none) holds: {:timeline? :preset-count :first-preset-id :has-content?}.
+   Its presets are the :type :preset items at the top of :items and in
+   groups' :items, in order, enabled or not; a preset's params and effects
+   aren't looked in. It has content when it is a timeline cue
+   (timeline-cue?) or holds a preset: a name, a mode or an empty group alone
+   isn't a cue. The cell's label (subs/cell-display-data) and a press of the
+   cell (handlers/grid.clj) both use it, so a press does what the cell holds
+   when it is handled, not what it showed when it was clicked."
+  [cue]
+  (let [presets (filterv #(= :preset (:type %))
+                         (tree-seq chains/group? #(:items % []) {:type :group :items (:items cue [])}))
+        timeline? (timeline-cue? cue)]
+    {:timeline? timeline?
+     :preset-count (count presets)
+     :first-preset-id (:preset-id (first presets))
+     :has-content? (or timeline? (pos? (count presets)))}))
