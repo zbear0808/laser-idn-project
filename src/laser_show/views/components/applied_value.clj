@@ -1,11 +1,12 @@
 (ns laser-show.views.components.applied-value
   "A native control that shows the value that applies, after an edit the
    app refused too (plans/2026-11-23-cljfx-reactivity/13). JavaFX changes a
-   check box, a radio button, a check menu item, a combo box, a slider or a
-   text field as it is used, before the app decides. An edit that applies
-   renders its own value; one the app refuses (the show lock) changes
-   nothing, so the description stays the one before and cljfx sets nothing
-   back: the control would go on showing a value that doesn't apply.
+   check box, a radio button, a check menu item, a combo box, a slider, a
+   spinner or a text field as it is used, before the app decides. An edit
+   that applies renders its own value; one the app refuses (the show lock)
+   changes nothing, so the description stays the one before and cljfx sets
+   nothing back: the control would go on showing a value that doesn't
+   apply.
 
    applied-control sends each change once, as the event its :on-change
    makes of the new value. settle-ms after the newest change (one timer per
@@ -28,13 +29,13 @@
             [cljfx.prop :as prop]
             [laser-show.events.core :as events])
   (:import [javafx.animation PauseTransition]
-           [javafx.beans.property Property]
-           [javafx.beans.value ChangeListener]
+           [javafx.beans.value ChangeListener ObservableValue WritableValue]
            [javafx.collections ObservableMap]
            [javafx.event EventHandler]
            [javafx.scene Node]
            [javafx.scene.control CheckBox CheckMenuItem ChoiceBox ComboBoxBase MenuItem RadioMenuItem Slider
-            TextInputControl ToggleButton]
+            Spinner SpinnerValueFactory SpinnerValueFactory$DoubleSpinnerValueFactory
+            SpinnerValueFactory$IntegerSpinnerValueFactory TextInputControl ToggleButton]
            [javafx.util Duration]))
 
 (def settle-ms
@@ -75,8 +76,9 @@
 
 (defn- native-property
   "owner's JavaFX property that property names: :selected, :value or
-   :text."
-  ^Property [owner property]
+   :text. A spinner's :value is the spinner's own, which follows whichever
+   value factory it has now (set-native! sets that factory's)."
+  ^ObservableValue [owner property]
   (case property
     :selected (cond
                 (instance? CheckBox owner) (.selectedProperty ^CheckBox owner)
@@ -86,10 +88,24 @@
     :value (cond
              (instance? ComboBoxBase owner) (.valueProperty ^ComboBoxBase owner)
              (instance? ChoiceBox owner) (.valueProperty ^ChoiceBox owner)
-             (instance? Slider owner) (.valueProperty ^Slider owner))
+             (instance? Slider owner) (.valueProperty ^Slider owner)
+             (instance? Spinner owner) (.valueProperty ^Spinner owner))
     :text (when (instance? TextInputControl owner)
             (.textProperty ^TextInputControl owner))
     nil))
+
+(defn- set-native!
+  "Set owner's property to value: a spinner's through its value factory, as
+   that factory's kind of number (none for no number)."
+  [owner ^ObservableValue property value]
+  (if (instance? Spinner owner)
+    (when-let [^SpinnerValueFactory factory (.getValueFactory ^Spinner owner)]
+      (when (some? value)
+        (.setValue factory (cond
+                             (instance? SpinnerValueFactory$IntegerSpinnerValueFactory factory) (int value)
+                             (instance? SpinnerValueFactory$DoubleSpinnerValueFactory factory) (double value)
+                             :else value))))
+    (.setValue ^WritableValue property value)))
 
 (defn- rendered
   "value as property shows it."
@@ -106,11 +122,11 @@
   "Set owner to what applies (its :user-data :value), unless it shows it.
    No edit: the listener lets it by."
   [owner]
-  (when-let [{:keys [^Property property]} (instance-of owner)]
+  (when-let [{:keys [^ObservableValue property]} (instance-of owner)]
     (let [{:keys [value]} (binding-of owner)]
       (when-not (same? value (.getValue property))
         (binding [*showing-applied?* true]
-          (.setValue property value)
+          (set-native! owner property value)
           (when (instance? TextInputControl owner)
             (.end ^TextInputControl owner)))))))
 
@@ -134,7 +150,7 @@
   "settle-ms after owner's last change: what applies, if owner is still
    bound to the address it was changed for and still shows that change."
   [owner]
-  (when-let [{:keys [^Property property attempt]} (instance-of owner)]
+  (when-let [{:keys [^ObservableValue property attempt]} (instance-of owner)]
     (when-let [{:keys [address value]} @attempt]
       (vreset! attempt nil)
       (when (and (= address (:address (binding-of owner)))
@@ -156,9 +172,9 @@
 (defn- attach!
   "Listen to owner's property, with its own settle timer, until detach!."
   [owner property]
-  (let [^Property p (or (native-property owner property)
-                        (throw (ex-info "applied-control: the control has no such property"
-                                        {:property property :control (class owner)})))
+  (let [^ObservableValue p (or (native-property owner property)
+                               (throw (ex-info "applied-control: the control has no such property"
+                                               {:property property :control (class owner)})))
         timer (PauseTransition. (Duration/millis settle-ms))
         listener (reify ChangeListener
                    (changed [_ _ _ v]
@@ -172,7 +188,7 @@
     (swap! !attached inc)))
 
 (defn- detach! [owner]
-  (when-let [{:keys [^Property property listener ^PauseTransition timer]} (.remove (properties owner) ::instance)]
+  (when-let [{:keys [^ObservableValue property listener ^PauseTransition timer]} (.remove (properties owner) ::instance)]
     (.stop timer)
     (.removeListener property ^ChangeListener listener)
     (swap! !attached dec)))
@@ -188,10 +204,11 @@
   "The native control desc, showing value and sending what its user
    changes (see the namespace). Props:
    - :desc - the control's description, without its value, a listener of
-     it or :user-data, which applied-control owns
+     it or :user-data, which applied-control owns (a spinner's value is its
+     :value-factory's :value)
    - :property - its value: :selected (a check box, toggle or radio button,
      check or radio menu item), :value (a combo box, choice box, color
-     picker or slider) or :text (a text field)
+     picker, slider or spinner) or :text (a text field)
    - :address - what the value is of, the entity and the field or role:
      [:projector :a :enabled?]
    - :value - what applies there (the view's subscription)
@@ -211,6 +228,7 @@
      :on-deleted detach!
      :desc {:fx/type ext-with-address
             :props {:address address}
-            :desc (assoc desc
-                         property value
-                         :user-data {:address address :value value :on-change on-change})}}))
+            :desc (-> (if (= :spinner (:fx/type desc))
+                        (cond-> desc (some? value) (assoc-in [:value-factory :value] value))
+                        (assoc desc property value))
+                      (assoc :user-data {:address address :value value :on-change on-change}))}}))

@@ -17,7 +17,8 @@
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.css PseudoClass]
            [javafx.scene Node]
-           [javafx.scene.control CheckBox CheckMenuItem ComboBox Control Labeled Menu MenuButton MenuItem ToggleButton]))
+           [javafx.scene.control CheckBox CheckMenuItem ComboBox Control Labeled Menu MenuButton MenuItem Slider Spinner
+            ToggleButton]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -573,3 +574,157 @@
     (testing "a pad's press is a performer's: it goes through"
       (press! robot "#pattern-chip-chase")
       (ui/wait-for! #(= :chase (pads-style))))))
+
+(defn- value-of
+  "The value the combo box, slider or spinner selector finds shows, on the
+   FX thread; nil when there is none."
+  [selector]
+  (when-let [node (ui/query selector)]
+    (ui/on-fx-thread #(condp instance? node
+                        ComboBox (.getValue ^ComboBox node)
+                        Slider (.getValue ^Slider node)
+                        Spinner (.getValue ^Spinner node)))))
+
+(defn- lock! [locked?]
+  (events/dispatch! {:event/type :vibe/set-show-lock :locked? locked?})
+  (ui/wait-for! #(= locked? (true? (get-in (app-state) [:ui :show-lock?])))))
+
+(defn- open-numeric!
+  "The cue at A1, \"Beams\", with pattern (its id pattern-id), in its
+   pattern window in Numeric mode (all its parameters), once selector
+   shows."
+  [pattern selector]
+  (lasers! 3)
+  (events/write-state! #(-> %
+                            (assoc-in [:chains :cue-chains [0 0] :name] "Beams")
+                            (assoc-in [:chains :cue-chains [0 0] :zone-patterns] [(assoc pattern :id pattern-id)])))
+  (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
+  (ui/wait-for! window-open?)
+  (events/dispatch! {:event/type :chain/set-ui-mode :domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]
+                     :mode :numeric})
+  (ui/wait-for! #(some? (ui/query selector))))
+
+(deftest locked-numeric-controls-show-applied-values-test
+  ;; Reactivity plan 13b: the shared parameter controls, in the pattern
+  ;; window's Numeric mode, show what applies after the lock refuses them
+  (let [robot (ui/robot)
+        param #(get-in (cue-pattern) [:params %])
+        undo-depth #(count (get-in (app-state) [:history :undo-stack]))
+        wave {:type :triangle :active? true :min -2.0 :max 2.0 :period 2.0}]
+    (open-numeric! (assoc-in (zone-patterns/preset-instance :alternate :cue) [:params :offset] wave)
+                   "#modulator-offset-period")
+    (lock! true)
+    (let [depth (undo-depth)]
+      (testing "a parameter's slider"
+        (attempt! :chain/update-param #(ui/slide! robot "#param-rate-slider" 3.0))
+        (is (= "Zone pattern edit refused" (get-in (app-state) [:ui :show-lock-notice :text])))
+        (is (= 1.0 (param :rate)))
+        (ui/wait-for! #(== 1.0 (value-of "#param-rate-slider"))))
+      (testing "a choice"
+        (attempt! :chain/update-param #(ui/select! robot "#param-step-on-choice" ":hit"))
+        (is (= :clock (param :step-on)))
+        (ui/wait-for! #(= :clock (value-of "#param-step-on-choice"))))
+      (testing "a choice that may follow a modulator"
+        (attempt! :chain/update-param #(ui/select! robot "#choice-path" ":bounce"))
+        (is (= :loop (param :path)))
+        (ui/wait-for! #(= :loop (value-of "#choice-path"))))
+      (testing "a parameter's ∿"
+        (ui/scroll-into-view! "#modulate-rate")
+        (attempt! :modulator/toggle #(ui/click! robot "#modulate-rate"))
+        (is (= 1.0 (param :rate)))
+        (ui/wait-for! #(false? (ticked "#modulate-rate"))))
+      (testing "a modulator's field, and its type"
+        (attempt! :modulator/update-param #(ui/slide! robot "#modulator-offset-period" 4.0))
+        (is (= wave (param :offset)))
+        (ui/wait-for! #(== 2.0 (value-of "#modulator-offset-period")))
+        (attempt! :modulator/update-param #(ui/select! robot "#modulator-offset-time-unit" ":seconds"))
+        (ui/wait-for! #(= :beats (value-of "#modulator-offset-time-unit")))
+        (attempt! :modulator/set-type #(ui/select! robot "#modulator-type-offset" "Sine"))
+        (is (= wave (param :offset)))
+        (ui/wait-for! #(= :triangle (:id (value-of "#modulator-type-offset")))))
+      (is (= depth (undo-depth)) "no undo step"))
+    (testing "unlocked, each edit applies once"
+      (lock! false)
+      (let [depth (undo-depth)
+            once! (fn [act! applied?]
+                    (let [before (undo-depth)]
+                      (act!)
+                      (ui/wait-for! applied?)
+                      (is (events/flush!))
+                      (is (= (inc before) (undo-depth)))))]
+        (once! #(ui/slide! robot "#param-rate-slider" 3.0)
+               #(and (= 3.0 (param :rate)) (== 3.0 (value-of "#param-rate-slider"))))
+        (once! #(ui/select! robot "#param-step-on-choice" ":hit")
+               #(and (= :hit (param :step-on)) (= :hit (value-of "#param-step-on-choice"))))
+        (once! #(ui/select! robot "#choice-path" ":bounce")
+               #(and (= :bounce (param :path)) (= :bounce (value-of "#choice-path"))))
+        (once! #(ui/slide! robot "#modulator-offset-period" 4.0)
+               #(and (= 4.0 (:period (param :offset))) (== 4.0 (value-of "#modulator-offset-period"))))
+        (once! #(ui/select! robot "#modulator-type-offset" "Sine")
+               #(and (= :sine (:type (param :offset))) (= :sine (:id (value-of "#modulator-type-offset")))))
+        (ui/scroll-into-view! "#modulate-rate")
+        (once! #(ui/click! robot "#modulate-rate")
+               #(and (map? (param :rate)) (true? (ticked "#modulate-rate"))))
+        (is (= (+ depth 6) (undo-depth)))))))
+
+(deftest locked-keyframe-settings-show-applied-values-test
+  ;; Reactivity plan 13b: with the pattern's keyframes on, its keyframe
+  ;; settings, the selected keyframe's Interp and its values in the Numeric
+  ;; list. (A pattern's first parameter, Style, isn't a number: it has no
+  ;; Value spinner; Period is this panel's spinner.)
+  (let [robot (ui/robot)
+        pattern (zone-patterns/preset-instance :alternate :cue)
+        kf #(get-in (cue-pattern) [:keyframe-modulator %])
+        frame-rate #(get-in (cue-pattern) [:keyframe-modulator :keyframes 1 :params :rate])
+        undo-depth #(count (get-in (app-state) [:history :undo-stack]))
+        spin! (fn [] (ui/on-fx-thread #(.increment ^Spinner (ui/query "#keyframe-period"))))]
+    (open-numeric! (assoc pattern :keyframe-modulator
+                          {:enabled? true :driver :time :period 4.0 :time-unit :beats :loop-mode :loop
+                           :selected-keyframe 1
+                           :keyframes [{:position 0.0 :params (:params pattern) :interpolation :linear}
+                                       {:position 1.0 :params (assoc (:params pattern) :rate 2.0) :interpolation :linear}]})
+                   "#keyframe-interp")
+    (ui/wait-for! #(== 2.0 (value-of "#param-rate-slider")))
+    (lock! true)
+    (let [depth (undo-depth)]
+      (testing "Period, its spinner"
+        (attempt! :keyframe/update-setting spin!)
+        (is (= 4.0 (kf :period)))
+        (ui/wait-for! #(== 4.0 (value-of "#keyframe-period"))))
+      (testing "Restart on"
+        (attempt! :keyframe/update-setting #(ui/select! robot "#keyframe-restart-on" ":hit"))
+        (is (nil? (kf :restart-on)))
+        (ui/wait-for! #(= :own (value-of "#keyframe-restart-on"))))
+      (testing "the selected keyframe's Interp"
+        (attempt! :keyframe/set-interpolation #(ui/select! robot "#keyframe-interp" ":exp-grow"))
+        (is (= :linear (get-in (cue-pattern) [:keyframe-modulator :keyframes 1 :interpolation])))
+        (ui/wait-for! #(= :linear (value-of "#keyframe-interp"))))
+      (testing "the selected keyframe's value, in the Numeric list"
+        (attempt! :keyframe/update-param #(ui/slide! robot "#param-rate-slider" 3.0))
+        (is (= 2.0 (frame-rate)))
+        (ui/wait-for! #(== 2.0 (value-of "#param-rate-slider"))))
+      (testing "Enable"
+        (attempt! :keyframe/toggle-enabled #(ui/click! robot "#keyframe-enabled"))
+        (is (true? (kf :enabled?)))
+        (ui/wait-for! #(true? (ticked "#keyframe-enabled"))))
+      (is (= depth (undo-depth)) "no undo step"))
+    (testing "unlocked, each edit applies once"
+      (lock! false)
+      (let [depth (undo-depth)
+            once! (fn [act! applied?]
+                    (let [before (undo-depth)]
+                      (act!)
+                      (ui/wait-for! applied?)
+                      (is (events/flush!))
+                      (is (= (inc before) (undo-depth)))))]
+        (once! spin! #(and (= 4.25 (kf :period)) (== 4.25 (value-of "#keyframe-period"))))
+        (once! #(ui/select! robot "#keyframe-restart-on" ":hit")
+               #(and (= :hit (kf :restart-on)) (= :hit (value-of "#keyframe-restart-on"))))
+        (once! #(ui/select! robot "#keyframe-interp" ":exp-grow")
+               #(and (= :exp-grow (get-in (cue-pattern) [:keyframe-modulator :keyframes 1 :interpolation]))
+                     (= :exp-grow (value-of "#keyframe-interp"))))
+        (once! #(ui/slide! robot "#param-rate-slider" 3.0)
+               #(and (= 3.0 (frame-rate)) (== 3.0 (value-of "#param-rate-slider"))))
+        (once! #(ui/click! robot "#keyframe-enabled")
+               #(and (false? (kf :enabled?)) (false? (ticked "#keyframe-enabled"))))
+        (is (= (+ depth 5) (undo-depth)))))))
