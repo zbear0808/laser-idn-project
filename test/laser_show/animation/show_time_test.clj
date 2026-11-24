@@ -231,7 +231,7 @@
   (init! {[0 0] (timeline {})})
   (handle! {:event/type :timeline/play :col 0 :row 0 :from 15.9})
   (let [r2 (run-id [0 0])
-        report {:event/type :show-clock/cue-ended :cell [0 0] :run r2}
+        report {:event/type :show-clock/cue-ended :cell [0 0] :run r2 :position-ids {:restart nil :seek nil}}
         {rt1 :runtime reports1 :reports} (step (run-at (:runtime start) 0.0) 100.0)]
     (is (= [true 16.0] ((juxt :ended? :accumulated-beats) (run-of rt1 [0 0]))) "held at its end")
     (is (= [report] reports1))
@@ -255,7 +255,7 @@
     (handle! {:event/type :timeline/play :col 0 :row 0})
     (is (not= r2 (run-id [0 0])) "started again: a new run")
     (let [before (state/get-raw-state)]
-      (events/event-handler {:event/type :show-clock/cue-ended :cell [0 0] :run r2})
+      (events/event-handler {:event/type :show-clock/cue-ended :cell [0 0] :run r2 :position-ids {:restart nil :seek nil}})
       (is (= (:playback before) (:playback (state/get-raw-state)))))))
 
 (deftest due-reports-keeps-separate-memories-test
@@ -269,7 +269,7 @@
   (testing "the step keeps its own (:sent) and leaves the rotation's (:vibe-sent, show-clock/tick!) alone"
     (init! {[0 0] (timeline {})})
     (handle! {:event/type :timeline/play :col 0 :row 0 :from 15.9})
-    (let [ended {:event/type :show-clock/cue-ended :cell [0 0] :run (run-id [0 0])}
+    (let [ended {:event/type :show-clock/cue-ended :cell [0 0] :run (run-id [0 0]) :position-ids {:restart nil :seek nil}}
           vibe-sent {{:event/type :vibe/arm :from :vibe-1} 50.0}
           {rt1 :runtime r1 :reports} (step (assoc (run-at (:runtime start) 0.0) :vibe-sent vibe-sent) 100.0)
           {rt2 :runtime r2 :reports} (step rt1 200.0)]
@@ -278,6 +278,138 @@
       (is (= {ended 100.0} (:sent rt2)))
       (is (= vibe-sent (:vibe-sent rt1) (:vibe-sent rt2)))))
   (is (= [{} {}] ((juxt :sent :vibe-sent) show-time/initial-runtime)) "a reset runtime has both, empty"))
+
+
+;; An end names the position that ended, and Stop stays in force
+;; (plans/2026-11-23-cljfx-reactivity/03 §7, §8)
+
+(def ^:private short-timeline
+  "A timeline 0.25 beats long: 125 ms at 120 BPM."
+  (timeline {:items [{:id :a :type :preset :preset-id :circle :track-id :t :enabled? true :effects []
+                      :timeline/start 0.0 :timeline/duration 0.25}]}))
+
+(defn- ended
+  "The end the show clock reports of run at cell, at the position the
+   restart and seek request ids name."
+  [cell run restart seek]
+  {:event/type :show-clock/cue-ended :cell cell :run run :position-ids {:restart restart :seek seek}})
+
+(defn- transport
+  "App state's transport now, as plan 03 §7 writes it: [playing? {cell run} active-cell]."
+  []
+  (let [{:keys [playing? active-cues active-cell]} (:playback (state/get-raw-state))]
+    [playing? (update-vals active-cues :run) active-cell]))
+
+(defn- restart-id [] (get-in (state/get-raw-state) [:playback :requests :restart :id]))
+
+(defn- seek-of [cell] (get-in (state/get-raw-state) [:playback :active-cues cell :seek]))
+
+(deftest stop-fences-old-ends-and-holds-survivors-test
+  (init! {[0 0] short-timeline [1 0] circle})
+  (handle! {:event/type :grid/trigger-cell :col 1 :row 0})
+  (handle! {:event/type :timeline/play :col 0 :row 0 :from 0.2})
+  (let [[a b] [[0 0] [1 0]]
+        [r rb] [(run-id a) (run-id b)]
+        b-intent (get-in (state/get-raw-state) [:playback :active-cues b])
+        before (state/get-raw-state)
+        {rt1 :runtime old :reports} (step (run-at (:runtime start) 0.0) 50.0)]
+    (is (= [true {a r b rb} a] (transport)))
+    (is (false? (get-in before [:project :dirty?])) "a clean project")
+    (is (= [(ended a r nil nil)] old) "0.2 + 0.1 beats: past its end")
+    (testing "example 1: an end seen before Stop leaves both cues held"
+      (handle! {:event/type :transport/stop})
+      (run! handle! old)
+      (is (= [false {a r b rb} a] (transport))))
+    (let [k1 (restart-id)
+          {rt2 :runtime restarted :reports} (step rt1 50.0)
+          {rt3 :runtime again :reports} (step rt2 175.0)]
+      (is (= [0.0 0.0] [(beats rt2 a) (beats rt2 b)]) "the restart, at the same 50 ms")
+      (is (empty? restarted))
+      (is (= [(ended a r k1 nil)] again) "the restarted run's own end, 0.25 beats on")
+      (testing "example 2: that end takes A out and leaves B held; only Play plays B"
+        (run! handle! again)
+        (is (= [false {b rb} b] (transport)))
+        (is (= b-intent (get-in (state/get-raw-state) [:playback :active-cues b])) "B's whole intent")
+        (run! handle! again)
+        (is (= [false {b rb} b] (transport)) "a duplicate changes nothing")
+        (handle! {:event/type :transport/play})
+        (is (= [true {b rb} b] (transport)))
+        (is (= [b] (map :cell (show-time/active-runs (state/get-raw-state) (run-at rt3 200.0)))) "B plays on"))
+      (is (= [(:history before) false] [(:history (state/get-raw-state)) (get-in (state/get-raw-state) [:project :dirty?])])
+          "no undo step, still clean"))))
+
+(deftest seek-fences-an-end-on-the-same-run-test
+  (init! {[0 0] (timeline {})})
+  (handle! {:event/type :timeline/play :col 0 :row 0 :from 0.0})
+  (handle! {:event/type :transport/retrigger})
+  (let [a [0 0]
+        r (run-id a)
+        k1 (restart-id)
+        rt0 (run-at (:runtime start) 0.0)]
+    (testing "example 4, by :timeline/seek: the end before a seek is no end of where it went"
+      (handle! {:event/type :timeline/seek :col 0 :row 0 :beat 15.9})
+      (let [s1 (:id (seek-of a))
+            {rt1 :runtime queued :reports} (step (run-at rt0 0.0) 100.0)]
+        (is (= [(ended a r k1 s1)] queued))
+        (handle! {:event/type :timeline/seek :col 0 :row 0 :beat 2.0})
+        (run! handle! queued)
+        (is (= [true {a r} a] (transport)))
+        (is (= 2.0 (:beat (seek-of a))) "still asked for")
+        (is (not= s1 (:id (seek-of a))))
+        (let [rt2 (run-at rt1 100.0)]
+          (is (= r (run-id a)) "the same run")
+          (is (close? 2.0 (beats rt2 a)) "at beat 2 on a step that adds no time")
+          (testing "by Play :from on the playing timeline, then a seek to the same beat: each its own"
+            (handle! {:event/type :timeline/play :col 0 :row 0 :from 15.9})
+            (let [s3 (:id (seek-of a))
+                  {rt3 :runtime queued :reports} (step (run-at rt2 100.0) 200.0)]
+              (is (= [(ended a r k1 s3)] queued))
+              (handle! {:event/type :timeline/seek :col 0 :row 0 :beat 15.9})
+              (run! handle! queued)
+              (is (= [true {a r} a] (transport)))
+              (let [s4 (:id (seek-of a))
+                    rt4 (run-at rt3 200.0)
+                    {final :reports} (step rt4 300.0)]
+                (is (not= s3 s4) "the same beat, another seek")
+                (is (close? 15.9 (beats rt4 a)) "the run that ended runs again from 15.9")
+                (is (= [(ended a r k1 s4)] final))
+                (run! handle! final)
+                (is (= [false {} nil] (transport)) "the end of where it is now")))))))))
+
+(deftest retrigger-fences-an-end-on-the-same-run-test
+  (init! {[0 0] short-timeline})
+  (handle! {:event/type :timeline/play :col 0 :row 0 :from 0.0})
+  (handle! {:event/type :transport/retrigger})
+  (handle! {:event/type :timeline/seek :col 0 :row 0 :beat 0.2})
+  (let [a [0 0]
+        r (run-id a)
+        [k1 s1] [(restart-id) (:id (seek-of a))]
+        rt0 (run-at (:runtime start) 0.0)
+        {rt1 :runtime [e1 :as queued] :reports} (step rt0 50.0)]
+    (is (close? 0.2 (beats rt0 a)) "the seek applied")
+    (is (= [(ended a r k1 s1)] queued))
+    (handle! {:event/type :transport/retrigger})
+    (let [k2 (restart-id)
+          {[e2 :as reports] :reports} (step rt1 175.0)]
+      (is (true? (get-in (state/get-raw-state) [:playback :playing?])) "still playing")
+      (is (= [(ended a r k2 s1)] reports) "ended again 125 ms after the first: a report of its own, sent at once")
+      (is (not= e1 e2))
+      (is (= [r s1] [(:run e2) (get-in e2 [:position-ids :seek])]) "the same run and seek")
+      (is (not= k1 k2) "a new restart")
+      (testing "example 5"
+        (handle! e1)
+        (is (= [true {a r} a] (transport)) "the end from before Retrigger")
+        (handle! e2)
+        (is (= [false {} nil] (transport)) "the restarted run's own end"))))
+  (testing "a new document asks for no restart, though the clock applied one before: an end names app state's"
+    (init! {[0 0] short-timeline})
+    (handle! {:event/type :timeline/play :col 0 :row 0 :from 0.2})
+    (is (nil? (restart-id)))
+    (let [rt (run-at (assoc-in (:runtime start) [:applied :restart] (random-uuid)) 0.0)
+          {:keys [reports]} (step rt 50.0)]
+      (is (= [(ended [0 0] (run-id [0 0]) nil nil)] reports))
+      (run! handle! reports)
+      (is (= [false {} nil] (transport))))))
 
 
 ;; Vibe mode's decay (plans/2026-11-18-vibe-mode/01 §7 "The clock's side")
@@ -306,7 +438,7 @@
   (handle! {:event/type :vibe/press :role :hit :input-time 1000})
   (handle! {:event/type :vibe/release :role :hit :input-time 1090})
   (let [{:keys [cell run]} (hit-voice)
-        report {:event/type :show-clock/cue-ended :cell cell :run run}]
+        report {:event/type :show-clock/cue-ended :cell cell :run run :position-ids {:restart nil :seek nil}}]
     (is (= {:run run :decay-beats 1.0 :hold? false} (get-in (state/get-raw-state) [:playback :active-cues cell]))
         "a tap: the intent lets the run go after its beat")
     (let [{rt29 :runtime reports29 :reports} (ticks 29)]
@@ -336,7 +468,7 @@
       (is (not (:ended? (get-in rt' [:runs run]))) "0.9 beats: the release didn't cut it")
       (let [{rt'' :runtime reports :reports} (step rt' 500.0)]
         (is (true? (:ended? (get-in rt'' [:runs run]))) "it ends at its beat")
-        (is (= [{:event/type :show-clock/cue-ended :cell cell :run run}] reports))))))
+        (is (= [{:event/type :show-clock/cue-ended :cell cell :run run :position-ids {:restart nil :seek nil}}] reports))))))
 
 (def ^:private chasing
   (timeline {:timeline/chase :mtc :timeline/tc-start 0.0 :timeline/tempo-bpm 120.0 :timeline/length 64.0}))

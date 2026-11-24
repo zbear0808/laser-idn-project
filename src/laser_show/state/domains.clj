@@ -64,7 +64,7 @@
    - where each cue is never reaches app state: views draw it from the show
      clock's newest tick (show-time/latest)"
   {:playing? {:default false
-              :doc "Whether playback is active (any cues playing)"}
+              :doc "The transport: whether the cues in play are drawn, not whether there are any. Play sets it, with no cue in play too; Stop clears it and keeps the cues' intents, held until Play; starting a cue sets it; removing the last intent clears it, removing another leaves it as it is (cue-timing/deactivate-cue)"}
    :active-cue {:default nil
                 :doc "Currently active cue data (legacy, may remove)"}
    :cue-queue {:default []

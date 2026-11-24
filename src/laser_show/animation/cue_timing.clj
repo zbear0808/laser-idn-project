@@ -346,19 +346,37 @@
              :active-cell cell)))
 
 (defn deactivate-cue
-  "Stop the cue at cell. :playing? is false once no cue remains."
+  "Stop the cue at cell: its intent leaves (:active-cues playback), the
+   others stay as they are. Removing the last one sets :playing? false;
+   while others remain :playing? is left as it was, so removing a cue never
+   starts a stopped transport (Stop holds the rest). If cell had the focus
+   (:active-cell) it moves to the first remaining cell, nil after the last.
+   No intent at cell: playback unchanged."
   [playback cell]
-  (let [remaining (dissoc (:active-cues playback) cell)]
-    (cond-> (assoc playback
-                   :active-cues remaining
-                   :playing? (boolean (seq remaining)))
-      (= (:active-cell playback) cell) (assoc :active-cell (first (keys remaining))))))
+  (let [cues (:active-cues playback)]
+    (if-not (contains? cues cell)
+      playback
+      (let [remaining (dissoc cues cell)]
+        (cond-> (assoc playback :active-cues remaining)
+          (empty? remaining) (assoc :playing? false)
+          (= (:active-cell playback) cell) (assoc :active-cell (first (keys remaining))))))))
 
 (defn request-seek
   "The intent, asking the show clock to move its run to beat. id names the
    request: the clock applies each id once."
   [intent beat id]
   (assoc intent :seek {:id id :beat (max 0.0 (double beat))}))
+
+(defn position-ids
+  "{:restart :seek}: the ids of the last requests that moved the cue at
+   cell, the transport's restart (Stop, Retrigger) and the cell's own seek,
+   each nil before the first. The show clock puts them in each end it
+   reports, from the state it stepped from; the end's handler compares them
+   with its own state's, so the end of a position that a later restart or
+   seek replaced stops nothing."
+  [playback cell]
+  {:restart (get-in playback [:requests :restart :id])
+   :seek (get-in playback [:active-cues cell :seek :id])})
 
 (defn seek
   "Move a cue's position to beat (clears :ended?)."

@@ -142,6 +142,70 @@
       (is (= state (update (:state result) :playback dissoc :requests))))))
 
 
+(deftest end-requires-a-current-run-and-position-test
+  (let [a [0 0]
+        b [1 0]
+        r #uuid "00000000-0000-0000-0000-000000000001"
+        rb #uuid "00000000-0000-0000-0000-000000000002"
+        k #uuid "00000000-0000-0000-0000-00000000000a"
+        s #uuid "00000000-0000-0000-0000-00000000000b"
+        intent {:run r :timeline? true :start-beat 0.0 :seek {:id s :beat 2.0}}
+        state {:chains {:cue-chains {a {:editor-type :timeline :items []} b {:items []}}}
+               :playback {:playing? true
+                          :active-cell a
+                          :active-cues {a intent b {:run rb}}
+                          :requests {:restart {:id k}}}}
+        end {:event/type :show-clock/cue-ended :cell a :run r :position-ids {:restart k :seek s}}
+        handle (fn [state event] (timing/handle (assoc event :state state)))]
+    (testing "the end of the run where it is now removes it, once"
+      (let [{after :state} (handle state end)]
+        (is (= {:playing? true :active-cell b :active-cues {b {:run rb}} :requests {:restart {:id k}}}
+               (:playback after)))
+        (is (= {:state after} (handle after end)) "a duplicate")))
+    (testing "an initial position's end, its ids nil"
+      (let [fresh (-> state
+                      (update :playback dissoc :requests)
+                      (update-in [:playback :active-cues a] dissoc :seek))]
+        (is (= {b {:run rb}} (get-in (handle fresh (assoc end :position-ids {:restart nil :seek nil}))
+                                     [:state :playback :active-cues])))))
+    (testing "another cell's seek and the tap's align are no part of the position"
+      (let [st (-> state
+                   (assoc-in [:playback :active-cues b :seek] {:id #uuid "00000000-0000-0000-0000-00000000000c" :beat 1.0})
+                   (assoc-in [:playback :requests :align] {:id #uuid "00000000-0000-0000-0000-00000000000d"}))]
+        (is (= {b (get-in st [:playback :active-cues b])} (get-in (handle st end) [:state :playback :active-cues])))))
+    (testing "after Stop the gate stays closed"
+      (let [stopped (:state (timing/handle {:event/type :transport/stop :state state}))
+            restarted (assoc-in end [:position-ids :restart] (get-in stopped [:playback :requests :restart :id]))]
+        (is (= {:state stopped} (handle stopped end)) "an end from before Stop: both cues stay held")
+        (is (= [false {b {:run rb}}]
+               ((juxt :playing? :active-cues) (get-in (handle stopped restarted) [:state :playback])))
+            "the restarted run's end: the other cue stays held")))
+    (testing "anything else leaves state as it was"
+      (doseq [[why st event]
+              [["moved to another cell" (-> state
+                                             (update-in [:playback :active-cues] dissoc a)
+                                             (assoc-in [:playback :active-cues [2 0]] intent))
+                end]
+               ["removed" (update-in state [:playback :active-cues] dissoc a) end]
+               ["started again: another run at the cell"
+                (assoc-in state [:playback :active-cues a :run] #uuid "00000000-0000-0000-0000-000000000003") end]
+               ["its timeline follows timecode now" (assoc-in state [:chains :cue-chains a :timeline/chase] :mtc) end]
+               ["a chasing intent: no run on either side"
+                (assoc-in state [:playback :active-cues a] {:chasing? true :timeline? true}) (assoc end :run nil)]
+               ["no run" state (assoc end :run nil)]
+               ["restarted since" (assoc-in state [:playback :requests :restart :id] #uuid "00000000-0000-0000-0000-00000000000e")
+                end]
+               ["seeked since" (assoc-in state [:playback :active-cues a :seek :id] #uuid "00000000-0000-0000-0000-00000000000f")
+                end]
+               ["no position ids" state (dissoc end :position-ids)]
+               ["only the restart's" state (assoc end :position-ids {:restart k})]
+               ["only the seek's" state (assoc end :position-ids {:seek s})]
+               ["no cell" state (dissoc end :cell)]]]
+        (let [result (handle st event)]
+          (is (= {:state st} result) why)
+          (is (identical? st (:state result)) why))))))
+
+
 (deftest timing-tap-tempo-phase-alignment-test
   (testing "Tap tempo asks the show clock to align to the nearest beat (its numbers: show-time-test)"
     (let [state {:timing {:tap (tap-tempo/make)} :playback {:active-cues {[0 0] {:run (random-uuid)}}}}

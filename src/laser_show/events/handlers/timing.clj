@@ -159,11 +159,23 @@
 
 (defn- handle-show-clock-cue-ended
   "The show clock saw the run at cell end (a timeline at its end, a vibe
-   cue's decay): stop the cue, unless it was started again since (a new run)."
-  [{:keys [cell run state]}]
-  {:state (if (= run (get-in state [:playback :active-cues cell :run]))
-            (update state :playback cue-timing/deactivate-cue cell)
-            state)})
+   cue's decay) at the position :position-ids names. The cue stops only if
+   its intent still names that run and the ids are this state's
+   (cue-timing/position-ids): a cue started again since (a new run), moved,
+   sent elsewhere by a seek or a restart (Stop, Retrigger), or whose
+   timeline follows timecode now (the chase's to stop) is left as it is; so
+   is an end without a run or without both ids. Removing the cue can stop
+   the transport, never start it (cue-timing/deactivate-cue)."
+  [{:keys [cell run position-ids state]}]
+  (let [playback (:playback state)
+        intent (get-in playback [:active-cues cell])]
+    {:state (if (and (some? run)
+                     (= run (:run intent))
+                     (not (:chasing? intent))
+                     (not (playback/chases-mtc? (get-in state [:chains :cue-chains cell])))
+                     (= position-ids (cue-timing/position-ids playback cell)))
+              (update state :playback cue-timing/deactivate-cue cell)
+              state)}))
 
 (defn- handle-show-clock-chase
   "The show clock started (:active? true) or stopped following timecode for

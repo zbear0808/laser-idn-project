@@ -283,7 +283,7 @@
         {:keys [cell run]} (in-state ctx :vibe-runtime :voices :hit)]
     (is (= cell (:playing (fx/sub-ctx ctx subs/vibe-pad :hit))) "a tap: its cue decays")
     (testing "the show clock ends the decayed run: the pad shows nothing, though the engine still remembers the voice"
-      (let [ctx' (handle ctx {:event/type :show-clock/cue-ended :cell cell :run run})]
+      (let [ctx' (handle ctx {:event/type :show-clock/cue-ended :cell cell :run run :position-ids {:restart nil :seek nil}})]
         (is (some? (in-state ctx' :vibe-runtime :voices :hit)))
         (is (nil? (:playing (fx/sub-ctx ctx' subs/vibe-pad :hit))))))
     (testing "the grid starts the cell again: a run that isn't HIT's"
@@ -554,7 +554,20 @@
       (let [none (assoc-in playing-state [:playback :active-cues] {})]
         (is (false? (held? none)))
         (is (false? (held? (after none :transport/stop))))
-        (is (zero? (held (after none :transport/stop))))))))
+        (is (zero? (held (after none :transport/stop))))))
+    (testing "plan 03 example 2: the end of a held cue after Stop leaves the other held, until Play"
+      (let [two (update-in playing-state [:playback :active-cues] dissoc [0 1])
+            stopped (after two :transport/stop)
+            end {:event/type :show-clock/cue-ended :cell [0 0] :run #uuid "00000000-0000-0000-0000-000000000001"
+                 :position-ids {:restart (get-in stopped [:playback :requests :restart :id]) :seek nil}}
+            ended (:state (timing/handle (assoc end :state stopped)))
+            playing (after ended :transport/play)]
+        (is (= 2 (held stopped)))
+        (is (= [true 1] [(held? ended) (held ended)]))
+        (is (= [] (fx/sub-ctx (context ended) subs/playing-cues)) "nothing plays while it holds")
+        (is (= {:state ended} (timing/handle (assoc end :state ended))) "a duplicate changes nothing")
+        (is (= [false 0] [(held? playing) (held playing)]))
+        (is (= [[1 0]] (map (juxt :col :row) (fx/sub-ctx (context playing) subs/playing-cues))))))))
 
 (deftest playing-cues-sub-test
   (let [ctx (context playing-state)

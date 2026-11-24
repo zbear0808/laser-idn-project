@@ -19,7 +19,8 @@
      follow (laser-show.animation.pulses), stamped on the pulse clock, which
      no request moves.
    step reads them once per tick. What the clock learns goes back to app state
-   as events: a run's end (a timeline's, or a vibe cue's decay) and a timecode
+   as events: a run's end (a timeline's, or a vibe cue's decay, with the
+   restart and seek ids of the position that ended) and a timecode
    chase (:show-clock/cue-ended, :show-clock/chase), auto-advance's arm and
    advance and a stuck key's release (laser-show.vibes.rotation and
    .watchdog, with their own memory, :vibe-sent),
@@ -209,11 +210,13 @@
 
 (defn- pending-reports
   "What app state needs to hear now: runs that ended (a timeline at its end,
-   a decay after its beats) while their intent is still there, chasing
-   cells where app state and the chase disagree, and a zone map switch whose
-   beat the global clock has reached (zones plan Z4: the tick routes by it
-   already, and the report lands it in app state), and a pattern pads'
-   switch likewise (zones plan Z5)."
+   a decay after its beats) while their intent is still there, each with the
+   ids of the restart and seek that put it where it ended
+   (cue-timing/position-ids of state, the snapshot this step applied),
+   chasing cells where app state and the chase disagree, and a zone map
+   switch whose beat the global clock has reached (zones plan Z4: the tick
+   routes by it already, and the report lands it in app state), and a
+   pattern pads' switch likewise (zones plan Z5)."
   [runtime state]
   (let [intents (or (get-in state [:playback :active-cues]) {})
         pending (get-in state [:zone-map :pending])
@@ -226,7 +229,8 @@
        [{:event/type :show-clock/pattern-due :id (:id style-pending) :style (:style style-pending)}])
      (for [[run-id run] (:runs runtime)
            :when (and (:ended? run) (= run-id (get-in intents [(:cell run) :run])))]
-       {:event/type :show-clock/cue-ended :cell (:cell run) :run run-id})
+       {:event/type :show-clock/cue-ended :cell (:cell run) :run run-id
+        :position-ids (cue-timing/position-ids (:playback state) (:cell run))})
      (for [[cell chain] (get-in state [:chains :cue-chains])
            :when (playback/chases-mtc? chain)
            :let [active? (contains? (:chase runtime) cell)
