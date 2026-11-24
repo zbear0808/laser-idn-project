@@ -25,7 +25,8 @@
   (:require [clojure.tools.logging :as log]
             [clojure.string :as str]
             [laser-show.events.safety-guard :as guard]
-            [laser-show.state.history :as history]))
+            [laser-show.state.history :as history]
+            [laser-show.vibes.refs :as refs]))
 
 (defn- settle
   "state with its open transaction, whichever press it is, sealed against
@@ -34,6 +35,18 @@
   (if (get-in state [:history :transaction])
     (assoc state :history (history/commit-transaction (:history state) state))
     state))
+
+(defn- restore
+  "state with snapshot's document restored (history/restore-document): the
+   restore of Undo, Redo and a press's abort. The effect cells the vibe
+   engine switched on stay its own where the restore takes their on/off
+   (history/effect-cell-sources, refs/restore-fx), so the next vibe and
+   Save still switch them off (reactivity plan 22)."
+  [state snapshot]
+  (let [document (:document-state snapshot)]
+    (-> state
+        (history/restore-document document)
+        (refs/restore-fx (history/effect-cell-sources state document)))))
 
 (defn handle-begin-transaction
   "A press's transaction, on mouse down: :history/gesture-id is the press's
@@ -64,7 +77,7 @@
         {:keys [history baseline]} (history/abort-transaction current-history id)]
     (if baseline
       {:state (-> state
-                  (history/restore-document (:document-state baseline))
+                  (restore baseline)
                   (assoc :history history))}
       {:state (assoc state :history history)})))
 
@@ -109,7 +122,7 @@
   "Restore a popped snapshot and build the effects map."
   [state {:keys [history snapshot]} verb]
   (let [restored-state (-> state
-                           (history/restore-document (:document-state snapshot))
+                           (restore snapshot)
                            (assoc :history history)
                            prune-active-cues)]
     (log/info verb "performed:" (:description snapshot))

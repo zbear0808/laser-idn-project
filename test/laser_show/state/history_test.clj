@@ -311,6 +311,26 @@
                    (doc sample-state)
                    (doc (assoc-in sample-state [:chains :effect-chains [7 7]] {:active? true}))))))))
 
+(deftest effect-cell-sources-are-where-restore-takes-on-off-test
+  ;; Reactivity plan 22: the live state that names effect cells (the vibes'
+  ;; switches) follows them by the same cells
+  (let [x {:id #uuid "55555555-5555-5555-5555-5555555555a1" :effect-id :scale}
+        y {:id #uuid "55555555-5555-5555-5555-5555555555b1" :effect-id :hue-shift}
+        z {:id #uuid "55555555-5555-5555-5555-5555555555c1" :effect-id :rotation}
+        cells #(assoc-in sample-state [:chains :effect-chains] %)
+        snapshot-doc (doc (cells {[0 0] {:active? false :items [x]}
+                                  [1 0] {:active? false :items [y]}
+                                  [2 0] {:active? false :items [z]}}))
+        ;; Since: [0 0] moved to [3 0], [1 0] cleared, [2 0] given another
+        ;; effect, both switched on
+        current (cells {[3 0] {:active? true :items [x]}
+                        [2 0] {:active? true :items [y z]}})]
+    (is (= {[0 0] [3 0] [2 0] [2 0]} (history/effect-cell-sources current snapshot-doc))
+        "moved: from where it is now; still there: from itself; cleared: none")
+    (is (= {[0 0] true [1 0] false [2 0] true}
+           (update-vals (get-in (history/restore-document current snapshot-doc) [:chains :effect-chains]) :active?))
+        "their on/off is what restore-document grafts")))
+
 (deftest restore-clamps-selected-keyframe-test
   (let [kf (fn [n sel] {:enabled? true :selected-keyframe sel
                         :keyframes (vec (for [i (range n)] {:position (/ i 4.0) :params {}}))})

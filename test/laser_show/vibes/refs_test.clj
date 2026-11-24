@@ -82,6 +82,24 @@
       (is (= bare (refs/move-cue bare [0 0] [1 1])))
       (is (= bare (refs/remove-fx bare [0 0]))))))
 
+(deftest restore-fx-follows-the-restored-cells-test
+  ;; Reactivity plan 22: after Undo or Redo the engine's switches are the
+  ;; restored cells' that take their on/off from them
+  (let [s (assoc state :vibe-runtime {:fx-on [[2 3] [1 1]]
+                                      :voices {:flash {:cell [0 0] :run :r3 :fx [[2 3]] :fx-on [[2 3]] :solo? true}}})
+        ;; Undo of a move [0 3] -> [2 3], and of the cell [1 1]'s creation
+        restored (refs/restore-fx s {[0 3] [2 3] [5 5] [5 5]})]
+    (is (= [[0 3]] (get-in restored [:vibe-runtime :fx-on])) "[1 1] is gone: let go of")
+    (is (= [[[0 3]] [[0 3]]] ((juxt :fx :fx-on) (get-in restored [:vibe-runtime :voices :flash]))) "and the held flash's")
+    (is (= (:config s) (:config restored)) "the vibes are the document's")
+    (testing "two cells taking one cell's on/off both take its owner"
+      (is (= [[0 3] [2 3]] (get-in (refs/restore-fx s {[2 3] [2 3] [0 3] [2 3]}) [:vibe-runtime :fx-on]))))
+    (testing "nothing moved: the runtime as it was"
+      (is (identical? (:vibe-runtime s) (:vibe-runtime (refs/restore-fx s {[2 3] [2 3] [1 1] [1 1]})))))
+    (testing "a state without vibes is left as it is"
+      (let [bare {:chains {:effect-chains {[0 0] {:items []}}}}]
+        (is (= bare (refs/restore-fx bare {[0 0] [0 0]})))))))
+
 (deftest trigger-targets-follow-a-move-test
   (let [k1 {:source :midi :channel 0 :note 60}
         k2 {:source :midi :channel 0 :note 61}

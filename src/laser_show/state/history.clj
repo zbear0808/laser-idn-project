@@ -269,16 +269,35 @@
 (defn- item-id-set [entry]
   (not-empty (set (keep :id (:items entry)))))
 
-(defn- restored-effect-active
-  "On/off state for a restored effect cell: the current cell's state; for a cell
-   that doesn't exist now, the state of the current cell holding the same items
-   (it was moved), otherwise off."
+(defn- effect-source
+  "The current effect cell a restored one (k, restored-entry) takes its
+   on/off from: the cell at k; for a cell that doesn't exist now, the cell
+   holding the same items (it was moved); otherwise none (nil)."
   [current-cells k restored-entry]
-  (if-let [current (get current-cells k)]
-    (boolean (:active? current))
-    (let [ids (item-id-set restored-entry)
-          moved (when ids (some (fn [[_ e]] (when (= ids (item-id-set e)) e)) current-cells))]
-      (boolean (:active? moved)))))
+  (if (get current-cells k)
+    k
+    (when-let [ids (item-id-set restored-entry)]
+      (some (fn [[ck e]] (when (= ids (item-id-set e)) ck)) current-cells))))
+
+(defn- restored-effect-active
+  "On/off state for a restored effect cell: its effect-source's state, off
+   without one."
+  [current-cells k restored-entry]
+  (boolean (:active? (get current-cells (effect-source current-cells k restored-entry)))))
+
+(defn effect-cell-sources
+  "{restored cell -> cell of state} for restoring document-state into state
+   (restore-document): for each restored effect cell, the current one whose
+   on/off it takes (effect-source). A restored cell without one comes back
+   off and isn't a key. Live state that names effect cells uses it to follow
+   them as their on/off does (vibes.refs/restore-fx)."
+  [state document-state]
+  (let [current-cells (get-in state [:chains :effect-chains])]
+    (into {}
+          (keep (fn [[k entry]]
+                  (when-let [source (and (map? entry) (effect-source current-cells k entry))]
+                    [k source])))
+          (get-in document-state [:chains :effect-chains]))))
 
 (defn- graft-live-chains
   [current-chains restored-chains]
