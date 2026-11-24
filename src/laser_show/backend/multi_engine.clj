@@ -258,9 +258,9 @@
    
    The fit guard's record on the frame (:fit) is averaged over the frames it
    makes (fit-guard/smooth, kept here: one provider per engine, called only
-   on its thread), so the card's load and low flag don't flicker. What it
-   produced is kept for the card's thumbnail (show-time/record-output!), nil
-   after an error.
+   on its thread), so the card's load and low flag don't flicker. What the
+   card's thumbnail shows is what the engine's driver was passed and
+   returned from (streaming-engine/thumbnail), not what this produced.
    
    The preview is built from the same tick, so it shows what the engines send.
    
@@ -278,12 +278,10 @@
               fit (vreset! smoothed (fit-guard/smooth @smoothed (:fit (meta frame))))
               frame (cond-> frame fit (vary-meta assoc :fit fit))]
           (output-errors/ok! [:provider projector-id])
-          (show-time/record-output! projector-id frame)
           frame)
         (catch Throwable e
           (output-errors/report! [:provider projector-id] e)
           (vreset! smoothed nil)
-          (show-time/record-output! projector-id nil)
           nil)))))
 
 

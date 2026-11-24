@@ -448,7 +448,8 @@
    a change the app refused (the show lock), or that changed nothing, the
    control shows the keyframe's value again.
    Props:
-   - :fx/context - cljfx context
+   - :fx/context - from cljfx, which gives every component its own; the
+     zone groups are read through it (the panel gives none)
    - :keyframes - Vector of keyframe maps
    - :selected-idx - Index of selected keyframe
    - :enabled? - Whether interactions are enabled
@@ -663,7 +664,6 @@
                                                    :event/type :keyframe/delete)}
                                 
                                 {:fx/type actions-row
-                                 :fx/context context
                                  :keyframes keyframes
                                  :selected-idx selected-idx
                                  :enabled? enabled?

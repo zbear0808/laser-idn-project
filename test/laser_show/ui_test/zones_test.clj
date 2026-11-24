@@ -8,6 +8,7 @@
             [laser-show.events.handlers.input :as input]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.router :as input-router]
+            [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
             [laser-show.state.history :as history]
             [laser-show.ui-test.fixtures :as fixtures]
@@ -482,25 +483,85 @@
         asking? #(boolean (some #{title} (ui/window-titles)))]
     (events/write-state! #(-> %
                               (assoc-in [:zone-maps :map/custom-1] {:name "Crowd sweep" :lanes [:auto/left :graphics] :overrides {}})
+                              (assoc-in [:zone-maps :map/custom-2] {:name "Balcony" :lanes [:all] :overrides {}})
+                              (assoc-in [:chains :effect-chains [1 1]]
+                                        {:active? true :items [(-> (zone-patterns/cycle-instance)
+                                                                   (assoc :id #uuid "00000000-0000-0000-0000-0000000000d2")
+                                                                   (assoc-in [:params :maps] [:map/left-right :map/custom-2]))]})
                               (assoc-in [:zone-map :active] :map/custom-1)
                               (assoc-in [:ui :zone-maps :selected] :map/custom-1)))
     (open-zones-tab!)
     (ui/wait-for! #(ui/visible? "#zone-map-delete"))
     (ui/click! robot "#zone-map-delete")
     (ui/wait-for! asking?)
-    (ui/assert-text! "#confirm-message" "It's the zone map in use: the show switches to Left / Right.")
+    (ui/assert-text! "#confirm-message" "If this is still the manual map, deleting it selects Left / Right and pauses a running Map cycle.")
     (is (some? (get-in (app-state) [:zone-maps :map/custom-1])) "nothing goes before you say yes")
     (testing "Cancel keeps it"
       (ui/click! robot "#confirm-cancel")
       (ui/wait-for! #(not (asking?)))
       (is (some? (get-in (app-state) [:zone-maps :map/custom-1]))))
-    (testing "yes deletes it, and the show goes back to Left / Right"
+    (testing "yes deletes it: the show goes back to Left / Right, and the running Map cycle pauses"
       (ui/click! robot "#zone-map-delete")
       (ui/wait-for! asking?)
       (ui/click! robot "#confirm-ok")
       (ui/wait-for! #(nil? (get-in (app-state) [:zone-maps :map/custom-1])))
       (is (= :map/left-right (active-map)))
-      (ui/wait-for! #(nil? (ui/query "#zone-map-item-custom-1"))))))
+      (is (true? (get-in (app-state) [:zone-map :cycle-paused?])))
+      (ui/wait-for! #(nil? (ui/query "#zone-map-item-custom-1"))))
+    (testing "a map the Map cycle lists, with no key or pad setting: the prompt never calls it unused"
+      (let [title "Delete \"Balcony\"?"
+            asking? #(boolean (some #{title} (ui/window-titles)))]
+        (ui/click! robot "#zone-map-item-custom-2")
+        (ui/wait-for! #(= :map/custom-2 (get-in (app-state) [:ui :zone-maps :selected])))
+        (ui/click! robot "#zone-map-delete")
+        (ui/wait-for! asking?)
+        (ui/assert-text! "#confirm-message" "Delete this map from the show?")
+        (ui/click! robot "#confirm-cancel")
+        (ui/wait-for! #(not (asking?)))
+        (is (some? (get-in (app-state) [:zone-maps :map/custom-2])))))))
+
+(defn- manual-badges
+  "The texts of the Manual badges the maps' list shows."
+  []
+  (ui/on-fx-thread #(into [] (keep (fn [n] (when (and (instance? Labeled n) (.isVisible ^Labeled n)) (.getText ^Labeled n))))
+                          (ui/query-all ".zone-map-item-manual"))))
+
+(deftest map-editor-can-take-over-on-the-manual-map-test
+  ;; plans/2026-11-23-cljfx-reactivity/29 §7: while a Map cycle runs, the
+  ;; manual map, edited, isn't called in use, and Use now on it takes over
+  (let [robot (ui/robot)
+        paused? #(true? (get-in (app-state) [:zone-map :cycle-paused?]))]
+    (events/write-state! #(-> %
+                              (assoc-in [:chains :effect-chains [1 1]]
+                                        {:active? true :items [(assoc (zone-patterns/cycle-instance) :id #uuid "00000000-0000-0000-0000-0000000000d3")]})
+                              (assoc-in [:zone-map :active] :map/unison)
+                              (assoc-in [:ui :zone-maps :selected] :map/unison)))
+    (open-zones-tab!)
+    (testing "cycle mode, with no clock: no Manual badge, and Use now can take over"
+      (ui/assert-text! "#zone-map-title" "Unison")
+      (ui/assert-enabled! "#zone-map-use-now")
+      (ui/wait-for! #(and (ui/visible? "#zone-map-mode")
+                          (= "Cycle mode · Manual fallback: Unison" (ui/node-text "#zone-map-mode"))))
+      (is (= [] (manual-badges)))
+      (is (= "Choose this map now, pause any running Map cycle, and clear any queued switch." (tooltip-of "#zone-map-use-now"))))
+    (testing "Use now: Unison, the cycle paused, and the editor says so"
+      (ui/click! robot "#zone-map-use-now")
+      (ui/wait-for! paused?)
+      (is (= {:active :map/unison :pending nil} (select-keys (:zone-map (app-state)) [:active :pending])))
+      (ui/assert-text! "#zone-map-mode" "Manual map: Unison")
+      (ui/assert-text! "#zone-map-item-unison .zone-map-item-manual" "Manual")
+      (is (ui/visible? "#zone-map-item-unison .zone-map-item-manual"))
+      (is (= ["Manual"] (manual-badges)) "one Manual badge")
+      (ui/assert-disabled! "#zone-map-use-now"))
+    (testing "another row: its title, the badge stays on Unison, and Use now can choose it"
+      (ui/click! robot "#zone-map-item-odd-even")
+      (ui/assert-text! "#zone-map-title" "Odd / Even")
+      (ui/assert-text! "#zone-map-item-unison .zone-map-item-manual" "Manual")
+      (is (= ["Manual"] (manual-badges)))
+      (ui/assert-text! "#zone-map-mode" "Manual map: Unison")
+      (ui/assert-enabled! "#zone-map-use-now")
+      (is (= :map/unison (active-map)) "browsing chooses nothing")
+      (is (paused?)))))
 
 
 ;; The Zone Selector leaves the bank (06 §4.5, invariant 13)

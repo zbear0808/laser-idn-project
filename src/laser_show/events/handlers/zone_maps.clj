@@ -161,20 +161,23 @@
         (get-in state [:config :input :trigger-map])))
 
 (defn- delete-message
-  "What goes with map id, as its delete asks (06 §6)."
+  "What goes with map id, as its delete asks (06 §6): what deleting the
+   manual map does, its learned keys and its pad setting; else just the
+   question. It counts no Map cycle that lists the map, so it never calls
+   one unused."
   [state id]
   (let [n (count (map-keys state id))
         setting? (some? (get-in state [:config :zone-map-pads id]))
         parts (cond-> []
                 (= id (get-in state [:zone-map :active]))
-                (conj "It's the zone map in use: the show switches to Left / Right.")
+                (conj "If this is still the manual map, deleting it selects Left / Right and pauses a running Map cycle.")
                 (or (pos? n) setting?)
                 (conj (str "Its "
                            (str/join " and its " (cond-> []
                                                    (pos? n) (conj (if (= 1 n) "learned key" (str n " learned keys")))
                                                    setting? (conj "pad setting")))
                            (if (or (> n 1) (and (pos? n) setting?)) " go too." " goes too."))))]
-    (if (seq parts) (str/join " " parts) "Nothing else uses it.")))
+    (if (seq parts) (str/join " " parts) "Delete this map from the show?")))
 
 (defn- handle-request-delete
   "Ask before deleting your map (Z0's confirm dialog, as every delete asks):

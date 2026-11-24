@@ -3,6 +3,8 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.input :as input]
+            [laser-show.input.router :as input-router]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
@@ -557,3 +559,75 @@
       (is (= "zone pattern +1" (label-text "#pick-fx-cell-3-1 .grid-cell-label")))
       (is (ui/has-style-class? "#pick-fx-cell-3-1" "grid-cell-content"))
       (is (ui/has-style-class? "#pick-fx-cell-2-1" "grid-cell-empty")))))
+
+
+;; A cell's LEARN badge and ⚡ follow its own learn and keys
+;; (plans/2026-11-23-cljfx-reactivity/35)
+
+(defn- key-press!
+  "A press of the key id, as the router gets one from the keyboard."
+  [id]
+  (input-router/dispatch! {:type :trigger :source :keyboard :id id :state :pressed
+                           :timestamp (System/currentTimeMillis)}))
+
+(defn- trigger-marks
+  "What the cell at selector shows of its learn and its keys: the LEARN
+   badge, the ⚡, and the Learn, Cancel and Clear items of its menu."
+  [selector]
+  {:learn? (boolean (seq (ui/query-all (str selector " .grid-cell-learning-badge"))))
+   :trigger? (boolean (seq (ui/query-all (str selector " .grid-cell-trigger-indicator"))))
+   :menu (filterv #{"Learn Trigger..." "Cancel Learning Trigger" "Clear Triggers"} (menu-texts selector))})
+
+(deftest cell-learn-and-trigger-badges-follow-the-target-test
+  (let [robot (ui/robot)
+        learning #(input/learning-target (state/get-raw-state))
+        bound (fn [id] (some-> (get-in (state/get-raw-state) [:config :input :trigger-map {:source :keyboard :id id}])
+                               (select-keys [:type :target])))
+        waiting {:learn? true :trigger? false :menu ["Cancel Learning Trigger"]}
+        triggered {:learn? false :trigger? true :menu ["Learn Trigger..." "Clear Triggers"]}
+        unmarked {:learn? false :trigger? false :menu ["Learn Trigger..."]}
+        learn! (fn [cell target id]
+                 (fire-menu-item! cell "Learn Trigger...")
+                 (ui/wait-for! #(= target (learning)))
+                 (ui/wait-for! #(= waiting (trigger-marks cell)))
+                 (is (= waiting (trigger-marks cell)) "waiting: LEARN, and Cancel in its menu")
+                 (key-press! id)
+                 (ui/wait-for! #(and (nil? (learning)) (= target (bound id))))
+                 (ui/wait-for! #(= triggered (trigger-marks cell)))
+                 (is (= triggered (trigger-marks cell)) "the key bound: ⚡, and Clear in its menu"))
+        clear! (fn [cell id]
+                 (fire-menu-item! cell "Clear Triggers")
+                 (ui/wait-for! #(nil? (bound id)))
+                 (ui/wait-for! #(= unmarked (trigger-marks cell)))
+                 (is (= unmarked (trigger-marks cell)) "cleared: neither"))
+        cue-a2 "#grid-cell-1-0"
+        fx-a2 "#effects-cell-1-0"]
+    (try
+      (testing "the Grid tab: the waiting cell's Cancel ends its learn (it names the attempt it shows, reactivity plan 24)"
+        (ui/assert-visible! cue-a2)
+        (is (= unmarked (trigger-marks cue-a2)))
+        (fire-menu-item! cue-a2 "Learn Trigger...")
+        (ui/wait-for! #(= waiting (trigger-marks cue-a2)))
+        (fire-menu-item! cue-a2 "Cancel Learning Trigger")
+        (ui/wait-for! #(nil? (learning)))
+        (ui/wait-for! #(= unmarked (trigger-marks cue-a2))))
+      (testing "the Grid tab: a learn from cue A2's menu, then a key press"
+        (learn! cue-a2 {:type :trigger-cue :target [1 0]} :h))
+      (testing "the Effects tab: the effects cell at the same place is unmarked, and learns a key of its own"
+        (ui/click! robot "#effects-tab")
+        (ui/assert-visible! fx-a2)
+        (is (= unmarked (trigger-marks fx-a2)))
+        (learn! fx-a2 {:type :trigger-effect :target [1 0]} :j)
+        (clear! fx-a2 :j)
+        (is (= {:type :trigger-cue :target [1 0]} (bound :h)) "the cue's key stays"))
+      (testing "back on the Grid tab: cue A2 keeps its ⚡ until its own Clear"
+        (ui/click! robot "#grid-tab")
+        (ui/assert-visible! cue-a2)
+        (ui/wait-for! #(= triggered (trigger-marks cue-a2)))
+        (clear! cue-a2 :h))
+      (finally
+        ;; Release a learn still waiting, when a step failed
+        (when (learning)
+          (events/dispatch! (merge {:event/type :input/cancel-learn}
+                                   (select-keys (input/active-learn (state/get-raw-state)) [:learn-id :document-id])))
+          (events/flush!))))))

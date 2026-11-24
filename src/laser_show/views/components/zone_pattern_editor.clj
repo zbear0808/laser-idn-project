@@ -394,7 +394,7 @@
    :current-params :params-map :on-change-event :on-text-event
    :modulator-event-base, and :effect-keys {:domain :entity-key
    :effect-path :effect-instance-id}."
-  [{:keys [fx/context current-params effect-keys] :as props}]
+  [{:keys [fx/context current-params effect-keys on-change-event] :as props}]
   (let [params current-params
         style (style-of params)
         shown (set (rows style (step-source params)))
@@ -418,9 +418,11 @@
              (control props :style)
              {:fx/type applied-value/applied-control
               :property :selected
-              :address [(:on-change-event props) :follow-pads?]
+              :address [on-change-event :follow-pads?]
               :value (not (false? (:follow-pads? params)))
-              :on-change (fn [on?] (assoc (:on-change-event props) :param-key :follow-pads? :value on?))
+              ;; keeps the event, not props, which has this view's context
+              ;; (reactivity plan 33)
+              :on-change (fn [on?] (assoc on-change-event :param-key :follow-pads? :value on?))
               :desc {:fx/type :check-box
                      :id "zone-pattern-follow-pads"
                      :text "Follows the pattern pads"
@@ -457,7 +459,7 @@
                      :style-class ["label" "zone-pattern-now"]}})
         {:fx/type :label
          :id "zone-pattern-fold"
-         :text (fx/sub-ctx context subs/pattern-fold params)
+         :text (fx/sub-ctx context subs/pattern-fold (:zones params))
          :wrap-text true
          :graphic {:fx/type :label :text "ⓘ" :style-class ["label" "zone-pattern-fold-icon"]}
          :style-class ["label" "zone-pattern-fold"]}]

@@ -522,9 +522,9 @@
                          (deref release 3000 nil))
                        nil)
                      #'se/send-frame!
-                     (fn [engine frame n]
+                     (fn [engine frame & more]
                        (swap! send-threads conj (.getName (Thread/currentThread)))
-                       (send-frame! engine frame n))}
+                       (apply send-frame! engine frame more))}
       (fn []
         (try
           (dispatch! {:event/type :idn/start-multi-streaming})

@@ -17,7 +17,12 @@
 
    A driver's error may say more in its ex-data (01 §1.1): {:reopen? true}
    from :send-frame! or :ready? closes the session and opens a new one;
-   {:busy? true :holder \"…\"} says another program has the device."
+   {:busy? true :holder \"…\"} says another program has the device.
+
+   Each engine keeps one observation for its rig card's thumbnail
+   (thumbnail): the frame of its last driver call that returned normally,
+   and when it returned. A return says only that the call returned, not what
+   the device received or drew."
   (:require [clojure.string :as str]
             [clojure.tools.logging :as log]
             [laser-show.backend.output-errors :as output-errors]
@@ -29,7 +34,8 @@
             [laser-show.animation.types :as t]
             [laser-show.output.driver :as driver]
             [laser-show.profiling.frame-profiler :as profiler])
-  (:import [java.util.concurrent.locks LockSupport]))
+  (:import [java.util.concurrent.atomic AtomicLong]
+           [java.util.concurrent.locks LockSupport]))
 
 
 ;; Constants
@@ -134,7 +140,9 @@
    ;; The driver's :status, sanitized (poll-driver-status!), and whether one
    ;; that threw was logged
    :driver-status (atom nil)
-   :status-warned? (atom false)})
+   :status-warned? (atom false)
+   ;; The thumbnail's observation (thumbnail), nil while no run owns it
+   :thumbnail (atom nil)})
 
 (defn create-engine
   "Create a streaming engine for an IDN DAC (the :idn driver).
@@ -184,6 +192,67 @@
                         :fps fps
                         :scan-rate scan-rate
                         :frame-signal frame-signal))
+
+
+;; The thumbnail's observation
+;;
+;; One slot per engine, {:run-token :session-token :knowledge :last-ok}: the
+;; run start! began, the session its streaming thread opened (nil while it
+;; opens or reopens), and what is known of that session's driver calls:
+;; :returned once one returned normally, its frame in :last-ok {:frame
+;; :at-ns :source}; :unknown before the first and from a call that threw
+;; until the next one returns (:last-ok kept, for that session only). nil
+;; once no run owns it. Every write names the run and session it is for and
+;; changes the slot only while they still own it, in the swap itself, so a
+;; late return or cleanup of an older run or session changes nothing.
+
+
+(defonce ^:private ^AtomicLong owner-tokens (AtomicLong.))
+
+(defn- next-token [] (.incrementAndGet owner-tokens))
+
+(defn- claim-run!
+  "A fresh run token, with nothing known yet (start!)."
+  [engine]
+  (let [run (next-token)]
+    (reset! (:thumbnail engine) {:run-token run :session-token nil :knowledge :unknown :last-ok nil})
+    run))
+
+(defn- retire-run!
+  "Clear the slot if run still owns it (a start that failed, the streaming
+   thread's end)."
+  [engine run]
+  (swap! (:thumbnail engine) #(when-not (= run (:run-token %)) %)))
+
+(defn- open-observation!
+  "Give the session run just opened a fresh token, with nothing known yet,
+   if run still owns the slot. Returns the owner, [run session-token], its
+   driver calls are recorded under."
+  [engine run]
+  (let [session (next-token)]
+    (swap! (:thumbnail engine) #(if (= run (:run-token %))
+                                   (assoc % :session-token session :knowledge :unknown :last-ok nil)
+                                   %))
+    [run session]))
+
+(defn- record-outcome!
+  "How a driver call made under owner ([run-token session-token]) ended, if
+   owner still owns the slot: {:frame :at-ns :source}, a call that returned
+   normally; :unknown, one that threw; :retired, the session ended (its
+   success goes with it). Plain data in an atom no one watches; it never
+   throws, so it can't change what the loop does next."
+  [engine [run session] outcome]
+  (try
+    (swap! (:thumbnail engine)
+           (fn [slot]
+             (if (and slot (= run (:run-token slot)) (= session (:session-token slot)))
+               (case outcome
+                 :unknown (assoc slot :knowledge :unknown)
+                 :retired (assoc slot :session-token nil :knowledge :unknown :last-ok nil)
+                 (assoc slot :knowledge :returned :last-ok outcome))
+               slot)))
+    (catch Throwable _))
+  nil)
 
 
 ;; Calling the driver
@@ -257,12 +326,18 @@
   (boolean (:reopen? (ex-data e))))
 
 (defn- send-frame!
-  "Send frame through the engine's driver. Returns [transfers duration-us]
-   (frame-result)."
-  [engine frame session]
+  "Send frame through the engine's driver, for owner (the run and session
+   streaming it) as source (:normal, or :recovery for the empty frame after
+   an error). Returns [transfers duration-us] (frame-result). The moment the
+   call returns normally, frame (this very vector) is owner's last success,
+   stamped on timing/nanotime (record-outcome!); a call that throws records
+   nothing."
+  [engine frame session owner source]
   (let [driver (:driver engine)
-        send! (:send-frame! driver)]
-    (frame-result engine frame (driver/with-loader driver #(send! session frame)))))
+        send! (:send-frame! driver)
+        result (driver/with-loader driver #(send! session frame))]
+    (record-outcome! engine owner {:frame frame :at-ns (timing/nanotime) :source source})
+    (frame-result engine frame result)))
 
 (defn- await-ready!
   "For a device-paced driver (01 §1.3): ask its :ready? every READY_POLL_US
@@ -354,9 +429,13 @@
    An error whose ex-data has :reopen? (G1) is reported and ends the loop
    at once, with no :on-error and no empty frame: the session is dead.
 
+   owner is the run and session it streams for: each send is recorded under
+   it (send-frame!), and an error makes the observation unknown
+   (record-outcome!) before anything that can block, until a send returns.
+
    Returns true when the driver asked for a reopen, else nil once the
    engine stops."
-  [engine session]
+  [engine session owner]
   (let [{:keys [frame-provider frame-signal fps running? stats driver]} engine
         on-error (:on-error driver)
         device-paced? (some? (:ready? driver))
@@ -406,7 +485,7 @@
                       produced (System/nanoTime)
                       _ (when-not paced? (await-gap!))
                       send-start (System/nanoTime)
-                      [packet-count duration-us] (send-frame! engine frame session)
+                      [packet-count duration-us] (send-frame! engine frame session owner :normal)
                       sent (System/nanoTime)]
                   (vreset! last-sent sent)
                   ;; IDN streaming time (µs): producing plus sending, without the wait between
@@ -418,6 +497,7 @@
                   (when @busy (reset! busy false))))
               
               (catch Throwable e
+                (record-outcome! engine owner :unknown)
                 (report-error! engine e)
                 (cond
                   (not @running?) nil
@@ -433,7 +513,7 @@
                     ;; Void the device's frame buffer instead of leaving the last frame drawn
                     (try
                       (await-gap!)
-                      (send-frame! engine (t/empty-frame) session)
+                      (send-frame! engine (t/empty-frame) session owner :recovery)
                       (vreset! last-sent (System/nanoTime))
                       (catch Throwable e2
                         (report-error! engine e2)
@@ -531,31 +611,40 @@
                     nil)))))))))
 
 (defn- drop-session!
-  "The driver asked for session to be reopened (G1): close it on its
-   output-close-<id> thread within CLOSE_MS, as stop does, unless Stop
-   already took it (C-4), and forget when a frame was last tried, so the
-   wait to reopen isn't \"not responding\"."
-  [engine session]
+  "The driver asked for session to be reopened (G1): it is owner's no more,
+   so its last success goes (record-outcome!), before anything waits; then
+   close it on its output-close-<id> thread within CLOSE_MS, as stop does,
+   unless Stop already took it (C-4), and forget when a frame was last
+   tried, so the wait to reopen isn't \"not responding\"."
+  [engine session owner]
+  (record-outcome! engine owner :retired)
   (when (compare-and-set! (:session engine) session nil)
     (close-session! engine session))
   (swap! (:stats engine) assoc :last-attempt-ns nil))
 
 (defn- run-engine
-  "The streaming thread: open the session, then stream until stopped. When
-   the driver asks for a reopen (G1), the session is closed and, REOPEN_MS
-   later, opened again as C-7's retry does."
-  [engine]
-  (loop [wait-ms 0]
-    (when-let [session (open-session! engine wait-ms)]
-      (when (streaming-loop engine session)
-        (drop-session! engine session)
-        (recur REOPEN_MS)))))
+  "The streaming thread of run (start!'s token): open the session, then
+   stream until stopped. When the driver asks for a reopen (G1), the session
+   is closed and, REOPEN_MS later, opened again as C-7's retry does. Each
+   session gets its own token (open-observation!); when the thread ends, the
+   run's observation goes, unless a newer run owns it."
+  [engine run]
+  (try
+    (loop [wait-ms 0]
+      (when-let [session (open-session! engine wait-ms)]
+        (let [owner (open-observation! engine run)]
+          (when (streaming-loop engine session owner)
+            (drop-session! engine session owner)
+            (recur REOPEN_MS)))))
+    (finally
+      (retire-run! engine run))))
 
 (defn start!
   "Start the streaming engine: start its own streaming thread, which opens
    the driver's session (open-session!) and streams. Nothing here calls into
    the driver (C-7), so it never blocks. Returns the engine map, or throws on
-   error (with nothing left running)."
+   error (with nothing left running). Each start is a new run of the
+   engine's thumbnail observation, with nothing known yet."
   [engine]
   (when @(:running? engine)
     (throw (ex-info "Engine already running" {})))
@@ -565,17 +654,18 @@
   (reset! (:busy? engine) false)
   (reset! (:driver-status engine) nil)
   (reset! (:stats engine) initial-stats)
-  (reset! (:running? engine) true)
-  
-  (try
-    (let [thread (Thread. #(run-engine engine) (thread-name engine))]
-      (.setDaemon thread true)
-      (reset! (:thread engine) thread)
-      (.start thread))
-    (catch Throwable t
-      (reset! (:running? engine) false)
-      (reset! (:thread engine) nil)
-      (throw t)))
+  (let [run (claim-run! engine)]
+    (reset! (:running? engine) true)
+    (try
+      (let [thread (Thread. #(run-engine engine run) (thread-name engine))]
+        (.setDaemon thread true)
+        (reset! (:thread engine) thread)
+        (.start thread))
+      (catch Throwable t
+        (reset! (:running? engine) false)
+        (reset! (:thread engine) nil)
+        (retire-run! engine run)
+        (throw t))))
   
   (log/info (format "Streaming engine started: %s (driver %s)" (:id engine) (:driver-id engine)))
   engine)
@@ -597,14 +687,17 @@
 
 (defn stop-all!
   "Stop several engines together. Clears every engine's running? flag first,
-   so they all go dark within about a frame of each other, then joins each
-   thread (sharing one STOP_JOIN_MS deadline) and closes its driver session
-   (for IDN, the close pair). Engines that aren't running, or that another
-   stop-all! already claimed, are skipped. Returns the engines this call
-   stopped."
+   so they all go dark within about a frame of each other, and ends each
+   one's run of the thumbnail observation, so no call still in progress can
+   record a result; then joins each thread (sharing one STOP_JOIN_MS
+   deadline) and closes its driver session (for IDN, the close pair).
+   Engines that aren't running, or that another stop-all! already claimed,
+   are skipped. Returns the engines this call stopped."
   [engines]
   (let [stopping (filterv #(compare-and-set! (:running? %) true false) engines)
         deadline (+ (System/nanoTime) (* STOP_JOIN_MS 1000000))]
+    (doseq [engine stopping]
+      (reset! (:thumbnail engine) nil))
     (doseq [engine stopping]
       (when-let [^Thread thread @(:thread engine)]
         (.join thread (max 1 (quot (- deadline (System/nanoTime)) 1000000))))
@@ -660,3 +753,16 @@
    last frame's fit-guard record."
   [engine]
   @(:stats engine))
+
+(defn thumbnail
+  "The engine's observation for its rig card's thumbnail, pure data: nil
+   while no run owns it (never started, stopped, its thread ended), else
+   {:run-token :session-token :knowledge :last-ok}. :session-token is nil
+   while a session opens or reopens; :knowledge is :returned once a driver
+   call of this session returned normally, with :last-ok {:frame (the very
+   vector the driver was passed) :at-ns (timing/nanotime when it returned)
+   :source (:normal, or :recovery for the empty frame after an error)}, and
+   :unknown before that and from an error until the next return. It says
+   that a call returned, not what the device received or drew."
+  [engine]
+  @(:thumbnail engine))

@@ -1034,7 +1034,9 @@
    - :title                 — optional node shown at the left of the toolbar
    
    Local state (viewport, follow, renaming) resets when :cell changes, since
-   it's part of :initial-state; the measured lane size carries over."
+   it's part of :initial-state; the measured lane size carries over. The
+   body gets the props without the editor's context: cljfx gives it its
+   own."
   [{:keys [col row] :as props}]
   {:fx/type fx/ext-state
    ;; :cell is never read: it's here so a new cell resets the local state
@@ -1043,4 +1045,4 @@
    ;; won't fire again: keep the measured size, or the canvas stays 0x0
    :reset (fn [old new]
             (update new :view merge (select-keys (:view old) [:width :height])))
-   :desc (assoc props :fx/type editor-body)})
+   :desc (assoc (dissoc props :fx/context) :fx/type editor-body)})

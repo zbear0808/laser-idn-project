@@ -83,7 +83,7 @@
               [(note "step-grid-every-laser-note" text)])
             (when-let [text (:wrap-note grid)]
               [(note "step-grid-wrap-note" text)])
-            [(assoc (note "step-grid-fold" (fx/sub-ctx context subs/pattern-fold (:params grid)))
+            [(assoc (note "step-grid-fold" (fx/sub-ctx context subs/pattern-fold (get-in grid [:params :zones])))
                     :graphic {:fx/type :label :text "ⓘ" :style-class ["label" "zone-pattern-fold-icon"]})]))}}
         {:fx/type :v-box
          :v-box/vgrow :always

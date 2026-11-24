@@ -612,7 +612,12 @@
          compact? false
          scrollable? true}
     :as props}]
-  (let [ui-state (fx/sub-ctx context subs/list-ui-state component-id)
+  (let [;; The rows, the group toolbar and the buttons get the list's props
+        ;; without the context cljfx gave this sidebar: each child gets its
+        ;; own, and this one in a child's description would keep this
+        ;; render's state and cache alive (reactivity plan 33)
+        list-props (dissoc props :fx/context)
+        ui-state (fx/sub-ctx context subs/list-ui-state component-id)
         {:keys [selected-ids dragging-ids drop-target-id drop-position renaming-id]} ui-state
         selection-count (count selected-ids)
         chain-depth (chains/nesting-depth items)
@@ -629,7 +634,7 @@
                                   :fx/key [(:id item) idx]
                                   :component-id component-id
                                   :items items
-                                  :props props
+                                  :props list-props
                                   :item item
                                   :depth 0
                                   :selected-ids selected-ids
@@ -679,7 +684,7 @@
 
         (when allow-groups?
           {:fx/type group-toolbar
-           :props props
+           :props list-props
            :selection-count selection-count
            :can-create-group? can-create-group?})
 
@@ -693,7 +698,7 @@
                      :style-class "chain-toolbar-btn"
                      :tooltip {:fx/type :tooltip
                                :text (str "Copy the selected items (" (shortcuts/shortcut-text :c) ")")}
-                     :on-action (fn [_] (dispatch-copy-selected! props))}
+                     :on-action (fn [_] (dispatch-copy-selected! list-props))}
                     {:fx/type :button
                      :id "chain-cut-selection"
                      :text "Cut"
@@ -702,7 +707,7 @@
                      :style-class "chain-toolbar-btn"
                      :tooltip {:fx/type :tooltip
                                :text (str "Cut the selected items (" (shortcuts/shortcut-text :x) ")")}
-                     :on-action (fn [_] (dispatch-cut-selected! props))}
+                     :on-action (fn [_] (dispatch-cut-selected! list-props))}
                     {:fx/type :button
                      :id "chain-paste-items"
                      :text "Paste"
@@ -711,7 +716,7 @@
                      :style-class "chain-toolbar-btn"
                      :tooltip {:fx/type :tooltip
                                :text (str "Paste after the selection (" (shortcuts/shortcut-text :v) ")")}
-                     :on-action (fn [_] (dispatch-paste-items! props))}
+                     :on-action (fn [_] (dispatch-paste-items! list-props))}
                     {:fx/type :button
                                 :id "chain-delete-selection"
                                 :text "Delete"
@@ -719,7 +724,7 @@
                      :disable (zero? selection-count)
                      :style-class "chain-toolbar-btn-danger"
                      :tooltip {:fx/type :tooltip :text "Delete the selected items (Delete)"}
-                     :on-action (fn [_] (dispatch-delete-selected! props))}]}
+                     :on-action (fn [_] (dispatch-delete-selected! list-props))}]}
         items-content])}))
 
 
@@ -793,7 +798,6 @@
    read via subs/list-ui-state subscription.
    
    Props:
-   - :fx/context - cljfx context (required)
    - :items - Vector of items (required)
    - :component-id - Unique ID for state isolation (required)
    
@@ -814,7 +818,7 @@
    - :compact? - If true, hide toolbar/header chrome (default false)
    - :scrollable? - If true, wrap items in ScrollPane (default true)
    - :show-enable-toggle? - If false, rows have no enable checkbox (default true)"
-  [{:keys [fx/context items component-id
+  [{:keys [items component-id
            get-item-label get-group-label
            get-context-menu get-group-context-menu
            item-id-key item-registry-fn
@@ -859,6 +863,5 @@
                         compact? scrollable? get-group-label get-context-menu get-group-context-menu
                         show-enable-toggle?
                         :fx/type list-sidebar
-                        :fx/context context
                         :v-box/vgrow :always
                         :get-item-label label-fn)]}}))

@@ -205,7 +205,8 @@
                      (is (events/flush!)))]
     (open-vibes! robot)
     (learn-all!)
-    (is (nil? (get-in (app-state) [:ui :vibes :wizard])) "invariant 8: it ends, nothing left learning")
+    (is (nil? (input/active-learn (app-state))) "invariant 8: it ends, nothing left learning")
+    (is (nil? (input-router/learn-listener-id)) "and no listener")
     (ui/wait-for! #(not (ui/visible? "#vibe-wizard-status")))
     (ui/assert-text! "#vibe-control-hit-keys" "MIDI Ch 1 Note 36")
     (ui/assert-text! "#vibe-control-blackout-keys" "MIDI Ch 1 Note 40")
