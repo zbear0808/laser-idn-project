@@ -43,15 +43,19 @@ jobs:
       with:
         cli: '1.12.4.1582'
 
+    # Each job caches what its own aliases resolve, under a key that names
+    # them: only the first job to miss a key saves it, so one key shared by
+    # jobs that resolve different aliases held only the dependencies of
+    # whichever job saved it first.
     - name: Cache Maven dependencies
       uses: actions/cache@v6
       with:
         path: |
           ~/.m2/repository
           ~/.gitlibs
-        key: ${{ runner.os }}-clojure-${{ hashFiles('**/deps.edn') }}
+        key: ${{ runner.os }}-clojure-kondo-${{ hashFiles('**/deps.edn') }}
         restore-keys: |
-          ${{ runner.os }}-clojure-
+          ${{ runner.os }}-clojure-kondo-
 
     # Fails only on kondo errors; warnings are reported but don't block.
     # dev/ is not linted yet: dev/cljfx/dev/help.clj is an in-ns override of
@@ -127,15 +131,18 @@ jobs:
       with:
         cli: '1.12.4.1582'
 
+    # Linux's first shard also resolves :dev (the dev-mode steps below), so
+    # its cache has a key of its own. The other shards resolve the same
+    # aliases as each other (:test is in :test-ui)
     - name: Cache Maven dependencies
       uses: actions/cache@v6
       with:
         path: |
           ~/.m2/repository
           ~/.gitlibs
-        key: ${{ runner.os }}-clojure-${{ hashFiles('**/deps.edn') }}
+        key: ${{ runner.os }}-clojure-test-ui${{ matrix.platform == 'linux' && matrix.shard == 1 && '-dev' || '' }}-${{ hashFiles('**/deps.edn') }}
         restore-keys: |
-          ${{ runner.os }}-clojure-
+          ${{ runner.os }}-clojure-test-ui${{ matrix.platform == 'linux' && matrix.shard == 1 && '-dev' || '' }}-
 
     - name: Run headless UI tests
       run: clojure '-M:${{ matrix.platform }}:test-ui:test-ui-headless' --shard '${{ matrix.shard }}/${{ matrix.shards }}' -e '${{ matrix.skip }}'
@@ -155,8 +162,9 @@ jobs:
     # checks every render against cljfx.dev's specs and dev/'s corrections
     # to them (reactivity plan 31). Only these runs use it, so they keep the
     # specs and corrections honest: the renderer's wiring, the F12 inspector
-    # and the Settings tab, in that mode. Once, in Linux's first shard, each
-    # in its own JVM. They run even when the UI tests failed.
+    # and the Settings tab, in that mode. Once, in Linux's first shard (whose
+    # cache key says -dev, above), each in its own JVM. They run even when
+    # the UI tests failed.
     - name: Run dev-mode renderer wiring tests
       if: &dev-mode ${{ !cancelled() && matrix.shard == 1 && matrix.platform == 'linux' }}
       run: clojure -M:dev:linux:test:test-ui-headless -n laser-show.renderer-wiring-test
@@ -201,16 +209,16 @@ jobs:
       with:
         cli: '1.12.4.1582'
     
-    # Cache Clojure dependencies
+    # Cache Clojure dependencies: :test, :test-integration and -T:build's
     - name: Cache Maven dependencies
       uses: actions/cache@v6
       with:
         path: |
           ~/.m2/repository
           ~/.gitlibs
-        key: ${{ runner.os }}-clojure-${{ hashFiles('**/deps.edn') }}
+        key: ${{ runner.os }}-clojure-test-build-${{ hashFiles('**/deps.edn') }}
         restore-keys: |
-          ${{ runner.os }}-clojure-
+          ${{ runner.os }}-clojure-test-build-
     
     # Run tests (need :linux for JavaFX deps on ubuntu). cljfx starts JavaFX as
     # soon as it loads and the runner has no display, so every test step uses
