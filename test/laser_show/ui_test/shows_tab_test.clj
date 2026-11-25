@@ -110,13 +110,17 @@
       (with-redefs [events/ordered-pipeline (recording pipeline sent)]
         (.doubleClickOn robot (ui/query (cell :title zebra)) (into-array javafx.scene.input.MouseButton [javafx.scene.input.MouseButton/PRIMARY]))
         (ui/wait-for! #(some #{{:event/type :shows/play :show-id zebra}} @sent))
+        (ui/click! robot "#shows-new")
+        (ui/wait-for! #(some #{{:event/type :shows/create}} @sent))
+        (ui/wait-for! #(= 4 (count (get-in (st) [:chains :shows]))))
+        (is (= :title (get-in (st) [:ui :shows :editing :column])) "+ New Show edits its title")
+        (ui/wait-for! #(= "shows-edit-field" (focus-owner-id)))
+        (ui/press! robot KeyCode/ESCAPE)
+        (ui/wait-for! #(nil? (get-in (st) [:ui :shows :editing])))
         (ui/right-click-node! robot (ui/query (cell :title alpha)))
         (menu-item! "Open in Editor")
         (ui/wait-for! #(some #{{:event/type :shows/open-editor :from-row alpha}} @sent))
-        (ui/click! robot "#shows-new")
-        (ui/wait-for! #(some #{{:event/type :shows/create}} @sent)))
-      (ui/wait-for! #(= 4 (count (get-in (st) [:chains :shows]))))
-      (is (= :title (get-in (st) [:ui :shows :editing :column])) "+ New Show edits its title"))))
+        (ui/wait-for! #(= alpha (get-in (st) [:ui :dialogs :timeline-cue-editor :show-id])))))))
 
 (defn- header-state [col-id]
   (ui/on-fx-thread
