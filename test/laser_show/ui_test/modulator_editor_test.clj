@@ -856,14 +856,20 @@
           (right-key! s)
           (is (ui/wait-for! #(= (inc before) (param-of :kpps))) "an arrow key moves it by one"))))
     (testing "a parameter list's slider (param-slider, one press)"
+      ;; Mounted on its own, the slider is rendered again only when the test
+      ;; says so (render!), as the app does with each stored value. Until
+      ;; then applied-value puts the first value it was given back on it,
+      ;; settle-ms after its last change, so the test reads what the slider
+      ;; sends rather than what it shows, which a slow run would race
       (let [id (get-in (state/get-raw-state) [:chains :effect-chains [0 0] :items 0 :id])
             address {:domain :effect-chains :entity-key [0 0] :effect-path [0] :effect-instance-id id}
-            [stage _] (mount-desc! {:fx/type param-controls/param-slider
-                                    :param-key :fps
-                                    :param-spec {:key :fps :label "Target fps" :type :int :default 30 :min 5 :max 120}
-                                    :current-value (param-of :fps)
-                                    :on-change-event (assoc address :event/type :chain/update-param)
-                                    :on-text-event (assoc address :event/type :chain/update-param-from-text)})
+            desc (fn [] {:fx/type param-controls/param-slider
+                         :param-key :fps
+                         :param-spec {:key :fps :label "Target fps" :type :int :default 30 :min 5 :max 120}
+                         :current-value (param-of :fps)
+                         :on-change-event (assoc address :event/type :chain/update-param)
+                         :on-text-event (assoc address :event/type :chain/update-param-from-text)})
+            [stage render!] (mount-desc! (desc))
             sent (atom [])]
         (try
           (let [s (ui/on-fx-thread #(.lookup (.getRoot (.getScene ^Stage stage)) "#param-fps-slider"))]
@@ -871,9 +877,12 @@
             (is (some (complement whole?) (sent-values sent :fps)) "mid-drag the slider sends a fraction")
             (is (ui/wait-for! #(let [v (param-of :fps)] (and (whole? v) (== v (Math/round (double (last (sent-values sent :fps))))))))
                 "stored as the whole number nearest it")
-            (fire-track! s MouseEvent/MOUSE_RELEASED 0.61)
-            (is (ui/wait-for! #(and (nil? (open-press)) (whole? (param-of :fps)) (== (param-of :fps) (value-of s))))
-                "released: one press ended, a whole number on the slider and stored")
+            (record-dispatches! sent #(fire-track! s MouseEvent/MOUSE_RELEASED 0.61))
+            (is (ui/wait-for! #(let [v (double (last (sent-values sent :fps)))]
+                                 (and (nil? (open-press)) (== v (Math/rint v)) (== v (param-of :fps)))))
+                "released: one press ended, and the whole number the slider stopped on is stored")
+            (render! (desc))
+            (is (ui/wait-for! #(== (param-of :fps) (value-of s))) "and shown, rendered again as the app does")
             (let [before (param-of :fps)]
               (right-key! s)
               (is (ui/wait-for! #(= (inc before) (param-of :fps))) "an arrow key moves it by one")))
