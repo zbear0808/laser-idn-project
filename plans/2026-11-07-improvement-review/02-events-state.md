@@ -92,7 +92,7 @@ The architecture is sound in principle. There is one cljfx context atom, handler
     `input_mapper.clj:68-70` passes `:time (:timestamp event)`. `wrap-co-effects` then `assoc`s `:time (System/currentTimeMillis)` over it. Tap tempo (`timing.clj:33`) and trigger runtime (`triggers.clj:87`) therefore use the time the agent dequeued the event, not the time the input arrived, so queue jitter feeds straight into BPM.
     `grid.clj:35` ignores event time entirely: `(h/current-time-ms {:time (System/currentTimeMillis)})`.
 
-11. **Sync-to-downbeat is broken (Med).**
+11. **Sync-to-downbeat is broken (Med).** *Resolved 2026-11-25: the downbeat path was removed; beat alignment now runs on the Link owner's thread through Carabiner's `phase-at-time` query (`input/link.clj`, `:timing/align-to-link-beat`). Bar sync is parked.*
     `timing.clj:106-112` reads `:dispatch-fn` from the event, but no co-effect provides it, so it is always nil. It also reads `[:playback :accumulated-beats]`, which doesn't exist. Beats live in `[:timing :global-clock]` / `ex/global-accumulated-beats`. On top of that it does Link network I/O inside a "pure" handler.
 
 12. **Modulator/keyframe mutual exclusion never fires (Med).**
@@ -226,7 +226,7 @@ The architecture is sound in principle. There is one cljfx context atom, handler
 | Q5 | **Keep the input timestamp.** Rename the input-mapper key to `:input-time`. Make `h/current-time-ms` prefer `:input-time` over `:time`. Use event time in `grid/trigger-cue`. | `input_mapper.clj`, `events/helpers.clj`, `handlers/grid.clj`, `handlers/timing.clj` | S | Low |
 | Q6 | **Fix false-to-nil.** Replace `(or (:fx/event e) (:value e))` with an `h/event-value` helper using `contains?`/`some?`. | `chain/params.clj`, `handlers/keyframe.clj`, `handlers/modulator.clj`, `events/helpers.clj` | S | Low |
 | Q7 | **Done: fix modulator paths and toggle atomically.** `handle-toggle` uses `chain-config`'s `:items-path` and composes `keyframe/handle-toggle-enabled` and the param update in one `:state` result. See finding 12. | `handlers/modulator.clj` | S | Low |
-| Q8 | **Fix sync-to-downbeat.** Read `ex/global-accumulated-beats`. Move the Link call into a `:link/sync-to-downbeat` effect that receives `dispatch`. | `handlers/timing.clj`, `events/core.clj` | S | Low |
+| Q8 | **Fix sync-to-downbeat.** *Superseded 2026-11-25 by beat alignment (see 11).* Read `ex/global-accumulated-beats`. Move the Link call into a `:link/sync-to-downbeat` effect that receives `dispatch`. | `handlers/timing.clj`, `events/core.clj` | S | Low |
 | Q9 | **Compute tap-tempo BPM in the handler.** Do it in `handle-timing-tap-tempo` and delete the `:timing/calculate-bpm` effect. | `handlers/timing.clj`, `events/core.clj` | S | Low |
 | Q10 | **Narrow the grid-cell subscriptions.** In `cell-display-data`, use `(fx/sub-val context get-in [:chains :cue-chains [col row]])` and a boolean `(fx/sub-val context (fn [s] (contains? (get-in s [:playback :active-cues]) [col row])))`. Do the same for `effect-cell-display-data`. Removes per-tick recompute for 64 cells. | `subs.clj` | S | Low |
 | Q11 | **Small fixes.** Add `:time` and `:history/description` to `ui.clj` reserved keys. Fix `util/remove-keys`/`remove-vals` argument order and the `->map` docstring. Correct the docstrings in `state/core.clj`, `chain.clj` and `common/timing.clj`. Turn the hot-path INFO logs in `grid.clj` and `keyframe.clj` down to DEBUG. | `handlers/ui.clj`, `common/util.clj`, `common/timing.clj`, `state/core.clj`, `handlers/grid.clj`, `handlers/keyframe.clj` | S | Very low |

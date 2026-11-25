@@ -1124,3 +1124,20 @@
           (state/reset-state! pressed)
           (handle! event)
           (is (= {} (stopped-for)) label))))))
+
+(deftest global-beats-at-runs-the-last-tick-on-test
+  ;; What beat alignment with Link reads (input.link): the clock's beats at
+  ;; an instant on its own time base, System/nanoTime
+  (let [t0 1000000000
+        at-ms #(+ t0 (long (* % 1e6)))
+        runtime (-> show-time/initial-runtime
+                    (assoc :t0-ns t0)
+                    (update :global assoc :accumulated-beats 8.0 :phase-offset 0.1 :phase-offset-target 0.25
+                            :last-frame-time 4000.0))]
+    (is (= {:current 8.1 :settled 8.25} (show-time/global-beats-at runtime 120.0 (at-ms 4000.0))) "at its last tick")
+    (let [{:keys [current settled]} (show-time/global-beats-at runtime 120.0 (at-ms 4100.0))]
+      (is (< (Math/abs (- 8.3 current)) 1e-9) "100 ms on at 120 BPM: 0.2 beats on")
+      (is (< (Math/abs (- 8.45 settled)) 1e-9) "and where its glide ends with them"))
+    (is (some? (show-time/global-beats-at runtime 120.0 (at-ms 4250.0))))
+    (is (nil? (show-time/global-beats-at runtime 120.0 (at-ms 4300.0))) "its last tick too old: the clock isn't running")
+    (is (nil? (show-time/global-beats-at show-time/initial-runtime 120.0 (at-ms 0.0))) "before its first tick")))

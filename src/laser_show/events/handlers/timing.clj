@@ -141,19 +141,23 @@
                 (assoc-in [:backend :link :link-bpm] bpm))
               (follow-link-tempo bpm))})
 
-(defn- handle-timing-sync-to-downbeat
-  "Synchronize playback to Link's next downbeat.
-   Uses phase-offset-target mechanism for smooth correction.
-   The Link query runs in the :link/sync-to-downbeat effect, which reads the
-   show clock's beats and dispatches :timing/set-phase-offset-target. Nothing
-   sends this event, and while Link's beat isn't known (beat-carabiner 8.0.0
-   gives none: link/get-link-beat-position) it corrects nothing."
-  [_event]
-  {:link/sync-to-downbeat {}})
+(defn- handle-timing-align-to-link-beat
+  "A beat correction from the Link owner (input.link check-beat!): :offset
+   beats, the shorter way onto Link's beat. While the app still aligns with
+   Link (link/aligning?: Carabiner connected, Link on with its tempo
+   followed, Align beats with Link on), the show clock moves its phase
+   targets by it, as external sync does (:shift: the global clock and every
+   cue but timelines, gliding there); else {} (one of those went off since
+   the check)."
+  [{:keys [state offset]}]
+  (if (and (number? offset) (link/aligning? state))
+    {:state (request state :shift {:offset (double offset)})}
+    {}))
 
 (defn- handle-timing-set-phase-offset-target
   "Ask the show clock to move the phase targets by :offset (the global clock
-   and every cue but timelines). Used by external sync."
+   and every cue but timelines). Link's beat alignment has its own,
+   checked, :timing/align-to-link-beat."
   [{:keys [state offset]}]
   {:state (request state :shift {:offset (double (or offset 0.0))})})
 
@@ -321,7 +325,9 @@
   {:state (set-link-bpm-sync state event)})
 
 (defn- handle-timing-link-set-beat-sync
-  "Enable or disable downbeat alignment sync."
+  "Align beats with Link on or off (the Settings checkbox): while it is on,
+   with Link and BPM sync, the Link owner keeps the beat phase on Link's
+   (link/aligning?). The key keeps its old name, :beat-sync?."
   [{:keys [state fx/event]}]
   {:state (assoc-in state [:backend :link :beat-sync?] (boolean event))})
 
@@ -344,11 +350,24 @@
   "At start-up (app/start!): connect to the Carabiner daemon unless
    [:backend :link :auto-connect?] is false. The Link owner (input.link)
    connects off the event thread and says how it went with
-   :timing/carabiner-connected, through this app's dispatcher."
+   :timing/carabiner-connected, through this app's dispatcher; until then
+   [:backend :link :connecting] is :auto."
   [{:keys [state]}]
   (if (get-in state [:backend :link :auto-connect?] true)
-    {:link/connect {}}
+    {:state (assoc-in state [:backend :link :connecting] :auto)
+     :link/connect {}}
     {}))
+
+(defn- handle-timing-carabiner-connect
+  "The Connect button (Settings' Link card, and the toolbar's Link button
+   while Carabiner isn't connected): connect to the Carabiner daemon now,
+   whatever Auto-connect says, as start-up does. The Link owner connects one
+   connect at a time (connected already, nothing new opens); until it
+   answers, [:backend :link :connecting] is :manual, and the buttons say
+   they wait."
+  [{:keys [state]}]
+  {:state (assoc-in state [:backend :link :connecting] :manual)
+   :link/connect {}})
 
 (defn- handle-timing-carabiner-connected
   "Update Carabiner connection status: whether the Link owner
@@ -356,13 +375,20 @@
    when the connection closes. Disconnected, Link can't stay enabled (it
    needs Carabiner, link/enable-link!): it is off, and Link's tempo and
    peers are forgotten; following its tempo stays selected for when Link is
-   enabled again. The other link keys are kept. The connection and its
-   listeners are the owner's, never app state."
+   enabled again. The wait of a connect asked for ([:backend :link
+   :connecting]) is over: the Connect button's, failed, is a notice. The
+   other link keys are kept. The connection and its listeners are the
+   owner's, never app state."
   [{:keys [state connected?]}]
-  {:state (if connected?
-            (assoc-in state [:backend :link :carabiner-connected?] true)
-            (update-in state [:backend :link] assoc
-                       :carabiner-connected? false :link-enabled? false :link-bpm nil :link-peers 0))})
+  (let [asked (get-in state [:backend :link :connecting])
+        state (cond-> (assoc-in state [:backend :link :connecting] nil)
+                connected? (assoc-in [:backend :link :carabiner-connected?] true)
+                (not connected?) (update-in [:backend :link] assoc
+                                            :carabiner-connected? false :link-enabled? false
+                                            :link-bpm nil :link-peers 0))]
+    (if (and (not connected?) (= :manual asked))
+      (h/show-notice state "Could not connect to Carabiner" :warning)
+      {:state state})))
 
 (defn- handle-timing-link-enabled
   "Update Link enabled status (internal event from link service)."
@@ -415,7 +441,7 @@
     ;; Link sync events
     :timing/toggle-link-sync (handle-timing-toggle-link-sync event)
     :timing/link-bpm-changed (handle-timing-link-bpm-changed event)
-    :timing/sync-to-downbeat (handle-timing-sync-to-downbeat event)
+    :timing/align-to-link-beat (handle-timing-align-to-link-beat event)
     :timing/set-phase-offset-target (handle-timing-set-phase-offset-target event)
     
     ;; Link settings events (from Settings tab)
@@ -428,6 +454,7 @@
     
     ;; Internal Link events
     :timing/carabiner-auto-connect (handle-timing-carabiner-auto-connect event)
+    :timing/carabiner-connect (handle-timing-carabiner-connect event)
     :timing/carabiner-connected (handle-timing-carabiner-connected event)
     :timing/link-enabled (handle-timing-link-enabled event)
     
