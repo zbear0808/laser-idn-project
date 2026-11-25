@@ -1,8 +1,11 @@
 (ns laser-show.input.fixtures
   "Real-shaped input messages, built with the same library code that
-   produces them at runtime (overtone/midi-clj and overtone/osc-clj), and a
-   fake MIDI input device shaped like the ones javax.sound.midi gives."
-  (:require [overtone.midi :as m]
+   produces them at runtime (overtone/midi-clj and overtone/osc-clj), a
+   fake MIDI input device shaped like the ones javax.sound.midi gives, and
+   Carabiner stood in for behind beat-carabiner's functions (with-carabiner)."
+  (:require [beat-carabiner.core :as bc]
+            [laser-show.input.link :as link]
+            [overtone.midi :as m]
             [overtone.osc.decode :as osc-decode]
             [overtone.osc.encode :as osc-encode]
             [overtone.osc.util :as osc-util])
@@ -121,3 +124,86 @@
   (doseq [^Transmitter t (.getTransmitters ^MidiDevice (:device source))]
     (when-let [^Receiver r (.getReceiver t)]
       (.send r msg -1))))
+
+
+;; Carabiner, stood in for behind beat-carabiner's functions: nothing
+;; reaches a daemon or starts one
+
+(defn with-carabiner
+  "(f carabiner) with beat-carabiner's connection to Carabiner stood in for
+   (no socket, no daemon, nothing started): carabiner is an atom
+   {:connected? :status :status-listeners :disconnection-listeners :calls}.
+   bc/connect connects (fails with :refuse?), bc/active? and bc/state read
+   it (:status, :link-bpm :link-peers, as given), bc/disconnect disconnects
+   and, as beat-carabiner's read loop does then, tells the disconnection
+   listeners left (unexpected? false), and the listeners' add and remove
+   fns keep them. bc/beat-at-time, which would move the Link session's beat
+   grid, only records its call and returns nil, as beat-carabiner's does.
+   :calls records each call, in order: :connect :disconnect :add-listener
+   :remove-listener :add-closed-listener :remove-closed-listener
+   :beat-at-time. What f leaves connected is released
+   (input.link/release!) while it stands in, and the Link owner opened
+   again."
+  ([f] (with-carabiner {} f))
+  ([{:keys [refuse? status]} f]
+   (let [carabiner (atom {:connected? false
+                          :status (merge {:link-bpm nil :link-peers 0} status)
+                          :status-listeners #{}
+                          :disconnection-listeners #{}
+                          :calls []})
+         call! #(swap! carabiner update :calls conj %)]
+     (with-redefs [bc/connect (fn []
+                                (call! :connect)
+                                (:connected? (swap! carabiner update :connected? #(or % (not refuse?)))))
+                   bc/active? #(:connected? @carabiner)
+                   bc/state #(:status @carabiner)
+                   bc/disconnect (fn []
+                                   (call! :disconnect)
+                                   (when (:connected? @carabiner)
+                                     (swap! carabiner assoc :connected? false)
+                                     (doseq [l (:disconnection-listeners @carabiner)] (l false))))
+                   bc/add-status-listener (fn [l]
+                                            (call! :add-listener)
+                                            (swap! carabiner update :status-listeners conj l))
+                   bc/remove-status-listener (fn [l]
+                                               (call! :remove-listener)
+                                               (swap! carabiner update :status-listeners disj l))
+                   bc/add-disconnection-listener (fn [l]
+                                                   (call! :add-closed-listener)
+                                                   (swap! carabiner update :disconnection-listeners conj l))
+                   bc/remove-disconnection-listener (fn [l]
+                                                      (call! :remove-closed-listener)
+                                                      (swap! carabiner update :disconnection-listeners disj l))
+                   bc/beat-at-time (fn [& _] (call! :beat-at-time) nil)]
+       (link/open!)
+       (try
+         (f carabiner)
+         (finally
+           (link/release! 2000)
+           (link/open!)))))))
+
+(defn report-status!
+  "What a status from Carabiner does in beat-carabiner: status (:link-bpm,
+   :link-peers) is what bc/state gives from now on, and each status
+   listener hears it, as on its read thread."
+  [carabiner status]
+  (let [{:keys [status status-listeners]} (swap! carabiner update :status merge status)]
+    (doseq [listener status-listeners]
+      (listener status))))
+
+(defn drop-carabiner!
+  "What beat-carabiner's read loop does when the connection to Carabiner
+   ends without a disconnect: not connected any more, then each
+   disconnection listener hears unexpected? (true, the default: Carabiner
+   quit or closed it; false: beat-carabiner's own check found no status
+   within a second of the connect)."
+  ([carabiner] (drop-carabiner! carabiner true))
+  ([carabiner unexpected?]
+   (swap! carabiner assoc :connected? false)
+   (doseq [listener (:disconnection-listeners @carabiner)]
+     (listener unexpected?))))
+
+(defn carabiner-calls
+  "How many calls of kind k (with-carabiner's :calls) carabiner has had."
+  [carabiner k]
+  (count (filter #{k} (:calls @carabiner))))

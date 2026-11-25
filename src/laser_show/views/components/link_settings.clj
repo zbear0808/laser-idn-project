@@ -59,6 +59,7 @@
                  :text "Carabiner:"
                  :style (str "-fx-text-fill: " (css/text-secondary) ";")}
                 {:fx/type :label
+                 :id "carabiner-status"
                  :text (if carabiner-connected? "Connected" "Disconnected")
                  :style (str "-fx-text-fill: " (css/text-primary) ";")}]}
     

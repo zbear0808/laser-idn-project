@@ -1,8 +1,10 @@
 (ns laser-show.input.link
   "Ableton Link synchronization service using beat-carabiner.
    
-   This is a READ-ONLY integration - we receive BPM and beat position
-   from Link but never push our tempo to the Link session.
+   This is a READ-ONLY integration - we receive BPM and peers from Link
+   (not its beat position: beat-carabiner gives none, see
+   get-link-beat-position) but never push our tempo, or a beat, to the
+   Link session.
    
    Architecture:
    - Carabiner: Auto-connects on app startup (embedded lib-carabiner):
@@ -16,21 +18,27 @@
       server): app state never holds them, only plain status
       ([:backend :link]), which comes back as events
    2. Enables/disables Link sync mode on user request
-   3. Listens for Link tempo and beat updates
+   3. Listens for Link tempo and peer updates
    4. Dispatches events to update app state
-   5. Does NOT call set-link-tempo or lock-tempo (read-only)
+   5. Does NOT call set-link-tempo, lock-tempo or beat-at-time (read-only)
    
    The connection:
    - connect! (the :link/connect effect) connects on the Link thread
      (link-carabiner), one connect at a time, so the event thread never
      waits for Carabiner (it can take seconds: it may start an embedded
-     one), and registers one status listener (create-status-listener).
-     Connected already, nothing new opens and no second listener.
+     one), and registers one status listener (create-status-listener) and
+     one disconnection listener. Connected already, nothing new opens and
+     no second listener.
    - The listener's reports (:timing/link-bpm-changed,
      :timing/link-peers-changed) and how the connect went
      (:timing/carabiner-connected {:connected?}) go through the dispatch fn
      of the effect that asked, so a stopped app's are dropped.
-   - release! (app/stop!) removes the listener and disconnects, once,
+   - When the connection closes without release! (Carabiner quit or closed
+     it, or beat-carabiner dropped it for sending no status), the
+     disconnection listener says so through that dispatch fn too:
+     :timing/carabiner-connected {:connected? false} (follow-up N5). The
+     connection is over; the next connect! makes a new one.
+   - release! (app/stop!) removes the listeners and disconnects, once,
      whatever app state says, and drops connects until open! (app/start!,
      start-test!); what a connect running then connects is undone at once.
      Before the first release! the Link thread starts with the first
@@ -96,8 +104,9 @@
 
 
 (defonce ^{:private true
-           :doc "{:listener f}: the status listener of the connection connect!
-   made (registered with beat-carabiner), or nil."}
+           :doc "The connection connect! made, or nil: {:token :listener (its
+   status listener) :on-closed (its disconnection listener)}, both
+   registered with beat-carabiner."}
   !connection
   (atom nil))
 
@@ -112,7 +121,8 @@
 
 (defn holds-connection?
   "Is there a connection to Carabiner that connect! made, with its status
-   listener, and release! hasn't closed?"
+   listener, and that neither release! closed nor beat-carabiner said has
+   closed?"
   []
   (some? @!connection))
 
@@ -134,44 +144,90 @@
       (log/error e "Error connecting to Carabiner:" (.getMessage e))
       false)))
 
+(defn- forget!
+  "The connection with token is over: unless it is gone already (release!,
+   a close heard before), it isn't the owner's any more and its listeners
+   are removed. True if it was the owner's."
+  [token]
+  (locking lock
+    (let [{:keys [listener on-closed] :as conn} @!connection]
+      (when (identical? token (:token conn))
+        (reset! !connection nil)
+        (bc/remove-status-listener listener)
+        (bc/remove-disconnection-listener on-closed)
+        true))))
+
+(defn- closed!
+  "beat-carabiner's word, on its read thread, that a connection closed (its
+   read loop ended: Carabiner quit or closed it, unexpected? true; or it
+   sent no status within a second of the connect). For the owner's
+   connection (token), unless Carabiner is connected again (a connect took
+   it over since, its listeners with it): it is over (forget!), and
+   dispatch gets :timing/carabiner-connected {:connected? false}. A close
+   release! asked for isn't heard: it removes this listener first."
+  [token dispatch unexpected?]
+  (locking lock
+    (when (and (not (bc/active?)) (forget! token))
+      (log/warn (if unexpected? "Carabiner closed the connection" "The connection to Carabiner closed")
+                "- Link is off until Carabiner connects again")
+      (dispatch {:event/type :timing/carabiner-connected :connected? false}))))
+
+(defn- register!
+  "Make the connection just connected the owner's: a status listener, its
+   reports through dispatch, and a disconnection listener (closed!), both
+   registered with beat-carabiner. Under lock. True if Carabiner is still
+   connected with them in; if it closed before its close could be heard,
+   the connection is over at once."
+  [dispatch]
+  (let [token (Object.)
+        listener (create-status-listener dispatch state/get-raw-state)
+        on-closed (fn [unexpected?] (closed! token dispatch unexpected?))]
+    (reset! !connection {:token token :listener listener :on-closed on-closed})
+    (bc/add-disconnection-listener on-closed)
+    ;; connect can receive the first tempo before registration. Seed it
+    ;; without letting an older snapshot overtake a later callback.
+    (locking listener
+      (bc/add-status-listener listener)
+      (listener (bc/state)))
+    (or (boolean (bc/active?))
+        (do (forget! token)
+            (log/warn "Carabiner closed the connection as it connected")
+            false))))
+
 (defn- connect-now!
-  "Connect to Carabiner, unless connected already (nothing new opens), and
-   register one status listener, its reports through dispatch. True if
-   connected. One that release! came during is undone: disconnected, unless
-   release! has the connection to close itself, or an app opened since (its
-   own connect takes it over)."
+  "Connect to Carabiner, unless connected already (nothing new opens), with
+   its listeners (register!), and send how it went through dispatch:
+   :timing/carabiner-connected {:connected?}, under the lock, so a close of
+   this connection is reported after it. One that release! came during is
+   undone: disconnected, unless release! has the connection to close itself,
+   or an app opened since (its own connect takes it over)."
   [dispatch generation]
-  (boolean
-   (when (or (and (holds-connection?) (bc/active?))
-             (connect-carabiner!))
-     (locking lock
-       (cond
-         (not (current? generation))
-         (when (and (= :closed (:state @!runtime)) (not (holds-connection?)))
-           (bc/disconnect)
-           (log/info "Carabiner connected after Link was released: disconnected")
-           false)
+  (let [connected? (or (and (holds-connection?) (bc/active?))
+                       (connect-carabiner!))]
+    (locking lock
+      (dispatch
+       {:event/type :timing/carabiner-connected
+        :connected? (boolean
+                     (when connected?
+                       (cond
+                         (not (current? generation))
+                         (when (and (= :closed (:state @!runtime)) (not (holds-connection?)))
+                           (bc/disconnect)
+                           (log/info "Carabiner connected after Link was released: disconnected")
+                           false)
 
-         (holds-connection?) true
+                         (holds-connection?) true
 
-         :else
-         (let [listener (create-status-listener dispatch state/get-raw-state)]
-           ;; connect can receive the first tempo before registration. Seed
-           ;; it without letting an older snapshot overtake a later callback.
-           (locking listener
-             (bc/add-status-listener listener)
-             (listener (bc/state)))
-           (reset! !connection {:listener listener})
-           (log/info "Carabiner daemon connected (Link not yet enabled)")
-           true))))))
+                         (register! dispatch)
+                         (do (log/info "Carabiner daemon connected (Link not yet enabled)")
+                             true))))}))))
 
 (defn- run-connect!
-  "Connect unless release! came since it was asked for, and send how it
-   went through dispatch."
+  "Connect unless release! came since it was asked for (connect-now!)."
   [dispatch generation]
   (when (current? generation)
     (try
-      (dispatch {:event/type :timing/carabiner-connected :connected? (connect-now! dispatch generation)})
+      (connect-now! dispatch generation)
       (catch Throwable t
         (log/error t "Connecting to Carabiner failed")))))
 
@@ -210,11 +266,12 @@
       (swap! !runtime assoc :state :idle))))
 
 (defn release!
-  "Remove the status listener and disconnect from Carabiner, once, on this
+  "Remove the listeners and disconnect from Carabiner, once, on this
    thread, whatever app state says (app/stop!): a connect not yet run is
    dropped, the one running gets up to timeout-ms to finish (what it
    connects after that is undone at once), and later connects are dropped
-   until open!. Writes no app state. Idempotent; nil."
+   until open!. Its own close isn't reported (the disconnection listener
+   goes first). Writes no app state. Idempotent; nil."
   [timeout-ms]
   (let [{:keys [^ExecutorService executor]}
         (locking lock
@@ -226,8 +283,9 @@
       (when-not (.awaitTermination executor timeout-ms TimeUnit/MILLISECONDS)
         (log/warn "Link: the connect to Carabiner did not finish within" timeout-ms "ms")
         (.shutdownNow executor)))
-    (when-let [{:keys [listener]} (locking lock (first (reset-vals! !connection nil)))]
+    (when-let [{:keys [listener on-closed]} (locking lock (first (reset-vals! !connection nil)))]
       (try
+        (bc/remove-disconnection-listener on-closed)
         (bc/remove-status-listener listener)
         (bc/disconnect)
         (log/info "Carabiner daemon disconnected")
@@ -308,28 +366,35 @@
 
 
 ;; Beat Position Query
+;;
+;; beat-carabiner 8.0.0 has no way to read Link's beat. state (and so what
+;; its status listeners get) holds :link-bpm and :link-peers only: of each
+;; Carabiner status, which carries the beat too (:beat, :start), it keeps
+;; :bpm and :peers. Its phase probe (phase-at-time) is private, for lining
+;; a Pioneer player up with Link. And its beat-at-time is no query: it
+;; sends Carabiner "beat-at-time t 4.0" (t on Link's clock: System/nanoTime
+;; in microseconds, not the wall clock), returns nil (the socket write's),
+;; and when the answer comes back it moves the whole Link session's beat
+;; grid so a beat falls at t, unless one nearly does (Carabiner's
+;; force-beat-at-time: every peer's playback shifts). This integration is
+;; read only, so it never calls it.
 
 
 (defn get-link-beat-position
-  "Gets the current beat position from Link (0.0-1.0 within beat).
-   Returns nil if Carabiner not connected."
+  "Link's beat phase now (0.0-1.0 within the beat), or nil when it isn't
+   known: with beat-carabiner 8.0.0, always (see above). Sends nothing to
+   Carabiner."
   []
-  (try
-    (when (bc/active?)
-      ;; Call beat-at-time with current time in microseconds
-      (let [current-time-us (* (System/currentTimeMillis) 1000)
-            beat (bc/beat-at-time current-time-us)]
-        (mod beat 1.0)))
-    (catch Exception e
-      (log/error e "Error getting Link beat position:" (.getMessage e))
-      nil)))
+  nil)
 
 (defn sync-to-downbeat!
   "Synchronizes playback to the next downbeat.
    Uses the phase-offset-target mechanism for smooth correction.
    
    This is a one-shot sync operation that calculates the phase
-   offset needed to align with Link's next downbeat."
+   offset needed to align with Link's next downbeat. While Link's beat
+   phase isn't known (get-link-beat-position: with beat-carabiner 8.0.0,
+   never), it does nothing."
   [dispatch-fn accumulated-beats]
   (try
     (when-let [link-beat-phase (get-link-beat-position)]
