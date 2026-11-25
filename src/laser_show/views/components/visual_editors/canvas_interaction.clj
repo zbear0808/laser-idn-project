@@ -367,7 +367,7 @@
                   (dispatch-result! (:dispatch result))
                   (render! canvas (or (:preview-value new-drag) value) new-drag)
                   (when (:consumed? result)
-                    (.consume e)))))
+                    (.consume e))))))
 
           :on-scroll
           (fn [e]
@@ -381,7 +381,7 @@
                                            (on-scroll delta-x delta-y value drag-state)))))]
                 (dispatch-result! (:dispatch result))
                 (when (:consumed? result)
-                  (.consume e))))))}
+                  (.consume e)))))}
           ;; cljfx can't set a nil style-class list
           style-class (assoc :style-class style-class)
 

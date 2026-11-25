@@ -673,7 +673,7 @@
 (def ^:private rename {:event/type :cue-chain/set-name :col 1 :row 0 :name "After"})
 
 (def ^:private modulate
-  {:event/type :modulator/toggle :domain :effect-chains :entity-key [5 3] :effect-path [0]
+  {:event/type :modulator/toggle :domain :effect-chains :entity-key [5 3] :effect-instance-id modulated-id
    :param-key :amount :param-spec {:min 0.0 :max 1.0} :fx/event true})
 
 (deftest close-or-interrupt-paint-preserves-undo-order-test

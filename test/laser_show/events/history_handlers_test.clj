@@ -279,9 +279,11 @@
 (def ^:private grid-session #uuid "00000000-0000-0000-0000-0000000016d2")
 (def ^:private grid-target {:domain :cue-zone-patterns :entity-key [0 0] :effect-instance-id grid-id})
 
-(defn- grid-press-events
-  "Valid step grid press events (with their :state): they do nothing ({})
-   without the window open on the grid, and :paint without its press."
+(defn- valid-events
+  "Valid events (with their :state) for the labels whose handlers rightly do
+   nothing ({}) without what they name: the step grid's press events,
+   without the window open on the grid, and :paint without its press; the
+   ∿ toggle, without its effect (follow-up B6)."
   []
   (let [s (-> (test-state)
               (assoc-in [:chains :cue-chains [0 0] :zone-patterns] [(assoc (zp/preset-instance :steps :cue) :id grid-id)])
@@ -289,10 +291,11 @@
         press {:editor-id grid-session :target grid-target :history/gesture-id press-g}
         pressed (run s (assoc press :event/type :step-grid/paint-start :row 0 :step 0))]
     {:step-grid/paint-start (assoc press :state s :row 0 :step 1)
-     :step-grid/paint (assoc press :state pressed :row 0 :step 2)}))
+     :step-grid/paint (assoc press :state pressed :row 0 :step 2)
+     :modulator/toggle (assoc grid-target :state s :param-key :offset :param-spec {:min -64.0 :max 64.0} :fx/event true)}))
 
 (deftest history-labels-name-real-events-test
-  (let [valid (assoc (grid-press-events)
+  (let [valid (assoc (valid-events)
                      ;; It does nothing ({}) for an item that isn't there
                      :cue-chain/set-item-target {:state (test-state) :col 0 :row 0 :item-id item-id :target :zone/a})]
     (doseq [event-type (keys history-handlers/event-descriptions)]
@@ -520,7 +523,7 @@
         initial (assoc-in (test-state) path before)
         {:keys [state dispatch dispatch-later]}
         (pipeline {:event/type :modulator/toggle :state initial :domain :effect-chains :entity-key [1 0]
-                   :effect-path [0] :param-key :amount :param-spec {:min 0.0 :max 1.0}
+                   :effect-instance-id item-id :param-key :amount :param-spec {:min 0.0 :max 1.0}
                    :current-value 0.3 :fx/event true}) ; stale value from the keyframe editor
         toggled (cond-> (or state initial) dispatch (run dispatch))
         ;; Undo before delivering any timer the toggle scheduled. No clock or sleep involved.

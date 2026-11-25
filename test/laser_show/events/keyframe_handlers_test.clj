@@ -593,3 +593,31 @@
       (is (true? (:enabled? kf-mod))))))
 
 
+;; A keyframe's colour (follow-up B4)
+
+
+(deftest update-keyframe-color-param-takes-a-plain-colour-test
+  ;; The colour picker reads its colour on the FX thread and sends it as
+  ;; :color [red green blue]; the handler never reads a node
+  (let [white {:red 1.0 :green 1.0 :blue 1.0}
+        effect {:id #uuid "44444444-4444-4444-4444-444444444444" :effect-id :set-color :enabled? true :params white
+                :keyframe-modulator {:enabled? true :selected-keyframe 1
+                                     :keyframes [{:position 0.0 :params white} {:position 1.0 :params white}]}}
+        state (make-test-state [effect])
+        event (fn [& {:as more}]
+                (merge {:event/type :keyframe/update-color-param :domain :effect-chains :entity-key [0 0]
+                        :effect-path [0] :keyframe-idx 1 :state state}
+                       more))
+        frames #(mapv (fn [kf] (select-keys (:params kf) [:red :green :blue]))
+                      (get-in % [:state :chains :effect-chains [0 0] :items 0 :keyframe-modulator :keyframes]))]
+    (testing "the selected keyframe takes the colour; the effect's own stays"
+      (let [result (keyframe/handle (event :color [0.0 0.5 1.0]))]
+        (is (= [white {:red 0.0 :green 0.5 :blue 1.0}] (frames result)))
+        (is (= white (get-in result [:state :chains :effect-chains [0 0] :items 0 :params])))))
+    (testing "anything but a colour, no such keyframe, or the colour it has: nothing ({})"
+      (doseq [more [{:fx/event (ActionEvent.)} {:color nil} {:color [0.1 0.2]} {:color "red"}
+                    {:color [0.0 0.5 1.0] :keyframe-idx 5} {:color [0.0 0.5 1.0] :keyframe-idx nil}
+                    {:color [1.0 1.0 1.0]}]]
+        (is (= {} (keyframe/handle (merge (event) more))) (pr-str (dissoc more :fx/event)))))))
+
+

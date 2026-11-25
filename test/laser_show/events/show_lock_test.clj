@@ -660,8 +660,8 @@
                  {:event/type :chain/set-items :domain :cue-zone-patterns :entity-key [0 0] :items []}
                  {:event/type :chain/update-param :domain :effect-chains :entity-key [4 2] :effect-path [0] :param-key :zones :value [:zone/a]}
                  {:event/type :chain/update-param :domain :effect-chains :entity-key [5 2] :effect-path [0] :param-key :rate :value 1.0}
-                 {:event/type :modulator/toggle :domain :cue-zone-patterns :entity-key [0 0] :effect-path [0] :param-key :offset
-                  :param-spec {:min -64.0 :max 64.0} :fx/event true}
+                 {:event/type :modulator/toggle :domain :cue-zone-patterns :entity-key [0 0] :effect-instance-id :p1
+                  :param-key :offset :param-spec {:min -64.0 :max 64.0} :fx/event true}
                  ;; a step grid's steps, edited as any parameter (zones plan Z6)
                  {:event/type :chain/update-param :domain :cue-zone-patterns :entity-key [0 0] :effect-path [0] :param-key :steps
                   :value [[:zone/a] []]}]]
@@ -741,7 +741,8 @@
 (deftest lock-classifies-reordered-modulator-target-test
   ;; Reactivity plan 07: a modulator's field edits name their effect by its
   ;; instance, so the lock judges the effect they edit where it is now, not
-  ;; what holds the place it had when its editor rendered
+  ;; what holds the place it had when its editor rendered; and so does its
+  ;; toggle (follow-up B6)
   (let [pattern-id #uuid "0000000a-0000-0000-0000-000000000001"
         point-id #uuid "0000000a-0000-0000-0000-000000000002"
         wave {:type :triangle :active? true :period 7.0 :min 0.2 :max 0.8}
@@ -758,9 +759,11 @@
                        :param-key param :effect-path [rendered-at]}
                       more))
         pattern-edits [(edit :modulator/update-param pattern-id :offset 1 :mod-param-key :max :fx/event 8.0)
-                       (edit :modulator/set-type pattern-id :offset 1 :mod-type :square :param-spec {:min -64.0 :max 64.0})]
+                       (edit :modulator/set-type pattern-id :offset 1 :mod-type :square :param-spec {:min -64.0 :max 64.0})
+                       (edit :modulator/toggle pattern-id :offset 1 :param-spec {:min -64.0 :max 64.0} :fx/event false)]
         point-edits [(edit :modulator/update-param point-id :amount 0 :mod-param-key :max :fx/event 0.9)
-                     (edit :modulator/set-type point-id :amount 0 :mod-type :square :param-spec {:min 0.0 :max 3.0})]]
+                     (edit :modulator/set-type point-id :amount 0 :mod-type :square :param-spec {:min 0.0 :max 3.0})
+                     (edit :modulator/toggle point-id :amount 0 :param-spec {:min 0.0 :max 3.0} :fx/event false)]]
     (doseq [event pattern-edits]
       (testing (str "the pattern's " (:event/type event) ", now where the point effect was rendered")
         (is (not= (history/extract-document-state s0) (history/extract-document-state (run s0 event))) "unlocked, a real edit")

@@ -1,6 +1,7 @@
 (ns laser-show.events.chain-params-handlers-test
   "Tests that boolean parameter edits keep `false` instead of turning it into
-   nil, and that a numeric field's typed text commits only a number."
+   nil, that a numeric field's typed text commits only a number, and that a
+   colour edit takes only a plain colour (follow-up B4)."
   (:require
    [clojure.test :refer [deftest is testing]]
    [laser-show.events.handlers.chain.helpers :as chain-helpers]
@@ -47,6 +48,22 @@
     (doseq [text ["abc" "" "NaN" "Infinity"]]
       (is (= 0.5 (commit {:text text})) (str (pr-str text) " changes nothing")))
     (is (= 0.5 (commit {:fx/event (ActionEvent.)})) "an ActionEvent without its text changes nothing")))
+
+(deftest update-color-param-takes-a-plain-colour-test
+  ;; Follow-up B4: the colour picker reads its colour on the FX thread and
+  ;; sends it as :color [red green blue]; the handler never reads a node
+  (let [cell {:chains {:effect-chains {[0 0] {:items [{:effect-id :set-color :params {:red 1.0 :green 1.0 :blue 1.0}}]}}}}
+        rgb #(select-keys (get-in % [:chains :effect-chains [0 0] :items 0 :params]) [:red :green :blue])
+        commit #(params/handle-update-color-param cell config (merge {:effect-path [0]} %))]
+    (is (= {:red 0.2 :green 0.4 :blue 0.6} (rgb (commit {:color [0.2 0.4 0.6]}))))
+    (is (= {:red 1.0 :green 0.0 :blue 0.5} (rgb (commit {:color [3 -1.0 0.5]}))) "clamped to 0.0-1.0")
+    (testing "anything else changes nothing"
+      (doseq [payload [{:fx/event (ActionEvent.)} {:color nil} {:color [0.1 0.2]} {:color [0.1 ##NaN 0.3]}
+                       {:color "#ff0000"} {:color {:red 0.1 :green 0.2 :blue 0.3}} {}]]
+        (is (identical? cell (commit payload)) (pr-str payload))))
+    (testing "no effect at its path: nothing, not a new item"
+      (is (identical? cell (commit {:effect-path [1] :color [0.1 0.2 0.3]})))
+      (is (identical? cell (commit {:effect-path nil :color [0.1 0.2 0.3]}))))))
 
 (deftest update-param-unchecked-checkbox-test
   (testing "checkbox :fx/event false is stored as false"

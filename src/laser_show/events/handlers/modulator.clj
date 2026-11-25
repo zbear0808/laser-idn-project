@@ -17,14 +17,15 @@
    - :entity-key - The entity key within the domain
    - :param-key - The parameter being modulated
    
-   The toggle finds its effect at :effect-path. The three field edits
-   (set-type, update-param, update-static-value) name it by its instance
-   instead: :effect-instance-id, and :owner-id for an effect a cue item, a
+   The toggle and the three field edits (set-type, update-param,
+   update-static-value) name their effect by its instance, not by its
+   place: :effect-instance-id, and :owner-id for an effect a cue item, a
    clip, a track or a folder owns (chain-helpers/resolve-effect-instance-path).
    Each reads the parameter as it is stored now where that effect is now, and
-   changes its own field only, so two edits from one render both stay
-   (reactivity plan 07). An effect that is gone, keyframes on, a stored value
-   of another kind or mode, invalid input or no change does nothing ({})."
+   the field edits change their own field only, so two edits from one render
+   both stay (reactivity plan 07). An effect that is gone, or no change, does
+   nothing ({}); nor, for a field edit, do keyframes on, a stored value of
+   another kind or mode, or invalid input."
   (:require
    [clojure.edn :as edn]
    [clojure.string :as str]
@@ -42,25 +43,34 @@
 
 
 (defn- handle-toggle
-  "Disable active keyframes before enabling per-parameter modulation, in one edit.
-   Use the effect's stored settings; the editor may be showing a keyframe's value."
-  [{:keys [state domain entity-key effect-path param-key param-spec] enabled? :fx/event}]
-  (let [config (chain-helpers/chain-config domain entity-key)
-        effect (get-in state (into (:items-path config) effect-path))
-        value (get-in effect [:params param-key])
-        configured? (mod/modulator-config? value)
-        new-value (cond
-                    (and enabled? configured?) (assoc value :active? true)
-                    enabled? (mod-defs/build-default-modulator :sine param-spec)
-                    configured? (assoc value :active? false
-                                       :value (or (:value value)
-                                                  (/ (+ (double (:min value 0.0)) (double (:max value 1.0))) 2.0)))
-                    :else value)]
-    {:state (cond-> state
-              (and enabled? (get-in effect [:keyframe-modulator :enabled?]))
-              (keyframe/handle-toggle-enabled config effect-path false)
-              (and effect (not= value new-value))
-              (params/handle-update-param config {:effect-path effect-path :param-key param-key :value new-value}))}))
+  "Turn modulation of the event's parameter on or off (its :fx/event), for
+   the effect it names by its instance, where that effect is now
+   (chain-helpers/resolve-effect-instance-path). Turning it on disables
+   the effect's active keyframes too, in one edit. Use the effect's stored
+   settings; the editor may be showing a keyframe's value. Once the effect
+   is gone (another may hold its place now), or when nothing would change,
+   it does nothing ({})."
+  [{:keys [state domain entity-key param-key param-spec] enabled? :fx/event :as event}]
+  (if-let [effect-path (chain-helpers/resolve-effect-instance-path state event)]
+    (let [config (chain-helpers/chain-config domain entity-key)
+          effect (get-in state (into (:items-path config) effect-path))
+          value (get-in effect [:params param-key])
+          configured? (mod/modulator-config? value)
+          new-value (cond
+                      (and enabled? configured?) (assoc value :active? true)
+                      enabled? (mod-defs/build-default-modulator :sine param-spec)
+                      configured? (assoc value :active? false
+                                         :value (or (:value value)
+                                                    (/ (+ (double (:min value 0.0)) (double (:max value 1.0))) 2.0)))
+                      :else value)
+          keyframes-off? (boolean (and enabled? (get-in effect [:keyframe-modulator :enabled?])))
+          param-changed? (not= value new-value)]
+      (if (or keyframes-off? param-changed?)
+        {:state (cond-> state
+                  keyframes-off? (keyframe/handle-toggle-enabled config effect-path false)
+                  param-changed? (params/handle-update-param config {:effect-path effect-path :param-key param-key :value new-value}))}
+        {}))
+    {}))
 
 
 ;; A modulator's field edits (reactivity plan 07)
@@ -146,10 +156,11 @@
       {})))
 
 (defn- parse-text-value
-  "Parse a text field value, clamping to min/max bounds: nil unless it is a
-   finite number (h/parse-number-text)."
-  [text-value min-val max-val]
-  (h/parse-number-text (str text-value) min-val max-val false))
+  "Parse a text field value, clamping to min/max bounds, a whole number for
+   an :int field (int?): nil unless it is a finite number
+   (h/parse-number-text)."
+  [text-value min-val max-val int?]
+  (h/parse-number-text (str text-value) min-val max-val int?))
 
 (defn- parse-number-list
   "The numbers in text, split on commas and spaces, as doubles; what doesn't
@@ -185,8 +196,9 @@
    number, clamped to :mod-param-min and :mod-param-max (parse-text-value).
    A control's own value (:value, else :fx/event) is taken when it fits the
    field: a finite number for a number, one of its :choices for a choice,
-   true or false for a checkbox. Never anything else, such as the
-   ActionEvent a text field's Enter delivers."
+   true or false for a checkbox. An :int field's number is a whole one,
+   rounded (a slider's 5.6 is 6, as typed \"5.6\" is). Never anything else,
+   such as the ActionEvent a text field's Enter delivers."
   [{:keys [type choices]} event]
   (if (or (:mod-text-field? event) (:text-field? event))
     (let [text (:text event)]
@@ -194,11 +206,13 @@
         (case type
           :text (text-or-edn text)
           :number-list (parse-number-list text)
-          (:float :int nil) (parse-text-value text (or (:mod-param-min event) -10.0) (or (:mod-param-max event) 10.0))
+          (:float :int nil) (parse-text-value text (or (:mod-param-min event) -10.0) (or (:mod-param-max event) 10.0)
+                                              (= :int type))
           nil)))
     (let [v (h/first-some (:value event) (:fx/event event))]
       (case type
-        (:float :int nil) (when (h/finite-number? v) v)
+        (:float nil) (when (h/finite-number? v) v)
+        :int (when (h/finite-number? v) (Math/round (double v)))
         :choice (when (some #(= v %) choices) v)
         :boolean (when (boolean? v) v)
         nil))))

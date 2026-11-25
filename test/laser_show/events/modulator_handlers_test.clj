@@ -6,11 +6,13 @@
    field only, of the parameter as it is stored when the edit is handled, so
    two edits from one render both stay; one for an effect that is gone, or
    a parameter of another kind or mode, does nothing (reactivity plan 07).
-   And a modulator that is off keeps only a number typed into its
-   parameter's field, through Save and Open."
+   The toggle names its effect by its instance too (follow-up B6). And a
+   modulator that is off keeps only a number typed into its parameter's
+   field, through Save and Open."
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.animation.effects.intensity] ; :intensity's :amount is a :float
             [laser-show.animation.effects.zone] ; :zone-pattern's :style is a modulatable :choice
+            [laser-show.animation.modulator-registry :as reg]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.modulator :as modulator]
             [laser-show.state.domains :as domains]
@@ -31,13 +33,6 @@
 (def sample-modulator-config
   "A sample sine modulator config."
   {:type :sine :min 0.5 :max 1.5 :period 1.0 :phase 0.0})
-
-(def sample-event-base
-  "Base event data for modulator events."
-  {:domain :effect-chains
-   :entity-key [0 0]
-   :effect-path [0]
-   :param-key :test-param})
 
 (def ^:private effect-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 
@@ -78,11 +73,14 @@
 ;; Toggle Tests
 
 
-(defn- toggle-effect [effect enabled?]
-  (let [state {:chains {:effect-chains {[0 0] {:items [effect]}}}}
-        result (modulator/handle (assoc sample-event-base :event/type :modulator/toggle :state state
+(defn- toggle-effect
+  "effect, the one in cell [0 0], after its ∿ for :test-param is clicked to
+   enabled? (the toggle names it by its instance: effect-id)."
+  [effect enabled?]
+  (let [state {:chains {:effect-chains {[0 0] {:items [(assoc effect :id effect-id)]}}}}
+        result (modulator/handle (assoc field-base :event/type :modulator/toggle :state state
                                         :param-spec sample-param-spec :fx/event enabled?))]
-    (get-in (:state result) [:chains :effect-chains [0 0] :items 0])))
+    (dissoc (get-in (or (:state result) state) [:chains :effect-chains [0 0] :items 0]) :id)))
 
 (deftest test-toggle-static-to-modulated
   (let [effect (toggle-effect {:params {:test-param 1.0}} true)]
@@ -469,25 +467,79 @@
 
 
 (deftest test-toggle-on-disables-active-keyframes
-  (doseq [[domain entity-key] [[:effect-chains [0 0]]
-                               [:cue-chains [2 1]]
-                               [:projector-effects :proj-1]]]
-    (testing (str "a nested effect in " domain)
-      (let [effect {:effect-id :test
-                    :params {:test-param (assoc sample-modulator-config :active? false) :other 0.4}
-                    :keyframe-modulator {:enabled? true :keyframes [{:position 0.0 :params {:test-param 0.5}}]}}
-            items-path [:chains domain entity-key :items]
-            state (assoc-in {} items-path [{:type :group :items [effect]}])
-            result (modulator/handle (assoc sample-event-base :event/type :modulator/toggle :state state
-                                            :domain domain :entity-key entity-key :effect-path [0 :items 0]
-                                            :param-spec sample-param-spec :fx/event true))]
-        (is (= (-> effect (assoc-in [:keyframe-modulator :enabled?] false)
-                          (assoc-in [:params :test-param :active?] true))
-               (get-in (:state result) (into items-path [0 :items 0]))))))))
+  (let [owner-id #uuid "cccccccc-0000-0000-0000-00000000000c"
+        group-id #uuid "dddddddd-0000-0000-0000-00000000000d"]
+    (doseq [[domain entity-key owned?] [[:effect-chains [0 0] false]
+                                        [:cue-chains [2 1] true]
+                                        [:projector-effects :proj-1 false]]]
+      (testing (str "a nested effect in " domain)
+        (let [effect {:id effect-id :effect-id :test
+                      :params {:test-param (assoc sample-modulator-config :active? false) :other 0.4}
+                      :keyframe-modulator {:enabled? true :keyframes [{:position 0.0 :params {:test-param 0.5}}]}}
+              group {:type :group :id group-id :items [effect]}
+              items-path [:chains domain entity-key :items]
+              ;; a cue's effects are its items' own
+              [items effect-path] (if owned?
+                                    [[{:id owner-id :type :preset :preset-id :circle :effects [group]}] [0 :effects 0 :items 0]]
+                                    [[group] [0 :items 0]])
+              state (assoc-in {} items-path items)
+              result (modulator/handle (cond-> (assoc field-base :event/type :modulator/toggle :state state
+                                                      :domain domain :entity-key entity-key
+                                                      :param-spec sample-param-spec :fx/event true)
+                                         owned? (assoc :owner-id owner-id)))]
+          (is (= (-> effect (assoc-in [:keyframe-modulator :enabled?] false)
+                            (assoc-in [:params :test-param :active?] true))
+                 (get-in (:state result) (into items-path effect-path)))))))))
 
 (deftest test-toggle-off-leaves-keyframes-alone
   (let [effect {:params {:test-param 0.5} :keyframe-modulator {:enabled? true}}]
     (is (= effect (toggle-effect effect false)))))
+
+(deftest toggle-follows-instance-or-does-nothing-test
+  ;; Follow-up B6: the ∿ toggle names its effect by its instance, as the
+  ;; modulator's field edits do (reactivity plan 07): queued behind a
+  ;; reorder, it turns on the effect it was clicked for, where that effect
+  ;; is now, or does nothing once it is gone
+  (let [a #uuid "aaaaaaaa-0000-0000-0000-0000000000b6"
+        b #uuid "bbbbbbbb-0000-0000-0000-0000000000b6"
+        p #uuid "cccccccc-0000-0000-0000-0000000000b6"
+        other #uuid "dddddddd-0000-0000-0000-0000000000b6"
+        fx (fn [id] {:id id :effect-id :intensity :enabled? true :params {:amount 1.0}})
+        ;; A's ∿, from a render where A was first in its chain (and P first in the cue)
+        toggle (fn [domain entity-key & {:as more}]
+                 (merge {:event/type :modulator/toggle :domain domain :entity-key entity-key
+                         :effect-instance-id a :param-key :amount :param-spec {:min 0.0 :max 3.0} :fx/event true}
+                        more))
+        modulating? #(reg/active-modulator? (get-in %1 (conj %2 :params :amount)))
+        turns-on-only (fn [state event leaf]
+                        (let [{after :state} (modulator/handle (assoc event :state state))]
+                          (is (modulating? after leaf) (str "A, now at " leaf))
+                          (is (= state (assoc-in after (conj leaf :params :amount) 1.0)) "nothing else")))]
+    (testing "an effects cell's chain, B now where A was rendered"
+      (let [cell [:chains :effect-chains [0 0] :items]
+            event (toggle :effect-chains [0 0])]
+        (turns-on-only (assoc-in {} cell [(fx b) (fx a)]) event (conj cell 1))
+        (turns-on-only (assoc-in {} cell [{:type :group :id other :items [(fx b) (fx a)]}]) event (conj cell 0 :items 1))
+        (is (= {} (modulator/handle (assoc event :state (assoc-in {} cell [(fx b)]))))
+            "A gone, B in its place: nothing")
+        (is (= {} (modulator/handle (assoc event :state (assoc-in {} [:chains :effect-chains [1 0] :items] [(fx a)]))))
+            "never another cell's")
+        (is (= {} (modulator/handle (assoc (dissoc event :effect-instance-id) :effect-path [0]
+                                           :state (assoc-in {} cell [(fx a)]))))
+            "nor a place: a toggle that names no instance does nothing")))
+    (testing "a cue item's effect: the owner, then the effect among its own"
+      (let [root [:chains :cue-chains [0 0] :items]
+            event (toggle :cue-chains [0 0] :owner-id p)
+            moved (assoc-in {} root [{:id other :type :preset :preset-id :circle :effects [(fx b)]}
+                                     {:id p :type :preset :preset-id :circle :effects [(fx b) (fx a)]}])]
+        (turns-on-only moved event (conj root 1 :effects 1))
+        (is (= {} (modulator/handle (assoc event :state (assoc-in {} root [{:id p :type :preset :effects [(fx b)]}]))))
+            "A gone from P")
+        (is (= {} (modulator/handle (assoc (dissoc event :owner-id) :state moved))) "no owner named")))
+    (testing "turning off what is off, or a number off: no change, nothing"
+      (let [cell [:chains :effect-chains [0 0] :items]]
+        (is (= {} (modulator/handle (assoc (toggle :effect-chains [0 0] :fx/event false)
+                                           :state (assoc-in {} cell [(fx a)])))))))))
 
 
 ;; Unknown Event Type Test
@@ -531,3 +583,32 @@
     (is (= [200.0 320.0] (typed "200 abc 320,,")) "what doesn't parse is left out")
     (is (= [-12.5 3.0] (typed " -12.5 ,3 ")))
     (is (= [] (typed "")) "empty clears the palette")))
+
+
+;; Whole numbers in an :int field (follow-up B16b)
+
+(deftest int-fields-store-whole-numbers-test
+  ;; An :int field (the Step's Steps, a MIDI CC's channel and number) stores
+  ;; a whole number, from its slider and from what is typed, as an :int
+  ;; parameter does (h/parse-number-text); a :float field keeps its decimals
+  (let [step {:type :step :source :hit :min 0.0 :max 1.0 :steps 4 :values []}
+        midi {:type :midi :channel 1 :cc 1 :min 0.0 :max 1.0}
+        slid (fn [config k v] (edited config (field-edit :modulator/update-param :mod-param-key k :fx/event v)))
+        typed (fn [config k text lo hi]
+                (edited config (field-edit :modulator/update-param :mod-param-key k :mod-text-field? true
+                                           :mod-param-min lo :mod-param-max hi :text text)))]
+    (testing "a slider's value, rounded"
+      (is (= (assoc step :steps 6) (slid step :steps 5.6)))
+      (is (= (assoc step :steps 5) (slid step :steps 5.4)))
+      (is (integer? (:steps (slid step :steps 5.6))) "a whole number, not 6.0")
+      (is (= ::nothing (slid (assoc step :steps 5) :steps 5.3)) "the 5 it has already: nothing")
+      (is (= (assoc midi :cc 64) (slid midi :cc 63.7))))
+    (testing "what is typed, rounded and clamped"
+      (is (= (assoc step :steps 7) (typed step :steps "6.6" 2 16)))
+      (is (= (assoc step :steps 16) (typed step :steps "99" 2 16)))
+      (is (= (assoc midi :channel 4) (typed midi :channel "3.5" 1 16)))
+      (is (integer? (:channel (typed midi :channel "3.5" 1 16))))
+      (is (= ::nothing (typed step :steps "4.2" 2 16)) "4, the 4 it has"))
+    (testing "a :float field keeps its decimals"
+      (is (= 0.3 (:glide (slid step :glide 0.3))))
+      (is (= 0.35 (:glide (typed step :glide "0.35" 0.0 4.0)))))))
