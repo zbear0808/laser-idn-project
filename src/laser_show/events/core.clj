@@ -948,7 +948,8 @@
    - :history/gesture-alarm - keep the open press's one wake-up: cancel
      its, arm the next; it dispatches :history/gesture-timeout (later,
      wake-up thread)
-   - :link/sync-to-downbeat - align phase to Link's downbeat (inline)
+   - :link/sync-to-downbeat - align phase to Link's downbeat (inline; while
+     Link's beat isn't known, which beat-carabiner 8.0.0 never gives, nothing)
    - :link/connect - connect to Carabiner on the Link thread (input.link);
      :timing/carabiner-connected and the status listener's reports come
      back (later, Link thread and Carabiner's)

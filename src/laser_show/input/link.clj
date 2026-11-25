@@ -1,8 +1,10 @@
 (ns laser-show.input.link
   "Ableton Link synchronization service using beat-carabiner.
    
-   This is a READ-ONLY integration - we receive BPM and beat position
-   from Link but never push our tempo to the Link session.
+   This is a READ-ONLY integration - we receive BPM and peers from Link
+   (not its beat position: beat-carabiner gives none, see
+   get-link-beat-position) but never push our tempo, or a beat, to the
+   Link session.
    
    Architecture:
    - Carabiner: Auto-connects on app startup (embedded lib-carabiner):
@@ -16,9 +18,9 @@
       server): app state never holds them, only plain status
       ([:backend :link]), which comes back as events
    2. Enables/disables Link sync mode on user request
-   3. Listens for Link tempo and beat updates
+   3. Listens for Link tempo and peer updates
    4. Dispatches events to update app state
-   5. Does NOT call set-link-tempo or lock-tempo (read-only)
+   5. Does NOT call set-link-tempo, lock-tempo or beat-at-time (read-only)
    
    The connection:
    - connect! (the :link/connect effect) connects on the Link thread
@@ -364,28 +366,35 @@
 
 
 ;; Beat Position Query
+;;
+;; beat-carabiner 8.0.0 has no way to read Link's beat. state (and so what
+;; its status listeners get) holds :link-bpm and :link-peers only: of each
+;; Carabiner status, which carries the beat too (:beat, :start), it keeps
+;; :bpm and :peers. Its phase probe (phase-at-time) is private, for lining
+;; a Pioneer player up with Link. And its beat-at-time is no query: it
+;; sends Carabiner "beat-at-time t 4.0" (t on Link's clock: System/nanoTime
+;; in microseconds, not the wall clock), returns nil (the socket write's),
+;; and when the answer comes back it moves the whole Link session's beat
+;; grid so a beat falls at t, unless one nearly does (Carabiner's
+;; force-beat-at-time: every peer's playback shifts). This integration is
+;; read only, so it never calls it.
 
 
 (defn get-link-beat-position
-  "Gets the current beat position from Link (0.0-1.0 within beat).
-   Returns nil if Carabiner not connected."
+  "Link's beat phase now (0.0-1.0 within the beat), or nil when it isn't
+   known: with beat-carabiner 8.0.0, always (see above). Sends nothing to
+   Carabiner."
   []
-  (try
-    (when (bc/active?)
-      ;; Call beat-at-time with current time in microseconds
-      (let [current-time-us (* (System/currentTimeMillis) 1000)
-            beat (bc/beat-at-time current-time-us)]
-        (mod beat 1.0)))
-    (catch Exception e
-      (log/error e "Error getting Link beat position:" (.getMessage e))
-      nil)))
+  nil)
 
 (defn sync-to-downbeat!
   "Synchronizes playback to the next downbeat.
    Uses the phase-offset-target mechanism for smooth correction.
    
    This is a one-shot sync operation that calculates the phase
-   offset needed to align with Link's next downbeat."
+   offset needed to align with Link's next downbeat. While Link's beat
+   phase isn't known (get-link-beat-position: with beat-carabiner 8.0.0,
+   never), it does nothing."
   [dispatch-fn accumulated-beats]
   (try
     (when-let [link-beat-phase (get-link-beat-position)]

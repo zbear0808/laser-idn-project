@@ -145,7 +145,9 @@
   "Synchronize playback to Link's next downbeat.
    Uses phase-offset-target mechanism for smooth correction.
    The Link query runs in the :link/sync-to-downbeat effect, which reads the
-   show clock's beats and dispatches :timing/set-phase-offset-target."
+   show clock's beats and dispatches :timing/set-phase-offset-target. Nothing
+   sends this event, and while Link's beat isn't known (beat-carabiner 8.0.0
+   gives none: link/get-link-beat-position) it corrects nothing."
   [_event]
   {:link/sync-to-downbeat {}})
 

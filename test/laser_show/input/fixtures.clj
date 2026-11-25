@@ -137,9 +137,11 @@
    it (:status, :link-bpm :link-peers, as given), bc/disconnect disconnects
    and, as beat-carabiner's read loop does then, tells the disconnection
    listeners left (unexpected? false), and the listeners' add and remove
-   fns keep them. :calls records each call, in order: :connect :disconnect
-   :add-listener :remove-listener :add-closed-listener
-   :remove-closed-listener. What f leaves connected is released
+   fns keep them. bc/beat-at-time, which would move the Link session's beat
+   grid, only records its call and returns nil, as beat-carabiner's does.
+   :calls records each call, in order: :connect :disconnect :add-listener
+   :remove-listener :add-closed-listener :remove-closed-listener
+   :beat-at-time. What f leaves connected is released
    (input.link/release!) while it stands in, and the Link owner opened
    again."
   ([f] (with-carabiner {} f))
@@ -171,7 +173,8 @@
                                                    (swap! carabiner update :disconnection-listeners conj l))
                    bc/remove-disconnection-listener (fn [l]
                                                       (call! :remove-closed-listener)
-                                                      (swap! carabiner update :disconnection-listeners disj l))]
+                                                      (swap! carabiner update :disconnection-listeners disj l))
+                   bc/beat-at-time (fn [& _] (call! :beat-at-time) nil)]
        (link/open!)
        (try
          (f carabiner)

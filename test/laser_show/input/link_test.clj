@@ -426,3 +426,29 @@
             (dispatch {:event/type :timing/link-toggle})
             (is (eventually? #(= 131.0 (bpm))))))
         (finally (events/retire!))))))
+
+
+;; Link's beat (follow-up N4): beat-carabiner 8.0.0 gives none, and its
+;; beat-at-time is no query but a push that moves the Link session's beat
+;; grid; a read-only follower never sends it
+
+(deftest the-beat-read-sends-nothing-to-carabiner-test
+  (with-carabiner {:status {:link-bpm 128.0 :link-peers 2}}
+    (fn [carabiner]
+      (let [sent (atom [])]
+        (link/connect! {} #(swap! sent conj %))
+        (is (eventually? #(some #{connected} @sent)) "a Link session to read")
+        (reset! sent [])
+        (is (nil? (link/get-link-beat-position)) "not known: beat-carabiner gives no beat")
+        (link/sync-to-downbeat! #(swap! sent conj %) 4.3)
+        (is (empty? @sent) "so downbeat sync corrects nothing")
+        (is (zero? (calls carabiner :beat-at-time)) "and no beat probe went to Carabiner")))))
+
+(deftest sync-to-downbeat-changes-nothing-while-the-beat-is-unknown-test
+  (with-carabiner {:status {:link-bpm 128.0 :link-peers 2}}
+    (fn [carabiner]
+      (link/connect! {} (fn [_]))
+      (is (eventually? link/holds-connection?))
+      (events/event-handler {:event/type :timing/sync-to-downbeat})
+      (is (nil? (get-in (state/get-raw-state) [:playback :requests :shift])) "no phase shift asked of the show clock")
+      (is (zero? (calls carabiner :beat-at-time))))))
