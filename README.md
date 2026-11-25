@@ -224,13 +224,18 @@ lockable per-timeline tempo, and a timecode readout and ruler (`Bars | Time`). A
 can follow incoming MIDI timecode (inspector → "Follow timecode: MTC"; beat 0 sits at its
 "Starts at" timecode) from any connected, enabled MIDI input. LTC isn't supported; use an
 LTC→MTC converter.
-Open it from a grid cell's menu ("Create Timeline Cue" / "Open in Timeline Editor"), or through the REPL:
+Timelines are shows in the Shows tab's library. Make one with "+ New Show" on the Shows
+tab, or copy a grid cue into a new show with "New Show from Cue" in the cue chain editor.
+Open a show with its ✎ (Open in Editor) button, or through the REPL:
 
 ```clojure
+;; Copy the cue at A1 into a new show and open the editor on it
 (laser-show.events.core/dispatch!
-  {:event/type :ui/open-dialog
-   :dialog-id :timeline-cue-editor
-   :data {:col 0 :row 0}})
+  {:event/type :shows/new-from-cue :col 0 :row 0})
+
+;; Open the editor on a show already in the library
+(laser-show.events.core/dispatch!
+  {:event/type :shows/open-editor :show-id show-id})
 ```
 
 
