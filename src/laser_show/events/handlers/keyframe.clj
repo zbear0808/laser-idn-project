@@ -345,8 +345,9 @@
   "What :keyframe/update-param writes, as [value], or nil to write nothing.
    A field's typed :text is a number (h/parse-number-text, with :min, :max
    and :is-int?). Otherwise :value or :fx/event, but never a JavaFX event
-   (what a text field's Enter delivers), and for a numeric parameter
-   (numeric-param?) only a finite number."
+   (what a text field's Enter delivers), for a numeric parameter
+   (numeric-param?) only a finite number, and for an :int one a whole
+   number (params/param-number)."
   [state config {:keys [effect-path keyframe-idx param-key] :as event}]
   (if (contains? event :text)
     (some-> (h/parse-number-text (:text event) (:min event) (:max event) (:is-int? event)) vector)
@@ -354,7 +355,7 @@
       (when-not (or (instance? javafx.event.Event value)
                     (and (numeric-param? state config effect-path keyframe-idx param-key)
                          (not (h/finite-number? value))))
-        [value]))))
+        [(params/param-number (params/param-spec state config effect-path param-key) value)]))))
 
 (defn- zone-value
   "The zone :keyframe/set-zone-value sets, or nil for no edit: its :value,

@@ -92,11 +92,19 @@
                                   [:domain :entity-key :owner-id :effect-instance-id :keyframe-idx :param-key]
                                   [:domain :entity-key :effect-path :keyframe-idx :param-key]))])
 
+(def int-slider
+  "What a slider for a whole number (an :int parameter, or an :int field of
+   a modulator) adds to its props: it stops at each whole number and
+   nowhere between (no minor ticks: JavaFX's default three let it stop at
+   quarters), and an arrow key moves it by one. The handlers round what it
+   sends mid-drag as well (params/param-number)."
+  {:snap-to-ticks true :major-tick-unit 1.0 :minor-tick-count 0 :block-increment 1.0})
+
 (defn param-slider
   "Slider control for numeric parameters with editable text field.
    
    Supports both :float and :int parameter types.
-   Int parameters use snap-to-ticks and display as integers.
+   Int parameters step by whole numbers (int-slider) and display as integers.
    
    Defensively handles modulator config maps by extracting static values.
    This can happen in edge cases where keyframes/modulation state gets out of sync.
@@ -138,16 +146,17 @@
                  :property :value
                  :address [on-change-event param-key]
                  :value (double value)
-                 :desc {:fx/type gesture/slider
-                        :id (str "param-" (name param-key) "-slider")
-                        :min min
-                        :max max
-                        :pref-width 150
-                        :snap-to-ticks is-int?
-                        :major-tick-unit (if is-int? 1.0 (/ (- max min) 10.0))
-                        :gesture {:label (str "Adjust " display-label)
-                                  :source-id (slider-source-id :slider param-key on-change-event)
-                                  :on-value-changed (assoc on-change-event :param-key param-key)}}}
+                 :desc (cond-> {:fx/type gesture/slider
+                                :id (str "param-" (name param-key) "-slider")
+                                :min min
+                                :max max
+                                :pref-width 150
+                                :snap-to-ticks false
+                                :major-tick-unit (/ (- max min) 10.0)
+                                :gesture {:label (str "Adjust " display-label)
+                                          :source-id (slider-source-id :slider param-key on-change-event)
+                                          :on-value-changed (assoc on-change-event :param-key param-key)}}
+                         is-int? (merge int-slider))}
                 {:fx/type number-field
                  :id (str "param-" (name param-key) "-field")
                  :text (if is-int?

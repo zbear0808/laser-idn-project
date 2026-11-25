@@ -1,10 +1,13 @@
 (ns laser-show.events.chain-params-handlers-test
   "Tests that boolean parameter edits keep `false` instead of turning it into
-   nil, that a numeric field's typed text commits only a number, and that a
+   nil, that a numeric field's typed text commits only a number, that a
    colour edit takes only a plain colour (follow-up B4), for the effect it
-   names by its instance (N2)."
+   names by its instance (N2), and that an :int parameter stores a whole
+   number (N1)."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [laser-show.animation.effects.intensity] ; :intensity's :amount is a :float
+   [laser-show.animation.effects.points] ; :decimate's :kpps and :fps are :int
    [laser-show.events.handlers.chain.helpers :as chain-helpers]
    [laser-show.events.handlers.chain.params :as params]
    [laser-show.events.handlers.keyframe :as keyframe]
@@ -111,6 +114,38 @@
         (is (= {:red 0.0 :green 0.5 :blue 1.0}
                (colour-of (commit items {:domain :cue-chains :entity-key [0 0] :effect-path [0] :color [0.0 0.5 1.0]})
                           (conj root 0))))))))
+
+(deftest update-param-rounds-an-int-param-test
+  ;; Follow-up N1: a number for an :int parameter (Decimate's scan rate and
+  ;; target fps, a preset's point count) is stored as a whole number, a long,
+  ;; as 01's typed text is (h/parse-number-text): a slider's mid-drag 25.6 is
+  ;; 26. A :float parameter keeps its decimals, and what isn't a number is
+  ;; stored as before
+  (let [cell (assoc-in {} [:chains :effect-chains [0 0] :items]
+                       [{:id #uuid "eeeeeeee-0000-0000-0000-0000000000e1" :effect-id :decimate :enabled? true :params {:kpps 25 :fps 30}}
+                        {:id #uuid "eeeeeeee-0000-0000-0000-0000000000e2" :effect-id :intensity :enabled? true :params {:amount 1.0}}])
+        param #(get-in %1 [:chains :effect-chains [0 0] :items %2 :params %3])
+        commit (fn [event] (params/handle-update-param cell config (merge {:effect-path [0]} event)))]
+    (testing "an effect's :int parameter"
+      (is (= 26 (param (commit {:param-key :kpps :fx/event 25.6}) 0 :kpps)))
+      (is (= 25 (param (commit {:param-key :kpps :fx/event 25.4}) 0 :kpps)))
+      (is (instance? Long (param (commit {:param-key :kpps :fx/event 25.6}) 0 :kpps)) "a long, not 26.0")
+      (is (= 30 (param (commit {:param-key :fps :value 30.25}) 0 :fps)) "from :value too")
+      (is (= 40 (param (commit {:param-key :fps :fx/event 40}) 0 :fps)) "a whole number as it is"))
+    (testing "a :float parameter keeps its decimals"
+      (is (= 0.25 (param (commit {:effect-path [1] :param-key :amount :fx/event 0.25}) 1 :amount))))
+    (testing "what isn't a finite number is stored as before"
+      (is (= {:type :sine :min 1.0 :max 2.0} (param (commit {:param-key :kpps :fx/event {:type :sine :min 1.0 :max 2.0}}) 0 :kpps)))
+      (is (false? (param (commit {:param-key :kpps :fx/event false}) 0 :kpps))))
+    (testing "a preset's :int parameter, in a cue chain"
+      (let [cue (assoc-in {} [:chains :cue-chains [0 0] :items]
+                          [{:id #uuid "eeeeeeee-0000-0000-0000-0000000000e3" :type :preset :preset-id :star
+                            :params {:spikes 5 :outer-radius 0.5}}])
+            cue-config (chain-helpers/chain-config :cue-chains [0 0])
+            edited #(params/handle-update-param cue cue-config {:effect-path [0] :param-key %1 :fx/event %2})]
+        (is (= 7 (get-in (edited :spikes 6.7) [:chains :cue-chains [0 0] :items 0 :params :spikes])))
+        (is (= 0.45 (get-in (edited :outer-radius 0.45) [:chains :cue-chains [0 0] :items 0 :params :outer-radius]))
+            "its :float parameter keeps its decimals")))))
 
 (deftest update-param-unchecked-checkbox-test
   (testing "checkbox :fx/event false is stored as false"

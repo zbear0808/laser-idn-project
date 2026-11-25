@@ -6,6 +6,7 @@
    state as part of the event map and return effect maps with :state key."
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.animation.effects.intensity] ; :intensity's :amount is a :float
+            [laser-show.animation.effects.points] ; :decimate's :kpps is an :int
             [laser-show.events.core :as events]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
@@ -651,5 +652,25 @@
             event (assoc pick :domain :cue-chains :owner-id p :state state)]
         (is (= {:red 0.0 :green 0.5 :blue 1.0} (frame-1 (:state (keyframe/handle event)) (conj root 0 :effects 1))))
         (is (= {} (keyframe/handle (dissoc event :owner-id))) "no owner named")))))
+
+
+;; A keyframe's :int parameter (follow-up N1)
+
+
+(deftest update-param-rounds-an-int-param-test
+  ;; A slider's number for a keyframe's :int parameter (Decimate's scan rate)
+  ;; is stored as a whole number, as the effect's own is
+  (let [effect {:id #uuid "55555555-0000-0000-0000-0000000000e1" :effect-id :decimate :enabled? true
+                :params {:kpps 25 :fps 30}
+                :keyframe-modulator {:enabled? true :selected-keyframe 1
+                                     :keyframes [{:position 0.0 :params {:kpps 20 :fps 30}}
+                                                 {:position 1.0 :params {:kpps 40 :fps 30}}]}}
+        edit (fn [v] (keyframe/handle {:event/type :keyframe/update-param :domain :effect-chains :entity-key [0 0]
+                                       :effect-path [0] :keyframe-idx 1 :param-key :kpps :fx/event v
+                                       :state (make-test-state [effect])}))
+        kpps #(get-in % [:state :chains :effect-chains [0 0] :items 0 :keyframe-modulator :keyframes 1 :params :kpps])]
+    (is (= 26 (kpps (edit 25.6))))
+    (is (instance? Long (kpps (edit 25.6))) "a long, not 26.0")
+    (is (= {} (edit 40.2)) "40, the 40 it has: nothing")))
 
 

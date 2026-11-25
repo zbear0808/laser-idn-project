@@ -8,6 +8,7 @@
   (:require
    [clojure.tools.logging :as log]
    [laser-show.animation.effects :as effects]
+   [laser-show.animation.presets :as presets]
    [laser-show.events.helpers :as h]
    [laser-show.events.handlers.chain.helpers :as chain-helpers]
    [laser-show.events.handlers.effect-params :as effect-params]))
@@ -79,9 +80,13 @@
       (assoc-in state (conj path :clamp-after?) value)
       state)))
 
+(declare param-spec param-number)
+
 (defn handle-update-param
   "Update an effect parameter value.
-   Extracts value from :value or :fx/event.
+   Extracts value from :value or :fx/event; a number for an :int parameter
+   is stored as a whole one (param-number, by its definition: param-spec),
+   so a slider's mid-drag 25.6 is 26.
    
    Parameters:
    - state: Application state
@@ -90,7 +95,8 @@
    
    Returns: Updated state"
   [state config {:keys [effect-path param-key] :as event}]
-  (let [value (h/first-some (:fx/event event) (:value event))
+  (let [value (param-number (param-spec state config effect-path param-key)
+                            (h/first-some (:fx/event event) (:value event)))
         items-path (:items-path config)
         items-vec (vec (get-in state items-path []))
         updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) value)]
@@ -115,14 +121,34 @@
       (assoc-in state items-path updated-items))
     state))
 
+(defn- item-parameters
+  "The parameter definitions of item: an effect's, the effect registry's for
+   its :effect-id; a cue item's or a clip's, its preset's (:preset-id);
+   nil for anything else."
+  [item]
+  (cond
+    (:effect-id item) (:parameters (effects/get-effect (:effect-id item)))
+    (:preset-id item) (:parameters (presets/presets-by-id (:preset-id item)))))
+
 (defn param-spec
-  "The definition of param-key in the effect registry's entry for the effect
-   at effect-path (a path under config's :items-path), or nil when the
-   registry has no such effect or parameter."
+  "The definition of param-key for the item at effect-path (a path under
+   config's :items-path): an effect's from the effect registry, a cue
+   item's or a clip's from its preset (item-parameters); nil when there is
+   no such item, definition or parameter."
   [state config effect-path param-key]
-  (let [effect (get-in state (into (:items-path config) effect-path))]
-    (some #(when (= param-key (:key %)) %)
-          (:parameters (effects/get-effect (:effect-id effect))))))
+  (let [item (get-in state (into (:items-path config) effect-path))]
+    (some #(when (= param-key (:key %)) %) (item-parameters item))))
+
+(defn param-number
+  "value as a parameter of spec holds it: for an :int parameter a finite
+   number rounded to a whole number, a long, as h/parse-number-text reads
+   a typed one; any other value, or another parameter's, as it is.
+   
+   Example: (param-number {:key :kpps :type :int} 25.6) => 26"
+  [spec value]
+  (if (and (= :int (:type spec)) (h/finite-number? value))
+    (Math/round (double value))
+    value))
 
 (defn numeric-spec?
   "Does a parameter of spec hold a number: :float or :int, or no :type (a

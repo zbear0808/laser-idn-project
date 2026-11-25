@@ -178,7 +178,7 @@
                                           :source-id (param-controls/slider-source-id :modulator-slider key on-change-event)
                                           :on-value-changed (assoc on-change-event :mod-param-key key)}}
                          ;; A whole number at every tick, none between
-                         is-int? (assoc :snap-to-ticks true :major-tick-unit 1.0 :minor-tick-count 0))}
+                         is-int? (merge param-controls/int-slider))}
                 {:fx/type param-controls/number-field
                  :id (str (param-id on-change-event key) "-field")
                  :text (if is-int?
@@ -568,13 +568,15 @@
                                                     :value (double static-value)
                                                     ;; static-change-event preserves an inactive modulator config
                                                     :on-change (fn [v] (assoc static-change-event :fx/event v))
-                                                    :desc {:fx/type :slider
-                                                           :id (str "param-" (name param-key) "-slider")
-                                                           :min min
-                                                           :max max
-                                                           :pref-width 120
-                                                           :snap-to-ticks is-int?
-                                                           :major-tick-unit (if is-int? 1.0 (/ (- max min) 10.0))}}
+                                                    :desc (cond-> {:fx/type :slider
+                                                                   :id (str "param-" (name param-key) "-slider")
+                                                                   :min min
+                                                                   :max max
+                                                                   :pref-width 120
+                                                                   :snap-to-ticks false
+                                                                   :major-tick-unit (/ (- max min) 10.0)}
+                                                            ;; An :int parameter's stops at whole numbers
+                                                            is-int? (merge param-controls/int-slider))}
                                                    {:fx/type param-controls/number-field
                                                     :id (str "param-" (name param-key) "-field")
                                                     :text (if is-int?
