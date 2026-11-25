@@ -21,7 +21,7 @@
   (:import [javafx.event Event]
            [javafx.scene Node]
            [javafx.scene.control Control Labeled]
-           [javafx.scene.input ClipboardContent KeyCode MouseButton MouseEvent TransferMode]))
+           [javafx.scene.input ClipboardContent ContextMenuEvent KeyCode MouseButton MouseEvent TransferMode]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -100,7 +100,7 @@
         (is (= #{a b} (selection)))
         (ui/wait-for! #(= #{0 1} (selected-rows)))
         (is (= #{0 1} (selected-rows))))
-      (testing "on an unselected row it selects that row alone, as the click finds the selection then"
+      (testing "on an unselected row it selects that row alone, by the selection when the click is handled"
         (right-click-row! (nth (cue-list-rows) 2))
         (ui/wait-for! #(= #{c} (selection)))
         (ui/wait-for! #(= #{2} (selected-rows)))
@@ -259,6 +259,120 @@
       (testing "the field edited its text; the list did nothing"
         (is (= before (cue-items)))
         (is (= selection (selected-ids)))))))
+
+(defn- row-menu-showing?
+  "Whether the context menu of row (on the label hosting it) is showing."
+  [^Node row]
+  (ui/on-fx-thread #(boolean (some-> ^Control (.getParent row) .getContextMenu .isShowing))))
+
+(defn- close-menu!
+  "Escape, which the open menu takes: row's menu closes."
+  [robot row]
+  (.push ^org.testfx.api.FxRobot robot (into-array KeyCode [KeyCode/ESCAPE]))
+  (ui/wait-for! #(not (row-menu-showing? row))))
+
+(defn- fire-at-row!
+  "Fire steps at the centre of row, each on its own, as a mouse button's
+   press, release and click (button, with Control held for ctrl?) and the
+   context menu asked for (:menu) come on a real display."
+  [^Node row button ctrl? steps]
+  (doseq [step steps]
+    (ui/on-fx-thread
+     #(let [bounds (.getBoundsInLocal row)
+            screen (.localToScreen row bounds)
+            x (/ (.getWidth bounds) 2)
+            y (/ (.getHeight bounds) 2)
+            sx (+ (.getMinX screen) x)
+            sy (+ (.getMinY screen) y)
+            down? (= :press step)]
+        (Event/fireEvent row
+                         (if (= :menu step)
+                           (ContextMenuEvent. ContextMenuEvent/CONTEXT_MENU_REQUESTED x y sx sy false nil)
+                           (MouseEvent. ({:press MouseEvent/MOUSE_PRESSED
+                                          :release MouseEvent/MOUSE_RELEASED
+                                          :click MouseEvent/MOUSE_CLICKED} step)
+                                        x y sx sy button 1
+                                        false ctrl? false false
+                                        (and down? (= MouseButton/PRIMARY button)) false
+                                        (and down? (= MouseButton/SECONDARY button))
+                                        false false true nil)))))
+    (ui/sync-fx!)))
+
+(deftest a-right-click-selects-its-row-before-the-menu-test
+  ;; Follow-up B1: only the row's click selected an unselected row, but the
+  ;; menu opens on the press (headless, macOS, Linux) and its window can
+  ;; take the release, so the row got no click: the editor kept showing,
+  ;; and Delete after the menu deleted, the old selection. The robot's
+  ;; right-click here is that sequence: press, menu asked for and shown,
+  ;; release in the menu's window
+  (let [robot (ui/robot)
+        component-id [:cue-chain 0 0]
+        selection #(get-in (state/get-raw-state) [:list-ui component-id :selected-ids])
+        ids #(mapv :id (cue-items))]
+    (open-cue-chain-editor!)
+    (add-cue-chain-items! [:square :triangle :star])
+    (let [[a b c d] (ids)]
+      (testing "with A selected, a right-click on B selects B alone as its menu opens"
+        (ui/click-node! robot (nth (cue-list-rows) 0))
+        (ui/wait-for! #(= #{a} (selection)))
+        (let [row (nth (cue-list-rows) 1)]
+          (ui/right-click-node! robot row)
+          (is (row-menu-showing? row) "its menu opened")
+          (ui/wait-for! #(= #{b} (selection)))
+          (ui/wait-for! #(= #{1} (selected-rows)))
+          (close-menu! robot row)))
+      (testing "Delete then deletes B alone"
+        (push! robot KeyCode/DELETE)
+        (ui/wait-for! #(not= 4 (count (ids))))
+        (is (= [a c d] (ids))))
+      (testing "a right-click within a multi-selection keeps it"
+        (ui/click-node! robot (nth (cue-list-rows) 0))
+        (ui/modifier-click-node! robot (nth (cue-list-rows) 1) KeyCode/SHORTCUT)
+        (ui/wait-for! #(= #{a c} (selection)))
+        (let [row (nth (cue-list-rows) 1)]
+          (ui/right-click-node! robot row)
+          (is (row-menu-showing? row))
+          (is (events/flush!))
+          (is (= #{a c} (selection)))
+          (close-menu! robot row))
+        (push! robot KeyCode/DELETE)
+        (ui/wait-for! #(not= 3 (count (ids))))
+        (is (= [d] (ids)))))))
+
+(deftest a-right-click-selects-its-row-in-each-platforms-order-test
+  ;; Follow-up B1, the orders a real display sends: the menu on the press
+  ;; (macOS, Linux), or after the click (Windows), or macOS's Control-click,
+  ;; a primary press that asks for the menu. Each selects the row it was on,
+  ;; or keeps a selection that has it; a click after the menu opened adds
+  ;; nothing (Control-click doesn't toggle the row back off)
+  (let [robot (ui/robot)
+        component-id [:cue-chain 0 0]
+        selection #(get-in (state/get-raw-state) [:list-ui component-id :selected-ids])]
+    (open-cue-chain-editor!)
+    (add-cue-chain-items! [:square :triangle])
+    (let [[a b c] (mapv :id (cue-items))]
+      (doseq [[label button ctrl? steps] [["the menu on the press" MouseButton/SECONDARY false [:press :menu :release :click]]
+                                          ["the menu after the click" MouseButton/SECONDARY false [:press :release :click :menu]]
+                                          ["Control-click" MouseButton/PRIMARY true [:press :menu :release :click]]]]
+        (testing label
+          (testing "on an unselected row"
+            (ui/click-node! robot (nth (cue-list-rows) 0))
+            (ui/wait-for! #(= #{a} (selection)))
+            (let [row (nth (cue-list-rows) 1)]
+              (fire-at-row! row button ctrl? steps)
+              (is (row-menu-showing? row))
+              (is (events/flush!))
+              (is (= #{b} (selection)))
+              (close-menu! robot row)))
+          (testing "within a multi-selection"
+            (ui/modifier-click-node! robot (nth (cue-list-rows) 2) KeyCode/SHORTCUT)
+            (ui/wait-for! #(= #{b c} (selection)))
+            (let [row (nth (cue-list-rows) 2)]
+              (fire-at-row! row button ctrl? steps)
+              (is (row-menu-showing? row))
+              (is (events/flush!))
+              (is (= #{b c} (selection)))
+              (close-menu! robot row))))))))
 
 (deftest grouped-list-drag-and-drop-reorders-items
   (let [robot (ui/robot)]

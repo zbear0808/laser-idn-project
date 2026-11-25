@@ -87,6 +87,17 @@
                       state-with-selection)]
     {:state state-final}))
 
+(defn- handle-select-for-menu
+  "The :context mode of :list/select-item, for a right-click or a row's
+   menu asked for: nothing changes while the selection has item-id (a
+   right-click in a multi-selection keeps it, and the item effects selected
+   in it), else item-id is selected alone. By the selection when it is
+   handled, so after the clicks before it (follow-up B1)."
+  [{:keys [component-id item-id state] :as event}]
+  (if (contains? (get-in state [:list-ui component-id :selected-ids]) item-id)
+    {:state state}
+    (handle-select-item (assoc event :mode :single))))
+
 (defn- handle-select-all
   "Select all items in the component: the list's items in the state."
   [{:keys [component-id state] :as event}]
@@ -456,7 +467,9 @@
   [{:keys [event/type] :as event}]
   (case type
     ;; Selection
-    :list/select-item (handle-select-item event)
+    :list/select-item (if (= :context (:mode event))
+                        (handle-select-for-menu event)
+                        (handle-select-item event))
     :list/select-all (handle-select-all event)
     :list/clear-selection (handle-clear-selection event)
 

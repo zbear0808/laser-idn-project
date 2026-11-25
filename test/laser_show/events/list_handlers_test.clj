@@ -201,6 +201,32 @@
       (is (nil? (get-in result [:state :list-ui [:item-effects 0 0] :last-selected-id]))))))
 
 
+(deftest select-item-for-a-menu-test
+  ;; Follow-up B1: a right-click, or a row's menu asked for (:context),
+  ;; keeps a selection that has the item and selects another item alone, by
+  ;; the selection when the event is handled
+  (let [state {:list-ui {[:cue-chain 0 0] {:selected-ids #{:a :b} :last-selected-id :b}
+                         [:item-effects 0 0] {:selected-ids #{:e} :last-selected-id :e}}}
+        for-menu (fn [state item-id]
+                   (:state (list-handlers/handle {:event/type :list/select-item
+                                                  :component-id [:cue-chain 0 0]
+                                                  :item-id item-id
+                                                  :mode :context
+                                                  :state state})))]
+    (testing "on a selected item nothing changes, nor the item effects selected in it"
+      (is (identical? state (for-menu state :a))))
+    (testing "on another item, it alone, as a click selects it"
+      (let [after (for-menu state :c)]
+        (is (= {:selected-ids #{:c} :last-selected-id :c} (get-in after [:list-ui [:cue-chain 0 0]])))
+        (is (= #{} (get-in after [:list-ui [:item-effects 0 0] :selected-ids])))
+        (testing "and again, as the menu and then its click ask: the same"
+          (is (identical? after (for-menu after :c))))))
+    (testing "after a Ctrl-click that added the item, the multi-selection stays"
+      (let [added (:state (list-handlers/handle {:event/type :list/select-item :component-id [:cue-chain 0 0]
+                                                 :item-id :c :mode :ctrl :state state}))]
+        (is (= #{:a :b :c} (get-in (for-menu added :c) [:list-ui [:cue-chain 0 0] :selected-ids])))))))
+
+
 (deftest select-all-test
   (testing "Select all selects the list's items in the state, not IDs the event brings"
     (let [state {:chains {:effect-chains {[1 0] {:items [{:id :x} {:id :y}]}}}
