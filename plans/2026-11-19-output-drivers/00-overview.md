@@ -35,7 +35,7 @@ Build order: **step 0** (the shared skeleton: the driver registry and its checks
 | D1 | IDN runs as a driver behind a contract. Every existing wire and lifecycle test still passes | ~1.5–2 d |
 | D2 | `:driver` and `:driver-config` on projectors, a Type picker in Add Manual, generic driver fields, the point encoder, the built-in LSPS driver | ~2 d |
 | D3 | Jar add-ons: loading, checking, the Settings → Add-ons section, Install add-on… | ~2 d |
-| D4 | Scan runs every discoverer; each new output becomes a disabled card, and a known output keeps its projector when it moves | Done on `output-d4-discovery` |
+| D4 | Scan runs every discoverer; each new output becomes a disabled card, and a known output keeps its projector when it moves | Done (`4b22368`) |
 | D5 | Proof on real USB hardware: an add-on from its own repo loads, scans, streams and stops cleanly. Only fixes to the contract or the loader land in this repo | ~1 d here (+ the add-on's own work) |
 
 ## 1. Current behaviour (file:line)

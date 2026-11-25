@@ -40,7 +40,7 @@ The ranked priorities below, as of `111f3a0`; rows 12, 14 and 17 updated after t
 
 Open decisions: `/plans` stays in git (`ba3c911`). The keyboard input source went into `plans/2026-11-13-keyboard-focus-window-lifecycle/` (Phase 5). Still open: adopt or delete the `triggers/` engine; the sequel-fragment chunk header (fragmentation stays off until a reference receiver is available, output runtime §7).
 
-Active plans: `plans/2026-11-13-keyboard-focus-window-lifecycle/` (Phases 2–5, decisions D4–D12), `plans/2026-11-08-timeline-rework/09-effect-racks.md` (proposed), and the output runtime's hardware and hidden-window checks (05 §8). `plans/2026-11-17-show-clock/` is done (`dd106de`, `7d67aff`, `378db47`).
+Active plans (2026-11-23): the keyboard plan's manual desktop checks (`plans/2026-11-13-keyboard-focus-window-lifecycle/05` §8; all five phases are on `master`), the output runtime's hardware and hidden-window checks (05 §8), and `plans/2026-11-23-cljfx-reactivity-audit.md`. `plans/2026-11-20-state-integrity/` is done and deleted (`09b6db7`..`7412ac6`). `plans/2026-11-17-show-clock/` is done (`dd106de`, `7d67aff`, `378db47`).
 
 **Deferred — very low priority (2026-11-23): live controls during project Save/Open.** Project ZIP reads and writes run inline on the event thread, so live inputs wait. If 02 M3 step 4 is picked up later, preserve Save-then-Exit: the pending action must wait for a successful write, and later edits must stay unsaved. The independent device-connect work remains in 02 M4.
 
@@ -128,7 +128,5 @@ These came up in more than one review and are best fixed once, centrally.
 - Ownership: effects (03) own NaN handling and clamping; output (04) owns the NaN failsafe and frame structure; calibration fail-closed is shared.
 
 ## Open decisions
-- Keep `/plans` in git?
 - `triggers/` engine: adopt or delete?
-- Keyboard input source: fold into `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md`?
 - Sequel-fragment chunk header (04): confirm against a reference receiver before changing.

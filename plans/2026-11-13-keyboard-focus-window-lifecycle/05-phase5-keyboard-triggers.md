@@ -1,7 +1,7 @@
 # Phase 5 — Keyboard as a cue-trigger source
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)   **Re-checked:** 2026-11-22 at `2227bce`, 275 commits later: every citation re-checked; K-15 found fixed by other work; the Settings placeholder found gone; the trigger actions added by vibes and zones (Z4, Z5), the new windows and their keys taken in (§0)
-**Status:** Implemented on `keyboard-phase5` from `eb25043`; D10–D12 answered A. **Last verified against:** `79bd080`, with both full regression suites passing (§10). The manual macOS window-focus and held-key checks in §8 remain open.
+**Status:** Done and on `master` (`79bd080`); D10–D12 answered A. **Last verified against:** `79bd080`, with both full regression suites passing (§10). The manual macOS window-focus and held-key checks in §8 remain open.
 **Size:** ~1–1.5 days   **Needs:** nothing open   **Depends on:** Phase 3 (`views.keys`), Phase 2 (the shell)
 **Supersedes / Superseded by:** none (replaces the "keyboard trigger source" amendment in `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md`)   **Related findings:** K-13, K-15 (`00-overview.md` §4); review 05 F17, L3, F9 (learn also fires the old binding: fixed)
 

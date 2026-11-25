@@ -1,7 +1,7 @@
 # Zones: set up the rig once, let cues adapt to it
 
 **Written:** 2026-11-19   **Written for commit:** `f9fc352` (`master`). Other work is landing in parallel (vibe phases, UX phases), so **re-check every cited path and line at HEAD before starting a phase.**
-**Status:** Proposed, with the design decided (§2). **Not to be built yet**: the repo is still changing. The open questions are in §9.
+**Status:** Built. Z0–Z6, ZR, 11 (vibe Phase 8), 12 (Decimate) and 13 (Projectors layout) are done on `master`; see each phase doc's status. Still owed: the real-projector checks in Z1 (decides `edge-dwell`), Z3 (R-1), Z4, Z5, Z6 and 11. Q1 in `10-questions.md` (how many lasers, laid out how) is still open.
 **Supersedes:** `plans/2026-11-19-zones-needs/07-plan.md` (the draft this grew from) and the options in `plans/2026-11-18-zones-ux/00-overview.md`. **Requirements:** `plans/2026-11-19-zones-needs/` (needs, conflicts, scenarios). **Future rig setup:** `plans/2026-11-19-zones-needs/08-rig-setup-ux-future.md`. **Must fit with:** vibe Phase 8 (`plans/2026-11-19-zones/11-vibe-phase8-zone-effects.md`), see §6.
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks anything that doesn't exist yet.

@@ -1,8 +1,8 @@
 # Keyboard, focus and window lifecycle — overview
 
 **Written:** 2026-11-13   **Written for commit:** `cb32414` (`master`)
-**Status:** All five phases are implemented on `keyboard-phase5`; Phase 5 builds on `keyboard-phase2` (`eb25043`). All decisions are answered (§7). **Last verified against:** `79bd080`; the full unit and headless UI suites passed. The remaining manual desktop checks are in Phase 5 §8. §2 is the historical priority comparison at `cb32414`.
-**Supersedes / Superseded by:** supersedes `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md` (approved with D0 on 2026-11-14; that file is marked superseded and otherwise untouched)
+**Status:** All five phases are on `master` (Phase 2 `90dbe87`, Phase 5 `79bd080`). All decisions are answered (§7). **Last verified against:** `79bd080`; the full unit and headless UI suites passed. Only the manual desktop checks in Phase 5 §8 remain; delete this plan once they're done. §2 is the historical priority comparison at `cb32414`.
+**Supersedes / Superseded by:** supersedes `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md` (deleted; in git history)
 **Related findings:** review 01 F3, F4, F7, F18, F20, M5, L3, Q4, Q6; 02 #15, M4 (clipboard part); 05 F17, F9, L3; carry-overs "menu stubs" and "unsaved-changes guard"; undo plan §10
 
 ## Start here
