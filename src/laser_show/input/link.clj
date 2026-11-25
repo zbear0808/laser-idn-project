@@ -400,8 +400,9 @@
     (when-let [link-beat-phase (get-link-beat-position)]
       (let [;; Calculate how far we are into the current beat
             internal-phase (mod accumulated-beats 1.0)
-            ;; Calculate correction needed to align with Link
-            phase-diff (- link-beat-phase internal-phase)
+            ;; Calculate correction needed to align with Link (never reached
+            ;; while get-link-beat-position can only answer nil)
+            phase-diff #_{:clj-kondo/ignore [:type-mismatch]} (- link-beat-phase internal-phase)
             ;; Normalize to -0.5 to 0.5 range (shortest path)
             correction (cond
                          (> phase-diff 0.5)  (- phase-diff 1.0)
