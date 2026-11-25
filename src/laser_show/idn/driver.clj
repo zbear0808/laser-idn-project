@@ -188,8 +188,10 @@
 
 (defn- send-frame!
   "Encode frame and send its packet(s), with the channel configuration when it
-   is due (should-resend-config?). Returns {:transfers packet-count
-   :duration-us d} (01 §1.2)."
+   is due (should-resend-config?). The config counts as sent once every
+   packet has gone out: a send that throws leaves it due, so the first frame
+   that goes out after it carries the config. Returns {:transfers
+   packet-count :duration-us d} (01 §1.2)."
   [session frame]
   (let [{:keys [target-host target-port socket service-id channel-id]} session
         include-config? (should-resend-config? session)
@@ -197,10 +199,8 @@
         ;; Get vector of packets (1 if no fragmentation, multiple if fragmented)
         idn-packets (create-idn-stream-packets session frame include-config? duration-us)
         packet-count (count idn-packets)
-        log-count (swap! stream-log-counter inc)]
-    
-    (when include-config?
-      (reset! (:last-config-ns session) (System/nanoTime)))
+        log-count (swap! stream-log-counter inc)
+        config-ns (when include-config? (System/nanoTime))]
     
     ;; Send all packets (fragments) for this frame
     (doseq [idn-packet idn-packets]
@@ -216,6 +216,8 @@
                              (count frame) packet-count (alength hello-packet) seq-num)))
         
         (hello/send-packet-to socket hello-packet (target-address! session) target-port)))
+    (when config-ns
+      (reset! (:last-config-ns session) config-ns))
     {:transfers packet-count :duration-us duration-us}))
 
 (defn- on-error
