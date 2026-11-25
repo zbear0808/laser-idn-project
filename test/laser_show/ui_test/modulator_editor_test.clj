@@ -704,3 +704,28 @@
       (ui/fill! robot "#modulator-amount-path" "/fader/1")
       (ui/submit! robot "#modulator-amount-path")
       (is (ui/wait-for! #(and (= "/fader/1" (:path (amount))) (= "/fader/1" (text-of "#modulator-amount-path"))))))))
+
+(deftest int-fields-show-and-store-whole-numbers-test
+  ;; Follow-up B16b: the Step's Steps is an :int field: its slider stops at
+  ;; whole numbers, its field shows one, and both store one
+  (let [robot (ui/robot)
+        config {:type :step :active? true :source :hit :min 0.0 :max 1.0 :steps 4 :order :up :values []}
+        slider "#modulator-amount-steps"
+        field "#modulator-amount-steps-field"]
+    (open-amount-editor! config)
+    (ui/wait-for! #(and (some? (node slider)) (some? (node field))))
+    (is (= "4" (text-of field)))
+    (testing "a click on the slider's track, 0.37 of the way along 2 to 16 (7.18)"
+      (let [s (node slider)]
+        (ui/on-fx-thread #(do (track-event! s MouseEvent/MOUSE_PRESSED 0.37)
+                              (track-event! s MouseEvent/MOUSE_RELEASED 0.37))))
+      (is (ui/wait-for! #(let [steps (:steps (amount))]
+                           (and (integer? steps) (not= 4 steps)
+                                (= (str steps) (text-of field))
+                                (== steps (slider-value slider)))))
+          "a whole number, stored and shown by the field and the slider")
+      (is (= (dissoc config :steps) (dissoc (amount) :steps)) "the rest of the Step stays"))
+    (testing "a typed 6.6"
+      (ui/fill! robot field "6.6")
+      (ui/submit! robot field)
+      (is (ui/wait-for! #(and (= 7 (:steps (amount))) (= "7" (text-of field)) (== 7.0 (slider-value slider))))))))

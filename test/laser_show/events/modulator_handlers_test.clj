@@ -583,3 +583,32 @@
     (is (= [200.0 320.0] (typed "200 abc 320,,")) "what doesn't parse is left out")
     (is (= [-12.5 3.0] (typed " -12.5 ,3 ")))
     (is (= [] (typed "")) "empty clears the palette")))
+
+
+;; Whole numbers in an :int field (follow-up B16b)
+
+(deftest int-fields-store-whole-numbers-test
+  ;; An :int field (the Step's Steps, a MIDI CC's channel and number) stores
+  ;; a whole number, from its slider and from what is typed, as an :int
+  ;; parameter does (h/parse-number-text); a :float field keeps its decimals
+  (let [step {:type :step :source :hit :min 0.0 :max 1.0 :steps 4 :values []}
+        midi {:type :midi :channel 1 :cc 1 :min 0.0 :max 1.0}
+        slid (fn [config k v] (edited config (field-edit :modulator/update-param :mod-param-key k :fx/event v)))
+        typed (fn [config k text lo hi]
+                (edited config (field-edit :modulator/update-param :mod-param-key k :mod-text-field? true
+                                           :mod-param-min lo :mod-param-max hi :text text)))]
+    (testing "a slider's value, rounded"
+      (is (= (assoc step :steps 6) (slid step :steps 5.6)))
+      (is (= (assoc step :steps 5) (slid step :steps 5.4)))
+      (is (integer? (:steps (slid step :steps 5.6))) "a whole number, not 6.0")
+      (is (= ::nothing (slid (assoc step :steps 5) :steps 5.3)) "the 5 it has already: nothing")
+      (is (= (assoc midi :cc 64) (slid midi :cc 63.7))))
+    (testing "what is typed, rounded and clamped"
+      (is (= (assoc step :steps 7) (typed step :steps "6.6" 2 16)))
+      (is (= (assoc step :steps 16) (typed step :steps "99" 2 16)))
+      (is (= (assoc midi :channel 4) (typed midi :channel "3.5" 1 16)))
+      (is (integer? (:channel (typed midi :channel "3.5" 1 16))))
+      (is (= ::nothing (typed step :steps "4.2" 2 16)) "4, the 4 it has"))
+    (testing "a :float field keeps its decimals"
+      (is (= 0.3 (:glide (slid step :glide 0.3))))
+      (is (= 0.35 (:glide (typed step :glide "0.35" 0.0 4.0)))))))

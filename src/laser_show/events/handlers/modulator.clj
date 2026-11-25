@@ -156,10 +156,11 @@
       {})))
 
 (defn- parse-text-value
-  "Parse a text field value, clamping to min/max bounds: nil unless it is a
-   finite number (h/parse-number-text)."
-  [text-value min-val max-val]
-  (h/parse-number-text (str text-value) min-val max-val false))
+  "Parse a text field value, clamping to min/max bounds, a whole number for
+   an :int field (int?): nil unless it is a finite number
+   (h/parse-number-text)."
+  [text-value min-val max-val int?]
+  (h/parse-number-text (str text-value) min-val max-val int?))
 
 (defn- parse-number-list
   "The numbers in text, split on commas and spaces, as doubles; what doesn't
@@ -195,8 +196,9 @@
    number, clamped to :mod-param-min and :mod-param-max (parse-text-value).
    A control's own value (:value, else :fx/event) is taken when it fits the
    field: a finite number for a number, one of its :choices for a choice,
-   true or false for a checkbox. Never anything else, such as the
-   ActionEvent a text field's Enter delivers."
+   true or false for a checkbox. An :int field's number is a whole one,
+   rounded (a slider's 5.6 is 6, as typed \"5.6\" is). Never anything else,
+   such as the ActionEvent a text field's Enter delivers."
   [{:keys [type choices]} event]
   (if (or (:mod-text-field? event) (:text-field? event))
     (let [text (:text event)]
@@ -204,11 +206,13 @@
         (case type
           :text (text-or-edn text)
           :number-list (parse-number-list text)
-          (:float :int nil) (parse-text-value text (or (:mod-param-min event) -10.0) (or (:mod-param-max event) 10.0))
+          (:float :int nil) (parse-text-value text (or (:mod-param-min event) -10.0) (or (:mod-param-max event) 10.0)
+                                              (= :int type))
           nil)))
     (let [v (h/first-some (:value event) (:fx/event event))]
       (case type
-        (:float :int nil) (when (h/finite-number? v) v)
+        (:float nil) (when (h/finite-number? v) v)
+        :int (when (h/finite-number? v) (Math/round (double v)))
         :choice (when (some #(= v %) choices) v)
         :boolean (when (boolean? v) v)
         nil))))

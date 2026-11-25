@@ -112,19 +112,23 @@
 (defn- modulator-param-slider
   "Slider for a single modulator parameter with editable text field; both
    show the value that applies after a change the app refused (the show
-   lock) too: applied-value, commit-field.
+   lock) too: applied-value, commit-field. An :int parameter's (the Step's
+   Steps, a MIDI channel) snaps to whole numbers and shows one; the handler
+   stores a whole number whatever the slider or the field sends.
    
    Uses same pattern as parameter-controls/param-slider for consistency.
    
    Props:
-   - :param-def - Parameter definition map with :key, :label, :min, :max, :default
+   - :param-def - Parameter definition map with :key, :label, :min, :max,
+     :default and :type (:float or :int)
    - :current-value - Current value for this parameter
    - :on-change-event - Event template for slider value changes (receives :mod-param-key)
    - :on-text-event - Event template for the text field (receives
      :mod-param-key, :mod-text-field? true, its bounds and the typed :text:
      param-controls/number-field)"
   [{:keys [param-def current-value on-change-event on-text-event]}]
-  (let [{:keys [key label min max default]} param-def
+  (let [{:keys [key label min max default type]} param-def
+        is-int? (= :int type)
         ;; Handle invalid values defensively - only use current-value if it's a number
         value (if (number? current-value)
                 current-value
@@ -148,17 +152,21 @@
                  :property :value
                  :address [on-change-event key]
                  :value (double value)
-                 :desc {:fx/type gesture/slider
-                        :id (param-id on-change-event key)
-                        :min min
-                        :max max
-                        :pref-width 80
-                        :gesture {:label (str "Adjust " (or label (name key)))
-                                  :source-id [:modulator-slider key]
-                                  :on-value-changed (assoc on-change-event :mod-param-key key)}}}
+                 :desc (cond-> {:fx/type gesture/slider
+                                :id (param-id on-change-event key)
+                                :min min
+                                :max max
+                                :pref-width 80
+                                :gesture {:label (str "Adjust " (or label (name key)))
+                                          :source-id [:modulator-slider key]
+                                          :on-value-changed (assoc on-change-event :mod-param-key key)}}
+                         ;; A whole number at every tick, none between
+                         is-int? (assoc :snap-to-ticks true :major-tick-unit 1.0 :minor-tick-count 0))}
                 {:fx/type param-controls/number-field
                  :id (str (param-id on-change-event key) "-field")
-                 :text (format "%.2f" (double value))
+                 :text (if is-int?
+                         (str (long value))
+                         (format "%.2f" (double value)))
                  :pref-width 50
                  :style "-fx-font-size: 10; -fx-padding: 2 4;"
                  ;; Text field event includes mod-param-key and text field marker
