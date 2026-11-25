@@ -1,0 +1,410 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+:root { --kick:#56B4E9; --snare:#F0E442; --hat:#5fe3c4; --bass:#a78bfa; --tom:#E69F00; --next:#CC79A7; --drop:#ffd27a;
+        --you:#ffffff; --music:#6ee7a0; --loop:#ff7ac8; --clock:#FFB000; }
+.page { background:#08090b; }
+.topband { height:48px; display:flex; align-items:center; gap:14px; padding:0 14px 0 16px; background:#0d0f12; border-bottom:1px solid #1d2128; white-space:nowrap; }
+.live { font-size:12px; font-weight:800; letter-spacing:.08em; color:#8ff0a8; padding:3px 9px; border-radius:4px; background:#0f3b1c; border:1px solid #2fbf5a; }
+.trk { font-size:14px; font-weight:600; color:#eee; }
+.trk span { color:var(--text2); font-weight:400; margin-left:8px; font-size:12.5px; }
+.bpm { font-family:"SF Mono",Menlo,monospace; font-size:15px; font-weight:700; }
+.bpm small { color:var(--muted); font-weight:400; font-size:11px; margin-left:4px; }
+.phr { display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:8px; background:#12161b; border:1px solid #262c35; }
+.phr .lb { font-size:11px; color:#9aa4ae; font-weight:700; letter-spacing:.06em; }
+.phr .bn { font-size:13px; color:#fff; font-weight:800; font-family:"SF Mono",Menlo,monospace; }
+.phr .bn small { color:#8c96a0; font-weight:400; }
+.segs { display:flex; gap:2px; }
+.segs i { width:4px; height:16px; border-radius:1px; background:#2a3038; }
+.segs i.d { background:#6b7a8c; }
+.segs i.now { background:#fff; box-shadow:0 0 6px #fff; }
+.segs i.t { background:transparent; border:1.5px solid var(--drop); }
+.mini { height:22px; min-width:22px; padding:0 6px; border-radius:4px; border:1px solid #3a414b; font-size:11px; font-weight:800; color:#d8dee5; display:inline-flex; align-items:center; justify-content:center; background:#171b21; }
+.conf { font-size:11.5px; font-weight:800; color:#8ff0a8; padding:3px 8px; border-radius:10px; background:#0f2e18; border:1px solid #2fbf5a; }
+.conf span { color:#a9c9b2; font-weight:500; }
+.src { font-size:11.5px; color:var(--text2); display:inline-flex; align-items:center; gap:6px; }
+.stop { margin-left:auto; height:32px; padding:0 14px; border-radius:6px; background:#b3170f; border:2px solid #ff6a5a; color:#fff; display:inline-flex; align-items:center; gap:8px; font-weight:800; letter-spacing:.06em; font-size:13px; box-shadow:0 0 14px rgba(255,60,40,.35); }
+.stop i { width:12px; height:12px; background:#fff; border-radius:2px; }
+.stop small { font-weight:600; letter-spacing:0; opacity:.85; font-size:11px; }
+
+.card2 { position:absolute; border-radius:12px; background:#0d0f12; border:1px solid #1e232b; }
+.card2 > h3 { position:absolute; left:16px; top:13px; color:#c9d3dd; }
+.pill { font-size:11.5px; padding:3px 9px; border-radius:10px; background:rgba(20,24,30,.85); border:1px solid #2c333d; color:#cdd6e0; white-space:nowrap; }
+.hr { position:absolute; right:14px; top:10px; display:flex; gap:6px; }
+
+/* ring */
+.ringc { left:14px; top:94px; width:500px; height:400px; }
+#ring { position:absolute; left:6px; top:44px; }
+.lays { position:absolute; left:318px; top:52px; width:168px; }
+.ly { border-radius:8px; background:#15181d; border:1px solid #232831; padding:6px 9px 6px 12px; margin-bottom:6px; position:relative; }
+.ly::before { content:""; position:absolute; left:0; top:6px; bottom:6px; width:4px; border-radius:2px; background:var(--lc); }
+.ly b { display:block; font-size:12.5px; color:#fff; }
+.ly > span { display:block; font-size:11px; color:#a4aeb8; line-height:1.35; }
+.ly .st { color:#cfd6dd; }
+.ly.stby { opacity:.8; }
+.ly.empty { background:transparent; border-style:dashed; border-color:#343b45; }
+.ly.empty::before { display:none; }
+.ly.empty b { color:#7e8894; }
+.ly .src2 { font-weight:800; }
+.ringfoot { position:absolute; left:16px; right:16px; bottom:12px; font-size:11.5px; color:#a4aeb8; line-height:1.4; }
+.ringfoot b { color:#fff; }
+
+/* stage */
+.stage { left:526px; top:94px; width:484px; height:272px; overflow:hidden; background:radial-gradient(ellipse at 50% 20%, #121821 0%, #07090b 70%); }
+.stage svg { position:absolute; left:0; top:0; }
+.lz { position:absolute; font-size:11px; color:#aeb8c2; text-align:center; width:96px; line-height:1.3; }
+.lz b { display:block; color:#fff; font-size:11.5px; }
+.lz.off, .lz.off b { color:#737b85; }
+
+/* timing */
+.timing { left:526px; top:378px; width:484px; height:116px; }
+.timing .big { position:absolute; right:14px; top:12px; font-size:12px; color:#b5c0ca; }
+.timing .big b { color:var(--snare); }
+.timing svg { position:absolute; left:0; top:36px; }
+
+/* drop */
+.dropc { left:1022px; top:94px; width:404px; height:200px; border-color:#5a4a22; background:linear-gradient(180deg,#14110a,#0d0f12 70%); }
+.dropc > h3 { color:#ffe2a0; }
+.land { position:absolute; left:16px; top:40px; }
+.land .a { font-size:30px; font-weight:900; color:var(--drop); letter-spacing:.01em; }
+.land .b { font-size:12px; color:#d9cfb8; margin-top:1px; }
+.chg { position:absolute; left:16px; right:16px; top:104px; }
+.chg .t { display:flex; justify-content:space-between; font-size:11.5px; color:#d9cfb8; margin-bottom:5px; }
+.chg .t b { color:#fff; font-size:13px; }
+.chg .bar { height:16px; border-radius:4px; background:#2a2518; position:relative; display:flex; overflow:visible; }
+.chg .bar i { display:block; height:100%; }
+.chg .mk { position:absolute; top:-3px; bottom:-3px; width:2px; background:#fff; opacity:.7; }
+.chg .lg { display:flex; gap:12px; font-size:11px; color:#c8bfa8; margin-top:6px; }
+.chg .lg span::before { content:""; display:inline-block; width:8px; height:8px; border-radius:2px; background:var(--c); margin-right:5px; vertical-align:0; }
+.dropfoot { position:absolute; left:16px; right:16px; bottom:9px; font-size:11px; color:#a89f8b; }
+
+/* next */
+.nextc { left:1022px; top:306px; width:404px; height:188px; }
+.nx { position:absolute; left:14px; right:14px; top:40px; }
+.nr { display:flex; align-items:center; gap:8px; font-size:12px; color:#d5dce3; height:24px; border-bottom:1px solid #1a1e24; }
+.nr .w { width:38px; font-family:"SF Mono",Menlo,monospace; font-size:11.5px; color:#8c96a0; }
+.nr .x { flex:1; white-space:nowrap; overflow:hidden; }
+.nr .x b { color:#fff; }
+.tg { font-size:10.5px; font-weight:800; padding:1px 7px; border-radius:8px; letter-spacing:.03em; }
+.tg.rule { color:#cfd6dd; background:#262c35; }
+.tg.music { color:#0b0b0b; background:var(--music); }
+.tg.you { color:#0b0b0b; background:#fff; }
+.tg.painted { color:#0b0b0b; background:var(--next); }
+
+/* controller */
+.ctl { position:absolute; left:14px; top:506px; width:1086px; height:582px; border-radius:16px;
+       background:linear-gradient(180deg,#1d1f23,#141518); border:1px solid #2c2f35; box-shadow:inset 0 1px 0 #34373d, 0 10px 30px rgba(0,0,0,.5); }
+.ctl .brand { position:absolute; left:20px; top:15px; font-size:11px; letter-spacing:.16em; color:#8d939b; font-weight:800; }
+.fns { position:absolute; left:226px; top:9px; display:flex; gap:8px; }
+.fn { height:28px; padding:0 12px; border-radius:6px; background:#26292e; border:1px solid #3b3f46; font-size:11.5px; font-weight:800; color:#d8dde3; display:flex; align-items:center; letter-spacing:.04em; box-shadow:inset 0 -2px 0 rgba(0,0,0,.35); }
+.fn.keep { color:var(--loop); border-color:color-mix(in srgb, var(--loop) 55%, #333); }
+.legend { position:absolute; left:478px; top:15px; display:flex; align-items:center; gap:6px; font-size:11px; color:#9aa2ab; }
+.legend .s { font-weight:800; }
+.pads { position:absolute; left:18px; top:54px; width:724px; display:grid; grid-template-columns:repeat(4,172px); grid-template-rows:234px 234px; gap:14px 12px; }
+.dp { border-radius:14px; background:linear-gradient(180deg,#2a2c31,#212327); border:2px solid color-mix(in srgb, var(--vc) 40%, #2a2a2a); position:relative; overflow:hidden; padding:16px 12px 0; }
+.dp::before { content:""; position:absolute; left:0; right:0; top:0; height:6px; background:var(--vc); opacity:.85; }
+.dp .nm { font-size:22px; font-weight:900; color:var(--vc); letter-spacing:.03em; }
+.dp .lk { font-size:12px; color:#e6e6e6; margin-top:2px; font-weight:600; }
+.dp .why { font-size:12px; color:#aeb6bf; margin-top:8px; line-height:1.42; height:74px; }
+.dp .why b { color:#fff; font-weight:700; }
+.dp .tagx { position:absolute; right:10px; top:16px; font-size:10.5px; font-weight:800; padding:2px 7px; border-radius:8px; background:rgba(255,255,255,.1); color:#ddd; letter-spacing:.03em; }
+.dp .pr { position:absolute; left:12px; right:12px; bottom:58px; }
+.dp .pr .vt { display:flex; justify-content:space-between; font-size:11px; color:#a8b0b8; margin-bottom:4px; }
+.dp .pr .bar { height:7px; border-radius:4px; background:#3a3d43; position:relative; }
+.dp .pr .bar i { position:absolute; left:0; top:0; bottom:0; border-radius:4px; background:var(--vc); }
+.dp .pr .bar u { position:absolute; left:70%; top:-3px; bottom:-3px; width:2px; background:#e8e8e8; }
+.chip3 { position:absolute; left:10px; right:10px; bottom:10px; height:36px; border-radius:9px; display:flex; align-items:center; gap:7px; padding:0 10px;
+         font-size:14px; font-weight:900; letter-spacing:.06em; background:color-mix(in srgb, var(--sc) 16%, #17191c); border:1.5px solid var(--sc); color:var(--sc); }
+.chip3 .g { font-size:14px; width:16px; text-align:center; }
+.chip3 .sub { font-size:11px; font-weight:600; letter-spacing:0; color:#d6dbe0; margin-left:auto; text-align:right; white-space:nowrap; }
+.chip3.you { background:#f4f4f4; color:#111; border-color:#fff; box-shadow:0 0 14px rgba(255,255,255,.35); }
+.chip3.you .sub { color:#333; }
+.chip3.paint { --sc:var(--next); }
+.lad { display:inline-flex; gap:3px; margin-left:2px; }
+.lad i { width:7px; height:7px; border-radius:50%; border:1.5px solid #6a717a; }
+.lad i.on { background:currentColor; border-color:currentColor; }
+.lad i.x { border-style:dashed; border-color:#4a4f56; }
+.dp.hit { background:linear-gradient(180deg, color-mix(in srgb, var(--vc) 34%, #1a1a1a), #212327); border-color:var(--vc); box-shadow:0 0 26px color-mix(in srgb, var(--vc) 55%, transparent); }
+.dp.hit .tagx { background:var(--vc); color:#111; }
+.dp.held { border-color:var(--vc); box-shadow:0 0 22px color-mix(in srgb, var(--vc) 40%, transparent); }
+.dp.held .tagx { background:var(--vc); color:#111; }
+.dp .charge { position:absolute; left:0; right:0; bottom:0; height:72%; background:linear-gradient(0deg, rgba(255,210,122,.30), rgba(255,210,122,.06)); border-top:2px solid rgba(255,210,122,.8); pointer-events:none; }
+.dp .charge span { position:absolute; right:10px; top:4px; font-size:11px; font-weight:800; color:var(--drop); }
+.dp.quiet { opacity:.9; }
+.ratch { position:absolute; left:12px; right:12px; bottom:96px; display:flex; gap:3px; align-items:center; font-size:11px; font-weight:800; color:var(--snare); }
+.ratch i { width:6px; height:10px; border-radius:1px; background:var(--snare); box-shadow:0 0 4px var(--snare); }
+.ctlfoot { position:absolute; left:20px; width:724px; top:546px; display:flex; gap:14px; font-size:11.5px; color:#9aa2ab; flex-wrap:wrap; line-height:1.45; }
+.ctlfoot b { color:#e6e6e6; }
+
+/* faders */
+.fdrs { position:absolute; left:758px; top:54px; width:312px; height:510px; display:grid; grid-template-columns:repeat(6,52px); }
+.fd { position:relative; text-align:center; }
+.fd .n { font-size:11px; color:#8d939b; font-weight:800; }
+.fd .r { font-size:11px; letter-spacing:-.01em; font-weight:800; color:#e6e6e6; margin-top:2px; height:16px; }
+.fd .trk2 { position:absolute; left:22px; width:8px; top:46px; height:356px; border-radius:4px; background:#0b0c0e; border:1px solid #33373d; }
+.fd .fill { position:absolute; left:0; right:0; bottom:0; border-radius:4px; background:var(--fc); opacity:.55; }
+.fd .cap { position:absolute; left:-12px; width:30px; height:18px; border-radius:4px; background:linear-gradient(180deg,#e9ecef,#9aa0a7); box-shadow:0 2px 4px rgba(0,0,0,.6); }
+.fd .cap::after { content:""; position:absolute; left:3px; right:3px; top:8px; height:2px; background:var(--fc); }
+.fd .v { position:absolute; left:0; right:0; top:414px; font-size:12px; font-weight:800; color:#fff; font-family:"SF Mono",Menlo,monospace; }
+.fd .d { position:absolute; left:0; right:0; top:432px; font-size:11px; color:#9aa2ab; line-height:1.3; }
+.fd.empty .r, .fd.empty .v { color:#6c737c; }
+.fdgrp { position:absolute; top:-22px; font-size:11px; color:#8d939b; letter-spacing:.06em; font-weight:800; border-top:1px solid #3a3e45; padding-top:3px; text-align:center; }
+.capline { position:absolute; left:4px; right:4px; height:0; border-top:1.5px dashed #ff9a7a; }
+
+/* feet */
+.feet { left:1112px; top:506px; width:314px; height:236px; }
+.feet svg { position:absolute; left:10px; top:40px; }
+.ft { position:absolute; font-size:11px; color:#aeb6bf; line-height:1.35; }
+.ft b { display:block; color:#fff; font-size:12px; }
+
+.notes.side { left:1112px; top:754px; width:314px; height:334px; padding:12px 14px; }
+.notes.side li { margin:0 0 5px; }
+</style></head><body>
+<div class="page tall">
+  <div class="caption-bar"><b>G1 · Light Drum &amp; Loop Station — live, building into the drop</b><span class="tag">full-screen instrument · 8 pressure pads · 6 faders · pedal</span><span class="tag">hit any pad and the rig answers on the beat</span></div>
+  <div class="topband">
+    <span class="live">LIVE</span>
+    <span class="trk">Hold On (Extended Mix)<span>Build</span></span>
+    <span class="bpm">128.0<small>BPM</small></span>
+    <span class="phr"><span class="lb">PHRASE</span><span class="bn">29<small> / 32</small></span><span class="segs" id="segs"></span><span class="mini">1</span><span class="mini">−</span><span class="mini">+</span></span>
+    <span class="conf">Locked <span>· CDJ</span></span>
+    <span class="src"><span class="dot green"></span>stems · line in</span>
+    <span class="src"><span class="dot" style="background:#F0E442"></span>flash 1/3</span>
+    <span class="stop"><i></i>TERMINATE <small>Esc · E-stop</small></span>
+  </div>
+
+  <!-- LOOP RING -->
+  <div class="card2 ringc">
+    <h3>Loop ring · 2 bars</h3>
+    <div class="hr"><span class="pill">4 layers max</span></div>
+    <svg id="ring" width="304" height="304" viewBox="0 0 304 304"></svg>
+    <div class="lays">
+      <div class="ly" style="--lc:var(--kick)"><b>A · KICK</b><span>kept from <span class="src2" style="color:var(--music)">MUSIC</span> · 23–24</span><span class="st"><span class="dot green"></span> F1 80% · playing</span></div>
+      <div class="ly stby" style="--lc:var(--hat)"><b>B · HAT</b><span>kept from <span class="src2" style="color:#fff">YOU</span> · 13–14</span><span class="st">F2 60% · waits: the music has the hats</span></div>
+      <div class="ly empty"><b>C · empty</b><span>hold KEEP, tap a pad</span></div>
+      <div class="ly empty"><b>D · empty</b><span>F3, F4 wake when filled</span></div>
+    </div>
+    <div class="ringfoot"><b>KEEP + pad</b> saves that voice's last 2 bars, whoever played them, from the next bar line. A layer plays only when nobody above it in the chip order is playing that voice.</div>
+  </div>
+
+  <!-- STAGE -->
+  <div class="card2 stage">
+    <h3>Stage · now</h3>
+    <div class="hr"><span class="pill" style="border-color:var(--drop);color:#ffe7b5">build 72% · narrow + rising</span><span class="pill" style="border-color:var(--snare);color:#fff6b0">SNARE ratchet 1/16</span></div>
+    <svg width="484" height="272" viewBox="0 0 484 272" id="stagesvg"></svg>
+    <div class="lz off" style="left:6px;top:214px;width:60px;text-align:left"><b>5 · Aud.</b>off</div>
+    <div class="lz" style="left:42px;top:222px"><b>1 · SL</b>kick · snare 1/16</div>
+    <div class="lz" style="left:142px;top:222px"><b>2 · LC</b>hat shimmer</div>
+    <div class="lz" style="left:246px;top:222px"><b>3 · RC</b>hat shimmer</div>
+    <div class="lz" style="left:346px;top:222px"><b>4 · SR</b>kick · snare 1/16</div>
+    <div class="lz off" style="left:418px;top:214px;width:60px;text-align:right"><b>6 · Aud.</b>off</div>
+  </div>
+
+  <!-- TIMING -->
+  <div class="card2 timing">
+    <h3>Timing · last 8 presses</h3>
+    <div class="big"><b>SNARE −9 ms</b> → snapped · tonight −13 ms avg</div>
+    <svg width="484" height="80" viewBox="0 0 484 80" id="tsvg"></svg>
+  </div>
+
+  <!-- DROP -->
+  <div class="card2 dropc">
+    <h3>Drop · building</h3>
+    <div class="hr"><span class="pill" style="border-color:#7a6430;color:#ffe2a0">DROP pad held 3 bars · 64%</span></div>
+    <div class="land"><div class="a">lands on 33.1</div><div class="b">let go any time: it waits for the phrase line, 14 beats away</div></div>
+    <div class="chg">
+      <div class="t"><span><b>CHARGE 72%</b> · spent on the drop</span><span>70% = CRASH + hit-stop</span></div>
+      <div class="bar">
+        <i style="width:38%;background:#ffd27a;border-radius:4px 0 0 4px"></i><i style="width:24%;background:#fff"></i><i style="width:10%;background:var(--music)"></i>
+        <span class="mk" style="left:40%"></span><span class="mk" style="left:70%;background:#ffd27a;opacity:1"></span>
+      </div>
+      <div class="lg"><span style="--c:#ffd27a">hold × pressure +38</span><span style="--c:#fff">6 clean hits +24</span><span style="--c:var(--music)">music riser +10</span></div>
+    </div>
+    <div class="dropfoot">Off-beat spam drains 3% a hit · CANCEL melts the build, no drop</div>
+  </div>
+
+  <!-- NEXT -->
+  <div class="card2 nextc">
+    <h3>What the lasers do next, and why</h3>
+    <div class="nx">
+      <div class="nr"><span class="w">31.3</span><span class="x"><b>SNARE</b> hands back to the snare stem</span><span class="tg rule">rule</span></div>
+      <div class="nr"><span class="w">32</span><span class="x"><b>TOMS</b> fill bar → chase roll 1→4</span><span class="tg rule">rule</span></div>
+      <div class="nr"><span class="w">32.4</span><span class="x"><b>Breath</b> ½ beat black (build ≥ 50%)</span><span class="tg rule">rule</span></div>
+      <div class="nr"><span class="w">33.1</span><span class="x"><b>DROP</b> ring burst → fan · CRASH · hit-stop</span><span class="tg you">you</span></div>
+      <div class="nr"><span class="w">33.1</span><span class="x"><b>KICK</b> back to MUSIC · layer A waits</span><span class="tg music">music</span></div>
+      <div class="nr" style="border-bottom:0"><span class="w">33.1</span><span class="x"><b>Peak kit</b> on the phrase line</span><span class="tg painted">painted</span></div>
+    </div>
+  </div>
+
+  <!-- CONTROLLER -->
+  <div class="ctl">
+    <div class="brand">LIGHT DRUM · 8 PADS</div>
+    <div class="fns"><span class="fn keep">KEEP</span><span class="fn">SHIFT</span><span class="fn">UNDO</span></div>
+    <div class="legend">chip = who plays it:
+      <span class="s" style="color:#fff">YOU</span>›<span class="s" style="color:var(--music)">MUSIC</span>›<span class="s" style="color:var(--loop)">LOOP</span>›<span class="s" style="color:var(--clock)">CLOCK</span></div>
+    <div class="pads" id="pads"></div>
+    <div class="ctlfoot">
+      <span><b>Hit</b> = yours for 2 bars</span>
+      <span><b>Past 70%</b> = 1/16 ratchet, that voice only</span>
+      <span><b>Lift</b> fast = snap · slow = tail</span>
+      <span><b>Swipe a row</b> = chase</span>
+    </div>
+    <div class="fdrs" id="fdrs"></div>
+  </div>
+
+  <!-- FEET -->
+  <div class="card2 feet">
+    <h3>Feet</h3>
+    <svg width="294" height="80" viewBox="0 0 294 80" style="top:108px">
+      <defs><linearGradient id="pg" x1="0" x2="1"><stop offset="0" stop-color="#2a2e34"/><stop offset="1" stop-color="#ffd27a" stop-opacity=".45"/></linearGradient></defs>
+      <rect x="4" y="34" width="120" height="24" rx="6" fill="#1c1f24" stroke="#3a3f47"/>
+      <g transform="rotate(-9 8 34)"><rect x="6" y="14" width="118" height="18" rx="5" fill="url(#pg)" stroke="#59606a"/></g>
+      <text x="64" y="76" fill="#ffd27a" font-size="11" text-anchor="middle" font-weight="700">pedal up</text>
+      <circle cx="166" cy="34" r="22" fill="#24272c" stroke="#4a4f57" stroke-width="2"/><circle cx="166" cy="34" r="14" fill="#8c939b"/>
+      <circle cx="226" cy="34" r="22" fill="#24272c" stroke="#4a4f57" stroke-width="2"/><circle cx="226" cy="34" r="14" fill="#8c939b"/><circle cx="226" cy="6" r="3" fill="#ffd27a"/>
+      <circle cx="276" cy="34" r="15" fill="#c4160c" stroke="#ffd400" stroke-width="3"/>
+    </svg>
+    <div class="ft" style="left:14px;top:40px;width:286px"><b>Expression pedal = holding DROP</b>so both hands stay free to drum. Toe click at 90% = hang at the top.</div>
+    <div class="ft" style="left:146px;top:176px;width:60px;text-align:center"><b>BREATH</b>½-beat cut</div>
+    <div class="ft" style="left:204px;top:176px;width:64px;text-align:center"><b>CANCEL</b>melts build</div>
+    <div class="ft" style="left:262px;top:176px;width:50px;text-align:center"><b style="color:#ff8a7a">E-stop</b>wired</div>
+  </div>
+
+  <span class="callout" style="left:190px;top:516px">1</span>
+  <span class="callout" style="left:446px;top:516px">2</span>
+  <span class="callout" style="left:214px;top:104px">3</span>
+  <span class="callout" style="left:1392px;top:146px">4</span>
+  <span class="callout" style="left:974px;top:136px">5</span>
+
+  <div class="notes side"><b>G1 notes</b>
+    <ol>
+      <li><b>Minute 1:</b> hit any pad. Early hits wait for the beat; up to 40 ms late still counts (r06 #1, r09 game feel 5–6).</li>
+      <li>Each pad's chip says who plays that voice. Leave it alone and it follows its instrument in the track, else your loop, else the clock. Hit it and it's yours for 2 bars (r07 #10, r08 #4).</li>
+      <li><b>KEEP</b> saves 2 bars of a voice. Here the music's kick is kept, so the breakdown keeps its pulse.</li>
+      <li>Hold DROP or the pedal to build. Hold time, pressure, clean hits and the music's riser fill the charge. Let go and it lands on 33.1 (r07 #17, r06 #22).</li>
+      <li>Past a felt 70% click, a pad ratchets 1/16 as motion, never as flashes (r07 #4, r06 #19).</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+(function(){
+  var NS="http://www.w3.org/2000/svg";
+  function el(n,a,p){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;}
+  // phrase segments
+  var sg=document.getElementById('segs');
+  for(var i=1;i<=32;i++){var x=document.createElement('i'); if(i<29)x.className='d'; if(i==29)x.className='now'; sg.appendChild(x);}
+
+  // ---- ring ----
+  var s=document.getElementById('ring'), cx=152, cy=152, N=32;
+  function ang(step){return (-90+step*360/N)*Math.PI/180;}
+  function pt(step,r){var a=ang(step);return [cx+Math.cos(a)*r, cy+Math.sin(a)*r];}
+  function arc(s0,s1,r){var p0=pt(s0,r),p1=pt(s1,r);var large=(s1-s0)*360/N>180?1:0;return "M"+p0[0]+" "+p0[1]+" A"+r+" "+r+" 0 "+large+" 1 "+p1[0]+" "+p1[1];}
+  el('circle',{cx:cx,cy:cy,r:118,fill:"none",stroke:"#1b2a36","stroke-width":22},s);
+  el('circle',{cx:cx,cy:cy,r:90,fill:"none",stroke:"#18201f","stroke-width":22},s);
+  for(var i=0;i<N;i++){var a=pt(i,131),b=pt(i,i%4==0?142:136);el('line',{x1:a[0],y1:a[1],x2:b[0],y2:b[1],stroke:i%16==0?"#fff":(i%4==0?"#8a96a3":"#3b434e"),"stroke-width":i%4==0?2:1},s);}
+  [0,16].forEach(function(st){var a=pt(st,66),b=pt(st,130);el('line',{x1:a[0],y1:a[1],x2:b[0],y2:b[1],stroke:"#4a5563","stroke-width":1.5,"stroke-dasharray":"3 3"},s);});
+  // kick: 4 on the floor, from the music
+  [[0,9],[4,7],[8,8],[12,7],[16,9],[20,7],[24,8],[28,7]].forEach(function(h){var p=pt(h[0],118);el('circle',{cx:p[0],cy:p[1],r:h[1],fill:"#56B4E9",style:"filter:drop-shadow(0 0 4px #56B4E9)"},s);});
+  // hat: standby, dim swells
+  [[2,3.6],[6,7.6],[10,11.6],[14,15.4],[18,19.6],[22,23.6],[26,27.6],[30,31.4]].forEach(function(h){el('path',{d:arc(h[0],h[1],90),fill:"none",stroke:"#5fe3c4","stroke-width":7,"stroke-linecap":"round",opacity:.38},s);});
+  // playhead at 2.3 (step 24)
+  var ph=pt(24,140);el('line',{x1:cx,y1:cy,x2:ph[0],y2:ph[1],stroke:"#fff","stroke-width":2.5,style:"filter:drop-shadow(0 0 5px #fff)"},s);
+  el('circle',{cx:ph[0],cy:ph[1],r:5,fill:"#fff"},s);
+  el('circle',{cx:cx,cy:cy,r:64,fill:"#0b0d10",stroke:"#262c35"},s);
+  function txt(x,y,str,sz,col,w,anc){var t=el('text',{x:x,y:y,fill:col,"font-size":sz,"text-anchor":anc||"middle","font-weight":w||400},s);t.textContent=str;return t;}
+  txt(cx,cy-20,"LOOP · BEAT",11,"#9aa4ae",700);
+  txt(cx,cy+10,"2 · 3",30,"#fff",800);
+  txt(cx,cy+30,"pass 3 of the break",11,"#b9c3cc");
+  var p1=pt(0,150);txt(p1[0],p1[1]-4,"bar 1",11,"#fff",700);
+  var p2=pt(16,150);txt(p2[0],p2[1]+12,"bar 2",11,"#fff",700);
+  // lane labels at the 1 o'clock gap
+  var la=pt(30,118); txt(la[0],la[1]+4,"A",11,"#cfe9fb",900);
+  var lb=pt(29,90); txt(lb[0],lb[1]+4,"B",11,"#5fe3c4",900);
+
+  // ---- stage ----
+  var g=document.getElementById('stagesvg');
+  el('rect',{x:40,y:196,width:404,height:8,fill:"#1a1e24",stroke:"#2b3139"},g);
+  var lx=[90,190,294,394], meet=[242,46];
+  lx.forEach(function(x,i){
+    var dx=meet[0]-x, dy=meet[1]-194, base=Math.atan2(dx,-dy);
+    [-5,0,5].forEach(function(dg){var a=base+dg*Math.PI/180;var L=Math.sqrt(dx*dx+dy*dy)*1.02;
+      el('line',{x1:x,y1:194,x2:x+Math.sin(a)*L,y2:194-Math.cos(a)*L,stroke:"#f4f0e2","stroke-width":(i==0||i==3)?2.2:1.6,style:"filter:drop-shadow(0 0 3px #ffd27a) drop-shadow(0 0 7px #ffd27a)"},g);});
+    // ghost: fan before the build
+    [-30,0,30].forEach(function(dg){var a=(dg+(i-1.5)*10)*Math.PI/180;el('line',{x1:x,y1:194,x2:x+Math.sin(a)*120,y2:194-Math.cos(a)*120,stroke:"#8aa0b5","stroke-width":1,opacity:.28,"stroke-dasharray":"3 4"},g);});
+    el('rect',{x:x-12,y:188,width:24,height:14,rx:3,fill:"#0c0e11",stroke:"#fff","stroke-width":1.5},g);
+  });
+  // ratchet ticks on outer lasers
+  [90,394].forEach(function(x){for(var j=0;j<4;j++){el('rect',{x:x-14+j*8,y:172,width:5,height:8,rx:1,fill:"#F0E442",opacity:1-j*.2,style:"filter:drop-shadow(0 0 3px #F0E442)"},g);}});
+  // hat shimmer dots near 2 and 3
+  [190,294].forEach(function(x){for(var j=0;j<14;j++){var t=0.2+j*0.05;var px=x+(meet[0]-x)*t+((j*13)%9-4), py=194+(meet[1]-194)*t;el('circle',{cx:px,cy:py,r:1.5,fill:"#9ff7e2",style:"filter:drop-shadow(0 0 2px #5fe3c4)"},g);}});
+  [16,468].forEach(function(x){el('rect',{x:x-12,y:186,width:24,height:16,rx:3,fill:"none",stroke:"#555","stroke-dasharray":"3 2"},g);});
+  var tt=el('text',{x:262,y:60,fill:"#ffe7b5","font-size":11,"font-weight":700},g);tt.textContent="← meet point rises";
+
+  // ---- timing ----
+  var t=document.getElementById('tsvg');
+  var X=function(ms){return 242+ms*3.4;};
+  function tx(x,y,s2,c,a){var e=el('text',{x:x,y:y,fill:c,"font-size":11,"text-anchor":a||"middle"},t);e.textContent=s2;}
+  tx(X(-58),10,"early: waits for the beat","#a9d8f5","start");
+  tx(X(3),10,"≤ 40 ms: on time","#a9f5bd","start");
+  tx(X(60),10,"late: smaller","#ffd27a","end");
+  el('rect',{x:X(-60),y:16,width:X(0)-X(-60),height:22,fill:"rgba(86,180,233,.10)",stroke:"rgba(86,180,233,.35)"},t);
+  el('rect',{x:X(0),y:16,width:X(40)-X(0),height:22,fill:"rgba(57,255,106,.14)",stroke:"rgba(57,255,106,.45)"},t);
+  el('rect',{x:X(40),y:16,width:X(60)-X(40),height:22,fill:"rgba(255,176,0,.13)",stroke:"rgba(255,176,0,.4)"},t);
+  el('line',{x1:X(-13),y1:14,x2:X(-13),y2:40,stroke:"#b5c0ca","stroke-width":1,"stroke-dasharray":"2 2"},t);
+  el('line',{x1:X(0),y1:12,x2:X(0),y2:42,stroke:"#fff","stroke-width":2},t);
+  [[-9,"#F0E442",1],[-14,"#F0E442",.85],[-6,"#F0E442",.75],[-20,"#56B4E9",.7],[4,"#F0E442",.65],[-11,"#E69F00",.6],[-17,"#F0E442",.55],[12,"#5fe3c4",.5]].forEach(function(m,i){
+    el('circle',{cx:X(m[0]),cy:27,r:i==0?6:4.5,fill:m[1],opacity:m[2],stroke:i==0?"#fff":"none","stroke-width":1.5},t);
+  });
+  tx(X(-60),54,"−60 ms","#8c96a0","start");
+  tx(X(0),54,"beat","#fff");
+  tx(X(60),54,"+60 ms","#8c96a0","end");
+  tx(X(-13),70,"dashed: your average, −13 ms. The window is centred on you.","#b5c0ca");
+
+  // ---- pads ----
+  var pads=[
+    {n:"TOM L",c:"--tom",lk:"sweep left · ½ beat",why:"No toms in this track. The <b>clock</b> plays a fill roll in bar 32, the last bar of the phrase.",src:"clock",g:"◷",word:"CLOCK",sub:"bar 32",pv:"—",pw:0},
+    {n:"TOM R",c:"--tom",lk:"sweep right · ½ beat",why:"Same fill, the other way. Hit either tom to take the fill yourself.",src:"clock",g:"◷",word:"CLOCK",sub:"bar 32",pv:"—",pw:0},
+    {n:"NEXT",c:"--next",lk:"the show's next hit",why:"Song mode: the next authored hit of Build is a <b>tunnel slam</b>. You choose when, and how hard.",src:"paint",g:"✎",word:"3 / 5",sub:"painted",pv:"—",pw:0},
+    {n:"DROP",c:"--drop",lk:"tap = crash · hold = build",why:"<b>Held 3 bars at 64%.</b> The rig narrows and rises. Let go: it lands on 33.1.",src:"you",g:"●",word:"YOU",sub:"lands 33.1",st:"held",tag:"HELD",charge:true,pv:"64% · charge 72%",pw:64},
+    {n:"KICK",c:"--kick",lk:"beams jump · all 4",why:"The track's kick is out for the break. <b>Layer A</b>, kept from the music, keeps the pulse.",src:"loop",g:"↻",word:"LOOP",sub:"layer A",lad:[0,"x",1,0],tag:"A",pv:"loop vel 80%",pw:80},
+    {n:"SNARE",c:"--snare",lk:"side swap L↔R",why:"You hit it at 29.3. <b>Yours until 31.3</b>, then the snare stem has it again.",src:"you",g:"●",word:"YOU",sub:"2 bars left",lad:[1,0,0,0],st:"hit",tag:"HIT 29.3",pv:"84% · ratchet 1/16",pw:84,ratch:true},
+    {n:"HAT",c:"--hat",lk:"shimmer on 2·3",why:"Follows the <b>hats stem</b> (94% heard). Fast, so it is texture, not flashes.",src:"music",g:"♪",word:"MUSIC",sub:"hats stem",lad:[0,1,0,0],pv:"stem level 58%",pw:58},
+    {n:"BASS",c:"--bass",lk:"fan width breathes",why:"Follows the <b>bass level</b>, not its hits. Loud bass = wide fan. Now 46°.",src:"music",g:"♪",word:"MUSIC",sub:"bass level",lad:[0,1,0,0],pv:"stem level 46%",pw:46}
+  ];
+  var sc={you:"var(--you)",music:"var(--music)",loop:"var(--loop)",clock:"var(--clock)",paint:"var(--next)"};
+  var host=document.getElementById('pads');
+  pads.forEach(function(p){
+    var d=document.createElement('div');d.className='dp'+(p.st?' '+p.st:'');d.style.setProperty('--vc','var('+p.c+')');
+    var lad='';
+    if(p.lad){lad='<span class="lad">'+p.lad.map(function(v){return '<i class="'+(v===1?'on':(v==='x'?'x':''))+'"></i>';}).join('')+'</span>';}
+    d.innerHTML=(p.charge?'<div class="charge"></div>':'')+(p.tag?'<span class="tagx">'+p.tag+'</span>':'')+
+      '<div class="nm">'+p.n+'</div><div class="lk">'+p.lk+'</div><div class="why">'+p.why+'</div>'+
+      
+      (p.pw?'<div class="pr"><div class="vt"><span>'+p.pv+'</span><span></span></div><div class="bar">'+(p.pw?'<i style="width:'+p.pw+'%"></i><u></u>':'')+'</div></div>':'')+
+      '<div class="chip3 '+p.src+'" style="--sc:'+sc[p.src]+'"><span class="g">'+p.g+'</span>'+p.word+'<span class="sub">'+p.sub+'</span></div>';
+    host.appendChild(d);
+  });
+
+  // ---- faders ----
+  var fd=[
+    {n:"F1",r:"A KICK",v:80,c:"var(--kick)",d:"layer A level"},
+    {n:"F2",r:"B HAT",v:60,c:"var(--hat)",d:"layer B level"},
+    {n:"F3",r:"C",v:0,c:"#555",d:"empty",e:1},
+    {n:"F4",r:"D",v:0,c:"#555",d:"empty",e:1},
+    {n:"F5",r:"FOLLOW",v:70,c:"var(--music)",d:"music depth"},
+    {n:"F6",r:"MASTER",v:85,c:"#e6e6e6",d:"cap 90%",cap:90}
+  ];
+  var fh=document.getElementById('fdrs');
+  var gl=document.createElement('div');gl.className='fdgrp';gl.style.cssText='left:0;width:204px';gl.textContent='LOOP LAYERS';fh.appendChild(gl);
+  var gr=document.createElement('div');gr.className='fdgrp';gr.style.cssText='left:212px;width:100px';gr.textContent='RIG';fh.appendChild(gr);
+  fd.forEach(function(f){
+    var x=document.createElement('div');x.className='fd'+(f.e?' empty':'');x.style.setProperty('--fc',f.c);
+    var top=356-(f.v/100*356)-9;
+    x.innerHTML='<div class="n">'+f.n+'</div><div class="r">'+f.r+'</div><div class="trk2"><div class="fill" style="height:'+f.v+'%"></div>'+
+      (f.cap?'<div class="capline" style="top:'+(356-f.cap/100*356)+'px;left:-12px;right:-12px"></div>':'')+
+      '<div class="cap" style="top:'+top+'px"></div></div><div class="v">'+(f.e?'—':f.v+'%')+'</div><div class="d">'+f.d+'</div>';
+    fh.appendChild(x);
+  });
+})();
+</script>
+</body></html>

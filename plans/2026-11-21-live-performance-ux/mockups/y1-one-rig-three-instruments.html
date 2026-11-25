@@ -1,0 +1,127 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.wrapy { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; }
+.rig { display: grid; grid-template-columns: 1fr 360px; gap: 16px; background: #151515; border: 1px solid #2c2c2c; border-radius: 12px; padding: 14px 16px; }
+.surface { background: linear-gradient(180deg,#232323,#1a1a1a); border: 1px solid #3a3a3a; border-radius: 14px; padding: 14px 18px; display: grid; grid-template-columns: auto 1fr; gap: 20px; align-items: center; }
+.pads { display: grid; grid-template-columns: repeat(4, 74px); grid-template-rows: repeat(2, 58px); gap: 8px; }
+.pads div { border-radius: 8px; background: #2c2c2c; border: 1px solid #4a4a4a; box-shadow: inset 0 -3px 0 rgba(0,0,0,.35); display: flex; align-items: flex-end; padding: 5px 7px; font-size: 11px; color: #aaa; }
+.faders { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.fd { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: #aaa; }
+.fd .tr { width: 6px; height: 96px; border-radius: 3px; background: #0d0d0d; position: relative; }
+.fd .tr i { position: absolute; left: -12px; width: 30px; height: 14px; border-radius: 3px; background: #ccc; }
+.feet { display: flex; gap: 14px; align-items: flex-end; }
+.pedal { width: 150px; height: 56px; position: relative; }
+.pedal .b { position: absolute; left: 0; right: 0; bottom: 0; height: 22px; border-radius: 6px; background: #262626; border: 1px solid #444; }
+.pedal .t { position: absolute; left: 8px; right: 8px; bottom: 18px; height: 18px; border-radius: 5px; background: #3a3a3a; border: 1px solid #555; transform: rotate(-9deg); transform-origin: left bottom; }
+.fs { width: 64px; height: 64px; border-radius: 10px; background: #262626; border: 1px solid #444; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 10.5px; color: #ccc; }
+.fs i { width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(#888,#444); display: block; }
+.estop { width: 74px; height: 74px; border-radius: 50%; background: radial-gradient(#ff5a4a,#b3140b); border: 4px solid #f1c40f; box-shadow: 0 0 14px rgba(255,80,60,.5); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; text-align: center; color: #fff; }
+.cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; flex: 1; min-height: 0; }
+.col3 { background: #161616; border: 1px solid #2c2c2c; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.col3 h2 { display: flex; align-items: baseline; gap: 10px; }
+.col3 h2 small { font-size: 12px; color: var(--text2); font-weight: 600; }
+.lead { font-size: 12.5px; color: #e9e9e9; line-height: 1.4; }
+.mp { display: grid; grid-template-columns: 116px 1fr; gap: 4px 10px; font-size: 12px; }
+.mp span:nth-child(odd) { color: var(--muted); }
+.mini { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.mini div { border-radius: 5px; padding: 4px 6px; font-size: 10.5px; font-weight: 700; border: 1px solid #444; background: #232323; color: #ddd; }
+.mini div small { display: block; font-weight: 500; color: #999; font-size: 9.5px; }
+.borrow { display: flex; flex-wrap: wrap; gap: 5px; }
+.borrow span { font-size: 10.5px; padding: 2px 8px; border-radius: 9px; background: #262626; border: 1px solid #3c3c3c; color: #ddd; }
+.borrow span b { color: #fff; }
+.shared { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ladder { display: grid; grid-template-columns: 70px 1fr; gap: 4px 10px; font-size: 12px; }
+.ladder b { color: #fff; }
+.ladder span:nth-child(odd) { color: var(--muted); font-weight: 700; }
+.shared span { font-size: 12px; padding: 5px 10px; border-radius: 14px; background: #1f2630; border: 1px solid #34465c; color: #cfe3ff; }
+.tagF { color: #ffcf6a; } .tagG { color: #8fe3ff; } .tagL { color: #c9a6ff; }
+</style></head><body>
+<div class="page">
+  <div class="caption-bar"><b>Y1 · One rig, three instruments</b><span class="tag">round 3 · F, G and L share the hardware and the vocabulary</span><span class="tag">each leads with a different gesture</span></div>
+  <div class="wrapy">
+    <div class="rig">
+      <div class="surface">
+        <div>
+          <div class="hint" style="margin-bottom:6px">8 pressure pads</div>
+          <div class="pads"><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div></div>
+        </div>
+        <div>
+          <div class="hint" style="margin-bottom:6px">6 faders</div>
+          <div class="faders">
+            <div class="fd"><div class="tr"><i style="top:24px"></i></div>1</div><div class="fd"><div class="tr"><i style="top:40px"></i></div>2</div><div class="fd"><div class="tr"><i style="top:58px"></i></div>3</div>
+            <div class="fd"><div class="tr"><i style="top:30px"></i></div>4</div><div class="fd"><div class="tr"><i style="top:46px"></i></div>5</div><div class="fd"><div class="tr"><i style="top:14px"></i></div>6</div>
+          </div>
+        </div>
+      </div>
+      <div class="feet">
+        <div class="col center gap6"><div class="pedal"><div class="b"></div><div class="t"></div></div><span class="small text2">expression pedal · toe click at 90 %</span></div>
+        <div class="fs"><i></i>BREATH</div><div class="fs"><i></i>CANCEL</div>
+        <div class="col center gap6"><div class="estop">TERMI-<br>NATE</div><span class="small muted">wired · never mapped</span></div>
+      </div>
+    </div>
+    <div class="cols">
+      <div class="col3" style="border-color:#5a4512">
+        <h2><span class="tagF">F · Tension &amp; Release</span><small>lead: the foot</small></h2>
+        <div class="lead"><b>Press the pedal down, let go:</b> the drop lands on the phrase line, sized by the charge the build earned.</div>
+        <div class="mini">
+          <div>TOM L<small>fill → chase</small></div><div>TOM R<small>fill → chase</small></div><div>CRASH<small>waits for drop</small></div><div>RING<small>fake drop</small></div>
+          <div>KICK<small>ride · +charge</small></div><div>SNARE<small>roll → shimmer</small></div><div>HAT<small>roll → sparkle</small></div><div style="border-color:var(--flash)">DROP<small>hold = build</small></div>
+        </div>
+        <div class="mp">
+          <span>faders</span><span>depth · music feed · sparkle · room · decay · master cap</span>
+          <span>pedal</span><span><b>the build</b>; toe click = hang at the top</span>
+          <span>BREATH / CANCEL</span><span>a small swell / melt the build, keep the charge</span>
+        </div>
+        <div class="borrow"><span><b>G</b> pads ride the build</span><span><b>G</b> DROP voice · KEEP the groove</span><span><b>L</b> the music's build line</span><span><b>L</b> catch the real drop</span><span><b>L</b> hand over to the music</span></div>
+        <div class="row gap10" style="margin-top:4px"><div class="screen" style="width:170px;height:104px" data-shape="beams" data-color="#F0E442" data-scale="1.1" data-lbl="build 81 %" data-lbl2="lands on 33.1"></div>
+        <div class="ladder grow"><span>minute 1</span><span>press, let go: it lands on the line</span><span>hour 1</span><span>charge, fake drops, BREATH, the toe hang</span><span>month 1</span><span>ride the build with the pads; catch the real drop; teach recipes by playing</span></div></div>
+        <div class="small" style="margin-top:auto;color:#8ff0a8">✓ No music feed needed: the phrase ring and tap/Link are enough.</div>
+        <div class="small" style="color:#ffd36b">▲ Biggest risk: The catch could fire on a fake kick inside a riser: it needs kick + bass together and a confidence check.</div>
+        <div class="text2 small">f1 live · f2 recipes · f3 the first minute</div>
+      </div>
+      <div class="col3" style="border-color:#1e4a5c">
+        <h2><span class="tagG">G · Light Drum</span><small>lead: the fingers</small></h2>
+        <div class="lead"><b>Hit any pad</b> and the rig answers on the beat. Leave a voice alone and it follows its instrument in the music.</div>
+        <div class="mini">
+          <div>TOM L<small>sweep left</small></div><div>TOM R<small>sweep right</small></div><div>NEXT<small>song mode</small></div><div style="border-color:var(--flash)">DROP<small>tap crash · hold build</small></div>
+          <div>KICK<small>beams jump</small></div><div>SNARE<small>side swap</small></div><div>HAT<small>shimmer</small></div><div>BASS<small>fan width</small></div>
+        </div>
+        <div class="mp">
+          <span>faders</span><span>loop layers A–D · follow depth · master cap</span>
+          <span>pedal</span><span>holds DROP, so both hands keep drumming</span>
+          <span>BREATH / CANCEL</span><span>½-beat cut / melt the build</span>
+        </div>
+        <div class="borrow"><span><b>L</b> voices follow the music</span><span><b>L</b> KEEP from a stem</span><span><b>F</b> hold DROP to build</span><span><b>F</b> charge · hit-stop</span><span><b>N</b> NEXT pad</span><span><b>H</b> 70 % ratchet</span><span><b>M</b> training</span></div>
+        <div class="row gap10" style="margin-top:4px"><div class="screen" style="width:170px;height:104px" data-shape="fan" data-color="#56B4E9" data-lbl="KICK · you" data-lbl2="snare follows the music"></div>
+        <div class="ladder grow"><span>minute 1</span><span>hit any pad, it lands on the beat</span><span>hour 1</span><span>let voices follow the music; take one for 2 bars; KEEP a layer</span><span>month 1</span><span>ratchets, fills by swipe, song mode, build on DROP while drumming</span></div></div>
+        <div class="small" style="margin-top:auto;color:#8ff0a8">✓ No music feed needed: voices fall back to KEEP layers and the clock.</div>
+        <div class="small" style="color:#ffd36b">▲ Biggest risk: Live stem separation is 23–92 ms late, too slow to follow a kick: band-pass lanes or real stems first.</div>
+        <div class="text2 small">g1 live · g2 kit editor · g3 training</div>
+      </div>
+      <div class="col3" style="border-color:#3e2f60">
+        <h2><span class="tagL">L · The Music Plays the Lights</span><small>lead: the faders</small></h2>
+        <div class="lead"><b>Start the track, push the faders up:</b> each instrument drives the lasers, and you mix how much.</div>
+        <div class="mini">
+          <div>KICK<small>punch · solo</small></div><div>SNARE<small>punch · solo</small></div><div>HATS<small>punch · solo</small></div><div>VOX<small>punch · solo</small></div>
+          <div style="border-color:var(--zone-a)">A<small>throw to laser 1</small></div><div style="border-color:var(--zone-b)">B<small>throw to 2</small></div><div style="border-color:var(--zone-c)">C<small>throw to 3</small></div><div style="border-color:var(--zone-d)">D<small>throw to 4</small></div>
+        </div>
+        <div class="mp">
+          <span>faders</span><span><b>the lanes</b>: kick · snare · hats · bass · vocals · lead</span>
+          <span>pedal</span><span>deepens the music's own build; toe click = drop by hand</span>
+          <span>BREATH / CANCEL</span><span>½ beat of black / no drop this time</span>
+        </div>
+        <div class="borrow"><span><b>G</b> a pad per lane</span><span><b>G</b> KEEP as the fallback</span><span><b>F</b> tension over the build</span><span><b>F</b> charge · catch · hit-stop</span><span><b>K</b> next, and why</span><span><b>J</b> ranges per section</span></div>
+        <div class="row gap10" style="margin-top:4px"><div class="screen" style="width:170px;height:104px" data-shape="wave" data-color="#CC79A7" data-lbl="vocals → wave" data-lbl2="kick: LOOP · snare: MUSIC"></div>
+        <div class="ladder grow"><span>minute 1</span><span>push faders up: the music plays the lights</span><span>hour 1</span><span>punch and solo lanes; throw a lane to a zone</span><span>month 1</span><span>ride the music's builds with the pedal; KEEP; paint the next drop</span></div></div>
+        <div class="small" style="margin-top:auto;color:#8ff0a8">✓ No music feed? Every lane reads CLOCK and it still plays.</div>
+        <div class="small" style="color:#ffd36b">▲ Biggest risk: False build detection in a live mix: the tension strip must stay honest about its confidence.</div>
+        <div class="text2 small">l1 live · l2 patch · l3 rig and layers</div>
+      </div>
+    </div>
+    <div class="shared">
+      <b class="small" style="color:#fff">Shared by all three:</b>
+      <span>Feel engine (X1)</span><span>phrase ring · "1" · Locked / Coasting / Lost</span><span>source chip YOU · MUSIC · LOOP · CLOCK</span><span>KEEP</span><span>Charge</span><span>what the lasers do next, and why</span><span>hit-stop</span><span>timing strip</span><span>flash limiter</span>
+    </div>
+  </div>
+  <div class="notes" style="right:22px;top:46px;width:300px;display:none"></div>
+</div></body></html>

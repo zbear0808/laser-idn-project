@@ -1,0 +1,402 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+:root { --you: #e6f6ff; --music: #b48cff; --loop: #3ad29f; --clock: #9aa4ae; }
+.page { background: #060708; }
+.topband { position: absolute; left: 0; right: 0; top: 34px; height: 44px; display: flex; align-items: center; gap: 16px; padding: 0 14px 0 16px; background: #0d0f12; border-bottom: 1px solid #1d2128; }
+.live { font-size: 12px; font-weight: 800; letter-spacing: .08em; color: #8ff0a8; padding: 3px 9px; border-radius: 4px; background: #0f3b1c; border: 1px solid #2fbf5a; }
+.trk { font-size: 14px; font-weight: 600; color: #eee; white-space: nowrap; }
+.trk span { color: var(--text2); font-weight: 400; margin-left: 8px; font-size: 12.5px; }
+.bpm { font-family: "SF Mono", Menlo, monospace; font-size: 15px; color: #fff; font-weight: 700; }
+.bpm small { color: var(--muted); font-weight: 400; font-size: 11px; margin-left: 4px; }
+.beats4 { display: inline-flex; gap: 4px; }
+.beats4 i { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid #555; }
+.beats4 i.on { background: var(--you); border-color: var(--you); box-shadow: 0 0 8px #9fdcff; }
+.src { font-size: 12px; color: var(--text2); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.term { margin-left: auto; height: 32px; padding: 0 14px; border-radius: 6px; background: #b3170f; border: 2px solid #ff6a5a; color: #fff;
+        display: inline-flex; align-items: center; gap: 8px; font-weight: 800; letter-spacing: .06em; font-size: 13px; box-shadow: 0 0 14px rgba(255,60,40,.35); white-space: nowrap; }
+.term i { width: 12px; height: 12px; background: #fff; border-radius: 2px; }
+.term small { font-weight: 600; letter-spacing: 0; opacity: .85; font-size: 11px; }
+
+.panel { position: absolute; border-radius: 12px; background: #0d0f12; border: 1px solid #1e232b; }
+.panel > h3 { position: absolute; left: 16px; top: 12px; }
+.panel .ph { position: absolute; right: 16px; top: 11px; font-size: 12px; color: var(--text2); }
+
+/* source chips (shared vocabulary) */
+.sc { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 9px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; border: 1.5px solid; white-space: nowrap; }
+.sc.you { color: var(--you); border-color: #9fdcff; background: rgba(159,220,255,.10); }
+.sc.music { color: #d7c2ff; border-color: var(--music); background: rgba(180,140,255,.12); }
+.sc.loop { color: #9ff0cf; border-color: var(--loop); background: rgba(58,210,159,.12); }
+.sc.clock { color: #c9d1d9; border-color: #6b7580; background: rgba(150,160,170,.10); }
+.tg { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 4px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; white-space: nowrap; }
+.tg.you { background: #233645; color: var(--you); }
+.tg.music { background: #2e2445; color: #d7c2ff; }
+.tg.rule { background: #2b2b2b; color: #ddd; }
+.tg.painted { background: #3a2c10; color: #ffc861; }
+
+/* ring */
+.ringp { left: 14px; top: 90px; width: 360px; height: 366px; }
+.ringp svg { position: absolute; left: 15px; top: 34px; }
+.conf { position: absolute; left: 16px; right: 16px; bottom: 12px; display: flex; gap: 6px; align-items: center; }
+.conf .lk { height: 26px; padding: 0 9px; border-radius: 6px; background: #10301a; border: 1px solid #2fbf5a; color: #8ff0a8; font-size: 12px; font-weight: 800; display: inline-flex; align-items: center; gap: 6px; }
+.conf .lk small { color: #9fd8ae; font-weight: 500; }
+.nb { height: 26px; padding: 0 8px; border-radius: 6px; background: #1d2127; border: 1px solid #343b45; color: #ddd; font-size: 12px; display: inline-flex; align-items: center; white-space: nowrap; }
+.nb.one { background: #2b6b33; border-color: #4caf50; color: #fff; font-weight: 800; }
+
+/* let go card */
+.letgo { left: 386px; top: 90px; width: 690px; height: 366px; background: #120f08; border: 2px solid var(--accent); box-shadow: 0 0 30px rgba(230,159,0,.12) inset; }
+.letgo .k { position: absolute; left: 16px; top: 12px; font-size: 11.5px; font-weight: 800; color: #111; background: var(--accent); padding: 3px 8px; border-radius: 4px; letter-spacing: .06em; }
+.letgo .upd { position: absolute; right: 16px; top: 13px; font-size: 12px; color: #b89b6a; }
+.big { position: absolute; left: 16px; top: 42px; font-size: 54px; font-weight: 900; color: #ffc861; letter-spacing: -.01em; line-height: 1; white-space: nowrap; }
+.big span { color: #fff; }
+.big2 { position: absolute; left: 18px; top: 104px; font-size: 18px; color: #f1dfbd; white-space: nowrap; }
+.big2 b { color: #fff; }
+.seq { position: absolute; left: 16px; right: 16px; top: 138px; }
+.seq .r { display: grid; grid-template-columns: 96px 1fr auto; gap: 10px; align-items: center; height: 26px; border-bottom: 1px solid #2a2418; font-size: 12.5px; color: #e4dccd; }
+.seq .r .t { font-family: "SF Mono", Menlo, monospace; font-size: 12px; color: #c9b48d; }
+.seq .r.dr { color: #fff; font-weight: 600; }
+.seq .r.dr .t { color: #ffc861; font-weight: 700; }
+.seq .hd { font-size: 11px; font-weight: 800; letter-spacing: .06em; color: #b89b6a; margin-bottom: 2px; }
+.alts { position: absolute; left: 16px; right: 16px; bottom: 14px; display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 8px; }
+.alts .a { border-radius: 8px; background: #1b1810; border: 1px solid #3c3322; padding: 7px 10px; font-size: 12px; color: #d9cfbd; line-height: 1.35; }
+.alts .a b { display: block; color: #fff; font-size: 12.5px; margin-bottom: 2px; }
+
+/* charge */
+.charge { left: 1088px; top: 90px; width: 338px; height: 366px; }
+.cnum { position: absolute; left: 16px; top: 36px; font-size: 64px; font-weight: 900; color: #fff; line-height: 1; }
+.cnum small { font-size: 24px; color: #cfd8e0; }
+.csz { position: absolute; left: 156px; top: 46px; font-size: 13px; color: var(--text2); line-height: 1.35; }
+.csz b { display: block; font-size: 22px; color: #ffc861; font-weight: 900; }
+.cbar { position: absolute; left: 16px; right: 16px; top: 116px; height: 22px; border-radius: 6px; background: #171a20; border: 1px solid #2c333d; overflow: hidden; display: flex; }
+.cbar i { display: block; height: 100%; }
+.cmarks { position: absolute; left: 16px; right: 16px; top: 142px; height: 16px; font-size: 11px; color: var(--text2); }
+.cmarks span { position: absolute; transform: translateX(-50%); }
+.crows { position: absolute; left: 16px; right: 16px; top: 168px; }
+.crows .r { display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; align-items: center; height: 27px; border-bottom: 1px solid #1d2229; font-size: 12.5px; color: #d6dde4; }
+.crows .r i { width: 10px; height: 10px; border-radius: 2px; }
+.crows .r b { font-family: "SF Mono", Menlo, monospace; color: #fff; font-size: 12.5px; }
+.crows .r small { color: var(--text2); font-size: 11px; margin-left: 4px; }
+.cfoot { position: absolute; left: 16px; right: 16px; bottom: 12px; font-size: 11.5px; color: var(--text2); line-height: 1.4; }
+.cfoot b { color: #eee; font-weight: 600; }
+
+/* build graph */
+.graph { left: 14px; top: 468px; width: 900px; height: 360px; }
+.graph svg { position: absolute; left: 0; top: 0; }
+.graph .leg { position: absolute; left: 230px; top: 10px; display: flex; gap: 14px; align-items: center; font-size: 12px; color: var(--text2); }
+.graph .leg .ln { display: inline-block; width: 22px; height: 0; border-top: 2.5px solid; vertical-align: middle; margin-right: 6px; }
+
+/* stage */
+.stage { left: 926px; top: 468px; width: 500px; height: 214px; overflow: hidden; background: radial-gradient(ellipse at 50% 10%, #11151b 0%, #07090b 60%, #050506 100%); }
+.stage svg { position: absolute; left: 0; top: 0; }
+.stage .pills { position: absolute; left: 16px; top: 34px; display: flex; gap: 6px; flex-wrap: wrap; width: 470px; }
+.pill { font-size: 11.5px; padding: 2px 8px; border-radius: 10px; background: rgba(20,24,30,.85); border: 1px solid #2c333d; color: #cdd6e0; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
+
+/* timing strip */
+.timing { left: 926px; top: 692px; width: 500px; height: 136px; }
+.timing svg { position: absolute; left: 0; top: 0; }
+
+/* rig */
+.rig { left: 14px; top: 840px; width: 1412px; height: 140px; }
+.rig > h3 { top: 10px; }
+.pads { position: absolute; left: 16px; top: 32px; display: grid; grid-template-columns: repeat(4, 124px); gap: 6px; }
+.pd { height: 47px; border-radius: 7px; background: #191c21; border: 1.5px solid #333a44; padding: 4px 8px; position: relative; }
+.pd b { display: block; font-size: 12px; color: #eee; letter-spacing: .03em; }
+.pd span { font-size: 11px; color: var(--text2); line-height: 1.2; display: block; }
+.pd.lit { border-color: #9fdcff; background: #15232e; box-shadow: 0 0 12px rgba(159,220,255,.25); }
+.pd.lit b { color: var(--you); }
+.pd.lock { opacity: .55; border-style: dashed; }
+.pd.drop { border-color: var(--accent); }
+.pd.drop b { color: #ffc861; }
+.pd .roll { position: absolute; right: 6px; top: 5px; font-size: 10.5px; color: #9fdcff; font-weight: 700; }
+.faders { position: absolute; left: 556px; top: 28px; display: flex; gap: 8px; }
+.fd { width: 62px; text-align: center; }
+.fd .tr { width: 10px; height: 64px; margin: 0 auto; border-radius: 5px; background: #191c21; border: 1px solid #333a44; position: relative; }
+.fd .cap { position: absolute; left: -10px; width: 28px; height: 10px; border-radius: 3px; background: #c9d1d9; border: 1px solid #fff; }
+.fd b { display: block; font-size: 11px; color: #eee; margin-top: 4px; white-space: nowrap; }
+.fd span { display: block; font-size: 11px; color: var(--text2); white-space: nowrap; }
+.feet { position: absolute; left: 990px; top: 26px; width: 300px; height: 108px; }
+.ped .base { position: absolute; left: 0; bottom: 30px; width: 150px; height: 22px; border-radius: 5px; background: linear-gradient(#2b2f35, #181b1f); border: 1px solid #3c424b; }
+.ped .plate { position: absolute; left: 6px; bottom: 50px; width: 140px; height: 16px; border-radius: 4px; background: repeating-linear-gradient(90deg, #3a3f47 0 6px, #2d3138 6px 12px); border: 1px solid #8fc8ee; transform-origin: 8% 100%; transform: rotate(-9deg); box-shadow: 0 -4px 16px rgba(170,220,255,.35); }
+.ped .v { position: absolute; left: 0; top: 0; font-size: 12px; font-weight: 700; color: var(--you); white-space: nowrap; }
+.ped .v span { color: var(--text2); font-weight: 400; }
+.ped .lb { position: absolute; left: 0; bottom: 6px; font-size: 11px; color: var(--text2); white-space: nowrap; }
+.fsw { position: absolute; top: 4px; width: 66px; height: 98px; border-radius: 8px; background: #1b1e23; border: 1px solid #3a3f47; text-align: center; padding-top: 8px; }
+.fsw .kn { width: 30px; height: 30px; border-radius: 50%; margin: 0 auto; background: radial-gradient(#9aa3ad, #4a5059); border: 2px solid #20242a; }
+.fsw .led { width: 8px; height: 8px; border-radius: 50%; background: #333; margin: 6px auto 0; }
+.fsw .led.on { background: #9fdcff; box-shadow: 0 0 8px #9fdcff; }
+.fsw b { display: block; font-size: 11px; color: #ddd; margin-top: 4px; letter-spacing: .03em; }
+.fsw span { display: block; font-size: 11px; color: var(--muted); line-height: 1.15; }
+.estop { position: absolute; right: 16px; top: 22px; width: 92px; text-align: center; }
+.estop .b { width: 56px; height: 56px; border-radius: 50%; margin: 0 auto; background: radial-gradient(#ff5a4a, #a10f08); border: 5px solid #f3c600; box-shadow: 0 0 12px rgba(255,60,40,.4); }
+.estop .t { font-size: 11px; color: #ffb3a8; font-weight: 800; margin-top: 5px; line-height: 1.25; letter-spacing: .04em; }
+
+.notes { left: 14px; top: 990px; width: 1412px; font-size: 12px; padding: 7px 12px; line-height: 1.4; }
+.notes ol { columns: 2; column-gap: 40px; }
+</style></head><body>
+<div class="page tall">
+  <div class="caption-bar"><b>F1 · Tension &amp; Release — mid-build, the music feeding it</b><span class="tag">full-screen instrument · expression pedal leads</span><span class="tag">press down, let go, it lands on the line</span></div>
+  <div class="topband">
+    <span class="live">LIVE</span>
+    <span class="trk">Hold On (Extended Mix)<span>Build vibe · recipe "Riser"</span></span>
+    <span class="bpm">128.0<small>BPM</small></span>
+    <span class="beats4"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span>
+    <span class="src"><span class="dot green"></span>CDJ phrases · beat 1 by you</span>
+    <span class="src"><span class="dot" style="background:var(--music);box-shadow:0 0 6px var(--music)"></span>Music: riser up · kick gone · hats 1/16</span>
+    <span class="src">flash 0 / 3 per s</span>
+    <span class="term"><i></i>TERMINATE<small>Esc · E-stop</small></span>
+  </div>
+
+  <!-- phrase ring -->
+  <div class="panel ringp">
+    <h3>Phrase ring</h3><span class="ph">bar 31 of 32</span>
+    <svg id="ring" width="330" height="270" viewBox="0 0 330 270"></svg>
+    <div class="conf"><span class="lk"><span class="dot green"></span>Locked <small>CDJ</small></span><span class="nb one">1</span><span class="nb">−1 beat</span><span class="nb">+1 beat</span><span class="nb">±1 bar</span></div>
+  </div>
+
+  <!-- let go card -->
+  <div class="panel letgo">
+    <span class="k">WHAT LETTING GO DOES NOW</span><span class="upd">true for this beat · re-checked every beat</span>
+    <div class="big">LET GO <span>→</span> DROP on 33.1</div>
+    <div class="big2">in <b>6 beats</b> · charge <b>78%</b> buys an <b>XL</b> drop · 80 ms hit-stop on landing</div>
+    <div class="seq">
+      <div class="hd">WHAT THE LASERS WILL DO NEXT, AND WHY</div>
+      <div class="r"><span class="t">31.3 → 32.4</span><span>keep narrowing and rising; the track's hats drive sparkle</span><span><span class="tg you">YOU · pedal 86%</span> <span class="tg music">MUSIC · hats</span></span></div>
+      <div class="r"><span class="t">32.4 &amp; ½</span><span>breath: lasers 1–4 black for 234 ms</span><span class="tg rule">RULE · recipe Riser</span></div>
+      <div class="r dr"><span class="t">33.1 DROP</span><span>kit DROP voice: ring burst → full beam fan, Peak colours</span><span><span class="tg you">YOU · release</span> <span class="tg music">MUSIC agrees</span></span></div>
+      <div class="r"><span class="t">33.1 →</span><span>hand over to the music: Peak, driven by kick and bass</span><span class="tg painted">PAINTED · after-drop</span></div>
+    </div>
+    <div class="alts">
+      <div class="a"><b>Keep holding past 33.1</b>catch the real drop: fires on the first big kick + bass, up to 2 bars late, else lands on 35.1</div>
+      <div class="a"><b>Toe click = hang</b>hold the top: motion slows, brightness holds, charge keeps filling</div>
+      <div class="a"><b>CANCEL stomp</b>melts away over 1 bar. No drop. Charge stays at 78%</div>
+    </div>
+  </div>
+
+  <!-- charge -->
+  <div class="panel charge">
+    <h3>Charge</h3><span class="ph">spent on the drop</span>
+    <div class="cnum">78<small>%</small></div>
+    <div class="csz"><b>XL drop</b>full fan + hit-stop ·<br>"DROP" text allowed here</div>
+    <div class="cbar"><i style="width:44%;background:#cfeeff"></i><i style="width:16%;background:#56B4E9"></i><i style="width:18%;background:var(--music)"></i></div>
+    <div class="cmarks"><span style="left:0;transform:none">S</span><span style="left:30%">M · 30</span><span style="left:55%">L · 55</span><span style="left:75%">XL · 75</span><span style="left:100%;transform:translateX(-100%)">100</span></div>
+    <div class="crows">
+      <div class="r"><i style="background:#cfeeff"></i><span>Hold × depth<small>6 bars 3 beats at ~80%</small></span><b>+44</b></div>
+      <div class="r"><i style="background:#56B4E9"></i><span>Clean ride hits<small>7 of 8 on the beat</small></span><b>+16</b></div>
+      <div class="r"><i style="background:var(--music)"></i><span>The music's build<small>riser, kick gone</small></span><b>+18</b></div>
+      <div class="r"><i style="background:#555"></i><span>Spam drain<small>no extra hits off-beat</small></span><b>&nbsp;&nbsp;0</b></div>
+    </div>
+    <div class="cfoot">A fake drop or CANCEL <b>keeps</b> the charge for the next build. Mashing pads drains it.</div>
+  </div>
+
+  <!-- build graph -->
+  <div class="panel graph">
+    <h3>This build</h3>
+    <div class="leg"><span><span class="ln" style="border-color:var(--you)"></span>your tension</span><span><span class="ln" style="border-color:var(--music)"></span>the music's build (riser energy)</span><span><span class="ln" style="border-color:#7f8a95;border-top-style:dotted"></span>pedal depth</span></div>
+    <svg id="tl" width="900" height="360" viewBox="0 0 900 360"></svg>
+  </div>
+
+  <!-- stage -->
+  <div class="panel stage">
+    <svg id="stage" width="500" height="214" viewBox="0 0 500 214"></svg>
+    <h3 style="position:absolute;left:16px;top:12px;color:#c9d3dd">Stage · now</h3>
+    <div class="pills"><span class="pill">converging 81% <span class="sc you">YOU</span></span><span class="pill">sparkle from hats <span class="sc music">MUSIC</span></span><span class="pill">beat motion <span class="sc clock">CLOCK</span></span></div>
+  </div>
+
+  <!-- timing strip -->
+  <div class="panel timing">
+    <h3>Timing strip · your releases</h3><span class="ph">avg −14 ms · window centred on you</span>
+    <svg id="ts" width="500" height="136" viewBox="0 0 500 136"></svg>
+  </div>
+
+  <!-- rig -->
+  <div class="panel rig">
+    <h3>The rig · F mapping</h3>
+    <div class="pads" style="top:30px">
+      <div class="pd"><b>TOM L</b><span>fill → chase left</span></div>
+      <div class="pd"><b>TOM R</b><span>fill → chase right</span></div>
+      <div class="pd lock"><b>CRASH</b><span>locked till the drop</span></div>
+      <div class="pd"><b>RING</b><span>tap = fake drop</span></div>
+      <div class="pd lit"><b>KICK</b><span class="roll">7/8</span><span>ride pulse · +charge</span></div>
+      <div class="pd lit"><b>SNARE</b><span class="roll">ROLL</span><span>roll → shimmer roll</span></div>
+      <div class="pd"><b>HAT</b><span>roll → more sparkle</span></div>
+      <div class="pd drop"><b>DROP</b><span>hold = build</span></div>
+    </div>
+    <div class="faders">
+      <div class="fd"><div class="tr"><div class="cap" style="top:40px"></div></div><b>1 DEPTH</b><span>if no pedal</span></div>
+      <div class="fd"><div class="tr"><div class="cap" style="top:18px;background:#d7c2ff"></div></div><b>2 MUSIC</b><span>feed 70%</span></div>
+      <div class="fd"><div class="tr"><div class="cap" style="top:24px"></div></div><b>3 SPARKLE</b><span>amount</span></div>
+      <div class="fd"><div class="tr"><div class="cap" style="top:30px"></div></div><b>4 ROOM</b><span>dim to 70%</span></div>
+      <div class="fd"><div class="tr"><div class="cap" style="top:34px"></div></div><b>5 DECAY</b><span>after drop</span></div>
+      <div class="fd"><div class="tr"><div class="cap" style="top:10px"></div></div><b>6 MASTER</b><span>show cap</span></div>
+    </div>
+    <div class="feet">
+      <div class="ped" style="position:absolute;left:0;top:0;width:150px;height:108px">
+        <div class="v">PEDAL 86% <span>· click at 90%</span></div>
+        <div class="plate"></div><div class="base"></div>
+        <div class="lb">heel = groove · toe = build</div>
+      </div>
+      <div class="fsw" style="left:162px"><div class="kn"></div><div class="led"></div><b>BREATH</b><span>tap = swell</span></div>
+      <div class="fsw" style="left:234px"><div class="kn"></div><div class="led on"></div><b>CANCEL</b><span>lit = build on</span></div>
+    </div>
+    <div class="estop"><div class="b"></div><div class="t">TERMINATE<br><span style="font-weight:500;color:#d99">wired E-stop</span></div></div>
+  </div>
+
+  <div class="callout" style="left:4px;top:80px">1</div>
+  <div class="callout" style="left:376px;top:80px">2</div>
+  <div class="callout" style="left:1078px;top:80px">3</div>
+  <div class="callout" style="left:4px;top:458px">4</div>
+  <div class="callout" style="left:916px;top:682px">5</div>
+  <div class="callout" style="left:4px;top:830px">6</div>
+
+  <div class="notes">
+    <b>F1 notes</b>
+    <ol>
+      <li>Minute 1 is one gesture: press the pedal, let go. The drop lands on the ring's line, even if you let go early.</li>
+      <li>The orange card is the lead feedback, readable from 2 m: what letting go does now, then what follows and why.</li>
+      <li>Charge is earned (hold × depth, clean hits, the music's build) and buys the drop's size (r07 #17, r06 #22).</li>
+      <li>With analysis, the music's build is drawn beside yours; holding past the line catches the real drop (r08 #3).</li>
+      <li>Releases are forgiven: early waits for the line, up to 40 ms late is full size (r06 #1, r09 game feel 5–6).</li>
+      <li>Pads ride the build: a snare roll becomes a shimmer roll, on-beat kicks add charge, CRASH waits for the drop.</li>
+    </ol>
+  </div>
+</div>
+<script>
+(function(){
+  var NS="http://www.w3.org/2000/svg", F="-apple-system,Helvetica";
+  function el(n,a,p){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;}
+  function tx(p,x,y,s,o){o=o||{};var t=el("text",{x:x,y:y,fill:o.fill||"#9aa4ae","font-size":o.size||11,"font-weight":o.w||400,"text-anchor":o.anchor||"start","font-family":o.mono?"SF Mono,Menlo,monospace":F},p);t.textContent=s;return t;}
+
+  // ---------- phrase ring ----------
+  var r=document.getElementById("ring");
+  var RX=165, RY=135, R1=106, R2=128;
+  var d=el("defs",{},r);
+  var lg=el("linearGradient",{id:"tens",x1:"0",y1:"1",x2:"1",y2:"0"},d);
+  el("stop",{offset:"0%","stop-color":"#7b4bb0"},lg);el("stop",{offset:"60%","stop-color":"#6aa9e8"},lg);el("stop",{offset:"100%","stop-color":"#ffffff"},lg);
+  function arcSeg(r0,r1,a0,a1){a0*=Math.PI/180;a1*=Math.PI/180;var big=(a1-a0)>Math.PI?1:0;
+    return "M"+(RX+r1*Math.cos(a0))+","+(RY+r1*Math.sin(a0))+" A"+r1+","+r1+" 0 "+big+" 1 "+(RX+r1*Math.cos(a1))+","+(RY+r1*Math.sin(a1))+
+      " L"+(RX+r0*Math.cos(a1))+","+(RY+r0*Math.sin(a1))+" A"+r0+","+r0+" 0 "+big+" 0 "+(RX+r0*Math.cos(a0))+","+(RY+r0*Math.sin(a0))+" Z";}
+  for(var b=1;b<=32;b++){
+    var a0=-90+(b-1)*360/32+1.3, a1=-90+b*360/32-1.3;
+    var fill="#1a1e24", st="#2b313a";
+    if(b<25) fill="#2a2f37";
+    if(b>=25&&b<31){var t2=(b-25)/6;fill="rgb("+Math.round(110+t2*110)+","+Math.round(90+t2*140)+","+Math.round(180+t2*70)+")";}
+    if(b==31){fill="#eaf7ff";st="#fff";}
+    el("path",{d:arcSeg(R1,R2,a0,a1),fill:fill,stroke:st,"stroke-width":1},r);
+    if(b%8==1){var la=(-90+(b-1)*360/32)*Math.PI/180;tx(r,RX+(R2+12)*Math.cos(la),RY+(R2+12)*Math.sin(la)+4,b,{anchor:"middle"});}
+  }
+  // tension arc (inner)
+  el("circle",{cx:RX,cy:RY,r:92,fill:"none",stroke:"#171b21","stroke-width":10},r);
+  var ta=-90+0.81*360; el("path",{d:arcSeg(87,97,-90,ta),fill:"url(#tens)"},r);
+  // target at top
+  el("circle",{cx:RX,cy:RY-R2-1,r:12,fill:"#060708",stroke:"#E69F00","stroke-width":3},r);
+  el("circle",{cx:RX,cy:RY-R2-1,r:4,fill:"#E69F00"},r);
+  tx(r,RX+18,RY-R2-14,"33.1",{fill:"#ffc861",w:800,size:12});
+  tx(r,RX,RY-40,"BAR · BEAT",{anchor:"middle",size:11.5});
+  tx(r,RX,RY+4,"31 · 3",{anchor:"middle",size:44,w:800,fill:"#fff"});
+  tx(r,RX,RY+28,"line in 6 beats",{anchor:"middle",size:14,w:700,fill:"#ffc861"});
+  tx(r,RX,RY+48,"tension 81%",{anchor:"middle",size:12.5,fill:"#cfe6f5"});
+
+  // ---------- build graph ----------
+  var L=document.getElementById("tl");
+  var X0=190,X1=876,Y0=206,Y1=62;
+  function bx(bar){return X0+(bar-24)*(X1-X0)/12;}
+  function ty(p){return Y0-(Y0-Y1)*p/100;}
+  var dd=el("defs",{},L);
+  var g1=el("linearGradient",{id:"tg",x1:"0",y1:"1",x2:"0",y2:"0"},dd);
+  el("stop",{offset:"0%","stop-color":"#7b4bb0","stop-opacity":".08"},g1);el("stop",{offset:"100%","stop-color":"#cfeeff","stop-opacity":".35"},g1);
+  [25,50,75,100].forEach(function(p){el("line",{x1:X0,y1:ty(p),x2:X1,y2:ty(p),stroke:"#20262e","stroke-dasharray":"3 4"},L);tx(L,X0-8,ty(p)+4,p+"%",{anchor:"end"});});
+  tx(L,X0-8,ty(0)+4,"0%",{anchor:"end"});
+  el("line",{x1:X0,y1:Y0,x2:X1,y2:Y0,stroke:"#3a424c"},L);
+  for(var bb=24;bb<=36;bb++){ if(bb==36) continue; tx(L,bx(bb),Y0+14,bb,{anchor:"middle",fill:bb==33?"#ffc861":"#7f8a95",w:bb==33?800:400}); }
+  // catch window 33.1 -> 35.1
+  el("rect",{x:bx(33),y:Y1-6,width:bx(35)-bx(33),height:Y0-Y1+6,fill:"#E69F00",opacity:.07},L);
+  el("line",{x1:bx(35),y1:Y1-6,x2:bx(35),y2:Y0,stroke:"#7a5a1c","stroke-dasharray":"3 3"},L);
+  tx(L,bx(34),ty(52),"catch window",{anchor:"middle",fill:"#e0ad55",w:700,size:12});
+  tx(L,bx(34),ty(52)+15,"still holding? the first",{anchor:"middle",fill:"#b8995f"});
+  tx(L,bx(34),ty(52)+29,"kick + bass fires it",{anchor:"middle",fill:"#b8995f"});
+  tx(L,bx(35)+5,Y0-6,"else 35.1",{fill:"#a98a55"});
+  // music line
+  var mb=[24,25,26,27,28,29,30,31,31.5], mp=[6,12,22,30,40,50,60,70,76];
+  var mpts=mb.map(function(b,i){return bx(b)+","+ty(mp[i]);});
+  el("polyline",{points:mpts.join(" "),fill:"none",stroke:"#b48cff","stroke-width":2.5},L);
+  el("polyline",{points:bx(31.5)+","+ty(76)+" "+bx(32)+","+ty(84)+" "+bx(32.85)+","+ty(96),fill:"none",stroke:"#b48cff","stroke-width":2,"stroke-dasharray":"5 4"},L);
+  tx(L,bx(29.3),ty(62)-8,"music: riser",{fill:"#d7c2ff",anchor:"end"});
+  // you line
+  var yb=[25,25.6,26.3,27.1,28,28.9,29.8,30.6,31.5], yp=[0,8,17,28,39,50,61,72,81];
+  var ypts=yb.map(function(b,i){return bx(b)+","+ty(yp[i]);});
+  el("path",{d:"M"+bx(25)+","+Y0+" L"+ypts.join(" L")+" L"+bx(31.5)+","+Y0+" Z",fill:"url(#tg)"},L);
+  el("polyline",{points:ypts.join(" "),fill:"none",stroke:"#e6f6ff","stroke-width":3},L);
+  el("polyline",{points:bx(31.5)+","+ty(81)+" "+bx(32.85)+","+ty(91),fill:"none",stroke:"#e6f6ff","stroke-width":2,"stroke-dasharray":"4 4"},L);
+  tx(L,bx(28.4)+8,ty(40)+16,"you",{fill:"#e6f6ff",w:700,size:12});
+  // pedal
+  var pd=[30,45,60,62,70,75,80,84,86];
+  el("polyline",{points:yb.map(function(b,i){return bx(b)+","+ty(pd[i]);}).join(" "),fill:"none",stroke:"#7f8a95","stroke-width":1.3,"stroke-dasharray":"2 3"},L);
+  // breath
+  el("rect",{x:bx(32.875),y:Y1-6,width:bx(33)-bx(32.875),height:Y0-Y1+6,fill:"#D55E00",opacity:.4},L);
+  // drop marker
+  el("line",{x1:bx(33),y1:Y1-14,x2:bx(33),y2:Y0,stroke:"#E69F00","stroke-width":2.5},L);
+  el("circle",{cx:bx(33),cy:ty(100),r:8,fill:"#060708",stroke:"#E69F00","stroke-width":2.5},L);
+  tx(L,bx(33)-6,Y1-18,"DROP 33.1 · line",{anchor:"end",fill:"#ffc861",w:800,size:12});
+  // now
+  el("line",{x1:bx(31.5),y1:Y1-6,x2:bx(31.5),y2:338,stroke:"#fff","stroke-width":1.3,opacity:.8},L);
+  tx(L,bx(31.5)-5,Y1+4,"NOW 31.3",{anchor:"end",fill:"#fff",w:800,size:12});
+  // lanes
+  var lanes=[["KICK","MUSIC",240],["HATS → sparkle","MUSIC",268],["YOUR PADS","YOU",296],["BEAT MOTION","CLOCK",324]];
+  lanes.forEach(function(ln){
+    el("line",{x1:16,y1:ln[2]-14,x2:X1,y2:ln[2]-14,stroke:"#1a1f26"},L);
+    tx(L,78,ln[2]+4,ln[0],{fill:"#e4e9ee",w:700,size:11.5});
+    var c=ln[1]=="MUSIC"?"#b48cff":ln[1]=="YOU"?"#9fdcff":"#6b7580";
+    el("rect",{x:16,y:ln[2]-8,width:54,height:16,rx:8,fill:"none",stroke:c,"stroke-width":1.4},L);
+    tx(L,43,ln[2]+4,ln[1],{anchor:"middle",fill:c,w:800,size:10.5});
+  });
+  // kick lane: beats until 25, gone, predicted return 33
+  for(var q=24;q<25;q+=0.25){el("rect",{x:bx(q)-1.5,y:232,width:3,height:16,fill:"#b48cff"},L);}
+  tx(L,bx(28.2),244,"kick gone since bar 25",{fill:"#a993d6",anchor:"middle"});
+  el("line",{x1:bx(25.1),y1:240,x2:bx(26.6),y2:240,stroke:"#3a3150","stroke-dasharray":"2 3"},L);
+  el("line",{x1:bx(29.8),y1:240,x2:bx(32.9),y2:240,stroke:"#3a3150","stroke-dasharray":"2 3"},L);
+  for(var q2=33;q2<36;q2+=0.25){el("rect",{x:bx(q2)-1.5,y:232,width:3,height:16,fill:"none",stroke:"#b48cff","stroke-dasharray":"2 2"},L);}
+  // hats lane density
+  for(var h=24;h<31.5;h+=(h<29?0.125:0.0625)){var hh=h<29?8:12;el("rect",{x:bx(h)-0.8,y:268-hh/2,width:1.6,height:hh,fill:"#b48cff",opacity:h<29?.6:.95},L);}
+  tx(L,bx(31.6),272,"1/8 → 1/16 at 29",{fill:"#a993d6"});
+  // your pads
+  [27,27.25,27.5,27.75,28,28.25,28.5].forEach(function(b){el("circle",{cx:bx(b),cy:296,r:4,fill:"#56B4E9"},L);});
+  el("circle",{cx:bx(28.8),cy:296,r:4,fill:"none",stroke:"#777"},L);
+  tx(L,bx(25.2),300,"kick rides: 7 clean →",{fill:"#8fc0e0"});
+  for(var s=30.5;s<31.4;s+=0.0625){el("rect",{x:bx(s)-1,y:290,width:2,height:12,fill:"#e6f6ff"},L);}
+  tx(L,bx(31.6),300,"snare roll → shimmer roll",{fill:"#cfe6f5"});
+  // beat motion (clock): thinning
+  for(var c2=24;c2<33;c2+=0.25){var hgt=c2<25?14:Math.max(3,14-(c2-25)*1.4);el("rect",{x:bx(c2)-1.2,y:324-hgt/2,width:2.4,height:hgt,fill:"#6b7580"},L);}
+  tx(L,bx(33)+6,328,"thins to motion-only rolls",{fill:"#7f8a95"});
+
+  // ---------- stage ----------
+  var S=document.getElementById("stage");
+  el("rect",{x:0,y:178,width:500,height:36,fill:"#08090b"},S);
+  el("rect",{x:60,y:168,width:380,height:9,fill:"#1b1f25",stroke:"#2d333c"},S);
+  var heads=[[88,168],[196,168],[304,168],[412,168]], cx=250, cy=70;
+  var gg=el("g",{style:"filter:drop-shadow(0 0 2px #cfeeff) drop-shadow(0 0 5px #8fd3ff)"},S);
+  heads.forEach(function(hd){var base=Math.atan2(cx-hd[0],hd[1]-cy),len=Math.hypot(cx-hd[0],hd[1]-cy)+16;
+    for(var k=-1;k<=1;k++){var a=base+k*0.05;el("line",{x1:hd[0],y1:hd[1],x2:hd[0]+Math.sin(a)*len,y2:hd[1]-Math.cos(a)*len,stroke:"#e6f6ff","stroke-width":1.4},gg);
+      for(var qq=1;qq<7;qq++){var f=qq/7+(k+2)*0.025;el("circle",{cx:hd[0]+Math.sin(a)*len*f,cy:hd[1]-Math.cos(a)*len*f,r:1.4,fill:"#e8dcff"},gg);}}
+  });
+  heads.forEach(function(hd,i){el("rect",{x:hd[0]-9,y:hd[1]-3,width:18,height:12,rx:3,fill:"#2a3038",stroke:"#fff","stroke-width":1.3},S);tx(S,hd[0],hd[1]+26,(i+1)+" · on",{anchor:"middle",fill:"#b9c3cc"});});
+  [[26,176],[474,176]].forEach(function(hd,i){el("rect",{x:hd[0]-9,y:hd[1]-6,width:18,height:12,rx:3,fill:"#16191d",stroke:"#555","stroke-dasharray":"3 2"},S);tx(S,hd[0],hd[1]+20,(i+5)+" · off",{anchor:"middle",fill:"#777"});});
+  el("circle",{cx:cx,cy:cy,r:12,fill:"none",stroke:"#cfeeff",opacity:.6},S);
+  
+
+  // ---------- timing strip ----------
+  var T=document.getElementById("ts");
+  var A0=60,A1=440,Z=(A0+A1)/2; function mx(ms){return Z+ms*(A1-Z)/120;}
+  el("rect",{x:mx(-117),y:62,width:mx(0)-mx(-117),height:26,fill:"#16283a"},T);
+  el("rect",{x:mx(0),y:62,width:mx(40)-mx(0),height:26,fill:"#173322"},T);
+  el("rect",{x:mx(40),y:62,width:mx(117)-mx(40),height:26,fill:"#2a2410"},T);
+  el("line",{x1:Z,y1:44,x2:Z,y2:94,stroke:"#fff","stroke-width":1.5},T);
+  tx(T,mx(-60),79,"early: waits for the line",{anchor:"middle",fill:"#8fb3d3"});
+  tx(T,mx(20),79,"≤40",{anchor:"middle",fill:"#8fd3a0"});
+  tx(T,mx(80),79,"late: smaller",{anchor:"middle",fill:"#c9b07a"});
+  tx(T,A0,106,"−117 ms",{fill:"#7f8a95"});tx(T,Z,106,"line",{anchor:"middle",fill:"#ddd",w:700});tx(T,A1,106,"+117",{anchor:"end",fill:"#7f8a95"});
+  var rel=[[-12,"Drop 1 · 17.1",1],[-31,"",0],[-6,"",0],[22,"",0]];
+  rel.forEach(function(rr,i){el("circle",{cx:mx(rr[0]),cy:rr[2]?52:46,r:rr[2]?6:4,fill:rr[2]?"#ffc861":"none",stroke:rr[2]?"#ffc861":"#cfe6f5","stroke-width":1.6},T);});
+  tx(T,mx(22)+12,56,"last: −12 ms → snapped",{fill:"#ffc861",w:700,size:12});
+  tx(T,16,126,"last 4: −12 · −31 · −6 · +22 ms  ·  fake at 9.1 and the tease at 57.1 counted too",{fill:"#9aa4ae"});
+})();
+</script>
+</body></html>

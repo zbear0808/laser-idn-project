@@ -1,0 +1,176 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+:root { --you: #e6f6ff; --music: #b48cff; --loop: #3ad29f; }
+.page { background: #07080a; }
+.hdr { position: absolute; left: 16px; right: 14px; top: 42px; height: 40px; display: flex; align-items: center; gap: 14px; }
+.hdr h1 { font-size: 20px; }
+.hdr .sub { font-size: 12.5px; color: var(--text2); }
+.term { margin-left: auto; height: 32px; padding: 0 14px; border-radius: 6px; background: #b3170f; border: 2px solid #ff6a5a; color: #fff; display: inline-flex; align-items: center; gap: 8px; font-weight: 800; letter-spacing: .06em; font-size: 13px; box-shadow: 0 0 14px rgba(255,60,40,.35); white-space: nowrap; }
+.term i { width: 12px; height: 12px; background: #fff; border-radius: 2px; }
+.term small { font-weight: 600; letter-spacing: 0; opacity: .85; font-size: 11px; }
+.panel { position: absolute; border-radius: 12px; background: #0e1014; border: 1px solid #1f242c; }
+.panel > h3 { position: absolute; left: 16px; top: 12px; }
+.panel .ph { position: absolute; right: 16px; top: 11px; font-size: 12px; color: var(--text2); }
+.sc { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 9px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; border: 1.5px solid; white-space: nowrap; }
+.sc.music { color: #d7c2ff; border-color: var(--music); background: rgba(180,140,255,.12); }
+.sc.loop { color: #9ff0cf; border-color: var(--loop); background: rgba(58,210,159,.12); }
+.sc.clock { color: #c9d1d9; border-color: #6b7580; }
+.sc.you { color: var(--you); border-color: #9fdcff; }
+
+/* start view */
+.start { left: 14px; top: 92px; width: 600px; height: 556px; background: #040506; border-color: #2a3038; }
+.start .tag0 { position: absolute; left: 16px; top: 12px; font-size: 11.5px; font-weight: 800; letter-spacing: .06em; color: #111; background: #9fdcff; padding: 3px 8px; border-radius: 4px; }
+.start svg { position: absolute; left: 0; top: 0; }
+.start .say { position: absolute; left: 0; right: 0; top: 404px; text-align: center; font-size: 34px; font-weight: 900; color: #fff; }
+.start .say span { color: #ffc861; }
+.start .say2 { position: absolute; left: 0; right: 0; top: 452px; text-align: center; font-size: 15px; color: #b9c3cc; }
+.start .foot { position: absolute; left: 16px; right: 16px; bottom: 14px; display: flex; justify-content: space-between; font-size: 12px; color: var(--text2); }
+
+/* layers */
+.layers { left: 626px; top: 92px; width: 800px; height: 330px; }
+.lr { position: absolute; left: 16px; right: 16px; height: 66px; display: grid; grid-template-columns: 34px 190px 1fr 170px; gap: 12px; align-items: center; border-top: 1px solid #1c2128; }
+.lr .n { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 14px; color: #111; }
+.lr .w b { display: block; font-size: 14px; color: #fff; }
+.lr .w span { font-size: 11.5px; color: var(--text2); }
+.lr .d { font-size: 12.5px; color: #d6dde4; line-height: 1.38; }
+.lr .c { font-size: 12px; color: #cfe6f5; line-height: 1.35; }
+.lr .c b { color: #fff; }
+
+/* training */
+.train { left: 626px; top: 434px; width: 800px; height: 214px; }
+.train svg { position: absolute; left: 0; top: 0; }
+.train .side { position: absolute; right: 16px; top: 42px; width: 230px; font-size: 12.5px; color: #d6dde4; line-height: 1.45; }
+.train .side b { color: #fff; }
+.train .side .big { font-size: 30px; font-weight: 900; color: #fff; line-height: 1; margin-bottom: 4px; }
+
+/* rig map */
+.rig { left: 14px; top: 660px; width: 1412px; height: 132px; }
+.rig > h3 { top: 10px; }
+.pads { position: absolute; left: 16px; top: 32px; display: grid; grid-template-columns: repeat(4, 120px); gap: 6px; }
+.pd { height: 44px; border-radius: 7px; background: #191c21; border: 1.5px solid #333a44; padding: 4px 8px; position: relative; }
+.pd b { display: block; font-size: 12px; color: #eee; }
+.pd span { font-size: 11px; color: var(--text2); display: block; }
+.lv { position: absolute; right: 5px; top: 5px; width: 17px; height: 17px; border-radius: 50%; font-size: 10.5px; font-weight: 900; color: #111; display: flex; align-items: center; justify-content: center; }
+.faders { position: absolute; left: 540px; top: 30px; display: flex; gap: 6px; }
+.fd { width: 70px; height: 92px; border-radius: 7px; background: #15181d; border: 1px solid #2a3038; text-align: center; padding-top: 8px; position: relative; }
+.fd .tr { width: 8px; height: 38px; margin: 0 auto; border-radius: 4px; background: #252a31; position: relative; }
+.fd .tr i { position: absolute; left: -8px; width: 24px; height: 8px; border-radius: 2px; background: #c9d1d9; }
+.fd b { display: block; font-size: 11px; color: #eee; margin-top: 6px; }
+.fd span { display: block; font-size: 11px; color: var(--text2); }
+.fd .lv { top: 4px; right: 4px; }
+.ft { position: absolute; top: 30px; height: 92px; border-radius: 7px; background: #15181d; border: 1px solid #2a3038; padding: 8px 10px; }
+.ft b { display: block; font-size: 12.5px; color: #fff; }
+.ft span { display: block; font-size: 11.5px; color: var(--text2); line-height: 1.35; margin-top: 2px; }
+.ft .lv { top: 6px; right: 6px; }
+.estop { position: absolute; right: 14px; top: 30px; width: 96px; text-align: center; }
+.estop .b { width: 52px; height: 52px; border-radius: 50%; margin: 0 auto; background: radial-gradient(#ff5a4a, #a10f08); border: 5px solid #f3c600; }
+.estop .t { font-size: 11px; color: #ffb3a8; font-weight: 800; margin-top: 5px; line-height: 1.25; }
+
+.rig .lv { position: absolute; right: 5px; top: 5px; width: 17px; height: 17px; border-radius: 50%; font-size: 10.5px; font-weight: 900; color: #111; display: flex; align-items: center; justify-content: center; margin: 0; line-height: 1; }
+.rig .ft span .lv { position: static; display: inline-flex; margin-right: 4px; vertical-align: -3px; }
+.l1 { background: #9fdcff; } .l2 { background: #ffc861; } .l3 { background: #b48cff; } .l4 { background: #3ad29f; }
+.notes { left: 14px; top: 802px; width: 1412px; font-size: 12px; padding: 7px 12px; line-height: 1.4; }
+.notes ol { columns: 2; column-gap: 40px; }
+</style></head><body>
+<div class="page">
+  <div class="caption-bar"><b>F3 · Tension &amp; Release — the first minute, and what reveals itself later</b><span class="tag">start view · layers · training · rig map</span><span class="tag">one gesture first</span></div>
+  <div class="hdr"><h1>Start view</h1><span class="sub">what a new performer sees the first time; each layer appears only once it has something true to say</span><span class="term"><i></i>TERMINATE<small>Esc · E-stop</small></span></div>
+
+  <div class="panel start">
+    <span class="tag0">MINUTE 1 · THIS IS ALL OF IT</span>
+    <svg id="ring" width="600" height="400" viewBox="0 0 600 400"></svg>
+    <div class="say">Press down. <span>Let go.</span></div>
+    <div class="say2">It lands on the line (bar 33, beat 1), even if you let go early.</div>
+    <div class="foot"><span>pedal 64% · the ring fills as you hold</span><span>CANCEL melts it · TERMINATE stops the lasers</span></div>
+  </div>
+
+  <div class="panel layers">
+    <h3>Layers that reveal themselves</h3><span class="ph">nothing is hidden: "Show all" opens every layer at once</span>
+    <div class="lr" style="top:38px"><span class="n l1">1</span><div class="w"><b>Hold and let go</b><span>from the start</span></div><div class="d">The ring, the tension fill and one sentence. The phrase line is the target. Works with tap or Link only.</div><div class="c"><b>Pedal</b> · CANCEL · TERMINATE</div></div>
+    <div class="lr" style="top:104px"><span class="n l2">2</span><div class="w"><b>Charge and size</b><span>after your first drop</span></div><div class="d">The charge meter and "what letting go does now" in full. A long, deep build earns a bigger drop.</div><div class="c"><b>BREATH</b> footswitch · <b>toe click</b> = hang</div></div>
+    <div class="lr" style="top:170px"><span class="n l3">3</span><div class="w"><b>The music joins</b><span>when analysis is Locked</span></div><div class="d">The music's build is drawn beside yours, hats drive sparkle, and holding past the line catches the real drop. <span class="sc music">MUSIC</span></div><div class="c"><b>Fader 2</b> = how much the music feeds</div></div>
+    <div class="lr" style="top:236px"><span class="n l4">4</span><div class="w"><b>Pads ride the build</b><span>the first time you hit a pad</span></div><div class="d">Rolls add sparkle, a snare roll becomes a shimmer roll, on-beat hits add charge. After the drop, KEEP its groove. <span class="sc loop">LOOP</span></div><div class="c"><b>8 pads</b> · faders 3–6</div></div>
+  </div>
+
+  <div class="panel train">
+    <h3>Training · your releases</h3><span class="ph" style="right:262px">over a looping riser · 40 builds · nothing sent</span>
+    <svg id="hist" width="560" height="214" viewBox="0 0 560 214"></svg>
+    <div class="side"><div class="big">−14 ms</div>you let go a little early, on average (most people do, r06 #1). <b>The window is now centred on you.</b> 37 of 40 landed full size; 3 were late and 30% smaller.</div>
+  </div>
+
+  <div class="panel rig">
+    <h3>The rig · F mapping, by layer</h3>
+    <div class="pads">
+      <div class="pd"><span class="lv l4">4</span><b>TOM L</b><span>fill → chase left</span></div>
+      <div class="pd"><span class="lv l4">4</span><b>TOM R</b><span>fill → chase right</span></div>
+      <div class="pd"><span class="lv l4">4</span><b>CRASH</b><span>waits for the drop</span></div>
+      <div class="pd"><span class="lv l4">4</span><b>RING</b><span>tap = fake drop</span></div>
+      <div class="pd"><span class="lv l4">4</span><b>KICK</b><span>ride · +charge</span></div>
+      <div class="pd"><span class="lv l4">4</span><b>SNARE</b><span>roll → shimmer</span></div>
+      <div class="pd"><span class="lv l4">4</span><b>HAT</b><span>roll → sparkle</span></div>
+      <div class="pd" style="border-color:#9fdcff"><span class="lv l1">1</span><b style="color:#ffc861">DROP</b><span>hold = build</span></div>
+    </div>
+    <div class="faders">
+      <div class="fd"><span class="lv l1">1</span><div class="tr"><i style="top:18px"></i></div><b>1 DEPTH</b><span>no pedal</span></div>
+      <div class="fd"><span class="lv l3">3</span><div class="tr"><i style="top:8px;background:#d7c2ff"></i></div><b>2 MUSIC</b><span>feed</span></div>
+      <div class="fd"><span class="lv l4">4</span><div class="tr"><i style="top:12px"></i></div><b>3 SPARKLE</b><span>amount</span></div>
+      <div class="fd"><span class="lv l4">4</span><div class="tr"><i style="top:16px"></i></div><b>4 ROOM</b><span>dim</span></div>
+      <div class="fd"><span class="lv l4">4</span><div class="tr"><i style="top:20px"></i></div><b>5 DECAY</b><span>after drop</span></div>
+      <div class="fd"><span class="lv l1">1</span><div class="tr"><i style="top:4px"></i></div><b>6 MASTER</b><span>show cap</span></div>
+    </div>
+    <div class="ft" style="left:998px;width:144px"><span class="lv l1">1</span><b>Expression pedal</b><span>heel = groove<br>toe = build</span><span><span class="lv l2" style="position:static;display:inline-flex;margin-right:4px">2</span>toe click = hang</span></div>
+    <div class="ft" style="left:1150px;width:146px"><b>Footswitches</b><span><span class="lv l2" style="position:static;display:inline-flex;margin-right:4px">2</span>BREATH: swell</span><span><span class="lv l1" style="position:static;display:inline-flex;margin-right:4px">1</span>CANCEL: melt, keep charge</span></div>
+    <div class="estop"><div class="b"></div><div class="t">TERMINATE<br><span style="font-weight:500;color:#d99">never mapped</span></div></div>
+  </div>
+
+  <div class="callout" style="left:4px;top:82px">1</div>
+  <div class="callout" style="left:616px;top:82px">2</div>
+  <div class="callout" style="left:616px;top:424px">3</div>
+  <div class="callout" style="left:4px;top:650px">4</div>
+
+  <div class="notes">
+    <b>F3 notes</b>
+    <ol>
+      <li>Minute 1 needs one gesture and one sentence. The ring and the sentence are readable from across a booth.</li>
+      <li>Layers appear when they become true (first drop, music Locked, first pad hit). "Show all" opens them at once: no hidden layers.</li>
+      <li>Training (from Flight Deck): build over a looping riser; the early/late histogram re-centres your window (r06 Q2).</li>
+      <li>One rig, mapped by layer. The DROP pad or fader 1 replaces the pedal at a booth with no floor space. TERMINATE is never mapped.</li>
+    </ol>
+  </div>
+</div>
+<script>
+(function(){
+  var NS="http://www.w3.org/2000/svg",F="-apple-system,Helvetica";
+  function el(n,a,p){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;}
+  function tx(p,x,y,s,o){o=o||{};var t=el("text",{x:x,y:y,fill:o.fill||"#9aa4ae","font-size":o.size||11,"font-weight":o.w||400,"text-anchor":o.anchor||"start","font-family":F},p);t.textContent=s;return t;}
+  var r=document.getElementById("ring"),RX=300,RY=214,R1=140,R2=170;
+  var d=el("defs",{},r);var lg=el("linearGradient",{id:"tg",x1:"0",y1:"1",x2:"1",y2:"0"},d);
+  el("stop",{offset:"0%","stop-color":"#7b4bb0"},lg);el("stop",{offset:"60%","stop-color":"#6aa9e8"},lg);el("stop",{offset:"100%","stop-color":"#fff"},lg);
+  function seg(r0,r1,a0,a1){a0*=Math.PI/180;a1*=Math.PI/180;var big=(a1-a0)>Math.PI?1:0;
+    return "M"+(RX+r1*Math.cos(a0))+","+(RY+r1*Math.sin(a0))+" A"+r1+","+r1+" 0 "+big+" 1 "+(RX+r1*Math.cos(a1))+","+(RY+r1*Math.sin(a1))+" L"+(RX+r0*Math.cos(a1))+","+(RY+r0*Math.sin(a1))+" A"+r0+","+r0+" 0 "+big+" 0 "+(RX+r0*Math.cos(a0))+","+(RY+r0*Math.sin(a0))+" Z";}
+  for(var b=1;b<=32;b++){var a0=-90+(b-1)*11.25+1.2,a1=-90+b*11.25-1.2;var f="#1a1e24";if(b<27)f="#2a2f37";if(b>=27&&b<30)f="#8f86d8";if(b==30)f="#eaf7ff";el("path",{d:seg(R1,R2,a0,a1),fill:f,stroke:"#2b313a"},r);}
+  el("circle",{cx:RX,cy:RY,r:120,fill:"none",stroke:"#171b21","stroke-width":14},r);
+  el("path",{d:seg(113,127,-90,-90+0.64*360),fill:"url(#tg)"},r);
+  el("circle",{cx:RX,cy:RY-R2-1,r:15,fill:"#040506",stroke:"#E69F00","stroke-width":3.5},r);
+  el("circle",{cx:RX,cy:RY-R2-1,r:5,fill:"#E69F00"},r);
+  tx(r,RX,RY-30,"BAR",{anchor:"middle",size:13});
+  tx(r,RX,RY+26,"30",{anchor:"middle",size:72,w:900,fill:"#fff"});
+  tx(r,RX,RY+58,"line in 3 bars",{anchor:"middle",size:17,w:700,fill:"#ffc861"});
+  // histogram
+  var H=document.getElementById("hist");var A0=40,A1=540,Z=290,Y0=170;function mx(ms){return Z+ms*(A1-Z)/100;}
+  el("rect",{x:mx(-100),y:46,width:mx(0)-mx(-100),height:Y0-46,fill:"#13202d"},H);
+  el("rect",{x:mx(0),y:46,width:mx(40)-mx(0),height:Y0-46,fill:"#13281b"},H);
+  el("rect",{x:mx(40),y:46,width:mx(100)-mx(40),height:Y0-46,fill:"#251f0f"},H);
+  var bins=[[-60,1],[-50,2],[-40,3],[-30,6],[-20,9],[-10,8],[0,5],[10,2],[20,1],[30,0],[40,1],[50,1],[60,1]];
+  bins.forEach(function(bn){var h=bn[1]*12;el("rect",{x:mx(bn[0])+2,y:Y0-h,width:(A1-Z)/10-4,height:h,rx:2,fill:bn[0]>=40?"#c9a24e":"#56B4E9"},H);});
+  el("line",{x1:Z,y1:40,x2:Z,y2:Y0+4,stroke:"#fff","stroke-width":1.5},H);
+  el("line",{x1:mx(-14),y1:40,x2:mx(-14),y2:Y0+4,stroke:"#ffc861","stroke-width":1.5,"stroke-dasharray":"4 3"},H);
+  tx(H,mx(-14)-4,38,"you: −14",{anchor:"end",fill:"#ffc861",w:700});
+  tx(H,Z+4,38,"line",{fill:"#fff",w:700});
+  el("line",{x1:A0,y1:Y0,x2:A1,y2:Y0,stroke:"#3a424c"},H);
+  [-100,-50,0,40,100].forEach(function(m){tx(H,mx(m),Y0+16,(m>0?"+":"")+m+" ms",{anchor:"middle",fill:"#7f8a95"});});
+  tx(H,mx(-75),62,"early: waits",{anchor:"middle",fill:"#8fb3d3"});tx(H,mx(20),62,"≤40: full",{anchor:"middle",fill:"#8fd3a0"});tx(H,mx(70),62,"late: smaller",{anchor:"middle",fill:"#c9b07a"});
+  tx(H,16,204,"each bar = releases in a 10 ms slice · fake drops and catches excluded",{fill:"#7f8a95"});
+})();
+</script>
+</body></html>

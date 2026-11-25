@@ -1,0 +1,198 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+:root { --kick:#56B4E9; --snare:#F0E442; --hat:#5fe3c4; --bass:#a78bfa; --tom:#E69F00; --next:#CC79A7; --drop:#ffd27a;
+        --you:#ffffff; --music:#6ee7a0; --loop:#ff7ac8; --clock:#FFB000; }
+.page { background:#08090b; }
+.topband { height:48px; display:flex; align-items:center; gap:14px; padding:0 14px 0 16px; background:#0d0f12; border-bottom:1px solid #1d2128; white-space:nowrap; }
+.train { font-size:12px; font-weight:800; letter-spacing:.06em; color:#cdb8ff; padding:3px 9px; border-radius:4px; background:#23193a; border:1px solid #8f6cff; }
+.trk { font-size:14px; font-weight:600; color:#eee; }
+.trk span { color:var(--text2); font-weight:400; margin-left:8px; font-size:12.5px; }
+.bpm { font-family:"SF Mono",Menlo,monospace; font-size:15px; font-weight:700; }
+.bpm small { color:var(--muted); font-weight:400; font-size:11px; margin-left:4px; }
+.src { font-size:11.5px; color:var(--text2); display:inline-flex; align-items:center; gap:6px; }
+.stop { margin-left:auto; height:32px; padding:0 14px; border-radius:6px; background:#b3170f; border:2px solid #ff6a5a; color:#fff; display:inline-flex; align-items:center; gap:8px; font-weight:800; letter-spacing:.06em; font-size:13px; box-shadow:0 0 14px rgba(255,60,40,.35); }
+.stop i { width:12px; height:12px; background:#fff; border-radius:2px; }
+.stop small { font-weight:600; letter-spacing:0; opacity:.85; font-size:11px; }
+.card2 { position:absolute; border-radius:12px; background:#0d0f12; border:1px solid #1e232b; }
+.card2 > h3 { position:absolute; left:16px; top:13px; color:#c9d3dd; }
+.hr { position:absolute; right:14px; top:11px; font-size:11.5px; color:#9aa4ae; display:flex; gap:6px; align-items:center; }
+.pill { font-size:11.5px; padding:3px 9px; border-radius:10px; background:rgba(20,24,30,.85); border:1px solid #2c333d; color:#cdd6e0; white-space:nowrap; }
+
+.hist { left:14px; top:94px; width:820px; height:376px; }
+.stats { position:absolute; left:16px; top:42px; display:flex; gap:26px; }
+.stats div { font-size:11.5px; color:#9aa4ae; }
+.stats b { display:block; font-size:24px; color:#fff; font-weight:900; font-family:"SF Mono",Menlo,monospace; letter-spacing:-.02em; }
+.hist svg { position:absolute; left:0; top:106px; }
+
+.vox { left:846px; top:94px; width:580px; height:376px; }
+.vr { position:absolute; left:14px; right:14px; height:50px; border-radius:9px; background:#14171c; border:1px solid #20252d; display:flex; align-items:center; gap:10px; padding:0 12px; }
+.vr .n { width:62px; font-size:14px; font-weight:900; color:var(--vc); letter-spacing:.03em; }
+.vr .m { width:92px; font-family:"SF Mono",Menlo,monospace; font-size:13px; color:#fff; font-weight:700; }
+.vr .m small { display:block; font-family:-apple-system,"SF Pro Text",sans-serif; font-size:11px; color:#8f99a4; font-weight:400; }
+.vr svg { flex:none; }
+.vr .t { flex:1; font-size:11.5px; color:#b9c3cc; line-height:1.35; }
+.vr .t b { color:#fff; }
+
+.lanes { left:14px; top:482px; width:820px; height:218px; }
+.lanes svg { position:absolute; left:0; top:38px; }
+
+.win { left:846px; top:482px; width:580px; height:218px; }
+.wrow { position:absolute; left:16px; right:16px; display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#b9c3cc; height:28px; border-bottom:1px solid #1a1e24; }
+.wrow b { color:#fff; font-family:"SF Mono",Menlo,monospace; }
+.btn2 { height:26px; padding:0 10px; border-radius:6px; font-size:11.5px; font-weight:700; display:inline-flex; align-items:center; border:1px solid #4992db; background:#173a5e; color:#d6eaff; }
+.safe { position:absolute; left:16px; right:16px; bottom:12px; font-size:11.5px; color:#cdb8ff; }
+
+.drills { left:14px; top:712px; width:996px; height:176px; }
+.dr { position:absolute; top:42px; width:186px; height:120px; border-radius:10px; background:#14171c; border:1px solid #232831; padding:9px 11px; }
+.dr.now { border-color:#8f6cff; background:#191528; }
+.dr .h { font-size:12.5px; font-weight:800; color:#fff; display:flex; align-items:center; gap:6px; }
+.dr .h i { font-style:normal; width:18px; height:18px; border-radius:50%; background:#2a3038; color:#cfd6dd; font-size:11px; display:inline-flex; align-items:center; justify-content:center; }
+.dr.now .h i { background:#8f6cff; color:#fff; }
+.dr .d { font-size:11.5px; color:#aeb6bf; margin-top:6px; line-height:1.38; }
+.dr .r { position:absolute; left:11px; right:11px; bottom:9px; font-size:11.5px; font-weight:700; }
+.notes.g3 { left:1022px; top:712px; width:404px; height:176px; padding:10px 14px; }
+.notes.g3 li { margin:0 0 3px; }
+</style></head><body>
+<div class="page">
+  <div class="caption-bar"><b>G3 · Light Drum — training mode</b><span class="tag">lasers dark · stage preview only</span><span class="tag">play along with the track's own hits, see where you land</span></div>
+  <div class="topband">
+    <span class="train">TRAINING</span>
+    <span class="trk">Hold On (Extended Mix)<span>looping Drop 1 · bars 49–56</span></span>
+    <span class="bpm">128.0<small>BPM</small></span>
+    <span class="src"><span class="dot green"></span>targets: the track's kick and snare stems</span>
+    <span class="src"><span class="dot" style="background:#8f6cff"></span>nothing is sent to the lasers</span>
+    <span class="stop"><i></i>TERMINATE <small>Esc · E-stop</small></span>
+  </div>
+
+  <div class="card2 hist">
+    <h3>Early or late · your last 64 hits</h3>
+    <div class="hr"><span class="pill">all pads</span><span class="pill" style="border-color:#555;color:#9aa4ae">dashed = last week</span></div>
+    <div class="stats">
+      <div><b style="color:var(--hit)">−16 ms</b>average: you play a little early</div>
+      <div><b>± 9 ms</b>spread: steady hands</div>
+      <div><b style="color:var(--music)">97%</b>landed full size</div>
+      <div><b style="color:#ffd27a">2</b>fired late and 30% smaller</div>
+    </div>
+    <svg width="820" height="270" viewBox="0 0 820 270" id="hsvg"></svg>
+  </div>
+
+  <div class="card2 vox">
+    <h3>By pad</h3>
+    <div class="hr">average · spread · count</div>
+    <div id="vrows"></div>
+  </div>
+
+  <div class="card2 lanes">
+    <h3>You against the music · last 2 bars</h3>
+    <div class="hr"><span class="pill" style="border-color:var(--music);color:#c6f6d6">♪ targets from the stems</span><span class="pill">no audio: the clock grid</span></div>
+    <svg width="820" height="180" viewBox="0 0 820 180" id="lsvg"></svg>
+  </div>
+
+  <div class="card2 win">
+    <h3>Your window</h3>
+    <div class="hr">used by every pad, live and here</div>
+    <div class="wrow" style="top:42px"><span>window centre · now</span><b>−13 ms</b></div>
+    <div class="wrow" style="top:70px"><span>suggested from tonight's 64 hits</span><span style="display:flex;gap:10px;align-items:center"><b style="color:var(--hit)">−16 ms</b><span class="btn2">Apply on the bar</span></span></div>
+    <div class="wrow" style="top:98px"><span>early hits wait for the beat, up to</span><b>⅛ note · 117 ms</b></div>
+    <div class="wrow" style="top:126px"><span>late hits still count as on time, up to</span><b>+40 ms</b></div>
+    <div class="wrow" style="top:154px;border-bottom:0"><span>learn a separate centre per pad</span><span class="toggle"></span></div>
+    <div class="safe">Training uses the stage preview only. TERMINATE and the E-stop stay live.</div>
+  </div>
+
+  <div class="card2 drills">
+    <h3>Drills · 8 bars each, on the loop</h3>
+    <div class="hr">clean hits here would add charge live</div>
+    <div class="dr" style="left:14px"><div class="h"><i>1</i>Pulse</div><div class="d">Play KICK on the track's kick. Land 8 bars in a row.</div><div class="r" style="color:var(--music)">✓ 31 / 32 clean</div></div>
+    <div class="dr now" style="left:208px"><div class="h"><i>2</i>Take and hand back</div><div class="d">Take SNARE for 2 bars, then let go. Watch the chip go YOU → MUSIC.</div><div class="r" style="color:#cdb8ff">now · bar 3 of 8</div></div>
+    <div class="dr" style="left:402px"><div class="h"><i>3</i>Ratchet on the fill</div><div class="d">Cross the 70% click on bar 8 only. Light the 1/16 roll, then lift fast.</div><div class="r" style="color:#8f99a4">next</div></div>
+    <div class="dr" style="left:596px"><div class="h"><i>4</i>Keep the pulse</div><div class="d">KEEP the music's kick before the break. The loop carries it.</div><div class="r" style="color:#8f99a4">next</div></div>
+    <div class="dr" style="left:790px"><div class="h"><i>5</i>Build and land</div><div class="d">Hold DROP 8 bars, drum on top, let go anywhere in bar 8.</div><div class="r" style="color:#8f99a4">next</div></div>
+  </div>
+
+  <span class="callout" style="left:400px;top:104px">1</span>
+  <span class="callout" style="left:930px;top:104px">2</span>
+  <span class="callout" style="left:360px;top:492px">3</span>
+  <span class="callout" style="left:982px;top:492px">4</span>
+
+  <div class="notes g3"><b>G3 notes</b>
+    <ol>
+      <li>Early and late hits against the beat, like a rhythm game's practice mode (r06 §1, Q2).</li>
+      <li>By pad: people rush some voices more than others. HAT is texture above 4 Hz, so no sync promise (r06 #19).</li>
+      <li>The targets are the music's own hits when stems are on, or the clock grid if not.</li>
+      <li>One tap moves the window centre to you, on the next bar (r06 Q8).</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+(function(){
+  var NS="http://www.w3.org/2000/svg";
+  function el(n,a,p){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;}
+  // histogram
+  var h=document.getElementById('hsvg');
+  var x0=40, x1=790, base=220, ms0=-60, ms1=60;
+  function X(ms){return x0+(ms-ms0)/(ms1-ms0)*(x1-x0);}
+  function tx(p,x,y,s,c,a,w,sz){var e=el('text',{x:x,y:y,fill:c,"font-size":sz||11,"text-anchor":a||"middle","font-weight":w||400},p);e.textContent=s;return e;}
+  el('rect',{x:X(-60),y:6,width:X(0)-X(-60),height:base-6,fill:"rgba(86,180,233,.05)"},h);
+  el('rect',{x:X(0),y:6,width:X(40)-X(0),height:base-6,fill:"rgba(57,255,106,.06)"},h);
+  el('rect',{x:X(40),y:6,width:X(60)-X(40),height:base-6,fill:"rgba(255,176,0,.07)"},h);
+  tx(h,X(-30),20,"early: waits for the beat","#a9d8f5","middle",700);
+  tx(h,X(20),20,"on time, up to +40 ms","#a9f5bd","middle",700);
+  tx(h,X(50),20,"late: smaller","#ffd27a","middle",700);
+  var counts=[0,0,1,1,2,3,5,8,11,11,8,6,3,2,1,0,0,0,0,0,0,1,1,0];
+  var bw=(x1-x0)/24, sc=11;
+  counts.forEach(function(c,i){var ms=-60+i*5; var col=ms<0?"#56B4E9":(ms<40?"#39ff6a":"#FFB000");
+    if(c) el('rect',{x:X(ms)+2,y:base-c*sc,width:bw-4,height:c*sc,rx:3,fill:col,opacity:.85},h);});
+  // last week dashed curve
+  var lw=[0,1,1,2,3,4,5,6,8,8,7,6,4,3,2,1,1,0,0,0,0,1,0,0], d="";
+  lw.forEach(function(c,i){var x=X(-60+i*5)+bw/2, y=base-c*sc; d+=(i?" L":"M")+x+" "+y;});
+  el('path',{d:d,fill:"none",stroke:"#c9d3dd","stroke-width":1.5,"stroke-dasharray":"4 4",opacity:.7},h);
+  el('line',{x1:x0,y1:base,x2:x1,y2:base,stroke:"#3a4450"},h);
+  el('line',{x1:X(0),y1:6,x2:X(0),y2:base+6,stroke:"#fff","stroke-width":2},h);
+  el('line',{x1:X(-16),y1:40,x2:X(-16),y2:base,stroke:"#56B4E9","stroke-width":1.5,"stroke-dasharray":"3 3"},h);
+  tx(h,X(-16)-5,50,"you −16","#cfe9fb","end",800);
+  el('line',{x1:X(-13),y1:40,x2:X(-13),y2:base,stroke:"#ffd400","stroke-width":1.5},h);
+  tx(h,X(-13)+5,50,"centre −13","#ffd400","start",700);
+  for(var m=-60;m<=60;m+=10){tx(h,X(m),base+18,(m>0?"+":"")+m,m==0?"#fff":"#8c96a0","middle",m==0?800:400);}
+  tx(h,X(0),base+36,"beat","#fff","middle",800);
+  tx(h,x0,base+36,"ms","#8c96a0","start");
+
+  // by pad rows
+  var rows=[
+    {n:"KICK",c:"--kick",m:-14,s:7,k:24,t:"<b>Tight.</b> The kick is your anchor."},
+    {n:"SNARE",c:"--snare",m:-22,s:12,k:16,t:"<b>You rush the snare.</b> It still lands, by waiting."},
+    {n:"HAT",c:"--hat",m:6,s:18,k:12,t:"Texture above 4 Hz: <b>no sync promise</b>, so it's loose by design."},
+    {n:"TOM L·R",c:"--tom",m:-9,s:15,k:8,t:"Fills only. Swipes read as a <b>chase</b>, not 4 hits."},
+    {n:"DROP",c:"--drop",m:-31,s:40,k:4,t:"Releases. <b>Early is fine:</b> the drop waits for the line."}
+  ];
+  var vh=document.getElementById('vrows');
+  rows.forEach(function(r,i){
+    var d=document.createElement('div');d.className='vr';d.style.top=(44+i*64)+'px';d.style.setProperty('--vc','var('+r.c+')');
+    var W=150, cx=W/2, sx=function(ms){return cx+ms*1.1;};
+    var svg='<svg width="'+W+'" height="30" viewBox="0 0 '+W+' 30"><rect x="0" y="10" width="'+W+'" height="10" rx="3" fill="#1d2228"/>'+
+      '<rect x="'+sx(Math.max(-60,r.m-r.s))+'" y="10" width="'+(Math.min(r.s*2,120)*1.1)+'" height="10" rx="3" fill="var('+r.c+')" opacity=".35"/>'+
+      '<line x1="'+cx+'" y1="4" x2="'+cx+'" y2="26" stroke="#fff" stroke-width="1.5"/>'+
+      '<circle cx="'+sx(r.m)+'" cy="15" r="5" fill="var('+r.c+')" stroke="#fff" stroke-width="1.2"/></svg>';
+    d.innerHTML='<span class="n">'+r.n+'</span><span class="m">'+(r.m>0?'+':'')+r.m+' ms<small>± '+r.s+' · '+r.k+' hits</small></span>'+svg+'<span class="t">'+r.t+'</span>';
+    vh.appendChild(d);
+  });
+
+  // lanes: 2 bars, 8 beats
+  var l=document.getElementById('lsvg');
+  var lx0=120, lx1=800, beats=8; function LX(b){return lx0+b/beats*(lx1-lx0);}
+  for(var b=0;b<=beats*2;b++){var x=LX(b/2);el('line',{x1:x,y1:10,x2:x,y2:150,stroke:b%8==0?"#4a5563":(b%2==0?"#262c35":"#161a20"),"stroke-width":b%8==0?1.5:1},l);}
+  for(var b2=0;b2<beats;b2++){tx(l,LX(b2)+4,10,(b2<4?"55.":"56.")+(b2%4+1),b2%4==0?"#fff":"#8c96a0","start",b2%4==0?700:400);}
+  var L=[["Music kick",36,"#6ee7a0"],["Your KICK",62,"#56B4E9"],["Music snare",100,"#6ee7a0"],["Your SNARE",126,"#F0E442"]];
+  L.forEach(function(r){tx(l,16,r[1]+4,r[0],r[0].indexOf("Music")==0?"#b9c3cc":"#fff","start",r[0].indexOf("Music")==0?400:700,12);});
+  for(var k=0;k<8;k++){el('rect',{x:LX(k)-2,y:28,width:4,height:16,rx:1,fill:"#6ee7a0"},l);}
+  var ko=[-14,-10,-18,-12,-16,-9,-15,-20];
+  ko.forEach(function(o,k){var x=LX(k)+o*0.7;el('line',{x1:x,y1:62,x2:LX(k),y2:62,stroke:"#56B4E9","stroke-width":1,opacity:.6},l);el('circle',{cx:x,cy:62,r:5,fill:"#56B4E9"},l);});
+  [1,3,5].forEach(function(k){el('rect',{x:LX(k)-2,y:92,width:4,height:16,rx:1,fill:"#6ee7a0"},l);});
+  var so=[[1,-24],[3,-19],[5,-28],[7,-22]];
+  so.forEach(function(s){var x=LX(s[0])+s[1]*0.7;el('line',{x1:x,y1:126,x2:LX(s[0]),y2:126,stroke:"#F0E442","stroke-width":1,opacity:.6},l);el('circle',{cx:x,cy:126,r:5,fill:"#F0E442"},l);});
+  // a missed music hit stays missed
+  el('rect',{x:LX(7)-2,y:92,width:4,height:16,rx:1,fill:"none",stroke:"#6ee7a0","stroke-dasharray":"2 2"},l);
+  tx(l,LX(0),168,"dots: your hits · line: how long each waited · dashed: the stem missed a clap, so no target is invented","#9aa4ae","start");
+})();
+</script>
+</body></html>

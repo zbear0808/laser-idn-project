@@ -1,0 +1,274 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+:root { --kick:#56B4E9; --snare:#F0E442; --hat:#5fe3c4; --bass:#a78bfa; --tom:#E69F00; --next:#CC79A7; --drop:#ffd27a;
+        --you:#ffffff; --music:#6ee7a0; --loop:#ff7ac8; --clock:#FFB000; --band:#6aa8ff; }
+.page { background:#08090b; }
+.topband { height:48px; display:flex; align-items:center; gap:14px; padding:0 14px 0 16px; background:#0d0f12; border-bottom:1px solid #1d2128; white-space:nowrap; }
+.blind { font-size:12px; font-weight:800; letter-spacing:.06em; color:#cdb8ff; padding:3px 9px; border-radius:4px; background:#23193a; border:1px solid #8f6cff; }
+.trk { font-size:15px; font-weight:700; color:#eee; }
+.trk span { color:var(--text2); font-weight:400; margin-left:8px; font-size:12.5px; }
+.tbtn { height:30px; padding:0 12px; border-radius:6px; font-size:12px; font-weight:700; display:inline-flex; align-items:center; gap:6px; border:1px solid #3a414b; color:#dfe5ea; background:#171b21; }
+.tbtn.go { background:#173a5e; border-color:#4992db; color:#d6eaff; }
+.stop { margin-left:auto; height:32px; padding:0 14px; border-radius:6px; background:#b3170f; border:2px solid #ff6a5a; color:#fff; display:inline-flex; align-items:center; gap:8px; font-weight:800; letter-spacing:.06em; font-size:13px; box-shadow:0 0 14px rgba(255,60,40,.35); }
+.stop i { width:12px; height:12px; background:#fff; border-radius:2px; }
+.stop small { font-weight:600; letter-spacing:0; opacity:.85; font-size:11px; }
+.card2 { position:absolute; border-radius:12px; background:#0d0f12; border:1px solid #1e232b; }
+.card2 > h3 { position:absolute; left:16px; top:13px; color:#c9d3dd; }
+.hr { position:absolute; right:14px; top:11px; font-size:11.5px; color:#9aa4ae; }
+
+/* kit sheet */
+.sheet { left:14px; top:94px; width:996px; height:506px; }
+table.ks { position:absolute; left:10px; top:40px; width:976px; border-collapse:separate; border-spacing:0 4px; }
+.ks th { font-size:11px; letter-spacing:.06em; color:#8f99a4; text-align:left; font-weight:800; padding:0 8px 2px; text-transform:uppercase; white-space:nowrap; }
+.ks td { background:#14171c; padding:0 8px; height:46px; white-space:nowrap; font-size:12px; color:#d5dce3; border-top:1px solid #1f242c; border-bottom:1px solid #1f242c; vertical-align:middle; line-height:1.3; }
+.ks td:first-child { border-left:1px solid #1f242c; border-radius:9px 0 0 9px; }
+.ks td:last-child { border-right:1px solid #1f242c; border-radius:0 9px 9px 0; }
+.ks tr.sel td { background:#122030; border-color:#3f7fae; }
+.ks tr.sel td:first-child { box-shadow:inset 3px 0 0 var(--kick); }
+.ks .muted2 { color:#8f99a4; font-size:11.5px; }
+.vn { display:flex; align-items:center; gap:8px; }
+.vn .sq { width:26px; height:26px; border-radius:6px; background:color-mix(in srgb, var(--vc) 75%, #000); border:1.5px solid var(--vc); font-size:11px; font-weight:800; color:#111; display:flex; align-items:center; justify-content:center; flex:none; }
+.vn b { font-size:13px; color:var(--vc); letter-spacing:.03em; }
+.lookc { display:flex; align-items:center; gap:8px; }
+.lookc .screen { width:52px; height:38px; flex:none; border-radius:5px; }
+.lz4 { display:flex; gap:3px; align-items:center; }
+.lz4 i { width:15px; height:15px; border-radius:3px; border:1.5px solid #3e4650; font-style:normal; font-size:10.5px; }
+.lz4 i.c { background:var(--vc); border-color:var(--vc); }
+.lz4 i.e { background:color-mix(in srgb, var(--vc) 35%, #111); border-color:var(--vc); }
+.lz4 span { font-size:11px; color:#9aa4ae; margin-left:5px; }
+.sc { display:inline-flex; align-items:center; font-size:10.5px; font-weight:800; padding:1px 6px; border-radius:7px; letter-spacing:.03em; margin-right:5px; vertical-align:1px; }
+.sc.stem { color:#0b0b0b; background:var(--music); }
+.sc.band { color:#06101e; background:var(--band); }
+.sc.clk { color:#1a1200; background:var(--clock); }
+.sc.none { color:#9aa4ae; border:1px solid #3a414b; }
+.sc.paint { color:#0b0b0b; background:var(--next); }
+.hl { display:inline-block; width:40px; height:5px; border-radius:3px; background:#2a3038; margin-left:6px; vertical-align:2px; overflow:hidden; }
+.hl i { display:block; height:100%; background:var(--music); }
+.never { color:#7d8792; font-size:11.5px; }
+.sheetfoot { position:absolute; left:18px; right:18px; bottom:12px; font-size:11.5px; color:#9aa4ae; }
+.sheetfoot b { color:#fff; }
+
+/* inspector */
+.insp { left:1022px; top:94px; width:404px; height:696px; }
+.insp .ttl { position:absolute; left:16px; top:38px; font-size:22px; font-weight:900; color:var(--kick); letter-spacing:.03em; }
+.insp .ttl span { font-size:12px; color:#9aa4ae; font-weight:500; letter-spacing:0; margin-left:6px; }
+.sec { position:absolute; left:14px; right:14px; border-top:1px solid #1e232b; padding-top:9px; }
+.sec h4 { margin:0 0 7px; font-size:11px; letter-spacing:.08em; color:#9aa4ae; }
+.seg2 { display:inline-flex; border:1px solid #39404a; border-radius:6px; overflow:hidden; }
+.seg2 span { padding:4px 9px; font-size:11.5px; color:#aab4be; border-right:1px solid #39404a; white-space:nowrap; }
+.seg2 span:last-child { border-right:0; }
+.seg2 span.on { background:#2a4560; color:#fff; font-weight:700; }
+.kv { display:flex; justify-content:space-between; font-size:12px; color:#b9c3cc; margin-top:6px; }
+.kv b { color:#fff; font-family:"SF Mono",Menlo,monospace; font-size:12px; }
+.zl { font-size:11.5px; color:#b9c3cc; line-height:1.4; }
+.zl b { color:#fff; display:block; font-size:12px; }
+.zl div { margin-bottom:9px; }
+.slider { height:8px; border-radius:4px; background:#2a3038; position:relative; margin-top:16px; }
+.slider i { position:absolute; top:-5px; width:6px; height:18px; border-radius:3px; background:#fff; box-shadow:0 0 6px #fff; margin-left:-3px; }
+.slider .f { position:absolute; left:0; top:0; bottom:0; border-radius:4px; }
+.sl-l { display:flex; justify-content:space-between; font-size:11px; color:#9aa4ae; margin-top:5px; }
+
+/* vibe kits */
+.vibes { left:14px; top:612px; width:996px; height:178px; }
+.vk { position:absolute; top:42px; width:186px; height:124px; border-radius:10px; background:#14171c; border:1px solid #232831; padding:9px 10px; }
+.vk.cur { border-color:var(--vibe); background:#1b1520; }
+.vk .h { display:flex; align-items:center; gap:7px; font-size:13px; font-weight:800; color:#eee; }
+.vk .h .ed { margin-left:auto; font-size:10.5px; font-weight:800; color:#f1c9e1; background:color-mix(in srgb, var(--vibe) 30%, #1c1c1c); border:1px solid color-mix(in srgb, var(--vibe) 60%, transparent); padding:1px 6px; border-radius:7px; }
+.mg { display:grid; grid-template-columns:repeat(4,22px); gap:3px; margin-top:7px; }
+.mg i { width:22px; height:18px; border-radius:4px; font-style:normal; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; background:color-mix(in srgb, var(--vc) 22%, #15181c); border:1.5px solid var(--vc); color:var(--sc); }
+.vk .d { position:absolute; left:112px; right:6px; top:36px; font-size:11px; color:#a9b3bd; line-height:1.35; }
+.vk .d b { color:#fff; display:block; }
+.vk .d2 { position:absolute; left:10px; right:8px; bottom:8px; font-size:11px; color:#a9b3bd; line-height:1.35; }
+.vfoot { position:absolute; right:16px; top:13px; font-size:11.5px; color:#b4bec8; display:flex; gap:8px; align-items:center; }
+
+/* timeline */
+.who { left:14px; top:802px; width:996px; height:286px; }
+.who svg { position:absolute; left:0; top:36px; }
+.notes.g2 { left:1022px; top:802px; width:404px; height:286px; padding:12px 14px; }
+.notes.g2 li { margin:0 0 5px; }
+</style></head><body>
+<div class="page tall">
+  <div class="caption-bar"><b>G2 · Light Drum — kit editor</b><span class="tag">blind edit · not on air</span><span class="tag">8 voices on one sheet · what each follows · kits per vibe</span></div>
+  <div class="topband">
+    <span class="blind">BLIND EDIT</span>
+    <span class="trk">Build kit<span>the show keeps playing the saved kit · pads here preview on the stage view only</span></span>
+    <span class="tbtn">↶ Undo · 10 versions</span>
+    <span class="tbtn go">Take on the bar</span>
+    <span class="stop"><i></i>TERMINATE <small>Esc · E-stop</small></span>
+  </div>
+
+  <!-- KIT SHEET -->
+  <div class="card2 sheet">
+    <h3>The kit · one row per pad</h3>
+    <div class="hr">pads never move between kits; only looks and sources change</div>
+    <table class="ks">
+      <thead><tr><th style="width:104px">Pad</th><th style="width:200px">Look</th><th style="width:132px">Lasers · centre / edge</th><th style="width:226px">Follows in the music</th><th style="width:126px">No music: clock</th><th style="width:96px">Past 70%</th><th style="width:44px">Lift</th><th>KEEP</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="sheetfoot"><b>Order when nobody hits a pad:</b> MUSIC if its lane hears hits (health ≥ 60%), else the pad's KEEP layer, else the clock. Audience scanners 5–6 can't be chosen in any column.</div>
+  </div>
+
+  <!-- INSPECTOR -->
+  <div class="card2 insp">
+    <h3>Voice</h3>
+    <div class="hr">pad 5 · bottom left</div>
+    <div class="ttl">KICK<span>beams jump, they don't blink</span></div>
+    <div class="screen" data-shape="fan" data-color="#56B4E9" data-scale="0.9" style="position:absolute;right:14px;top:36px;width:96px;height:62px"></div>
+
+    <div class="sec" style="top:108px">
+      <h4>HIT ZONES → LASERS</h4>
+      <svg width="150" height="150" viewBox="0 0 150 150" style="position:absolute;left:0;top:28px">
+        <circle cx="75" cy="75" r="70" fill="#14181e" stroke="#3a4450"/>
+        <circle cx="75" cy="75" r="46" fill="none" stroke="#56B4E9" stroke-opacity=".45" stroke-dasharray="3 3"/>
+        <circle cx="75" cy="75" r="22" fill="rgba(86,180,233,.22)" stroke="#56B4E9"/>
+        <text x="75" y="79" fill="#fff" font-size="11" text-anchor="middle" font-weight="800">CENTRE</text>
+        <text x="75" y="44" fill="#cfe9fb" font-size="11" text-anchor="middle" font-weight="700">MIDDLE</text>
+        <text x="75" y="18" fill="#cfe9fb" font-size="11" text-anchor="middle" font-weight="700">EDGE</text>
+        <g fill="#fff" opacity=".85"><circle cx="68" cy="91" r="2.4"/><circle cx="84" cy="89" r="2.4"/><circle cx="76" cy="94" r="2.4"/><circle cx="91" cy="84" r="2.4"/><circle cx="59" cy="86" r="2.4"/><circle cx="84" cy="58" r="2.4"/><circle cx="92" cy="90" r="2.4"/><circle cx="58" cy="94" r="2.4"/><circle cx="110" cy="60" r="2.4"/><circle cx="36" cy="100" r="2.4"/></g>
+      </svg>
+      <div class="zl" style="position:absolute;left:162px;top:28px;width:214px">
+        <div><b>centre → 1 · 2 · 3 · 4</b>the whole rig jumps</div>
+        <div><b>middle → 2 · 3</b>inner pair only</div>
+        <div><b>edge → 1 · 4</b>outer pair only</div>
+        <div>Distance sets fan width, 20° → 120°. Dots: your last 32 kicks.</div>
+      </div>
+    </div>
+
+    <div class="sec" style="top:300px">
+      <h4>FOLLOWS IN THE MUSIC</h4>
+      <span class="seg2"><span class="on">kick stem</span><span>band-pass &lt; 150 Hz</span><span>nothing</span></span>
+      <div class="kv"><span>threshold · pull to grid</span><b>−18 dB · ± 30 ms</b></div>
+      <div class="kv"><span>health tonight</span><b style="color:var(--music)">128 / 128 · 100%</b></div>
+      <div class="kv"><span>after your last hit, hand back in</span><span class="seg2"><span>1</span><span class="on">2 bars</span><span>4</span><span>never</span></span></div>
+      <div class="kv"><span>if the lane goes quiet</span><b>LOOP A → CLOCK ¼ at 40%</b></div>
+    </div>
+
+    <div class="sec" style="top:466px">
+      <h4>VELOCITY → SIZE AND BRIGHTNESS</h4>
+      <span class="seg2"><span>linear</span><span class="on">soft</span><span>hard</span><span>fixed</span></span>
+      <svg width="376" height="86" viewBox="0 0 376 86" style="display:block;margin-top:8px">
+        <rect x="30" y="4" width="340" height="70" fill="#12151a" stroke="#232933"/>
+        <line x1="30" y1="11" x2="370" y2="11" stroke="#ff9a7a" stroke-dasharray="4 3"/>
+        <text x="36" y="24" fill="#ff9a7a" font-size="11">show cap 90%</text>
+        <line x1="30" y1="56" x2="370" y2="56" stroke="#6b7480" stroke-dasharray="2 3"/>
+        <text x="366" y="68" fill="#9aa4ae" font-size="11" text-anchor="end">floor 25%</text>
+        <path d="M30 56 C 90 30, 160 20, 250 14 L370 11" fill="none" stroke="#56B4E9" stroke-width="2.5" style="filter:drop-shadow(0 0 3px #56B4E9)"/>
+        <g fill="#fff" opacity=".8"><circle cx="210" cy="17" r="2.2"/><circle cx="240" cy="15" r="2.2"/><circle cx="262" cy="14" r="2.2"/><circle cx="290" cy="13" r="2.2"/><circle cx="180" cy="20" r="2.2"/><circle cx="120" cy="31" r="2.2"/></g>
+        <text x="2" y="15" fill="#9aa4ae" font-size="11">100</text><text x="10" y="74" fill="#9aa4ae" font-size="11">0</text>
+        <text x="200" y="85" fill="#9aa4ae" font-size="11" text-anchor="middle">strike velocity →</text>
+      </svg>
+    </div>
+
+    <div class="sec" style="top:618px">
+      <h4>PRESS PAST 70% · LIFT</h4>
+      <div class="kv" style="margin-top:0"><span>past the felt click</span><b>ratchet 1/16 · motion only</b></div>
+      <div class="kv"><span>lift fast = snap to black, slow = tail up to</span><b>180 ms</b></div>
+    </div>
+  </div>
+
+  <!-- VIBE KITS -->
+  <div class="card2 vibes">
+    <h3>Kits per vibe</h3>
+    <div class="vfoot"><span style="color:#fff">● you</span><span style="color:var(--music)">♪ music</span><span style="color:var(--loop)">↻ loop</span><span style="color:var(--clock)">◷ clock</span><span style="color:var(--next);margin-right:14px">✎ painted</span><span class="toggle on"></span>kit follows the vibe on the phrase line</div>
+    <div id="vk"></div>
+  </div>
+
+  <!-- WHO PLAYS KICK -->
+  <div class="card2 who">
+    <h3>Who plays KICK, bar by bar · preview of tonight's Build</h3>
+    <svg width="996" height="250" viewBox="0 0 996 250" id="wsvg"></svg>
+  </div>
+
+  <span class="callout" style="left:360px;top:104px">1</span>
+  <span class="callout" style="left:1210px;top:402px">2</span>
+  <span class="callout" style="left:560px;top:812px">3</span>
+  <span class="callout" style="left:150px;top:622px">4</span>
+
+  <div class="notes g2"><b>G2 notes</b>
+    <ol>
+      <li>One sheet shows the whole kit: each pad's look, which lasers its centre and edge play, what it follows in the music, and its clock fallback (r07 #5, r08 #4).</li>
+      <li>Following is set per voice: the stem or a band-pass slice, a threshold and pull-to-grid, and how long your hit keeps the voice before it hands back.</li>
+      <li>The timeline is the chip order made visible: music, then your hit for 2 bars, then the KEEP layer through the break, then music again.</li>
+      <li>One kit per vibe, with the same pad places, so the hands never relearn (r07 §4 #5). NEXT and DROP never loop.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+(function(){
+  var rows=[
+    {n:"KICK",p:5,c:"--kick",shape:"fan",col:"#56B4E9",look:"beam fan, jumps 14°<br><span class='muted2'>85% motion</span>",z:"cccc",ze:"e..e",fl:"<span class='sc stem'>STEM</span>kick<span class='hl'><i style='width:100%'></i></span>",ck:"¼ notes at 40%",r:"ratchet 1/16",l:"snap",k:"2 bars",sel:1},
+    {n:"SNARE",p:6,c:"--snare",shape:"beams",col:"#F0E442",look:"side swap L↔R<br><span class='muted2'>flash on 2 and 4</span>",z:"cccc",ze:"e..e",fl:"<span class='sc band'>BAND-PASS</span>1.8–4 kHz<span class='hl'><i style='width:94%'></i></span>",ck:"2 and 4",r:"ratchet 1/16",l:"snap",k:"2 bars"},
+    {n:"HAT",p:7,c:"--hat",shape:"dots",col:"#5fe3c4",look:"shimmer texture<br><span class='muted2'>pressure reveals it</span>",z:".cc.",ze:"e..e",fl:"<span class='sc stem'>STEM</span>hats<span class='hl'><i style='width:94%'></i></span>",ck:"⅛ shimmer at 20%",r:"denser 1/16",l:"tail",k:"2 bars"},
+    {n:"BASS",p:8,c:"--bass",shape:"fan",col:"#a78bfa",look:"fan width breathes<br><span class='muted2'>level, not hits</span>",z:"cccc",ze:"cccc",fl:"<span class='sc stem'>STEM</span>bass level",ck:"slow swell per bar",r:"wider, to cap",l:"tail",k:"2 bars"},
+    {n:"TOM L",p:1,c:"--tom",shape:"line",col:"#E69F00",look:"sweep to the left<br><span class='muted2'>½ beat</span>",z:"cccc",ze:"e..e",fl:"<span class='sc none'>FILLS</span>CDJ Fill phrase, snare roll",ck:"roll in bar 16 of 16",r:"ratchet sweep",l:"snap",k:"1 bar"},
+    {n:"TOM R",p:2,c:"--tom",shape:"line",col:"#E69F00",look:"sweep to the right<br><span class='muted2'>½ beat</span>",z:"cccc",ze:"e..e",fl:"<span class='sc none'>FILLS</span>same as TOM L",ck:"roll in bar 16 of 16",r:"ratchet sweep",l:"snap",k:"1 bar"},
+    {n:"NEXT",p:3,c:"--next",shape:"tunnel",col:"#CC79A7",look:"the next painted hit<br><span class='muted2'>5 painted in Build</span>",z:"cccc",ze:"cccc",fl:"<span class='sc paint'>PAINTED</span>you choose when",ck:"—",r:"strength only",l:"—",k:"<span class='never'>never</span>"},
+    {n:"DROP",p:4,c:"--drop",shape:"ring2",col:"#ffd27a",look:"tap crash · hold build<br><span class='muted2'>drop: ring burst → fan</span>",z:"cccc",ze:"cccc",fl:"<span class='sc stem'>RISER</span>adds charge, never fires",ck:"—",r:"builds faster",l:"lands",k:"<span class='never'>never</span>"}
+  ];
+  var tb=document.getElementById('rows');
+  rows.forEach(function(r){
+    var tr=document.createElement('tr'); if(r.sel) tr.className='sel'; tr.style.setProperty('--vc','var('+r.c+')');
+    function lz(s,lbl){return '<span class="lz4">'+s.split('').map(function(ch,i){return '<i class="'+(ch=='c'?'c':(ch=='e'?'e':''))+'"></i>';}).join('')+'<span>'+lbl+'</span></span>';}
+    tr.innerHTML='<td><div class="vn"><span class="sq">'+r.p+'</span><b>'+r.n+'</b></div></td>'+
+      '<td><div class="lookc"><div class="screen" data-shape="'+r.shape+'" data-color="'+r.col+'" data-scale="0.85"></div><div>'+r.look+'</div></div></td>'+
+      '<td>'+lz(r.z,'centre')+'<div style="height:3px"></div>'+lz(r.ze,'edge')+'</td>'+
+      '<td>'+r.fl+'</td><td>'+r.ck+'</td><td>'+r.r+'</td><td>'+r.l+'</td><td>'+r.k+'</td>';
+    tb.appendChild(tr);
+  });
+
+  // vibe kits
+  var order=[["TOM","--tom"],["TOM","--tom"],["NXT","--next"],["DRP","--drop"],["K","--kick"],["S","--snare"],["H","--hat"],["B","--bass"]];
+  var G={Y:"●",M:"♪",L:"↻",C:"◷",P:"✎"};
+  var SC={Y:"#fff",M:"var(--music)",L:"var(--loop)",C:"var(--clock)",P:"var(--next)"};
+  var kits=[
+    {n:"Warm-up",s:"CCPYYMMM",d:"<b>FOLLOW 90%</b>no flashes",d2:"The music plays most voices. SNARE is a swap."},
+    {n:"Groove",s:"CCPYYYMM",d:"<b>FOLLOW 70%</b>full kit",d2:"Kick and snare start as yours; hats and bass follow."},
+    {n:"Build",s:"CCPYLYMM",d:"<b>FOLLOW 70%</b>8-bar build",d2:"Toms roll the last bar. KICK has KEEP layer A.",cur:1},
+    {n:"Peak",s:"CCPYMMMM",d:"<b>FOLLOW 80%</b>wide fans",d2:"\"DROP\" text at 100% charge, once per set."},
+    {n:"Breakdown",s:"CCPYLMML",d:"<b>FOLLOW 60%</b>half bright",d2:"Kick and bass fall back to KEEP layers."}
+  ];
+  var host=document.getElementById('vk');
+  kits.forEach(function(k,i){
+    var d=document.createElement('div');d.className='vk'+(k.cur?' cur':'');d.style.left=(14+i*194)+'px';
+    var g='<div class="mg">'+order.map(function(o,j){var s=k.s[j];return '<i style="--vc:var('+o[1]+');--sc:'+SC[s]+'">'+G[s]+'</i>';}).join('')+'</div>';
+    d.innerHTML='<div class="h">'+k.n+(k.cur?'<span class="ed">editing</span>':'')+'</div>'+g+'<div class="d">'+k.d+'</div><div class="d2">'+k.d2+'</div>';
+    host.appendChild(d);
+  });
+
+  // who plays KICK timeline
+  var NS="http://www.w3.org/2000/svg";
+  function el(n,a,p){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;}
+  function tx(x,y,s2,c,a,w,sz){var e=el('text',{x:x,y:y,fill:c,"font-size":sz||11,"text-anchor":a||"start","font-weight":w||400},w2);e.textContent=s2;return e;}
+  var w2=document.getElementById('wsvg');
+  var x0=150, bw=40, b0=17; // bars 17..36
+  function X(bar){return x0+(bar-b0)*bw;}
+  // bar axis
+  for(var b=17;b<=37;b++){el('line',{x1:X(b),y1:10,x2:X(b),y2:200,stroke:(b-1)%8==0?"#4a5563":"#1c2129","stroke-width":(b-1)%8==0?1.5:1},w2); if(b<=36) tx(X(b)+bw/2,10,String(b),(b-1)%8==0?"#fff":"#8c96a0","middle",(b-1)%8==0?700:400);}
+  tx(X(17),232,"Drop 1 ends","#9aa4ae","start"); tx(X(25)+4,232,"breakdown → build: the track's kick is out","#9aa4ae","start"); tx(X(33)+4,232,"Drop 2","#ffd27a","start",700);
+  var lanes=[["Music: kick heard",34],["You: your hits",66],["KEEP layer A",98],["Clock ¼",130],["KICK played by",172]];
+  lanes.forEach(function(l){tx(14,l[1]+4,l[0],l[0]=="KICK played by"?"#fff":"#b9c3cc","start",l[0]=="KICK played by"?800:400,12);});
+  // music kick ticks 17-24 and 33-36
+  function ticks(a,bEnd,y,col){for(var t=a;t<bEnd;t+=0.25){el('rect',{x:X(t)+1,y:y-7,width:3,height:14,rx:1,fill:col},w2);}}
+  ticks(17,25,34,"#6ee7a0"); ticks(33,37,34,"#6ee7a0");
+  // you hits 26.75 .. 28.5 (bars 26.3 to 28.4-ish)
+  [26.5,26.75,27,27.25,27.5,27.75,28,28.25,28.5].forEach(function(t,i){el('circle',{cx:X(t)+2,cy:66,r:i%2?3.5:5,fill:"#fff"},w2);});
+  // keep layer A: captured bars 23-24
+  el('rect',{x:X(23),y:90,width:bw*2,height:16,rx:4,fill:"none",stroke:"#ff7ac8","stroke-dasharray":"3 2"},w2);
+  tx(X(23)+4,86,"KEEP at 24.4 saves 23–24","#ff7ac8","start",700);
+  el('rect',{x:X(25),y:91,width:bw*8,height:14,rx:4,fill:"rgba(255,122,200,.22)",stroke:"#ff7ac8"},w2);
+  el('rect',{x:X(33),y:91,width:bw*4,height:14,rx:4,fill:"rgba(255,122,200,.06)",stroke:"#ff7ac8","stroke-opacity":.35,"stroke-dasharray":"3 3"},w2);
+  tx(X(33)+6,102,"waits under the music","#c792b4","start");
+  // clock always there, dashed
+  el('rect',{x:X(17),y:124,width:bw*20,height:12,rx:4,fill:"rgba(255,176,0,.06)",stroke:"#FFB000","stroke-opacity":.45,"stroke-dasharray":"3 3"},w2);
+  tx(X(17)+6,134,"always ready underneath, used only if all above are silent","#c8a45a","start");
+  // result band
+  var seg=[[17,25,"MUSIC","#6ee7a0","#0b0b0b"],[25,26.5,"LOOP","#ff7ac8","#0b0b0b"],[26.5,30.5,"YOU · 2 bars after last hit","#ffffff","#0b0b0b"],[30.5,33,"LOOP","#ff7ac8","#0b0b0b"],[33,37,"MUSIC","#6ee7a0","#0b0b0b"]];
+  seg.forEach(function(s){el('rect',{x:X(s[0])+1,y:160,width:(s[1]-s[0])*bw-2,height:24,rx:5,fill:s[3]},w2); tx((X(s[0])+X(s[1]))/2,176,s[2],s[4],"middle",800);});
+  // annotations
+  tx(X(30.5),206,"▲ hands back at 30.3","#d5dce3","middle");
+  tx(X(26.5),150,"you hit at 26.3 ▾","#fff","middle",700);
+  tx(X(33),150,"kick returns ▾","#6ee7a0","middle",700);
+})();
+</script>
+</body></html>

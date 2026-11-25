@@ -1,0 +1,144 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.wrapx { padding: 18px 22px; display: grid; grid-template-columns: 1.55fr 1fr; grid-template-rows: auto auto 1fr; align-content: stretch; gap: 16px; flex: 1; min-height: 0; }
+.panel { background: #171717; border: 1px solid #2c2c2c; border-radius: 10px; padding: 14px 16px; position: relative; }
+.panel h3 { margin-bottom: 4px; }
+.panel .sub { color: var(--text2); font-size: 12px; margin-bottom: 10px; }
+.lane { position: relative; height: 150px; margin: 6px 0 4px; }
+.lane .beatline { position: absolute; top: 0; bottom: 18px; width: 2px; background: #3a3a3a; }
+.lane .beatline.bar { background: #6a6a6a; width: 3px; }
+.lane .blab { position: absolute; bottom: -2px; font-size: 11px; color: #9a9a9a; transform: translateX(-50%); }
+.win { position: absolute; top: 34px; height: 64px; border-radius: 6px; }
+.win.early { background: rgba(86,180,233,.14); border: 1px dashed rgba(86,180,233,.6); }
+.win.coyote { background: rgba(57,255,106,.14); border: 1px dashed rgba(57,255,106,.6); }
+.press { position: absolute; top: 18px; width: 14px; height: 14px; border-radius: 50%; transform: translateX(-50%); border: 2px solid #fff; }
+.press.p1 { background: var(--hit); } .press.p2 { background: var(--accent); } .press.p3 { background: var(--flash); }
+.fire { position: absolute; top: 104px; width: 4px; height: 26px; transform: translateX(-50%); border-radius: 2px; }
+.plabel { position: absolute; font-size: 11px; color: #ddd; line-height: 1.3; }
+.arrow { position: absolute; top: 25px; height: 2px; background: var(--hit); }
+.arrow::after { content: ""; position: absolute; right: -6px; top: -4px; border-left: 7px solid var(--hit); border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+.legend { display: flex; gap: 16px; font-size: 11.5px; color: var(--text2); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 14px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12.5px; }
+.kv b { color: #fff; }
+.slots { display: flex; gap: 8px; margin: 8px 0; }
+.slot { width: 56px; height: 44px; border-radius: 6px; border: 2px solid #555; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #aaa; }
+.slot.used { background: #fff3a0; color: #111; border-color: #fff; font-weight: 700; box-shadow: 0 0 10px rgba(255,240,150,.5); }
+.wave { height: 42px; position: relative; border-radius: 6px; background: #0e0e0e; overflow: hidden; }
+.ring { width: 150px; height: 150px; border-radius: 50%; position: relative;
+  background: conic-gradient(var(--vibe) 0 40%, #2e2e2e 40% 100%); }
+.ring::after { content: ""; position: absolute; inset: 16px; border-radius: 50%; background: #171717; }
+.ring .c { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 2; }
+.src { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.src span { font-size: 11px; padding: 3px 8px; border-radius: 10px; border: 1px solid #444; color: #ccc; }
+.src span.on { border-color: #2fbf5a; color: #8ff0a8; background: #0f3b1c; }
+.src span.co { border-color: var(--warn); color: #ffd36b; }
+.hist { display: flex; align-items: flex-end; gap: 3px; height: 54px; margin-top: 6px; }
+.hist i { width: 10px; background: #4caf50; border-radius: 2px 2px 0 0; display: block; }
+.conf { display: flex; gap: 10px; margin-top: 10px; }
+.conf .ch { flex: 1; border-radius: 8px; background: #212121; border: 1px solid #333; padding: 8px 10px; font-size: 12px; }
+.conf .ch b { display: block; font-size: 13px; margin-bottom: 2px; }
+</style></head><body>
+<div class="page">
+  <div class="caption-bar"><b>X1 · The Feel engine</b><span class="tag">round 2 · the layer under every concept</span><span class="tag">r06 timing numbers · r09 game feel · r08 confidence</span></div>
+  <div class="status-band live">● LIVE · 128.0 BPM · bar 13 of 32 · visual lead +18 ms · press → light 6 ms ± 0.4 · flashes 2 of 3 this second</div>
+  <div class="wrapx">
+    <!-- forgiving presses -->
+    <div class="panel" style="grid-column:1;grid-row:1">
+      <h3>Forgiving presses · aim for the beat, the engine lands it</h3>
+      <div class="sub">People tap a little early without knowing it; late light is noticed sooner than early light. So early presses wait for the beat they aimed at, slightly late ones fire at once as if on time.</div>
+      <div class="lane" id="lane" style="height:150px">
+        <div class="beatline bar" style="left:40px"></div><div class="blab" style="left:41px">13.1</div>
+        <div class="beatline" style="left:225px"></div><div class="blab" style="left:226px">13.2</div>
+        <div class="beatline" style="left:410px"></div><div class="blab" style="left:411px">13.3</div>
+        <div class="beatline" style="left:595px"></div><div class="blab" style="left:596px">13.4</div>
+        <div class="beatline bar" style="left:780px"></div><div class="blab" style="left:781px">14.1</div>
+        <div class="win early" style="left:182px;width:43px"></div>
+        <div class="win coyote" style="left:225px;width:15px"></div>
+        <div class="win early" style="left:552px;width:43px"></div>
+        <div class="win coyote" style="left:595px;width:15px"></div>
+        <div class="press p1" style="left:199px"></div>
+        <div class="arrow" style="left:207px;width:13px"></div>
+        <div class="fire" style="left:226px;background:var(--hit);box-shadow:0 0 10px var(--hit)"></div>
+        <div class="plabel" style="left:60px;top:44px;width:118px;text-align:right">HIT −70 ms<br><b>waits</b>, fires on 13.2</div>
+        <div class="press p3" style="left:454px"></div>
+        <div class="fire" style="left:454px;height:16px;top:110px;background:var(--flash)"></div>
+        <div class="plabel" style="left:466px;top:44px;width:84px">+120 ms: fires now, 30 % smaller</div>
+        <div class="press p2" style="left:605px"></div>
+        <div class="fire" style="left:605px;background:var(--accent);box-shadow:0 0 10px var(--accent)"></div>
+        <div class="plabel" style="left:622px;top:44px;width:150px">ACCENT +28 ms: fires at once, full size (coyote)</div>
+      </div>
+      <div class="legend" style="margin-top:14px">
+        <span><i style="background:rgba(86,180,233,.35)"></i>early window · ⅛ note (117 ms) → waits for the beat</span>
+        <span><i style="background:rgba(57,255,106,.35)"></i>coyote window · 40 ms → counts as on time</span>
+        <span>tight grid: hits never drift off the beat (±25 ms already hurts groove)</span>
+      </div>
+    </div>
+    <!-- right column: phrase + clock -->
+    <div class="panel" style="grid-column:2;grid-row:1">
+      <h3>A beat clock that never stops</h3>
+      <div class="sub">Cues act on beat position, not "now", through breakdowns and silence. A human owns beat 1.</div>
+      <div class="row gap16 center">
+        <div class="ring"><div class="c"><div class="hint">phrase</div><div style="font-size:30px;font-weight:800">13<span class="muted" style="font-size:16px"> / 32</span></div><div class="small text2">change lands on 33</div></div></div>
+        <div class="col gap8">
+          <div class="row gap6"><span class="btn green">1 · this is beat 1</span></div>
+          <div class="row gap6"><span class="btn sm">−1 beat</span><span class="btn sm">+1 beat</span><span class="btn sm">−1 bar</span><span class="btn sm">+1 bar</span></div>
+          <div class="small text2">Queued to the phrase line:<br><b style="color:#fff">→ Peak</b> · <b style="color:#fff">map Odd/Even</b></div>
+        </div>
+      </div>
+      <div class="conf">
+        <div class="ch"><b style="color:#8ff0a8">LOCKED</b>Link · 2 peers</div>
+        <div class="ch"><b style="color:#ffd36b">COASTING</b>audio lost the kick 4 bars ago</div>
+        <div class="ch"><b class="muted">tap</b>last 22 s ago</div>
+      </div>
+    </div>
+    <!-- visual lead -->
+    <div class="panel" style="grid-column:1;grid-row:2">
+      <h3>Light leads sound, a little</h3>
+      <div class="sub">Viewers notice late light at ~45 ms but early light only at ~125 ms, and most of the crowd stands 10–40 m from the speakers (sound is 2.9 ms per metre behind). So light goes out slightly early.</div>
+      <div class="wave" style="margin-bottom:8px">
+        <svg viewBox="0 0 900 42" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+          <g fill="#4a4a4a"><rect x="40" y="6" width="10" height="30"/><rect x="240" y="10" width="10" height="22"/><rect x="440" y="6" width="10" height="30"/><rect x="640" y="10" width="10" height="22"/><rect x="840" y="6" width="10" height="30"/></g>
+          <g fill="#56B4E9"><rect x="33" y="2" width="6" height="38"/><rect x="233" y="2" width="6" height="38"/><rect x="433" y="2" width="6" height="38"/><rect x="633" y="2" width="6" height="38"/><rect x="833" y="2" width="6" height="38"/></g>
+        </svg>
+      </div>
+      <div class="row gap16 center">
+        <div class="legend"><span><i style="background:#4a4a4a"></i>kick at the speakers</span><span><i style="background:var(--hit)"></i>laser hit (sent 18 ms early)</span></div>
+        <div class="grow"></div>
+        <span class="text2 small">visual lead</span><div class="hfader" style="width:220px;height:30px"><div class="fill" style="width:38%"></div><div class="lbl" style="font-size:13px">+18 ms</div><div class="val small">range 0…60</div></div>
+        <span class="btn sm">Calibrate (click + camera)</span>
+      </div>
+    </div>
+    <!-- latency -->
+    <div class="panel" style="grid-column:2;grid-row:2">
+      <h3>Steady latency, measured</h3>
+      <div class="sub">Jitter hurts more than delay: 10 ms ± 3 feels as bad as a steady 20 ms.</div>
+      <div class="kv"><span class="text2">press → light</span><b>6.1 ms median</b><span class="text2">jitter</span><b>0.4 ms (target ≤ 1)</b><span class="text2">worst in 5 min</span><b>9.8 ms</b></div>
+      <div class="hist"><i style="height:6px"></i><i style="height:14px"></i><i style="height:40px"></i><i style="height:54px"></i><i style="height:30px"></i><i style="height:9px"></i><i style="height:4px"></i><i style="height:2px;background:var(--warn)"></i></div>
+      <div class="small muted" style="margin-top:4px">4 ms ………… 10 ms · every input also confirms on the controller LED and a click</div>
+    </div>
+    <!-- flash limiter -->
+    <div class="panel" style="grid-column:1;grid-row:3">
+      <h3>Flash limiter · at most 3 full-field flashes in any second</h3>
+      <div class="sub">Photosensitivity guidance. At 128 BPM, quarter notes (2.1 Hz) pass; eighth notes (4.3 Hz) do not, so an eighth-note strobe request is played as motion (a beam bounce) instead. Above 4 Hz, sync can't be judged anyway, so fast detail is treated as texture.</div>
+      <div class="row gap16 center">
+        <div class="slots"><div class="slot used">1</div><div class="slot used">2</div><div class="slot">3</div></div>
+        <div class="col gap6" style="font-size:12.5px">
+          <div><span class="badge orange">limited</span> FLASH asked for ⅛ strobe → played as ¼ flashes + ⅛ beam bounce</div>
+          <div><span class="badge green">ok</span> motion hits (bounce, snap, sweep) are never limited: people lock to motion better than to flashes</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" style="grid-column:2;grid-row:3;background:#2a2400;border-color:#6b5a00">
+      <div class="notes" style="position:static;width:auto;box-shadow:none;background:transparent;color:#ffe9a0;padding:0">
+        <b style="color:#ffd400">Why this comes first</b>
+        <ol>
+          <li>Every round-2 concept (F–N) sits on this layer; it can also ship in today's app.</li>
+          <li>Forgiveness and a steady clock make any surface feel "in time".</li>
+          <li>The limiter and lead are global and can't be turned off per cue.</li>
+          <li>Numbers: r06 table (ITU-R BT.1359, Repp, Ofcom, Wessel &amp; Wright, Jack et al.).</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</div></body></html>

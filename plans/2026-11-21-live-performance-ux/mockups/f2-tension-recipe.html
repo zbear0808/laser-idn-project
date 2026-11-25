@@ -1,0 +1,281 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+:root { --you: #e6f6ff; --music: #b48cff; --loop: #3ad29f; }
+.page { background: #07080a; }
+.hdr { position: absolute; left: 16px; right: 14px; top: 44px; height: 46px; display: flex; align-items: center; gap: 14px; }
+.hdr h1 { font-size: 22px; }
+.hdr .sub { font-size: 12.5px; color: var(--text2); }
+.blind { font-size: 12px; font-weight: 800; letter-spacing: .06em; color: #c9b7ff; padding: 3px 9px; border-radius: 4px; border: 1.5px solid #8a6fe0; background: #1c1630; }
+.vchip { height: 26px; padding: 0 11px; border-radius: 13px; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; background: color-mix(in srgb, var(--vibe) 20%, #1a1a1a); border: 1px solid var(--vibe); color: #f3d6e8; font-weight: 600; white-space: nowrap; }
+.term { margin-left: auto; height: 32px; padding: 0 14px; border-radius: 6px; background: #b3170f; border: 2px solid #ff6a5a; color: #fff; display: inline-flex; align-items: center; gap: 8px; font-weight: 800; letter-spacing: .06em; font-size: 13px; box-shadow: 0 0 14px rgba(255,60,40,.35); white-space: nowrap; }
+.term i { width: 12px; height: 12px; background: #fff; border-radius: 2px; }
+.term small { font-weight: 600; letter-spacing: 0; opacity: .85; font-size: 11px; }
+.panel { position: absolute; border-radius: 12px; background: #0e1014; border: 1px solid #1f242c; }
+.panel > h3 { position: absolute; left: 16px; top: 12px; }
+.panel .ph { position: absolute; right: 16px; top: 11px; font-size: 12px; color: var(--text2); }
+.sc { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 9px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; border: 1.5px solid; white-space: nowrap; }
+.sc.you { color: var(--you); border-color: #9fdcff; background: rgba(159,220,255,.10); }
+.sc.music { color: #d7c2ff; border-color: var(--music); background: rgba(180,140,255,.12); }
+.sc.loop { color: #9ff0cf; border-color: var(--loop); background: rgba(58,210,159,.12); }
+.sc.clock { color: #c9d1d9; border-color: #6b7580; background: rgba(150,160,170,.10); }
+.opt { display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid #3a414b; }
+.opt span { padding: 4px 10px; font-size: 12px; color: var(--text2); border-right: 1px solid #3a414b; white-space: nowrap; }
+.opt span:last-child { border-right: 0; }
+.opt span.on { background: #2a4a68; color: #fff; }
+.btnx { height: 30px; padding: 0 12px; border-radius: 6px; background: #1d2127; border: 1px solid #39414c; color: #e6e6e6; font-size: 12.5px; display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.btnx.keep { background: #10392b; border-color: var(--loop); color: #c9ffe9; font-weight: 800; letter-spacing: .03em; }
+.btnx.pri { background: #2a4a68; border-color: #4992db; color: #fff; font-weight: 700; }
+
+/* presets */
+.presets { left: 14px; top: 96px; width: 1412px; height: 206px; }
+.pgrid { position: absolute; left: 16px; right: 16px; top: 40px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.pc { border-radius: 10px; background: #15181d; border: 1.5px solid #2a2f37; padding: 10px 12px; height: 150px; position: relative; }
+.pc .nm { font-size: 17px; font-weight: 800; color: #fff; }
+.pc .nm small { font-size: 12px; font-weight: 500; color: var(--text2); margin-left: 6px; }
+.pc .strip { display: flex; gap: 4px; margin-top: 8px; }
+.pc .strip .screen { width: 46px; height: 34px; border-radius: 4px; }
+.pc .ds { font-size: 12px; color: #c9d1d9; line-height: 1.38; margin-top: 8px; }
+.pc .vt { position: absolute; right: 10px; top: 11px; font-size: 11px; padding: 1px 8px; border-radius: 9px; border: 1px solid var(--vibe); color: #f3d6e8; }
+.pc.sel { border-color: #9fdcff; box-shadow: 0 0 0 2px rgba(159,220,255,.18); }
+.pc.mine { border-color: var(--loop); border-style: dashed; background: #0f1a16; }
+.pc.mine .nm { color: #c9ffe9; }
+
+/* teach */
+.teach { left: 14px; top: 314px; width: 860px; height: 318px; }
+.teach svg { position: absolute; left: 0; top: 0; }
+.teach .side { position: absolute; left: 560px; top: 40px; width: 284px; }
+.teach .side .h { font-size: 11px; font-weight: 800; letter-spacing: .06em; color: #8fd3b8; margin-bottom: 6px; }
+.teach .side .r { font-size: 12.5px; color: #d6dde4; line-height: 1.35; padding: 5px 0; border-bottom: 1px solid #1c2128; }
+.teach .side .r b { color: #fff; }
+.teach .acts { position: absolute; left: 16px; bottom: 14px; display: flex; gap: 8px; align-items: center; }
+.teach .acts .hint { font-size: 12px; color: var(--text2); margin-left: 6px; }
+
+/* lanes */
+.lanes { left: 886px; top: 314px; width: 540px; height: 318px; }
+.ln { position: absolute; left: 16px; right: 16px; height: 62px; border-top: 1px solid #1c2128; display: flex; align-items: center; }
+.ln .nm { width: 150px; }
+.ln .nm b { display: block; font-size: 15px; color: #fff; letter-spacing: .02em; }
+.ln .nm span { font-size: 11.5px; color: var(--text2); line-height: 1.3; display: block; }
+.ln svg { width: 220px; height: 50px; }
+.ln .ev { margin-left: 12px; font-size: 12px; color: #cfe6f5; line-height: 1.35; }
+.ln .ev b { color: #fff; }
+.laxis { position: absolute; left: 166px; top: 232px; width: 220px; font-size: 11px; color: var(--text2); display: flex; justify-content: space-between; }
+.lfoot { position: absolute; left: 16px; right: 16px; bottom: 12px; font-size: 12px; color: var(--text2); display: flex; flex-direction: column; gap: 7px; }
+.lfoot .rw { display: flex; align-items: center; gap: 10px; }
+.lfoot .rw > b { color: #eee; font-weight: 600; width: 84px; }
+
+/* after the drop */
+.after { left: 14px; top: 644px; width: 600px; height: 326px; }
+.dv { position: absolute; left: 16px; right: 16px; top: 38px; height: 70px; display: flex; gap: 12px; align-items: center; background: #15181d; border: 1px solid #2a2f37; border-radius: 9px; padding: 0 10px; }
+.dv .screen { width: 84px; height: 54px; }
+.dv .t { font-size: 12.5px; color: #d6dde4; line-height: 1.4; }
+.dv .t b { color: #ffc861; font-size: 13.5px; }
+.dv .sz { margin-left: auto; display: flex; gap: 4px; }
+.dv .sz span { font-size: 11px; padding: 3px 6px; border-radius: 4px; background: #22262d; color: #aab; }
+.dv .sz span.on { background: #3a2c10; color: #ffc861; font-weight: 800; }
+.ach { position: absolute; left: 16px; right: 16px; top: 120px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.ac { border-radius: 9px; background: #15181d; border: 1.5px solid #2a2f37; padding: 9px 10px; height: 190px; position: relative; }
+.ac .tt { font-size: 13.5px; font-weight: 800; color: #fff; margin: 6px 0 4px; }
+.ac .dd { font-size: 12px; color: #c9d1d9; line-height: 1.38; }
+.ac svg { position: absolute; left: 10px; bottom: 10px; }
+.ac.sel { border-color: var(--music); background: #17131f; box-shadow: 0 0 0 2px rgba(180,140,255,.15); }
+
+/* landing */
+.land { left: 626px; top: 644px; width: 400px; height: 326px; }
+.land .blk { position: absolute; left: 16px; right: 16px; }
+.land .lbl { font-size: 11px; font-weight: 800; letter-spacing: .06em; color: var(--text2); margin-bottom: 6px; }
+.tgl { display: flex; gap: 10px; align-items: flex-start; font-size: 12px; color: #c9d1d9; line-height: 1.36; padding: 5px 0; }
+.tgl .toggle { flex-shrink: 0; margin-top: 1px; }
+.tgl b { color: #fff; }
+
+/* ranges */
+.ranges { left: 1038px; top: 644px; width: 388px; height: 326px; }
+.rr { position: absolute; left: 16px; right: 16px; height: 36px; display: grid; grid-template-columns: 96px 1fr; gap: 10px; align-items: center; }
+.rr .s b { display: block; font-size: 12.5px; color: #eee; }
+.rr .s span { font-size: 11px; color: var(--text2); }
+.rr .bar { position: relative; height: 16px; border-radius: 4px; background: #171a20; border: 1px solid #2a3038; }
+.rr .bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px 0 0 3px; background: linear-gradient(90deg, #7b4bb0, #6aa9e8 70%, #dff4ff); }
+.rr .bar em { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(45deg, rgba(230,159,0,.5) 0 3px, transparent 3px 7px); border-left: 1px solid #E69F00; }
+.rr .bar u { position: absolute; left: calc(100% + 0px); top: -1px; text-decoration: none; }
+.rr .note { position: absolute; right: 0; top: -14px; font-size: 11px; color: #9aa4ae; white-space: nowrap; }
+.rr.cur { background: rgba(159,220,255,.06); border-radius: 6px; }
+.rfoot { position: absolute; left: 16px; right: 16px; bottom: 12px; font-size: 11.5px; color: var(--text2); line-height: 1.4; }
+.rfoot b { color: #eee; font-weight: 600; }
+
+.notes { left: 14px; top: 982px; width: 1412px; font-size: 12px; padding: 8px 12px; line-height: 1.4; }
+.notes ol { columns: 2; column-gap: 40px; }
+</style></head><body>
+<div class="page tall">
+  <div class="caption-bar"><b>F2 · Tension &amp; Release — recipes, made easy</b><span class="tag">set-up · blind, nothing is sent</span><span class="tag">pick a preset, or teach one by playing it</span></div>
+
+  <div class="hdr">
+    <span class="blind">BLIND EDIT</span>
+    <h1>Recipe: Riser</h1>
+    <span class="vchip">Carried by vibe: Build</span>
+    <span class="sub">used by 3 tracks · the show keeps playing the saved recipe; changes take on the next phrase line</span>
+    <span class="term"><i></i>TERMINATE<small>Esc · E-stop</small></span>
+  </div>
+
+  <!-- presets -->
+  <div class="panel presets">
+    <h3>Start from a preset</h3><span class="ph">each strip = the look at 0 · 25 · 50 · 75 · 100% tension</span>
+    <div class="pgrid">
+      <div class="pc sel"><span class="vt">Build</span><div class="nm">Riser<small>8 bars</small></div>
+        <div class="strip"><div class="screen" data-shape="fan" data-color="#ff3bd4"></div><div class="screen" data-shape="fan" data-color="#c58bff" data-scale=".85"></div><div class="screen" data-shape="beams" data-color="#6aa9e8" data-scale=".8"></div><div class="screen" data-shape="beams" data-color="#cfeeff" data-scale=".55"></div><div class="screen" data-shape="line" data-color="#ffffff" data-rot="90"></div></div>
+        <div class="ds">The classic: narrow, rise, drain to white, ½-beat breath. Lands an XL ring burst.</div></div>
+      <div class="pc"><span class="vt">Peak</span><div class="nm">Snap<small>2 bars</small></div>
+        <div class="strip"><div class="screen" data-shape="fan" data-color="#36e2ff"></div><div class="screen" data-shape="beams" data-color="#36e2ff" data-scale=".8"></div><div class="screen" data-shape="tunnel" data-color="#8fe9ff" data-scale=".6"></div><div class="screen" data-shape="tunnel" data-color="#dff4ff" data-scale=".4"></div><div class="screen" data-shape="tunnel" data-color="#fff" data-scale=".25"></div></div>
+        <div class="ds">Short and hard. No breath. Ends in a tunnel slam. For drops that come fast.</div></div>
+      <div class="pc"><span class="vt">Warm-up</span><div class="nm">Bloom<small>16 bars</small></div>
+        <div class="strip"><div class="screen" data-shape="circle" data-color="#ffb04d" data-scale=".4"></div><div class="screen" data-shape="circle" data-color="#ffb04d" data-scale=".7"></div><div class="screen" data-shape="ring2" data-color="#ffd07a"></div><div class="screen" data-shape="fan" data-color="#ffe2a8" data-scale=".7"></div><div class="screen" data-shape="fan" data-color="#fff3d6"></div></div>
+        <div class="ds">Slow opening, colour stays warm, room never dims. Gentle drop, no hit-stop.</div></div>
+      <div class="pc"><span class="vt">Breakdown</span><div class="nm">Tease<small>4 bars</small></div>
+        <div class="strip"><div class="screen" data-shape="wave" data-color="#c58bff"></div><div class="screen" data-shape="wave" data-color="#c58bff" data-scale=".7"></div><div class="screen" data-shape="beams" data-color="#9fb8ff" data-scale=".7"></div><div class="screen" data-shape="beams" data-color="#dfe8ff" data-scale=".5"></div><div class="screen" data-shape="line" data-color="#fff" data-rot="90"></div></div>
+        <div class="ds">Made for fake-outs: letting go early is a fake drop, CANCEL melts in ½ bar. Charge is kept.</div></div>
+      <div class="pc mine"><span class="vt" style="border-color:var(--loop);color:#c9ffe9">new</span><div class="nm">Hold On · build 1<small>yours</small></div>
+        <div class="strip"><div class="screen" data-shape="fan" data-color="#ff3bd4"></div><div class="screen" data-shape="beams" data-color="#b48cff" data-scale=".8"></div><div class="screen" data-shape="beams" data-color="#9fb8ff" data-scale=".72"></div><div class="screen" data-shape="beams" data-color="#dff4ff" data-scale=".5"></div><div class="screen" data-shape="line" data-color="#fff" data-rot="90"></div></div>
+        <div class="ds">Taught by playing at 23:14. Fast start, a plateau, then a last push. Shimmer roll at 75%.</div></div>
+    </div>
+  </div>
+
+  <!-- teach by playing -->
+  <div class="panel teach">
+    <h3>Teach it by playing · KEEP your build</h3><span class="ph">tonight · Hold On · Build 1 · bars 25 → 33</span>
+    <svg id="tb" width="560" height="270" viewBox="0 0 560 270"></svg>
+    <div class="side">
+      <div class="h">WHAT KEEP WILL SAVE</div>
+      <div class="r"><b>Shape over time:</b> your pedal curve, smoothed. Fast start, plateau near 70%, last push in bar 32.</div>
+      <div class="r"><b>Length:</b> 8 bars, fitted to the phrase so 100% arrives on the line.</div>
+      <div class="r"><b>Pads:</b> your snare roll in bar 30 becomes a shimmer roll at 75% tension.</div>
+      <div class="r"><b>Not saved:</b> the music's line. Recipes never depend on analysis.</div>
+    </div>
+    <div class="acts"><span class="btnx keep">● KEEP last 8 bars</span><span class="btnx">KEEP 16</span><span class="btnx">Try it · hold <span class="kbd">T</span> over a looping riser</span><span class="btnx pri">Save as "Hold On · build 1"</span></div>
+  </div>
+
+  <!-- three lanes -->
+  <div class="panel lanes">
+    <h3>What tension does · 3 lanes</h3><span class="ph">drag a curve · all 8 lanes ›</span>
+    <div class="ln" style="top:40px"><div class="nm"><b>SHAPE</b><span>spread narrows, rig converges</span></div><svg viewBox="0 0 220 50"><path d="M4,8 C70,10 120,34 216,44" fill="none" stroke="#e6f6ff" stroke-width="2.2"/><circle cx="4" cy="8" r="3.5" fill="#e6f6ff"/><circle cx="110" cy="28" r="3.5" fill="#e6f6ff"/><circle cx="216" cy="44" r="3.5" fill="#e6f6ff"/></svg><div class="ev">120° → <b>6°</b><br>apart → one point</div></div>
+    <div class="ln" style="top:102px"><div class="nm"><b>LIFT</b><span>beams tilt up, motion speeds up</span></div><svg viewBox="0 0 220 50"><path d="M4,44 C60,42 140,22 216,8" fill="none" stroke="#e6f6ff" stroke-width="2.2"/><line x1="4" y1="6" x2="216" y2="6" stroke="#E69F00" stroke-dasharray="3 3"/><circle cx="4" cy="44" r="3.5" fill="#e6f6ff"/><circle cx="216" cy="8" r="3.5" fill="#e6f6ff"/></svg><div class="ev">0° → <b>+22°</b><br>1× → <b>3×</b> (cap)</div></div>
+    <div class="ln" style="top:164px"><div class="nm"><b>SHINE</b><span>sparkle in, colour drains, room dims</span></div><svg viewBox="0 0 220 50"><defs><linearGradient id="sh" x1="0" x2="1"><stop offset="0" stop-color="#ff3bd4"/><stop offset=".5" stop-color="#8a9cff"/><stop offset="1" stop-color="#fff"/></linearGradient></defs><rect x="4" y="38" width="212" height="8" rx="3" fill="url(#sh)"/><path d="M4,32 L80,32 C130,30 170,14 216,6" fill="none" stroke="#e6f6ff" stroke-width="2.2"/><circle cx="80" cy="32" r="3.5" fill="#e6f6ff"/><circle cx="216" cy="6" r="3.5" fill="#e6f6ff"/></svg><div class="ev">sparkle from <b>50%</b><br>room 100 → <b>70%</b></div></div>
+    <div class="laxis"><span>0%</span><span>50%</span><span>100% tension</span></div>
+    <div class="lfoot">
+      <div class="rw"><b>Breath</b><span class="opt"><span>none</span><span>¼ beat</span><span class="on">½ beat</span><span>1 beat</span></span><span>black · only if tension ≥ 50%</span></div>
+      <div class="rw"><b>Toe click</b><span class="opt"><span class="on">hang</span><span>off</span></span><span>hold the top: motion ½ speed, brightness held</span></div>
+    </div>
+  </div>
+
+  <!-- after the drop -->
+  <div class="panel after">
+    <h3>The drop, and after it</h3><span class="ph">bars 33 → 41 shown</span>
+    <div class="dv"><div class="screen" data-shape="ring2" data-color="#ffc861"></div>
+      <div class="t"><b>The drop look is the kit's DROP voice</b><br>Groove kit · ring burst → full fan · Peak colours<br><span style="color:var(--text2)">set in the kit (G2) · charge picks the size</span></div>
+      <div class="sz"><span>S</span><span>M</span><span>L</span><span class="on">XL</span></div></div>
+    <div class="ach">
+      <div class="ac"><span class="sc loop">LOOP</span><div class="tt">KEEP the drop's groove</div><div class="dd">The first 2 bars after the drop (the look plus your hits) loop until you play over them or the phrase ends.</div><svg id="a1" width="168" height="44"></svg></div>
+      <div class="ac sel"><span class="sc music">MUSIC</span><div class="tt">Hand over to the music</div><div class="dd">"Peak, driven by kick and bass." If detection is weak, it falls back to the clock on its own and says so.</div><svg id="a2" width="168" height="44"></svg></div>
+      <div class="ac"><span class="sc clock">CLOCK</span><div class="tt">The recipe's decay</div><div class="dd">Settles into the Peak vibe over 1 bar, then the beat clock drives it. Works with nothing plugged in.</div><svg id="a3" width="168" height="44"></svg></div>
+    </div>
+  </div>
+
+  <!-- landing + music -->
+  <div class="panel land">
+    <h3>Landing, and the music</h3>
+    <div class="blk" style="top:40px"><div class="lbl">LETTING GO LANDS ON</div><span class="opt"><span>next beat</span><span>next bar</span><span class="on">phrase line</span></span>
+      <div style="font-size:11.5px;color:var(--text2);margin-top:6px">early waits · ≤ 40 ms late fires full size · later is 30% smaller</div></div>
+    <div class="blk" style="top:116px"><div class="lbl">THE MUSIC FEEDS THE BUILD <span class="sc music" style="margin-left:6px">MUSIC</span></div>
+      <div class="tgl"><span class="toggle on"></span><span><b>Catch the real drop.</b> Still holding at the line? The first big kick + bass fires it, up to 2 bars late.</span></div>
+      <div class="tgl"><span class="toggle on"></span><span><b>Riser adds charge</b> (up to +20) and is drawn beside your line.</span></div>
+      <div class="tgl"><span class="toggle on"></span><span><b>Hats drive the sparkle</b> when they get denser.</span></div>
+    </div>
+    <div class="blk" style="bottom:12px;font-size:11.5px;color:var(--text2);line-height:1.4">No analysis? Everything still runs on the phrase ring <span class="sc clock">CLOCK</span>. The music only adds; it never starts a drop by itself.</div>
+  </div>
+
+  <!-- ranges -->
+  <div class="panel ranges">
+    <h3>Ranges per section</h3><span class="ph">from the show file</span>
+    <div class="rr" style="top:44px"><div class="s"><b>Intro</b><span>bars 1–16</span></div><div class="bar"><i style="width:30%"></i><span class="note">30% · no drop look</span></div></div>
+    <div class="rr cur" style="top:84px"><div class="s"><b>Build 1</b><span>17–32 · now</span></div><div class="bar"><i style="width:80%"></i><em style="left:80%;right:0"></em><span class="note">100% · top 20% opens at the line</span></div></div>
+    <div class="rr" style="top:124px"><div class="s"><b>Drop 1</b><span>33–48</span></div><div class="bar"><i style="width:15%"></i><span class="note">pads only · BREATH swells</span></div></div>
+    <div class="rr" style="top:164px"><div class="s"><b>Breakdown</b><span>49–64</span></div><div class="bar"><i style="width:60%"></i><span class="note">60% · fake drops only</span></div></div>
+    <div class="rr" style="top:204px"><div class="s"><b>Build 2</b><span>65–80</span></div><div class="bar"><i style="width:80%"></i><em style="left:80%;right:0"></em><span class="note">100% · "DROP" text, once a set</span></div></div>
+    <div class="rfoot">Past the range, the pedal hits a soft end stop and the ring says <b>"range 60% here"</b>. <span style="color:#e0ad55">Hatched</span> = the top 20%, locked until the phrase line.</div>
+  </div>
+
+  <div class="callout" style="left:4px;top:86px">1</div>
+  <div class="callout" style="left:4px;top:304px">2</div>
+  <div class="callout" style="left:876px;top:304px">3</div>
+  <div class="callout" style="left:4px;top:634px">4</div>
+  <div class="callout" style="left:616px;top:634px">5</div>
+  <div class="callout" style="left:1028px;top:634px">6</div>
+
+  <div class="notes">
+    <b>F2 notes</b>
+    <ol>
+      <li>Four strong presets, one per kind of build. Most people never leave this row; the vibe picks one for you.</li>
+      <li>Teach by playing: KEEP the last 8 bars of your pedal and pads, and they become a recipe fitted to the phrase.</li>
+      <li>Eight lanes became three (shape, lift, shine). Experts can still open all eight; caps stay the vibe's.</li>
+      <li>The drop is the kit's DROP voice (G). After it: KEEP a loop (G), hand over to the music (L), or decay.</li>
+      <li>The music only adds: it catches the real drop, adds charge and drives sparkle (r08 #3). Off = the ring.</li>
+      <li>Ranges per section come from the show file: how deep a build may go, and where the top 20% opens (J, M).</li>
+    </ol>
+  </div>
+</div>
+<script>
+(function(){
+  var NS="http://www.w3.org/2000/svg",F="-apple-system,Helvetica";
+  function el(n,a,p){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;}
+  function tx(p,x,y,s,o){o=o||{};var t=el("text",{x:x,y:y,fill:o.fill||"#9aa4ae","font-size":o.size||11,"font-weight":o.w||400,"text-anchor":o.anchor||"start","font-family":F},p);t.textContent=s;return t;}
+  // teach graph
+  var T=document.getElementById("tb");
+  var X0=56,X1=540,Y0=190,Y1=68;
+  function bx(b){return X0+(b-25)*(X1-X0)/8.5;} function ty(p){return Y0-(Y0-Y1)*p/100;}
+  [0,50,100].forEach(function(p){el("line",{x1:X0,y1:ty(p),x2:X1,y2:ty(p),stroke:p?"#1f252d":"#3a424c","stroke-dasharray":p?"3 4":"0"},T);tx(T,X0-8,ty(p)+4,p+"%",{anchor:"end"});});
+  for(var b=25;b<=33;b++)tx(T,bx(b),Y0+15,b,{anchor:"middle",fill:b==33?"#ffc861":"#7f8a95",w:b==33?800:400});
+  // pedal raw (jittery)
+  var pts=[],raw=[[25,0],[25.2,35],[25.5,52],[25.8,58],[26.2,63],[26.6,66],[27,70],[27.4,68],[27.8,71],[28.2,69],[28.6,72],[29,70],[29.4,73],[29.8,71],[30.2,74],[30.6,72],[31,76],[31.5,80],[31.9,88],[32.3,95],[32.6,98],[32.9,0]];
+  raw.forEach(function(r){pts.push(bx(r[0])+","+ty(r[1]));});
+  el("polyline",{points:pts.join(" "),fill:"none",stroke:"#c3ccd5","stroke-width":1.6,"stroke-dasharray":"2 3"},T);
+  // smoothed recipe curve
+  el("path",{d:"M"+bx(25)+","+ty(0)+" C"+bx(25.6)+","+ty(55)+" "+bx(26.5)+","+ty(66)+" "+bx(28)+","+ty(70)+" S"+bx(30.8)+","+ty(73)+" "+bx(31.4)+","+ty(78)+" S"+bx(32.6)+","+ty(98)+" "+bx(33)+","+ty(100),fill:"none",stroke:"#3ad29f","stroke-width":3},T);
+  tx(T,bx(26.4),ty(74)-6,"saved shape",{fill:"#8ff0cf",w:700});
+  tx(T,bx(29.4),ty(60)+16,"your pedal (raw, dotted)",{fill:"#c3ccd5"});
+  // KEEP bracket
+  el("rect",{x:bx(25),y:38,width:bx(33)-bx(25),height:15,rx:4,fill:"#10392b",stroke:"#3ad29f"},T);
+  tx(T,bx(29),49,"KEEP · last 8 bars of pedal + pads",{anchor:"middle",fill:"#c9ffe9",w:800});
+  // release + drop
+  el("line",{x1:bx(32.9),y1:ty(100),x2:bx(32.9),y2:Y0,stroke:"#cfe6f5","stroke-dasharray":"2 2"},T);
+  tx(T,bx(32.9)-6,ty(20),"let go −12 ms",{anchor:"end",fill:"#cfe6f5"});
+  el("line",{x1:bx(33),y1:Y1-4,x2:bx(33),y2:Y0,stroke:"#E69F00","stroke-width":2.5},T);
+  el("circle",{cx:bx(33),cy:ty(100),r:6,fill:"#07080a",stroke:"#E69F00","stroke-width":2.5},T);
+  // pad lane
+  var py=222; tx(T,16,py+4,"pads",{fill:"#e4e9ee",w:700});
+  el("line",{x1:X0,y1:py,x2:X1,y2:py,stroke:"#1c2128"},T);
+  [27,27.25,27.5,27.75,28,28.25,28.5].forEach(function(b){el("circle",{cx:bx(b),cy:py,r:3.5,fill:"#56B4E9"},T);});
+  for(var s=30;s<30.9;s+=0.0625)el("rect",{x:bx(s)-1,y:py-6,width:2,height:12,fill:"#e6f6ff"},T);
+  tx(T,bx(30.45),py+20,"snare roll → shimmer at 75%",{anchor:"middle",fill:"#cfe6f5"});
+  tx(T,bx(27.75),py+20,"kick rides",{anchor:"middle",fill:"#8fc0e0"});
+  // breath
+  el("rect",{x:bx(32.875),y:py-8,width:bx(33)-bx(32.875),height:16,fill:"#D55E00",opacity:.6},T);
+
+  // after-drop minis
+  function mini(id,kind){
+    var S=document.getElementById(id); var w=168,h=44;
+    el("line",{x1:0,y1:h-4,x2:w,y2:h-4,stroke:"#3a424c"},S);
+    el("line",{x1:4,y1:2,x2:4,y2:h-4,stroke:"#E69F00","stroke-width":2},S);
+    for(var i=1;i<8;i++)el("line",{x1:4+i*20,y1:h-7,x2:4+i*20,y2:h-1,stroke:"#4a525c"},S);
+    if(kind==1){
+      for(var k=0;k<4;k++){var x0=4+k*40;el("path",{d:"M"+x0+",6 C"+(x0+8)+",26 "+(x0+20)+",28 "+(x0+40)+",30",fill:"none",stroke:"#3ad29f","stroke-width":2,opacity:k?0.75:1},S);}
+      tx(S,w,h-8,"×4",{anchor:"end",fill:"#8ff0cf",w:700});
+    } else if(kind==2){
+      var p="M4,6"; for(var j=0;j<32;j++){var x=4+j*5;p+=" L"+x+","+(j%4==0?10:24)+" L"+(x+2.5)+","+(j%4==0?18:26);} 
+      el("path",{d:p,fill:"none",stroke:"#b48cff","stroke-width":1.6},S);
+    } else {
+      el("path",{d:"M4,6 C14,28 28,30 44,30 L168,30",fill:"none",stroke:"#9aa4ae","stroke-width":2},S);
+      for(var q=48;q<168;q+=10)el("line",{x1:q,y1:26,x2:q,y2:34,stroke:"#6b7580"},S);
+    }
+  }
+  mini("a1",1);mini("a2",2);mini("a3",3);
+})();
+</script>
+</body></html>

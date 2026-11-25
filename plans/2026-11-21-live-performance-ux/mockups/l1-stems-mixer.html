@@ -1,0 +1,348 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.page { background: #060708; }
+.abs { position: absolute; }
+.topband { height: 44px; display: flex; align-items: center; gap: 14px; padding: 0 14px 0 16px; background: #0d0f12; border-bottom: 1px solid #1d2128; }
+.topband .live { font-size: 12px; font-weight: 800; letter-spacing: .08em; color: #8ff0a8; padding: 3px 9px; border-radius: 4px; background: #0f3b1c; border: 1px solid #2fbf5a; }
+.topband .trk { font-size: 14px; font-weight: 600; color: #eee; }
+.topband .trk span { color: var(--text2); font-weight: 400; margin-left: 8px; font-size: 12.5px; }
+.topband .bpm { font-family: "SF Mono", Menlo, monospace; font-size: 15px; color: #fff; font-weight: 700; }
+.topband .bpm small { color: var(--muted); font-weight: 400; font-size: 11px; margin-left: 4px; }
+.pill { font-size: 11.5px; padding: 3px 9px; border-radius: 10px; background: rgba(20,24,30,.85); border: 1px solid #2c333d; color: #cdd6e0; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
+.stop { margin-left: auto; height: 32px; padding: 0 14px; border-radius: 6px; background: #b3170f; border: 2px solid #ff6a5a; color: #fff;
+        display: inline-flex; align-items: center; gap: 8px; font-weight: 800; letter-spacing: .06em; font-size: 13px; box-shadow: 0 0 14px rgba(255,60,40,.35); }
+.stop i { width: 12px; height: 12px; background: #fff; border-radius: 2px; }
+.stop small { font-weight: 600; letter-spacing: 0; opacity: .85; font-size: 11px; }
+.card { background: #0d0f12; border: 1px solid #1e232b; border-radius: 12px; }
+.card h3 { color: #c9d3dd; }
+
+/* source chips: who drives the lane right now */
+:root { --you: #56B4E9; --music: #2fbf5a; --loop: #b58cff; --clock: #FFB000; }
+.src { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 17px; font-weight: 900; letter-spacing: .08em; white-space: nowrap; }
+.src.you   { background: #0f2b40; border: 2px solid var(--you); color: #cbe9ff; }
+.src.music { background: #0f2a17; border: 2px solid var(--music); color: #b9f5c9; }
+.src.loop  { background: #24173d; border: 2px solid var(--loop); color: #e2d3ff; }
+.src.clock { background: #3d2e00; border: 2px solid var(--clock); color: #ffd36b; }
+
+/* tension strip */
+.tension { left: 14px; top: 90px; width: 1412px; height: 200px; border-radius: 14px;
+  background: linear-gradient(90deg, #120f1c 0%, #17142a 55%, #1c1a2a 100%); border: 1px solid #3a3160; box-shadow: 0 0 30px rgba(160,130,255,.12) inset; }
+.tension .tag { position: absolute; left: 236px; top: 12px; display: flex; gap: 10px; align-items: center; }
+.tension .tag b { font-size: 13px; letter-spacing: .1em; color: #e6dcff; }
+.tension .tag .pill { background: #221b3a; border-color: #4b3f7a; color: #d9ccff; }
+.ring { position: absolute; left: 18px; top: 14px; width: 172px; height: 172px; }
+.ring .c { position: absolute; left: 0; top: 0; width: 172px; text-align: center; }
+.ring .c .bb { position: absolute; left: 0; right: 0; top: 52px; font-family: "SF Mono", Menlo, monospace; font-weight: 800; font-size: 30px; color: #fff; }
+.ring .c .bb small { font-size: 15px; color: #9b93b8; }
+.ring .c .lt { position: absolute; left: 0; right: 0; top: 92px; font-size: 11.5px; color: #ffcf6b; font-weight: 700; }
+.ring .c .lk { position: absolute; left: 44px; right: 44px; top: 112px; font-size: 11px; font-weight: 800; color: #8ff0a8; background: #0f3b1c; border: 1px solid #2fbf5a; border-radius: 8px; padding: 1px 0; }
+.ringbtns { position: absolute; left: 196px; top: 40px; display: flex; flex-direction: column; gap: 6px; }
+.ringbtns span { width: 30px; height: 26px; border-radius: 6px; background: #241f38; border: 1px solid #4b3f7a; color: #d9ccff; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.ringbtns span.one { background: #2a4a1e; border-color: #5fbf4a; color: #d6ffc8; font-size: 14px; }
+.tgraph { position: absolute; left: 236px; top: 36px; }
+.charge { position: absolute; left: 1010px; top: 14px; width: 388px; height: 172px; }
+.charge .lbl { font-size: 12px; letter-spacing: .1em; font-weight: 800; color: #c7bdf0; }
+.charge .big { font-family: "SF Mono", Menlo, monospace; font-size: 34px; font-weight: 800; color: #fff; line-height: 1; }
+.charge .bar { position: relative; height: 16px; border-radius: 8px; background: #231e36; border: 1px solid #3f3666; overflow: hidden; margin-top: 4px; }
+.charge .bar i { position: absolute; top: 0; bottom: 0; }
+.charge .bar .mk { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #fff; }
+.charge .split { display: flex; gap: 12px; font-size: 11.5px; color: #cfc6ef; margin-top: 6px; }
+.charge .split span { display: inline-flex; align-items: center; gap: 5px; }
+.charge .split i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.catch { position: absolute; left: 0; right: 0; top: 98px; height: 74px; border-radius: 10px; background: #2a2010; border: 1.5px solid #ffb000; display: flex; align-items: center; gap: 12px; padding: 0 12px; }
+.catch .screen { width: 74px; height: 56px; flex: none; }
+.catch .t1 { font-size: 15px; font-weight: 800; color: #ffd36b; }
+.catch .t2 { font-size: 12px; color: #f2e2bd; margin-top: 2px; line-height: 1.3; }
+
+/* lanes */
+.lanes { left: 14px; top: 302px; display: flex; gap: 10px; }
+.lane { width: 168px; height: 570px; border-radius: 12px; background: linear-gradient(180deg, #15181c, #0f1114); border: 1px solid #262a31; position: relative; }
+.lane .hd { position: absolute; left: 0; right: 0; top: 0; height: 46px; border-radius: 12px 12px 0 0; background: color-mix(in srgb, var(--lc) 18%, #14161a); border-bottom: 2px solid var(--lc); padding: 6px 12px 0; }
+.lane .hd b { display: block; font-size: 19px; font-weight: 900; letter-spacing: .05em; color: var(--lc); line-height: 1.1; }
+.lane .hd span { font-size: 11px; color: #a9b3bd; }
+.lane .srcw { position: absolute; left: 10px; right: 10px; top: 56px; }
+.lane .src { width: 100%; height: 34px; font-size: 16px; }
+.lane .srcsub { font-size: 11.5px; color: #dfe5ea; text-align: center; margin-top: 5px; line-height: 1.25; height: 30px; }
+.ladder { position: absolute; left: 10px; right: 10px; top: 128px; display: flex; gap: 3px; }
+.ladder span { flex: 1; height: 18px; border-radius: 4px; font-size: 11px; color: #5c646e; background: #14171b; border: 1px solid #22262c; display: flex; align-items: center; justify-content: center; }
+.ladder span.on { color: #0b0b0b; font-weight: 800; }
+.ladder span.on.music { background: var(--music); border-color: var(--music); }
+.ladder span.on.loop { background: var(--loop); border-color: var(--loop); }
+.ladder span.on.clock { background: var(--clock); border-color: var(--clock); }
+.ladder span.fail { color: #7a5f5f; text-decoration: line-through; }
+.ladder span.under { color: #b9f5c9; border-color: #2fbf5a; border-style: dashed; }
+.heard { position: absolute; left: 10px; right: 10px; top: 154px; height: 34px; }
+.heard .t { font-size: 11px; color: #7f8893; display: flex; justify-content: space-between; }
+.heard svg { position: absolute; left: 0; top: 14px; }
+.mf { position: absolute; left: 10px; right: 10px; top: 198px; height: 262px; }
+.led { position: absolute; left: 8px; top: 0; width: 34px; height: 262px; display: flex; flex-direction: column-reverse; gap: 3px; }
+.led i { flex: 1; border-radius: 3px; background: #1c1f24; }
+.led i.on { background: var(--lc); box-shadow: 0 0 8px color-mix(in srgb, var(--lc) 70%, transparent); }
+.ftrk { position: absolute; left: 82px; top: 4px; width: 10px; height: 254px; border-radius: 5px; background: #050607; border: 1px solid #2a2e35; }
+.lock { position: absolute; left: 66px; width: 42px; top: 4px; height: 51px; border-radius: 6px; background: repeating-linear-gradient(45deg, rgba(255,176,0,.30) 0 5px, transparent 5px 10px); border: 1px dashed #ffb000; }
+.cap { position: absolute; left: 60px; width: 54px; height: 28px; border-radius: 5px; background: linear-gradient(180deg, #eceef1, #9ca2aa); box-shadow: 0 3px 8px rgba(0,0,0,.8); }
+.cap::after { content: ""; position: absolute; left: 5px; right: 5px; top: 13px; height: 2px; background: var(--lc); }
+.lane .val { position: absolute; left: 0; right: 0; top: 466px; text-align: center; font-family: "SF Mono", Menlo, monospace; font-size: 24px; font-weight: 800; color: #fff; }
+.lane .drv { position: absolute; left: 10px; right: 10px; top: 500px; text-align: center; font-size: 12px; color: #e3e8ee; line-height: 1.3; }
+.lane .lpad { position: absolute; left: 10px; right: 10px; bottom: 10px; height: 26px; border-radius: 6px; font-size: 11px; font-weight: 700; color: #aab4be; background: #1a1d22; border: 1px solid #30353d; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.lane .lpad b { color: var(--lc); }
+.lane .lpad.lit { background: color-mix(in srgb, var(--you) 30%, #12161b); border-color: var(--you); color: #e3f3ff; }
+.lane.rest .led i.on { opacity: .9; }
+
+/* right column */
+.stage { left: 1084px; top: 302px; width: 342px; height: 210px; overflow: hidden; background: radial-gradient(ellipse at 50% 30%, #15131f 0%, #07080b 70%); }
+.stage svg { position: absolute; left: 0; top: 0; }
+.stage .hd { position: absolute; left: 14px; top: 12px; display: flex; gap: 8px; align-items: center; z-index: 2; }
+.next { left: 1084px; top: 522px; width: 342px; height: 350px; }
+.next .rows { position: absolute; left: 12px; right: 12px; top: 40px; display: flex; flex-direction: column; gap: 6px; }
+.next .r { display: grid; grid-template-columns: 54px 1fr; gap: 2px 8px; padding: 7px 9px; border-radius: 8px; background: #13161b; border: 1px solid #1f242b; }
+.next .r .w { font-family: "SF Mono", Menlo, monospace; font-size: 12px; color: #fff; font-weight: 700; grid-row: span 2; padding-top: 1px; }
+.next .r .a { font-size: 12.5px; color: #e6ebf0; font-weight: 600; }
+.next .r .b { font-size: 11px; color: #8d97a1; display: flex; gap: 6px; align-items: center; }
+.why { font-size: 10.5px; font-weight: 800; letter-spacing: .05em; padding: 1px 6px; border-radius: 7px; text-transform: uppercase; }
+.why.painted { background: #3a2a10; color: #ffcf6b; border: 1px solid #a7791d; }
+.why.rule { background: #1d2230; color: #b8c6ea; border: 1px solid #44507a; }
+.why.music { background: #0f2a17; color: #b9f5c9; border: 1px solid #2fbf5a; }
+.why.you { background: #0f2b40; color: #cbe9ff; border: 1px solid #56B4E9; }
+.next .r.hot { border-color: #ffb000; background: #1e1910; }
+
+/* bottom */
+.master { left: 14px; top: 884px; width: 520px; height: 204px; }
+.master .grid { position: absolute; left: 16px; right: 16px; top: 40px; display: grid; grid-template-columns: 112px minmax(0,1fr); gap: 12px 12px; align-items: center; font-size: 12px; color: #cfd6dd; }
+.master .k { font-size: 11px; letter-spacing: .08em; font-weight: 800; color: #8d97a1; }
+.tiers { display: flex; gap: 4px; }
+.tiers span { flex: 1; height: 26px; border-radius: 5px; background: #171a1f; border: 1px solid #2c3139; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #8d97a1; font-weight: 700; }
+.tiers span.on { background: #1d3650; border-color: #4992db; color: #fff; }
+.tiers span.next { border: 1.5px dashed #ffb000; color: #ffd36b; }
+.seg2 { display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid #3a3f47; }
+.seg2 span { padding: 5px 12px; font-size: 12px; color: #aab4be; border-right: 1px solid #3a3f47; }
+.seg2 span:last-child { border-right: 0; }
+.seg2 span.on { background: #2b4f7a; color: #fff; font-weight: 700; }
+.sw { display: inline-block; width: 22px; height: 14px; border-radius: 3px; vertical-align: middle; margin-right: 3px; }
+.timing { left: 546px; top: 884px; width: 330px; height: 204px; }
+.timing svg { position: absolute; left: 0; top: 0; }
+.notes.l1 { left: 888px; top: 884px; width: 538px; height: 204px; }
+</style></head><body>
+<div class="page tall">
+  <div class="caption-bar"><b>L1 · The music plays the lights — stem mixer, mid-build</b><span class="tag">full-screen · 6 faders + 8 pads + pedal</span><span class="tag">push faders up: the music plays the lights</span></div>
+
+  <div class="topband">
+    <span class="live">LIVE</span>
+    <span class="trk">Hold On (Extended Mix)<span>Up · build to Drop 2</span></span>
+    <span class="bpm">128.00<small>BPM</small></span>
+    <span class="pill"><span class="dot green"></span>clock + phrases: CDJ · rekordbox</span>
+    <span class="pill"><span class="dot green"></span>audio: booth line 1/2</span>
+    <span class="pill">vibe: Build</span>
+    <span class="pill">flash 1 / 3 per s</span>
+    <span class="stop"><i></i>TERMINATE <small>Esc · E-stop</small></span>
+  </div>
+
+  <!-- tension strip: only appears when a build is detected -->
+  <div class="abs tension">
+    <div class="ring">
+      <svg width="172" height="172" viewBox="0 0 172 172" id="ring"></svg>
+      <div class="c"><div class="bb">31·2<small> /32</small></div><div class="lt">lands on 33.1</div><div class="lk">● LOCKED</div></div>
+    </div>
+    <div class="ringbtns"><span class="one">1</span><span>−1</span><span>+1</span></div>
+    <div class="tag"><b>BUILD DETECTED</b><span class="pill">rekordbox: Up · bars 25–32</span><span class="pill">heard: riser ↑ · kick out · highs rising</span><span class="pill">pedal 64 %</span></div>
+    <svg class="tgraph" id="tg" width="760" height="150" viewBox="0 0 760 150"></svg>
+    <div class="charge">
+      <div style="display:flex;justify-content:space-between;align-items:center;height:40px">
+        <div style="display:flex;align-items:baseline;gap:10px"><span class="lbl">CHARGE · EARNED</span><span class="big">72<span style="font-size:18px;color:#9b93b8">%</span></span></div>
+        <div style="text-align:right;font-size:11.5px;color:#cfc6ef;line-height:1.35">big look unlocks at 50 %<br>off-beat spam drains it</div>
+      </div>
+      <div class="bar">
+        <i style="left:0;width:40%;background:#7a63d8"></i>
+        <i style="left:40%;width:24%;background:#e9e4ff"></i>
+        <i style="left:64%;width:8%;background:#56B4E9"></i>
+        <span class="mk" style="left:50%"></span>
+      </div>
+      <div class="split"><span><i style="background:#7a63d8"></i>music's build 40</span><span><i style="background:#e9e4ff"></i>your hold 24</span><span><i style="background:#56B4E9"></i>clean hits 8</span></div>
+      <div class="catch">
+        <div class="screen" data-shape="tunnel" data-color="#ff3bd4" data-scale="1.2"></div>
+        <div><div class="t1">DROP catches at 33.1 · in 7 beats</div>
+          <div class="t2">first big kick + bass on the line → <b>Tunnel slam</b><br>toe click = drop by hand · CANCEL = no drop</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="abs lanes" id="lanes"></div>
+
+  <div class="abs card stage">
+    <div class="hd"><h3>Stage now</h3><span class="pill">narrow 14° · 70 % white</span></div>
+    <svg id="stg" width="342" height="210" viewBox="0 0 342 210"></svg>
+  </div>
+
+  <div class="abs card next">
+    <h3 style="position:absolute;left:14px;top:14px">What the lasers do next, and why</h3>
+    <div class="rows">
+      <div class="r"><span class="w">32.1</span><span class="a">Vocal wave back to the music</span><span class="b"><span class="why you">you</span>your VOX punch lasts 1 bar</span></div>
+      <div class="r"><span class="w">32.1</span><span class="a">Beams 6°, full white, sparkle on</span><span class="b"><span class="why rule">rule</span>tension passes 75 %</span></div>
+      <div class="r"><span class="w">32.4&amp;</span><span class="a">BREATH: ½ beat of black</span><span class="b"><span class="why you">you</span>BREATH armed by foot</span></div>
+      <div class="r hot"><span class="w">33.1</span><span class="a">DROP: Tunnel slam, hit-stop 80 ms</span><span class="b"><span class="why painted">painted</span><span class="why music">music</span>on kick + bass</span></div>
+      <div class="r"><span class="w">33.1</span><span class="a">Kick back to MUSIC · top 20 % opens</span><span class="b"><span class="why music">music</span><span class="why rule">rule</span>Drop range</span></div>
+    </div>
+  </div>
+
+  <div class="abs card master">
+    <h3 style="position:absolute;left:16px;top:14px">Master</h3>
+    <div class="grid">
+      <span class="k">ENERGY CEILING</span>
+      <div class="tiers"><span>Calm</span><span class="on">Groove · now</span><span class="next">Peak · 33.1</span></div>
+      <span class="k">AUDIO DEPTH</span>
+      <div><span class="seg2"><span>Clock</span><span class="on">Tight</span><span>Loose</span></span><span style="margin-left:10px;color:#8d97a1">music hits, held to the grid</span></div>
+      <span class="k">COLOUR</span>
+      <div><span class="sw" style="background:#ff3bd4"></span><span class="sw" style="background:#9b6bff"></span><span class="sw" style="background:#4d7bff"></span><span class="sw" style="background:#fff"></span><span style="margin-left:6px;color:#8d97a1">vibe palette "Build" · never from pitch</span></div>
+      <span class="k">RESET</span>
+      <div><span class="pill" style="border-color:#FFB000;color:#ffd36b;background:#3d2e00;font-weight:800">ALL LANES → CLOCK</span><span style="margin-left:10px;color:#8d97a1">creative reset, not a safety stop</span></div>
+    </div>
+  </div>
+
+  <div class="abs card timing">
+    <h3 style="position:absolute;left:14px;top:14px">Timing · your last presses</h3>
+    <svg id="tm" width="330" height="204" viewBox="0 0 330 204"></svg>
+  </div>
+
+  <div class="callout" style="left:208px;top:96px">1</div>
+  <div class="callout" style="left:1240px;top:118px">2</div>
+  <div class="callout" style="left:152px;top:308px">3</div>
+  <div class="callout" style="left:0px;top:468px">4</div>
+  <div class="callout" style="left:144px;top:518px">5</div>
+  <div class="callout" style="left:1400px;top:530px">6</div>
+
+  <div class="notes l1"><b>L1 notes</b>
+    <ol>
+      <li>Minute 1: start the track, push faders up. Each lane is one instrument; its fader sets how much it moves the light (one-to-one maps, r07 #10).</li>
+      <li>The tension strip appears only when the music builds. Charge is earned from the music's build, your pedal hold and clean hits. The drop is caught on the first big kick + bass at the line (r08 #3).</li>
+      <li>The big chip says who drives the lane. When detection fails, it steps down the ladder; LOOP is a KEEP of the last 2 bars the lane heard.</li>
+      <li>The 2-bar strip is what KEEP loops. The hatched top 20 % opens at the drop (section range).</li>
+      <li>Tap a lane pad to punch (velocity = strength), hold to solo. Rig: L3.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+(function(){
+  var NS="http://www.w3.org/2000/svg";
+  function el(n,a,p){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;}
+  function txt(p,x,y,t,o){o=o||{};var e=el('text',Object.assign({x:x,y:y,fill:'#9aa4ae','font-size':11,'font-family':'-apple-system,sans-serif'},o),p);e.textContent=t;return e;}
+
+  /* phrase ring: 32 bars, 30 done, bar 31 current */
+  var r=document.getElementById('ring'), cx=86, cy=86;
+  for(var i=0;i<32;i++){
+    var a0=(-90+i*360/32+1.6)*Math.PI/180, a1=(-90+(i+1)*360/32-1.6)*Math.PI/180, R1=84, R0=70;
+    var p=[[cx+R0*Math.cos(a0),cy+R0*Math.sin(a0)],[cx+R1*Math.cos(a0),cy+R1*Math.sin(a0)],[cx+R1*Math.cos(a1),cy+R1*Math.sin(a1)],[cx+R0*Math.cos(a1),cy+R0*Math.sin(a1)]];
+    var col='#2a2540';
+    if(i<24) col='#4a4270'; else if(i<30){ var t=(i-24)/6; col='rgb('+Math.round(140+t*100)+','+Math.round(110+t*120)+','+Math.round(230+t*20)+')'; } else if(i===30) col='#ffffff';
+    el('path',{d:'M'+p[0]+' L'+p[1]+' A'+R1+' '+R1+' 0 0 1 '+p[2]+' L'+p[3]+' A'+R0+' '+R0+' 0 0 0 '+p[0]+' Z',fill:col},r);
+  }
+  el('circle',{cx:cx,cy:cy-77,r:7,fill:'none',stroke:'#ffb000','stroke-width':2.5},r);
+
+  /* tension graph: bars 25..35 */
+  var g=document.getElementById('tg'), X0=40, W=700, Y0=128, H=96;
+  function bx(b){return X0+(b-25)*W/10;}
+  function ty(v){return Y0-v*H;}
+  for(var b=25;b<=35;b++){ el('line',{x1:bx(b),y1:Y0-H-4,x2:bx(b),y2:Y0,stroke:b===33?'#ffb000':'#2b2645','stroke-width':b===33?2:1},g); txt(g,bx(b)-6,Y0+12,String(b),{fill:b===33?'#ffcf6b':'#7d7799','font-weight':b===33?800:400}); }
+  [0,.25,.5,.75,1].forEach(function(v){ el('line',{x1:X0,y1:ty(v),x2:X0+W,y2:ty(v),stroke:'#231f38','stroke-dasharray':'2 4'},g); });
+  txt(g,0,ty(1)+4,'100',{fill:'#7d7799'}); txt(g,6,ty(.5)+4,'50',{fill:'#7d7799'}); txt(g,12,ty(0)+4,'0',{fill:'#7d7799'});
+  var now=31.25;
+  /* music's build (stacked bottom) and your pedal (top) */
+  function mus(bb){ return Math.min(.55, Math.max(0,(bb-25)/8*.55)); }
+  function you(bb){ return bb<26?0:Math.min(.36,(bb-26)*.072); }
+  var m=[],u=[],pm=[],pu=[];
+  for(var bb=25;bb<=now+1e-6;bb+=.125){ m.push([bx(bb),ty(mus(bb))]); u.push([bx(bb),ty(mus(bb)+you(bb))]); }
+  for(var bb2=now;bb2<=33.001;bb2+=.125){ pm.push([bx(bb2),ty(mus(bb2))]); pu.push([bx(bb2),ty(Math.min(1,mus(bb2)+you(bb2)*1.25))]); }
+  function pts(a){return a.map(function(q){return q[0].toFixed(1)+','+q[1].toFixed(1);}).join(' ');}
+  el('polygon',{points:pts(u)+' '+pts(m.slice().reverse()),fill:'rgba(233,228,255,.55)'},g);
+  el('polygon',{points:pts(m)+' '+bx(now)+','+Y0+' '+bx(25)+','+Y0,fill:'rgba(122,99,216,.8)'},g);
+  el('polyline',{points:pts(u),fill:'none',stroke:'#fff','stroke-width':2.2},g);
+  el('polyline',{points:pts(pu),fill:'none',stroke:'#fff','stroke-width':1.6,'stroke-dasharray':'4 4',opacity:.7},g);
+  el('polyline',{points:pts(pm),fill:'none',stroke:'#9c86f0','stroke-width':1.4,'stroke-dasharray':'4 4'},g);
+  /* now */
+  el('line',{x1:bx(now),y1:Y0-H-8,x2:bx(now),y2:Y0,stroke:'#fff','stroke-width':2},g);
+  txt(g,bx(now)-46,Y0-H-12+0,'NOW 31.2',{fill:'#fff','font-weight':800,'font-size':12});
+  /* breath band and drop */
+  el('rect',{x:bx(32.875),y:Y0-H,width:bx(33)-bx(32.875),height:H,fill:'#000',stroke:'#ff9a3c','stroke-width':1},g);
+  txt(g,bx(32.875)-68,Y0-6,'breath ½ beat',{fill:'#ffb27a'});
+  el('circle',{cx:bx(33),cy:ty(1),r:7,fill:'none',stroke:'#ffb000','stroke-width':2.5},g);
+  txt(g,bx(33)+12,ty(1)+4,'DROP 33.1',{fill:'#ffcf6b','font-weight':800,'font-size':12});
+  /* decay after drop */
+  var dec=[]; for(var d=33;d<=35;d+=.1){ dec.push([bx(d),ty(.15+.85*Math.exp(-(d-33)*1.6))]); }
+  el('polyline',{points:pts(dec),fill:'none',stroke:'#ffb000','stroke-width':1.6,'stroke-dasharray':'3 3'},g);
+  txt(g,bx(33.9),ty(.3)+16,'settles into Peak',{fill:'#c9a35a'});
+  /* labels */
+  txt(g,bx(28.7),ty(.07),"music's build",{fill:'#e6dcff','font-weight':700,'font-size':12});
+  txt(g,bx(27.5),ty(.42),'+ your pedal',{fill:'#fff','font-weight':800,'font-size':12});
+  txt(g,bx(25.1),ty(.92),'tension = music + you: lanes narrow · fade to white · hats sparkle',{fill:'#bdb2e6'});
+
+  /* lanes */
+  var L=[
+    {n:"KICK",sub:"drums stem · < 150 Hz",c:"#ff6f91",src:"loop",st:"LOOP",ss:"kick gone since 25 · KEEP of bars 23–24",lad:["fail","fail","on","off"],heard:"loop",lv:8,fd:.80,val:"80",drv:"punch: beams jump<br>motion only in the build",pad:"<b>PAD 1</b> punch · solo"},
+    {n:"SNARE",sub:"+ clap · stem 1.8–4 kHz",c:"#ffc75f",src:"music",st:"MUSIC",ss:"snare roll heard<br>stem · 16ths",lad:["on","off","off","off"],heard:"roll",lv:13,fd:.70,val:"70",drv:"ring burst · a roll<br>becomes a chase 1→4",pad:"<b>PAD 2</b> punch · solo"},
+    {n:"HATS",sub:"drums stem · above 8 kHz",c:"#c9f27b",src:"clock",st:"CLOCK",ss:"riser hides the hats<br>⅛ from the grid",lad:["fail","fail","fail","on"],heard:"clock",lv:6,fd:.50,val:"50",drv:"sparkle · texture<br>never a flash",pad:"<b>PAD 3</b> punch · solo"},
+    {n:"BASS",sub:"bass · band-pass level",c:"#9b8cff",src:"music",st:"MUSIC",ss:"resting: the track took<br>the bass out for the build",lad:["fail","on","off","off"],heard:"low",lv:1,fd:.72,val:"72",drv:"fan width<br>loud bass = wide fan",pad:"fader only · a level lane"},
+    {n:"VOCALS",sub:"vocal stem · presence",c:"#4ee6d0",src:"you",st:"YOU",ss:"you punched it on 31.1<br>back to MUSIC on 32.1",lad:["under","off","off","off"],heard:"vox",lv:10,fd:.55,val:"55",drv:"centre wave on 2–3<br>while she sings",pad:"<b>PAD 4</b> punched · vel 96",lit:1},
+    {n:"LEAD",sub:"synth stem · pitch",c:"#6ab7ff",src:"music",st:"MUSIC",ss:"riser climbing<br>pitch ↑ 2 octaves",lad:["on","off","off","off"],heard:"rise",lv:14,fd:.80,val:"80",drv:"tilt by pitch<br>the riser lifts the beams",pad:"fader only · a level lane"}
+  ];
+  var host=document.getElementById('lanes'), labs=["stem","band","loop","clock"];
+  L.forEach(function(l,idx){
+    var leds=""; for(var k=0;k<16;k++) leds+='<i class="'+(k<l.lv?'on':'')+'"></i>';
+    var lad=l.lad.map(function(s,j){ var cls=s; if(s==='on') cls='on '+(j<2?'music':j===2?'loop':'clock'); return '<span class="'+cls+'">'+labs[j]+'</span>'; }).join('');
+    var capTop=4+254*(1-l.fd)-14;
+    var d=document.createElement('div'); d.className='lane'; d.style.setProperty('--lc',l.c);
+    d.innerHTML='<div class="hd"><b>'+l.n+'</b><span>'+l.sub+'</span></div>'+
+      '<div class="srcw"><div class="src '+l.src+'">'+l.st+'</div><div class="srcsub">'+l.ss+'</div></div>'+
+      '<div class="ladder">'+lad+'</div>'+
+      '<div class="heard"><div class="t"><span>last 2 bars heard</span><span></span></div><svg width="148" height="20" viewBox="0 0 148 20" data-k="'+l.heard+'" data-c="'+l.c+'"></svg></div>'+
+      '<div class="mf"><div class="led">'+leds+'</div><div class="ftrk"></div><div class="lock"></div><div class="cap" style="top:'+capTop+'px"></div></div>'+
+      '<div class="val">'+l.val+'<span style="font-size:14px;color:#8d97a1">%</span></div>'+
+      '<div class="drv">'+l.drv+'</div>'+
+      '<div class="lpad'+(l.lit?' lit':'')+'">'+l.pad+'</div>';
+    host.appendChild(d);
+  });
+  /* the 2-bar "heard" strips */
+  Array.prototype.forEach.call(document.querySelectorAll('.heard svg'),function(s){
+    var k=s.getAttribute('data-k'), c=s.getAttribute('data-c');
+    el('rect',{x:0,y:0,width:148,height:20,rx:3,fill:'#0a0b0d',stroke:'#22262c'},s);
+    el('line',{x1:74,y1:0,x2:74,y2:20,stroke:'#3a3f47'},s);
+    function tk(i,h,col,dash){ var x=3+i*142/32; el('rect',{x:x,y:20-h-2,width:3,height:h,rx:1,fill:dash?'none':col,stroke:dash?col:'none','stroke-width':1},s); }
+    var i;
+    if(k==='loop'){ for(i=0;i<32;i+=4) tk(i,15,'#b58cff'); }
+    if(k==='roll'){ for(i=0;i<16;i+=4) tk(i+4,9,c); for(i=16;i<32;i++) tk(i,6+ (i-16)*0.6,c); }
+    if(k==='clock'){ for(i=0;i<32;i+=2) tk(i,9,'#FFB000',true); }
+    if(k==='low'){ el('polyline',{points:'2,17 40,17 80,18 146,18',fill:'none',stroke:c,'stroke-width':2},s); }
+    if(k==='vox'){ el('polyline',{points:'2,16 30,15 60,9 74,5 100,6 120,10 146,12',fill:'none',stroke:c,'stroke-width':2},s); }
+    if(k==='rise'){ el('polyline',{points:'2,17 40,14 80,10 120,6 146,3',fill:'none',stroke:c,'stroke-width':2},s); }
+  });
+
+  /* stage */
+  var s=document.getElementById('stg');
+  el('rect',{x:20,y:168,width:302,height:7,rx:2,fill:'#1c2027',stroke:'#333a45'},s);
+  var P=[52,132,210,290], mx=171, my=46;
+  P.forEach(function(x,i){
+    var gg=el('g',{stroke:i===1||i===2?'#f3eaff':'#e2c8ff','stroke-width':1.4,style:'filter:drop-shadow(0 0 3px #d9b8ff)'},s);
+    for(var k=-1;k<=1;k++){ el('line',{x1:x,y1:164,x2:mx+k*6+(x-mx)*.06,y2:my+Math.abs(k)*3},gg); }
+  });
+  for(var q=0;q<26;q++){ var a=q*2.4, rr=10+(q%5)*6; el('circle',{cx:mx+Math.cos(a)*rr*1.6,cy:my+20+Math.sin(a)*rr,r:1.1,fill:'#e9ffb0',opacity:.85},s); }
+  P.forEach(function(x){ el('rect',{x:x-8,y:162,width:16,height:11,rx:2,fill:'#0b0b0b',stroke:'#fff','stroke-width':1.2},s); });
+  [10,332].forEach(function(x){ el('rect',{x:x-7,y:140,width:14,height:10,rx:2,fill:'none',stroke:'#555','stroke-dasharray':'3 2'},s); });
+  txt(s,4,164,'5 off',{fill:'#7f7f7f'}); txt(s,338,164,'6 off',{fill:'#7f7f7f','text-anchor':'end'});
+  ['1 · SL','2 · LC','3 · RC','4 · SR'].forEach(function(t,i){ txt(s,P[i],192,t,{fill:'#cfd6dd','text-anchor':'middle','font-weight':700}); });
+  txt(s,300,60,'hat sparkle',{fill:'#c9f27b','text-anchor':'end'});
+
+  /* timing strip */
+  var t=document.getElementById('tm'), T0=40, TW=270;
+  var cxm=T0+TW/2;
+  el('rect',{x:T0,y:44,width:TW,height:22,rx:4,fill:'#11161c',stroke:'#26303a'},t);
+  el('rect',{x:T0,y:44,width:TW/2-8,height:22,rx:4,fill:'#16283a'},t);
+  el('rect',{x:cxm,y:44,width:TW*40/234,height:22,fill:'#173a24'},t);
+  el('line',{x1:cxm,y1:38,x2:cxm,y2:72,stroke:'#fff','stroke-width':2},t);
+  txt(t,T0+6,59,'early: waits',{fill:'#9ec5ea'}); txt(t,cxm+3,59,'≤40',{fill:'#9fe3b4'}); txt(t,T0+TW-6,59,'late: smaller',{fill:'#e3c27a','text-anchor':'end'});
+  txt(t,cxm,84,'beat',{fill:'#cfd6dd','text-anchor':'middle'});
+  var rows=[['31.1','VOX pad','−9 ms','snapped to beat'],['30.3','SNARE pad','+14 ms','counts on time'],['29.1','KICK pad','−31 ms','snapped to beat'],['25.1','pedal down','—','build starts']];
+  rows.forEach(function(rw,i){ var y=106+i*22;
+    txt(t,16,y,rw[0],{fill:'#fff','font-family':'SF Mono,Menlo,monospace'}); txt(t,62,y,rw[1],{fill:'#dfe6ec'}); txt(t,150,y,rw[2],{fill:'#fff','font-family':'SF Mono,Menlo,monospace'}); txt(t,206,y,rw[3],{fill:'#8d97a1'}); });
+  el('circle',{cx:cxm-9*TW/234,cy:55,r:5,fill:'#56B4E9',stroke:'#fff'},t);
+})();
+</script>
+</body></html>

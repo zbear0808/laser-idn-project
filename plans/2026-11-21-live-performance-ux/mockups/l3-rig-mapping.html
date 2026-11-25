@@ -1,0 +1,178 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.page { background: #060708; }
+.abs { position: absolute; }
+.topband { height: 44px; display: flex; align-items: center; gap: 14px; padding: 0 14px 0 16px; background: #0d0f12; border-bottom: 1px solid #1d2128; }
+.topband .mode { font-size: 12px; font-weight: 800; letter-spacing: .08em; color: #8ff0a8; padding: 3px 9px; border-radius: 4px; background: #0f3b1c; border: 1px solid #2fbf5a; }
+.topband .trk { font-size: 14px; font-weight: 600; color: #eee; }
+.topband .trk span { color: var(--text2); font-weight: 400; margin-left: 8px; font-size: 12.5px; }
+.pill { font-size: 11.5px; padding: 3px 9px; border-radius: 10px; background: rgba(20,24,30,.85); border: 1px solid #2c333d; color: #cdd6e0; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
+.stop { margin-left: auto; height: 32px; padding: 0 14px; border-radius: 6px; background: #b3170f; border: 2px solid #ff6a5a; color: #fff;
+        display: inline-flex; align-items: center; gap: 8px; font-weight: 800; letter-spacing: .06em; font-size: 13px; box-shadow: 0 0 14px rgba(255,60,40,.35); }
+.stop i { width: 12px; height: 12px; background: #fff; border-radius: 2px; }
+.stop small { font-weight: 600; letter-spacing: 0; opacity: .85; font-size: 11px; }
+.card { background: #0d0f12; border: 1px solid #1e232b; border-radius: 12px; }
+.card h3 { color: #c9d3dd; }
+
+.ctl { left: 14px; top: 90px; width: 760px; height: 520px; border-radius: 18px; background: linear-gradient(180deg, #1c1f24, #121417); border: 1px solid #2f343b; box-shadow: inset 0 1px 0 #353a42, 0 10px 30px rgba(0,0,0,.6); }
+.ctl .brand { position: absolute; left: 22px; top: 14px; font-size: 12px; font-weight: 800; letter-spacing: .18em; color: #8d97a1; }
+.ctl .brand b { color: #e8eef3; }
+.leg { position: absolute; left: 58px; font-size: 11.5px; color: #aab4be; }
+.leg b { color: #fff; }
+.prow { position: absolute; left: 58px; display: flex; gap: 14px; }
+.lp { width: 150px; height: 92px; border-radius: 12px; background: #23262b; border: 2px solid color-mix(in srgb, var(--lc) 50%, #2a2d33); position: relative; padding: 10px 12px; box-shadow: inset 0 -3px 0 rgba(0,0,0,.4); }
+.lp b { display: block; font-size: 18px; font-weight: 900; letter-spacing: .05em; color: var(--lc); }
+.lp span { display: block; font-size: 11.5px; color: #cfd6dd; margin-top: 4px; line-height: 1.3; }
+.lp .n { position: absolute; right: 10px; top: 8px; font-size: 11px; color: #6f7883; }
+.lp.lit { background: color-mix(in srgb, var(--lc) 75%, #000); border-color: var(--lc); box-shadow: 0 0 22px color-mix(in srgb, var(--lc) 55%, transparent); }
+.lp.lit b, .lp.lit span, .lp.lit .n { color: #111; }
+.lp.held { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--lc) 85%, #000) 0 8px, color-mix(in srgb, var(--lc) 55%, #000) 8px 16px); border-color: #fff; box-shadow: 0 0 0 2px #fff, 0 0 22px color-mix(in srgb, var(--lc) 55%, transparent); }
+.lp.held b, .lp.held span, .lp.held .n { color: #fff; text-shadow: 0 1px 2px #000; }
+.frow { position: absolute; left: 58px; top: 300px; display: flex; gap: 0; width: 642px; }
+.fd { flex: 1; position: relative; height: 200px; }
+.fd .trk { position: absolute; left: 50%; margin-left: -5px; top: 0; width: 10px; height: 150px; border-radius: 5px; background: #050607; border: 1px solid #2a2e35; }
+.fd .lock { position: absolute; left: 50%; margin-left: -22px; top: 0; width: 44px; height: 30px; border-radius: 5px; background: rgba(47,191,90,.12); border: 1px dashed #2fbf5a; }
+.fd .cap { position: absolute; left: 50%; margin-left: -26px; width: 52px; height: 26px; border-radius: 5px; background: linear-gradient(180deg, #eceef1, #9ca2aa); box-shadow: 0 3px 8px rgba(0,0,0,.8); }
+.fd .cap::after { content: ""; position: absolute; left: 5px; right: 5px; top: 12px; height: 2px; background: var(--lc); }
+.fd .led { position: absolute; left: 50%; margin-left: -40px; top: 0; width: 8px; height: 150px; display: flex; flex-direction: column-reverse; gap: 2px; }
+.fd .led i { flex: 1; border-radius: 2px; background: #1c1f24; }
+.fd .led i.on { background: var(--lc); box-shadow: 0 0 6px var(--lc); }
+.fd .nm { position: absolute; left: 0; right: 0; top: 160px; text-align: center; font-size: 14px; font-weight: 900; letter-spacing: .05em; color: var(--lc); }
+.fd .nm small { display: block; font-size: 11px; font-weight: 400; color: #8d97a1; letter-spacing: 0; margin-top: 1px; }
+
+.feet { left: 14px; top: 622px; width: 760px; height: 264px; }
+.ped { position: absolute; left: 20px; top: 70px; width: 250px; height: 150px; }
+.fs { position: absolute; top: 52px; width: 128px; height: 150px; border-radius: 12px; background: #15171b; border: 1px solid #2c3036; text-align: center; padding-top: 12px; }
+.fs .k { width: 54px; height: 54px; margin: 0 auto; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #9aa0a8, #3a3e44 70%); box-shadow: 0 3px 6px rgba(0,0,0,.7); }
+.fs b { display: block; font-size: 14px; letter-spacing: .06em; margin-top: 10px; color: #fff; }
+.fs span { display: block; font-size: 11.5px; color: #aab4be; margin-top: 3px; padding: 0 8px; line-height: 1.3; }
+.estop .k { background: radial-gradient(circle at 40% 35%, #ff6a5a, #9e0f08 70%); border: 4px solid #ffd400; width: 62px; height: 62px; }
+.flab { position: absolute; font-size: 12px; color: #dfe6ec; line-height: 1.35; }
+.flab b { color: #fff; }
+
+.reveal { left: 786px; top: 90px; width: 640px; height: 400px; }
+.rv { position: absolute; left: 16px; right: 16px; top: 44px; display: flex; flex-direction: column; gap: 8px; }
+.rv .s { display: grid; grid-template-columns: 82px 1fr 150px; gap: 12px; align-items: center; padding: 9px 12px; border-radius: 10px; background: #13161b; border: 1px solid #22272e; }
+.rv .s .t { font-family: "SF Mono", Menlo, monospace; font-size: 12px; font-weight: 800; color: #fff; }
+.rv .s .a { font-size: 14px; color: #fff; font-weight: 700; }
+.rv .s .a small { display: block; font-size: 12px; color: #aab4be; font-weight: 400; margin-top: 2px; line-height: 1.3; }
+.rv .s .h { font-size: 11.5px; color: #8d97a1; text-align: right; line-height: 1.3; }
+.rv .s.first { border: 2px solid #2fbf5a; background: #0f1d14; }
+.rv .s .num { display: inline-flex; width: 22px; height: 22px; border-radius: 50%; background: #2a2f36; color: #fff; font-size: 12px; align-items: center; justify-content: center; margin-right: 6px; }
+.rv .s.first .num { background: #2fbf5a; color: #0b0b0b; }
+
+.throw { left: 786px; top: 502px; width: 314px; height: 210px; overflow: hidden; background: radial-gradient(ellipse at 50% 30%, #13161c 0%, #07080b 70%); }
+.throw svg { position: absolute; left: 0; top: 0; }
+.nofeed { left: 1112px; top: 502px; width: 314px; height: 210px; }
+.nofeed .b { position: absolute; left: 14px; right: 14px; top: 40px; font-size: 12px; color: #dfe6ec; line-height: 1.45; }
+.nofeed .chips { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+.nofeed .chips span { font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 8px; background: #3d2e00; border: 1px solid #FFB000; color: #ffd36b; }
+.notes.l3 { left: 786px; top: 724px; width: 640px; height: 162px; }
+</style></head><body>
+<div class="page">
+  <div class="caption-bar"><b>L3 · The music plays the lights — the rig, and what reveals itself when</b><span class="tag">8 pads · 6 faders · pedal + 2 footswitches · wired E-stop</span><span class="tag">shown mid-throw: snare → zone D</span></div>
+
+  <div class="topband">
+    <span class="mode">LIVE</span>
+    <span class="trk">Hold On (Extended Mix)<span>Drop 2 · bar 41 · beat 2</span></span>
+    <span class="pill"><span class="dot green"></span>clock + phrases: CDJ · Locked</span>
+    <span class="pill">zones A–D = lasers 1–4 · 5–6 off</span>
+    <span class="stop"><i></i>TERMINATE <small>Esc · E-stop</small></span>
+  </div>
+
+  <div class="abs ctl">
+    <div class="brand"><b>HANDS</b> · any APC / Maschine-style surface · pads are pressure and velocity</div>
+    <div class="leg" style="top:40px"><b>Top row · a pad per lane:</b> tap = punch now (velocity = strength) · hold = solo · double-tap = KEEP 2 bars</div>
+    <div class="prow" style="top:60px" id="row1"></div>
+    <div class="leg" style="top:164px"><b>Bottom row · throws:</b> hold = the lane you last touched plays on that zone · let go = back on the bar</div>
+    <div class="prow" style="top:184px" id="row2"></div>
+    <div class="leg" style="top:284px"><b>Faders · the lead gesture:</b> how much each instrument moves the light · top 20 % is locked until a drop · <span style="color:#8ff0a8">open now (Drop 2)</span></div>
+    <div class="frow" id="frow"></div>
+  </div>
+
+  <div class="abs card feet">
+    <h3 style="position:absolute;left:16px;top:14px">Feet · the tension handle over the music's build</h3>
+    <svg class="ped" width="250" height="150" viewBox="0 0 250 150">
+      <rect x="10" y="108" width="220" height="30" rx="6" fill="#1a1d22" stroke="#33383f"/>
+      <g transform="translate(0 14) rotate(-9 20 100)"><rect x="12" y="66" width="214" height="30" rx="6" fill="#2a2e34" stroke="#454b53"/>
+        <rect x="150" y="70" width="70" height="22" rx="4" fill="repeating-linear-gradient(90deg,#555,#555)" opacity=".001"/>
+        <g stroke="#6b727c" stroke-width="2"><line x1="140" y1="70" x2="140" y2="92"/><line x1="150" y1="70" x2="150" y2="92"/><line x1="160" y1="70" x2="160" y2="92"/><line x1="170" y1="70" x2="170" y2="92"/><line x1="180" y1="70" x2="180" y2="92"/><line x1="190" y1="70" x2="190" y2="92"/><line x1="200" y1="70" x2="200" y2="92"/><line x1="210" y1="70" x2="210" y2="92"/></g></g>
+      <text x="14" y="34" fill="#9aa4ae" font-size="11.5">heel = ease off</text>
+      <text x="236" y="34" fill="#9aa4ae" font-size="11.5" text-anchor="end">toe = deepen</text>
+      <text x="236" y="54" fill="#ffd36b" font-size="11.5" text-anchor="end" font-weight="700">click at 90 % ↓</text>
+    </svg>
+    <div class="flab" style="left:24px;top:206px;width:286px"><b>Pedal:</b> deepens the build on every lane at once. <b>Toe click</b> = drop by hand on the next line.</div>
+    <div class="fs" style="left:318px"><div class="k"></div><b>BREATH</b><span>½ beat of black before the landing</span></div>
+    <div class="fs" style="left:460px"><div class="k"></div><b>CANCEL</b><span>melt over a bar · no drop (a fake-out)</span></div>
+    <div class="fs estop" style="left:610px;border-color:#7a1a12"><div class="k"></div><b style="color:#ff8a7a">E-STOP</b><span>wired TERMINATE · never remappable</span></div>
+  </div>
+
+  <div class="abs card reveal">
+    <h3 style="position:absolute;left:16px;top:14px">What reveals itself, and when</h3>
+    <div class="rv">
+      <div class="s first"><span class="t"><span class="num">1</span>min 1</span><span class="a">Start the track, push faders up<small>The music plays the lights. Nothing else is needed.</small></span><span class="h">faders only</span></div>
+      <div class="s"><span class="t"><span class="num">2</span>min 5</span><span class="a">Tap a pad to punch, hold to solo<small>Your hits land on the beat, even a little early.</small></span><span class="h">chip turns YOU for that hit</span></div>
+      <div class="s"><span class="t"><span class="num">3</span>min 15</span><span class="a">Hold a zone pad to throw<small>Tap SNARE, hold D: the snare plays stage right for a bar.</small></span><span class="h">call and response</span></div>
+      <div class="s"><span class="t"><span class="num">4</span>hour 1</span><span class="a">Ride the build with the pedal<small>The strip appears when the music builds; BREATH, CANCEL, toe click.</small></span><span class="h">charge, drop catch, hit-stop</span></div>
+      <div class="s"><span class="t"><span class="num">5</span>week 1</span><span class="a">KEEP, paint the next drop, Learn<small>Loop a lane on purpose, pick the drop look ahead, set ranges.</small></span><span class="h">L2 patch</span></div>
+    </div>
+  </div>
+
+  <div class="abs card throw">
+    <h3 style="position:absolute;left:14px;top:12px;z-index:2">Stage · throw in progress</h3>
+    <svg id="stg" width="314" height="210" viewBox="0 0 314 210"></svg>
+  </div>
+
+  <div class="abs card nofeed">
+    <h3 style="position:absolute;left:14px;top:14px">No music feed? Still plays</h3>
+    <div class="b">
+      <div class="chips"><span>CLOCK</span><span>CLOCK</span><span>CLOCK</span><span>CLOCK</span><span>CLOCK</span><span>CLOCK</span></div>
+      With only Link or tap, every chip reads CLOCK. Faders mix clock pulses: kick on every beat, snare on 2 and 4, hats on ⅛. Pads still punch, the pedal still builds, and the drop lands on the counted line.<div style="margin-top:8px;color:#8ff0a8;font-weight:700">Analysis makes it better. It is never required.</div>
+    </div>
+  </div>
+
+  <div class="callout" style="left:742px;top:150px">1</div>
+  <div class="callout" style="left:742px;top:274px">2</div>
+  <div class="callout" style="left:742px;top:380px">3</div>
+  <div class="callout" style="left:742px;top:640px">4</div>
+
+  <div class="notes l3"><b>L3 notes</b>
+    <ol>
+      <li>The faders are the instrument: one per lane, ATOM-style one-to-one (r07 #10). The 80 % detent and the locked top 20 % keep the peak for the drop (Flight Deck, r06 #22).</li>
+      <li>Four lane pads, for the lanes that have moments: kick, snare, hats, vocal. Bass and lead are levels, so they live on their faders. Punches use the forgiving window (x1).</li>
+      <li>A throw is a held quasimode on zones A–D: it lasts while held and lands back on the bar.</li>
+      <li>The pedal is F's tension handle, laid over the music's own build. Every input also lights its pad or switch.</li>
+    </ol>
+  </div>
+</div>
+<script>
+(function(){
+  var C={k:"#ff6f91",s:"#ffc75f",h:"#c9f27b",b:"#9b8cff",v:"#4ee6d0",l:"#6ab7ff"};
+  var r1=[["KICK",C.k,"music · punch · solo","1",""],["SNARE",C.s,"just punched · vel 104<br>selected for throws","2","lit"],["HATS",C.h,"clock ⅛ · sparkle","3",""],["VOX",C.v,"music · centre wave","4",""]];
+  var r2=[["A",getComputedStyle(document.documentElement).getPropertyValue('--zone-a'),"laser 1 · stage left","5",""],["B",getComputedStyle(document.documentElement).getPropertyValue('--zone-b'),"laser 2 · left centre","6",""],["C",getComputedStyle(document.documentElement).getPropertyValue('--zone-c'),"laser 3 · right centre","7",""],["D",getComputedStyle(document.documentElement).getPropertyValue('--zone-d'),"HELD · snare → laser 4<br>back on 42.1","8","held"]];
+  function fill(id,arr){ var h=document.getElementById(id); arr.forEach(function(p){ var d=document.createElement('div'); d.className='lp '+p[4]; d.style.setProperty('--lc',p[1]); d.innerHTML='<span class="n">pad '+p[3]+'</span><b>'+p[0]+'</b><span>'+p[2]+'</span>'; h.appendChild(d); }); }
+  fill('row1',r1); fill('row2',r2);
+  var F=[["KICK",C.k,.80,12,"punch"],["SNARE",C.s,.70,10,"ring burst"],["HATS",C.h,.50,6,"sparkle"],["BASS",C.b,.72,11,"fan width"],["VOCALS",C.v,.55,8,"centre wave"],["LEAD",C.l,.92,13,"tilt by pitch"]];
+  var fr=document.getElementById('frow');
+  F.forEach(function(f){ var leds=''; for(var i=0;i<14;i++) leds+='<i class="'+(i<f[3]?'on':'')+'"></i>';
+    var d=document.createElement('div'); d.className='fd'; d.style.setProperty('--lc',f[1]);
+    d.innerHTML='<div class="led">'+leds+'</div><div class="trk"></div><div class="lock"></div><div class="cap" style="top:'+(150*(1-f[2])-13)+'px"></div><div class="nm">'+f[0]+'<small>'+f[4]+'</small></div>'; fr.appendChild(d); });
+
+  var NS="http://www.w3.org/2000/svg";
+  function el(n,a,p){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;}
+  function txt(p,x,y,t,o){o=o||{};var e=el('text',Object.assign({x:x,y:y,fill:'#9aa4ae','font-size':11,'font-family':'-apple-system,sans-serif'},o),p);e.textContent=t;return e;}
+  var s=document.getElementById('stg');
+  el('rect',{x:18,y:160,width:278,height:7,rx:2,fill:'#1c2027',stroke:'#333a45'},s);
+  var P=[48,122,194,266];
+  function beams(x,col,n,spread,len,w){ var g=el('g',{stroke:col,'stroke-width':w,style:'filter:drop-shadow(0 0 3px '+col+')'},s);
+    for(var i=0;i<n;i++){ var a=(-spread/2+i*spread/(n-1))*Math.PI/180; el('line',{x1:x,y1:156,x2:x+Math.sin(a)*len,y2:156-Math.cos(a)*len},g);} }
+  beams(P[0],'#ff3bd4',7,70,92,1.3); beams(P[1],'#ff3bd4',7,70,92,1.3); beams(P[2],'#ff3bd4',7,70,92,1.3);
+  beams(P[3],'#ff3bd4',3,30,80,1.1);
+  [18,30].forEach(function(r,i){ el('circle',{cx:P[3],cy:96,r:r,fill:'none',stroke:'#ffc75f','stroke-width':1.8,opacity:i?0.55:1,style:'filter:drop-shadow(0 0 4px #ffc75f)'},s); });
+  P.forEach(function(x){ el('rect',{x:x-8,y:153,width:16,height:11,rx:2,fill:'#0b0b0b',stroke:'#fff','stroke-width':1.2},s); });
+  ['1 · A','2 · B','3 · C','4 · D'].forEach(function(t,i){ txt(s,P[i],182,t,{fill:i===3?'#e8c37a':'#cfd6dd','text-anchor':'middle','font-weight':700}); });
+  txt(s,306,200,'snare ring burst on D · 1 bar',{fill:'#ffd36b','text-anchor':'end'});
+  txt(s,10,200,'kick punch on all 4',{fill:'#ff9ccf'});
+})();
+</script>
+</body></html>

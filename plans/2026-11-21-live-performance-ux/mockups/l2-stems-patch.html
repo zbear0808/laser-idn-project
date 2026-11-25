@@ -1,0 +1,217 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="kit.css"><script src="kit.js"></script>
+<style>
+.page { background: #060708; }
+.abs { position: absolute; }
+.topband { height: 44px; display: flex; align-items: center; gap: 14px; padding: 0 14px 0 16px; background: #0d0f12; border-bottom: 1px solid #1d2128; }
+.topband .mode { font-size: 12px; font-weight: 800; letter-spacing: .08em; color: #cfe6ff; padding: 3px 9px; border-radius: 4px; background: #173a5e; border: 1px solid var(--blue); }
+.topband .trk { font-size: 14px; font-weight: 600; color: #eee; }
+.topband .trk span { color: var(--text2); font-weight: 400; margin-left: 8px; font-size: 12.5px; }
+.pill { font-size: 11.5px; padding: 3px 9px; border-radius: 10px; background: rgba(20,24,30,.85); border: 1px solid #2c333d; color: #cdd6e0; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
+.stop { margin-left: auto; height: 32px; padding: 0 14px; border-radius: 6px; background: #b3170f; border: 2px solid #ff6a5a; color: #fff;
+        display: inline-flex; align-items: center; gap: 8px; font-weight: 800; letter-spacing: .06em; font-size: 13px; box-shadow: 0 0 14px rgba(255,60,40,.35); }
+.stop i { width: 12px; height: 12px; background: #fff; border-radius: 2px; }
+.stop small { font-weight: 600; letter-spacing: 0; opacity: .85; font-size: 11px; }
+.card { background: #0d0f12; border: 1px solid #1e232b; border-radius: 12px; }
+.card h3 { color: #c9d3dd; }
+:root { --you: #56B4E9; --music: #2fbf5a; --loop: #b58cff; --clock: #FFB000; }
+
+/* presets */
+.presets { left: 14px; top: 90px; width: 1412px; display: flex; gap: 10px; }
+.pre { flex: 1; height: 128px; border-radius: 12px; background: #0f1215; border: 1px solid #252a31; position: relative; padding: 12px 12px 0 108px; }
+.pre .screen { position: absolute; left: 12px; top: 12px; width: 84px; height: 66px; }
+.pre b { display: block; font-size: 15px; color: #fff; }
+.pre .d { font-size: 12px; color: #aab4be; margin-top: 3px; line-height: 1.3; }
+.pre .lanes { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; gap: 4px; }
+.pre .lanes i { flex: 1; height: 22px; border-radius: 4px; background: #191c21; position: relative; overflow: hidden; }
+.pre .lanes i::after { content: ""; position: absolute; left: 0; bottom: 0; right: 0; height: var(--v); background: var(--lc); opacity: .9; }
+.pre.sel { border: 2px solid var(--blue); background: #0f1a26; box-shadow: 0 0 18px rgba(73,146,219,.25); }
+.pre .tg { position: absolute; right: 10px; top: 10px; font-size: 10.5px; font-weight: 800; padding: 2px 7px; border-radius: 8px; background: #173a5e; color: #cfe6ff; letter-spacing: .04em; }
+
+/* table */
+.tbl { left: 14px; top: 232px; width: 1000px; height: 640px; }
+.th { position: absolute; left: 14px; right: 14px; top: 44px; display: grid; grid-template-columns: 160px 210px 320px 150px 106px; gap: 6px; font-size: 11px; letter-spacing: .08em; font-weight: 800; color: #8d97a1; }
+.rows { position: absolute; left: 14px; right: 14px; top: 66px; display: flex; flex-direction: column; gap: 6px; }
+.row { display: grid; grid-template-columns: 160px 210px 320px 150px 106px; gap: 6px; height: 88px; }
+.row > div { border-radius: 8px; background: #12151a; border: 1px solid #1f242b; padding: 8px 10px; position: relative; }
+.row.sel > div { border-color: #3d6fa3; background: #121b26; }
+.ln { border-left: 4px solid var(--lc) !important; }
+.ln b { display: block; font-size: 16px; font-weight: 900; letter-spacing: .04em; color: var(--lc); }
+.ln span { display: block; font-size: 11.5px; color: #aab4be; margin-top: 3px; line-height: 1.3; }
+.dv .a { font-size: 13px; color: #fff; font-weight: 700; }
+.dv .b { font-size: 11.5px; color: #aab4be; margin-top: 2px; }
+.dv .zs { position: absolute; left: 10px; bottom: 8px; display: flex; gap: 4px; align-items: center; }
+.dv .zs .zchip { width: 20px; height: 20px; font-size: 11px; }
+.dv .zs .x { width: 20px; height: 20px; border-radius: 5px; border: 1px dashed #4a4f57; color: #6b727c; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; }
+.dv .str { position: absolute; right: 10px; bottom: 12px; width: 70px; }
+.dv .str .meter { height: 6px; }
+.dv .str small { display: block; font-size: 11px; color: #8d97a1; text-align: right; margin-bottom: 2px; }
+.lad { display: flex; align-items: stretch; gap: 0; padding: 8px 8px !important; }
+.step { width: 70px; border-radius: 6px; border: 1.5px solid #2c3139; background: #0d0f12; padding: 4px 5px; text-align: center; }
+.step b { display: block; font-size: 11px; letter-spacing: .06em; color: #cfd6dd; }
+.step span { display: block; font-size: 11px; color: #8d97a1; line-height: 1.25; margin-top: 2px; }
+.step.music { border-color: var(--music); } .step.music b { color: #b9f5c9; }
+.step.loop { border-color: var(--loop); } .step.loop b { color: #e2d3ff; }
+.step.clock { border-color: var(--clock); } .step.clock b { color: #ffd36b; }
+.step.na { border-style: dashed; opacity: .55; }
+.step.now { box-shadow: 0 0 0 2px #fff; }
+.step.now::before { content: "NOW"; display: block; font-size: 10px; font-weight: 900; color: #0b0b0b; background: #fff; border-radius: 3px; margin: -2px auto 3px; width: 34px; }
+.arr { width: 10px; display: flex; align-items: center; justify-content: center; color: #5c646e; font-size: 12px; }
+.bd .a { font-size: 12.5px; color: #e6dcff; font-weight: 700; line-height: 1.3; }
+.bd .b { font-size: 11px; color: #9b93b8; margin-top: 3px; line-height: 1.3; }
+.rg { display: flex; align-items: flex-end; gap: 4px; padding-bottom: 22px !important; }
+.rg i { flex: 1; background: #1b1f25; border-radius: 3px; position: relative; height: 52px; }
+.rg i::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: var(--v); border-radius: 3px; background: color-mix(in srgb, var(--lc) 70%, #222); }
+.rg i.cur { outline: 1.5px solid #fff; }
+.rg .lb { position: absolute; left: 10px; right: 10px; bottom: 5px; display: flex; justify-content: space-between; font-size: 11px; color: #8d97a1; }
+
+/* learn */
+.learn { left: 1026px; top: 232px; width: 400px; height: 468px; }
+.steps3 { position: absolute; left: 14px; right: 14px; top: 42px; display: flex; gap: 6px; }
+.steps3 span { flex: 1; height: 30px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 700; background: #171a1f; border: 1px solid #2c3139; color: #8d97a1; }
+.steps3 span.done { background: #0f2a17; border-color: #2fbf5a; color: #b9f5c9; }
+.steps3 span.on { background: #173a5e; border-color: var(--blue); color: #fff; }
+.learn .intro { position: absolute; left: 14px; right: 14px; top: 82px; font-size: 12px; color: #cfd6dd; line-height: 1.4; }
+.props { position: absolute; left: 14px; right: 14px; top: 122px; display: flex; flex-direction: column; gap: 5px; }
+.prop { border-radius: 8px; background: #13161b; border: 1px solid #22272e; padding: 5px 36px 5px 10px; position: relative; border-left: 3px solid var(--lc); }
+.prop b { font-size: 12.5px; color: var(--lc); }
+.prop span { font-size: 12px; color: #dfe6ec; }
+.prop small { display: block; font-size: 11px; color: #8d97a1; margin-top: 2px; }
+.prop .check { position: absolute; right: 10px; top: 12px; }
+.learn .btns { position: absolute; left: 14px; right: 14px; bottom: 14px; display: flex; gap: 8px; }
+.learn .btns span { flex: 1; height: 34px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; }
+
+.safe { left: 1026px; top: 712px; width: 400px; height: 160px; }
+.safe .l { position: absolute; left: 14px; right: 14px; top: 40px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #dfe6ec; }
+.safe .l div { display: flex; gap: 8px; align-items: flex-start; line-height: 1.35; }
+.safe .hz { width: 34px; height: 18px; border-radius: 4px; flex: none; background: repeating-linear-gradient(45deg, rgba(253,54,54,.55) 0 4px, transparent 4px 8px); border: 1px solid #fd3636; margin-top: 1px; }
+
+.inwords { left: 14px; top: 884px; width: 560px; height: 204px; }
+.inwords .s { position: absolute; left: 16px; right: 16px; top: 42px; font-size: 14px; color: #fff; line-height: 1.5; }
+.inwords .s b { color: #ff6f91; }
+.inwords .k { position: absolute; left: 16px; right: 16px; bottom: 14px; display: flex; gap: 10px; flex-wrap: wrap; }
+.notes.l2 { left: 586px; top: 884px; width: 840px; height: 204px; }
+.notes.l2 ol { columns: 2; column-gap: 26px; }
+</style></head><body>
+<div class="page tall">
+  <div class="caption-bar"><b>L2 · The music plays the lights — patch</b><span class="tag">set-up view · edits apply on the next bar</span><span class="tag">pick a preset, check the fallback, let it learn</span></div>
+
+  <div class="topband">
+    <span class="mode">PATCH</span>
+    <span class="trk">Hold On (Extended Mix)<span>Drop 1 · bar 61 · playing</span></span>
+    <span class="pill"><span class="dot green"></span>clock + phrases: CDJ · Locked</span>
+    <span class="pill"><span class="dot green"></span>stems: rekordbox 4-stem · booth line for band-pass</span>
+    <span class="pill">preset "Club stems" · 6 lanes</span>
+    <span class="stop"><i></i>TERMINATE <small>Esc · E-stop</small></span>
+  </div>
+
+  <div class="abs presets" id="presets"></div>
+
+  <div class="abs card tbl">
+    <h3 style="position:absolute;left:16px;top:14px">Six lanes · what each listens to, drives, and falls back to</h3>
+    <span style="position:absolute;right:16px;top:14px;font-size:11.5px;color:#8d97a1">lasers 1–4 only · 5–6 audience scanners can't be patched</span>
+    <div class="th"><span>LANE · LISTENS TO</span><span>DRIVES</span><span>FALLBACK LADDER · BEST FIRST</span><span>IN A BUILD (PEDAL)</span><span>RANGE</span></div>
+    <div class="rows" id="rows"></div>
+  </div>
+
+  <div class="abs card learn">
+    <h3 style="position:absolute;left:14px;top:14px">Learn from the track</h3>
+    <div class="steps3"><span class="done">✓ 1 Listen</span><span class="on">2 Review</span><span>3 Keep</span></div>
+    <div class="intro">Listened to 16 bars of Drop 1 and 8 bars of the break. Each lane was scored against the beat grid. Nothing changes until you keep it.</div>
+    <div class="props">
+      <div class="prop" style="--lc:#ffc75f"><b>Snare</b> <span>stem bleeds hats → band-pass first</span><small>band-pass 1.8–4 kHz heard 94 % · stem 71 %</small><span class="check on"></span></div>
+      <div class="prop" style="--lc:#c9f27b"><b>Hats</b> <span>too quiet in this mix → clock ⅛ earlier</span><small>heard 33 % · step down at 60 % instead of 40 %</small><span class="check on"></span></div>
+      <div class="prop" style="--lc:#ff6f91"><b>Kick</b> <span>threshold −18 dB · KEEP 2 bars</span><small>clean on every beat · the break drops it for 8 bars</small><span class="check on"></span></div>
+      <div class="prop" style="--lc:#4ee6d0"><b>Vocals</b> <span>only sung in the Drop → rest elsewhere</span><small>presence 0.64 · synth bleeds in the break</small><span class="check on"></span></div>
+      <div class="prop" style="--lc:#9b8cff"><b>Bass</b> <span>steady level, no breaks → stem level</span><small>fall 300 ms · fan width 40–120°</small><span class="check on"></span></div>
+      <div class="prop" style="--lc:#6ab7ff"><b>Lead</b> <span>pitch range C4–C6 → tilt 0–30°</span><small>keep my current setting</small><span class="check"></span></div>
+    </div>
+    <div class="btns"><span style="background:#3D8B40;color:#fff">Keep 5 · on the next bar</span><span style="border:1px solid #505050;color:#cfd6dd">Listen again</span></div>
+  </div>
+
+  <div class="abs card safe">
+    <h3 style="position:absolute;left:14px;top:14px">Limits no patch can change</h3>
+    <div class="l">
+      <div><span class="hz"></span>Audience scanners 5–6: no lane, pad, throw or Learn can reach them.</div>
+      <div><span class="hz"></span>A lane faster than 3 per s can't drive brightness. Hats → brightness is blocked (4.3 / s).</div>
+      <div><span class="hz"></span>Lanes only move looks inside the vibe's measured envelope and the energy ceiling.</div>
+    </div>
+  </div>
+
+  <div class="abs card inwords">
+    <h3 style="position:absolute;left:16px;top:14px">Selected: Kick, in words</h3>
+    <div class="s">Every kick over −18 dB makes the beams on <b>lasers 1–4</b> jump 12° and fall back in 120 ms, held to the grid. If the kick goes quiet or isn't heard, the last <b>2 bars it heard keep playing</b>, then the clock pulses on every beat. In a build it thins to motion only.</div>
+    <div class="k"><span class="pill">threshold −18 dB</span><span class="pill">KEEP length: 2 bars</span><span class="pill">steps down below 60 % heard</span></div>
+  </div>
+
+  <div class="callout" style="left:1400px;top:96px">1</div>
+  <div class="callout" style="left:622px;top:272px">2</div>
+  <div class="callout" style="left:864px;top:272px">3</div>
+  <div class="callout" style="left:940px;top:272px">4</div>
+  <div class="callout" style="left:1400px;top:238px">5</div>
+
+  <div class="notes l2"><b>L2 notes</b>
+    <ol>
+      <li>Start from a preset. They are sparse on purpose, so the rig doesn't look like a visualizer (r08 §5). The bars show which lanes are up.</li>
+      <li>One row per lane, five columns: what it hears, what it drives, how it falls back, what the pedal does to it, and how far it may go per section.</li>
+      <li>The ladder is the same on every lane: stem → band-pass → LOOP (a KEEP of the last 2 bars) → CLOCK. Vocals and lead have no fake: they rest.</li>
+      <li>"In a build" is the tension recipe, split by lane. The pedal pushes all lanes at once.</li>
+      <li>Ranges per section (Intro, Up, Drop, Down) come from the show file. Up caps every lane at 80 %; the top 20 % opens at the drop (r06 #22).</li>
+      <li>Learn listens, scores each lane against the grid, and proposes. It never changes a link by itself.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+(function(){
+  var LC=["#ff6f91","#ffc75f","#c9f27b","#9b8cff","#4ee6d0","#6ab7ff"];
+  var P=[
+    {n:"Club stems",d:"Kick punches, bass breathes, vocal sings. The default.",sh:"fan",c:"#ff3bd4",v:[85,70,50,72,55,60],sel:1,tg:"IN USE"},
+    {n:"Sparse",d:"Kick and bass only. Minute-one patch.",sh:"beams",c:"#36e2ff",v:[90,0,0,80,0,0]},
+    {n:"Vocal song",d:"The voice leads; drums sit under.",sh:"wave",c:"#39ff6a",v:[50,30,0,50,95,40]},
+    {n:"Breakdown wash",d:"Levels only, slow and wide. No hits.",sh:"circle",c:"#4d7bff",v:[0,0,30,80,70,80]},
+    {n:"Live band",d:"Multitrack in from the desk: one input per lane.",sh:"grid",c:"#ffe23b",v:[80,70,40,70,70,70]}
+  ];
+  var ph=document.getElementById('presets');
+  P.forEach(function(p){
+    var d=document.createElement('div'); d.className='pre'+(p.sel?' sel':'');
+    d.innerHTML=(p.tg?'<span class="tg">'+p.tg+'</span>':'')+'<div class="screen" data-shape="'+p.sh+'" data-color="'+p.c+'"></div><b>'+p.n+'</b><div class="d">'+p.d+'</div>'+
+      '<div class="lanes">'+p.v.map(function(v,i){return '<i style="--v:'+v+'%;--lc:'+LC[i]+'"></i>';}).join('')+'</div>';
+    ph.appendChild(d);
+  });
+
+  function step(cls,t,s,now){ return '<div class="step '+cls+(now?' now':'')+'"><b>'+t+'</b><span>'+s+'</span></div>'; }
+  var A='<div class="arr">→</div>';
+  var R=[
+    {n:"KICK",l:"drums stem<br>band-pass < 150 Hz",c:LC[0],a:"punch · beams jump 12°",b:"fall 120 ms · held to grid",z:[1,1,1,1],s:85,
+     lad:step('music','STEM','100 %',1)+A+step('music','BAND','< 150 Hz')+A+step('loop','LOOP','KEEP last 2 bars')+A+step('clock','CLOCK','every beat'),
+     bd:"thins to motion-only rolls",bb:"kick gone → LOOP",rg:[60,80,100,40],cur:2,sel:1},
+    {n:"SNARE",l:"+ clap<br>band-pass 1.8–4 kHz",c:LC[1],a:"ring burst",b:"≤ 3 per s · a fill = chase roll",z:[0,1,1,0],s:70,
+     lad:step('music','STEM','71 % · bleeds')+A+step('music','BAND','94 %',1)+A+step('loop','LOOP','KEEP last 2 bars')+A+step('clock','CLOCK','beats 2 + 4'),
+     bd:"a snare roll becomes a chase 1 → 4",bb:"speeds up with the roll",rg:[40,80,100,30],cur:2},
+    {n:"HATS",l:"drums stem<br>band-pass > 8 kHz",c:LC[2],a:"sparkle · scan speed",b:"texture, never a flash",z:[1,0,0,1],s:50,
+     lad:step('music','STEM','33 %')+A+step('music','BAND','28 %')+A+step('loop','LOOP','no clean bars')+A+step('clock','CLOCK','⅛ grid',1),
+     bd:"adds sparkle to every lane",bb:"the pedal's top half",rg:[30,80,70,50],cur:2},
+    {n:"BASS",l:"bass stem<br>band-pass 40–120 Hz",c:LC[3],a:"fan width",b:"loud bass = wide fan",z:[1,1,1,1],s:72,
+     lad:step('music','STEM','level 0.92',1)+A+step('music','BAND','40–120 Hz')+A+step('loop','LOOP','last 2 bars')+A+step('clock','CLOCK','slow breath'),
+     bd:"rests with the track; the fan narrows",bb:"comes back on the drop",rg:[50,40,100,80],cur:2},
+    {n:"VOCALS",l:"vocal stem<br>presence",c:LC[4],a:"centre wave height",b:"while she sings",z:[0,1,1,0],s:55,
+     lad:step('music','STEM','weak 0.64',1)+A+step('music na','BAND','too unreliable')+A+step('loop na','LOOP','no')+A+step('clock na','REST','no fake vocal'),
+     bd:"the wave rises with the build",bb:"",rg:[40,80,100,100],cur:2},
+    {n:"LEAD",l:"synth stem<br>pitch",c:LC[5],a:"tilt by pitch",b:"high note = beams up",z:[1,1,1,1],s:60,
+     lad:step('music','STEM','0.81',1)+A+step('music na','BAND','no pitch')+A+step('loop na','LOOP','no')+A+step('clock na','REST','holds level'),
+     bd:"the riser lifts the beams",bb:"pitch ↔ height (r06 #10)",rg:[30,80,100,60],cur:2}
+  ];
+  var rh=document.getElementById('rows');
+  R.forEach(function(r){
+    var zs=['a','b','c','d'].map(function(z,i){ return r.z[i]?'<span class="zchip zone-'+z+'">'+(i+1)+'</span>':'<span class="x">'+(i+1)+'</span>'; }).join('');
+    var d=document.createElement('div'); d.className='row'+(r.sel?' sel':''); d.style.setProperty('--lc',r.c);
+    d.innerHTML='<div class="ln"><b>'+r.n+'</b><span>'+r.l+'</span></div>'+
+      '<div class="dv"><div class="a">'+r.a+'</div><div class="b">'+r.b+'</div><div class="zs">'+zs+'</div><div class="str"><small>strength '+r.s+'</small><div class="meter"><i style="width:'+r.s+'%;background:'+r.c+'"></i></div></div></div>'+
+      '<div class="lad">'+r.lad+'</div>'+
+      '<div class="bd"><div class="a">'+r.bd+'</div><div class="b">'+r.bb+'</div></div>'+
+      '<div class="rg">'+r.rg.map(function(v,i){return '<i class="'+(i===r.cur?'cur':'')+'" style="--v:'+v+'%"></i>';}).join('')+'<div class="lb"><span>In</span><span>Up</span><span>Dr</span><span>Dn</span></div></div>';
+    rh.appendChild(d);
+  });
+})();
+</script>
+</body></html>
