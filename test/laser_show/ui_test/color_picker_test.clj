@@ -125,6 +125,17 @@
       (events/dispatch! {:event/type :edit/undo})
       (is (ui/wait-for! #(and (= white (stored)) (= Color/WHITE (shown (picker)))))))))
 
+(deftest set-color-editor-shows-a-modulator-that-is-off-test
+  ;; Follow-up N3: a channel's modulator that is off leaves the editor
+  ;; visual; its swatch and its picker show the modulator's static value
+  ;; (rendering it used to throw)
+  (open-set-color! {:id (random-uuid) :effect-id :set-color :enabled? true
+                    :params {:red {:type :sine :active? false :min 0.0 :max 1.0 :period 1.0 :value 0.25}
+                             :green 1.0 :blue 1.0}})
+  (let [swatch-style #(let [^Node n (first (ui/query-all "#set-color-swatch"))] (ui/on-fx-thread (fn [] (.getStyle n))))]
+    (is (ui/wait-for! #(.contains ^String (swatch-style) "rgb(63,255,255)")))
+    (is (= [0.25 1.0 1.0] (let [c (shown (picker))] [(.getRed c) (.getGreen c) (.getBlue c)])))))
+
 (deftest set-color-picker-edits-the-selected-keyframe-test
   (let [frames #(mapv (fn [kf] (select-keys (:params kf) [:red :green :blue])) (get-in (effect) [:keyframe-modulator :keyframes]))]
     (open-set-color! {:id (random-uuid) :effect-id :set-color :enabled? true :params white

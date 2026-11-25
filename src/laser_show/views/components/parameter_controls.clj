@@ -231,13 +231,31 @@
                         :id (str "param-" (str/replace (name param-key) "?" "") "-check")
                         :text display-label}}]}))
 
+(defn color-channel
+  "A colour channel's value as the colour controls show it, 0.0-1.0: a
+   number, clamped; a modulator that is off, its static value (the :value
+   it keeps, else the middle of its range, as reg/get-static-value); one
+   that is on, the middle of its range, which it moves about, else its
+   :value; full (1.0) for nothing there or anything else.
+   
+   Example: (color-channel {:type :sine :active? false :min 0.0 :max 1.0 :value 0.25}) => 0.25"
+  ^double [v]
+  (let [middle (fn [{lo :min hi :max}]
+                 (when (and (number? lo) (number? hi)) (/ (+ (double lo) (double hi)) 2.0)))
+        kept #(let [x (:value %)] (when (number? x) x))
+        x (cond
+            (number? v) v
+            (reg/active-modulator? v) (or (middle v) (kept v))
+            (reg/modulated? v) (or (kept v) (middle v))
+            :else nil)]
+    (if (and (number? x) (Double/isFinite (double x)))
+      (max 0.0 (min 1.0 (double x)))
+      1.0)))
+
 (defn- normalized-color
-  "The colour of red, green and blue, each clamped to 0.0-1.0: a number, or
-   a modulator's static value (reg/get-static-value; 1.0 for none)."
+  "The colour of red, green and blue, as color-channel shows each."
   ^Color [red green blue]
-  (let [c (fn [v] (let [s (reg/get-static-value v 1.0)]
-                    (max 0.0 (min 1.0 (if (number? s) (double s) 1.0)))))]
-    (Color/color (c red) (c green) (c blue))))
+  (Color/color (color-channel red) (color-channel green) (color-channel blue)))
 
 (defn- send-picked-color!
   "A colour picker's action, its user's pick (a square of its palette, or
