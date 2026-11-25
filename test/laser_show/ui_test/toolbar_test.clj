@@ -1,7 +1,8 @@
 (ns laser-show.ui-test.toolbar-test
   "Toolbar: transport, BPM input, trigger mode, tap tempo, the beat
    indicator and the streaming status."
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [beat-carabiner.core :as bc]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
             [laser-show.input.fixtures :as input-fixtures]
             [laser-show.services.show-clock :as show-clock]
@@ -87,8 +88,11 @@
 
 (deftest toolbar-and-settings-follow-a-steady-link-tempo-test
   (let [robot (ui/robot)]
-    ;; start-test! never connects to a peer. Supply the service's status only.
-    (ui/assert-disabled! "#link-sync-btn")
+    ;; start-test! never connects to a peer. Supply the service's status
+    ;; only. Not connected, the button offers to connect (not clicked here:
+    ;; no Carabiner is stood in for)
+    (ui/assert-enabled! "#link-sync-btn")
+    (is (= "Carabiner not connected — click to connect" (tooltip-text "#link-sync-btn")))
     (events/dispatch! {:event/type :timing/carabiner-connected :connected? true})
     (try
       (events/dispatch! {:event/type :timing/link-bpm-changed :bpm 128.0})
@@ -131,22 +135,74 @@
         (ui/assert-text! "#bpm-input" "128.0")
         (is (ui/has-style-class? "#link-sync-btn" "transport-btn-active"))
         (input-fixtures/drop-carabiner! carabiner)
-        (ui/assert-disabled! "#link-sync-btn")
-        (is (= "Carabiner not connected" (tooltip-text "#link-sync-btn")))
+        (ui/wait-for! #(= "Carabiner not connected — click to connect" (tooltip-text "#link-sync-btn")))
+        (ui/assert-enabled! "#link-sync-btn")
         (is (not (ui/has-style-class? "#link-sync-btn" "transport-btn-active")) "no longer shown following Link")
         (is (= {:carabiner-connected? false :link-enabled? false :link-bpm nil :link-peers 0}
                (select-keys (link) [:carabiner-connected? :link-enabled? :link-bpm :link-peers])))
         (ui/assert-text! "#bpm-input" "128.0")
         (ui/click! robot "#settings-tab")
         (ui/assert-text! "#carabiner-status" "Disconnected")
-        (testing "connected again (start-up's request, sent again): Link can be enabled again and follows the tempo"
+        (testing "Connect, on the Link card: connected again; Link can be enabled again and follows the tempo"
           (swap! carabiner assoc-in [:status :link-bpm] 131.0)
-          (events/dispatch! {:event/type :timing/carabiner-auto-connect})
+          (ui/assert-text! "#carabiner-connect-button" "Connect Carabiner")
+          (ui/scroll-into-view! "#carabiner-connect-button")
+          (ui/click! robot "#carabiner-connect-button")
           (ui/assert-text! "#carabiner-status" "Connected")
+          (ui/wait-for! #(nil? (ui/query "#carabiner-connect-button")))
           (ui/assert-enabled! "#link-sync-btn")
           (click-then-rest! robot "#link-sync-btn")
           (ui/assert-text! "#bpm-input" "131.0")
           (is (= 2 (input-fixtures/carabiner-calls carabiner :connect))))))))
+
+(deftest the-toolbars-link-button-connects-carabiner-test
+  ;; Not connected (start-test! connects nothing), the toolbar's Link button
+  ;; connects, in one click. Carabiner is stood in for
+  (input-fixtures/with-carabiner {:status {:link-bpm 128.0 :link-peers 1}}
+    (fn [carabiner]
+      (let [robot (ui/robot)
+            link #(get-in (state/get-raw-state) [:backend :link])]
+        (ui/assert-enabled! "#link-sync-btn")
+        (is (= "Carabiner not connected — click to connect" (tooltip-text "#link-sync-btn")))
+        (click-then-rest! robot "#link-sync-btn")
+        (ui/wait-for! #(true? (:carabiner-connected? (link))))
+        (ui/wait-for! #(= "Carabiner ready - Click to enable Link" (tooltip-text "#link-sync-btn")))
+        (is (false? (:link-enabled? (link))) "connected; enabling Link is the next click's")
+        (is (= 1 (input-fixtures/carabiner-calls carabiner :connect)))))))
+
+(deftest a-connect-says-it-waits-test
+  (input-fixtures/with-carabiner {:status {:link-bpm 128.0 :link-peers 1}}
+    (fn [carabiner]
+      (let [robot (ui/robot)
+            gate (promise)
+            connect bc/connect]
+        ;; Carabiner slow to answer: an embedded one can take seconds to start
+        (with-redefs [bc/connect (fn [] (deref gate 5000 nil) (connect))]
+          (try
+            (ui/click! robot "#settings-tab")
+            (ui/scroll-into-view! "#carabiner-connect-button")
+            (ui/click! robot "#carabiner-connect-button")
+            (ui/assert-text! "#carabiner-connect-button" "Connecting…")
+            (ui/assert-disabled! "#carabiner-connect-button")
+            (ui/assert-disabled! "#link-sync-btn")
+            (is (= "Connecting to Carabiner…" (tooltip-text "#link-sync-btn")) "nothing to click twice")
+            (deliver gate true)
+            (ui/assert-text! "#carabiner-status" "Connected")
+            (is (= 1 (input-fixtures/carabiner-calls carabiner :connect)))
+            (finally (deliver gate true))))))))
+
+(deftest a-connect-that-fails-says-so-test
+  (input-fixtures/with-carabiner {:refuse? true}
+    (fn [carabiner]
+      (let [robot (ui/robot)]
+        (ui/click! robot "#settings-tab")
+        (ui/scroll-into-view! "#carabiner-connect-button")
+        (ui/click! robot "#carabiner-connect-button")
+        (ui/assert-text! "#status-notice-text" "Could not connect to Carabiner")
+        (ui/assert-text! "#carabiner-status" "Disconnected")
+        (ui/assert-text! "#carabiner-connect-button" "Connect Carabiner")
+        (ui/assert-enabled! "#carabiner-connect-button")
+        (is (= 1 (input-fixtures/carabiner-calls carabiner :connect)))))))
 
 (deftest bpm-commits-on-focus-loss-test
   (let [robot (ui/robot)
@@ -196,6 +252,35 @@
     (let [kept (taps)]
       (is (<= 1 (count kept) 3))
       (is (every? #(<= 100 % 1500) (map - (rest kept) kept)) "kept taps are 100 ms to 1.5 s apart"))))
+
+(deftest tap-and-the-bpm-field-are-off-while-the-app-follows-links-tempo-test
+  ;; Following Link's tempo, the tempo and the beats are Link's: TAP and the
+  ;; BPM field are disabled, and a tap from a key or a mapped control
+  ;; changes nothing. As in toolbar-and-settings-follow-a-steady-link-tempo-
+  ;; test, only the service's status is supplied
+  (let [robot (ui/robot)
+        timing #(select-keys (:timing (state/get-raw-state)) [:bpm :tap])]
+    (events/dispatch! {:event/type :timing/carabiner-connected :connected? true})
+    (try
+      (events/dispatch! {:event/type :timing/link-bpm-changed :bpm 128.0})
+      (ui/click! robot "#link-sync-btn")
+      (ui/wait-for! #(true? (get-in (state/get-raw-state) [:backend :link :link-enabled?])))
+      (ui/assert-enabled! "#tap-tempo-btn")
+      (ui/assert-enabled! "#bpm-input")
+      (ui/click! robot "#link-sync-btn")
+      (ui/assert-text! "#bpm-input" "128.0")
+      (ui/assert-disabled! "#tap-tempo-btn")
+      (ui/assert-disabled! "#bpm-input")
+      (let [before (timing)]
+        (events/dispatch! {:event/type :timing/tap-tempo})
+        (is (events/flush!))
+        (is (= before (timing)) "a tap from a key or a mapped control changes nothing"))
+      (ui/click! robot "#link-sync-btn")
+      (ui/assert-enabled! "#tap-tempo-btn")
+      (ui/assert-enabled! "#bpm-input")
+      (finally
+        (events/dispatch! {:event/type :timing/carabiner-connected :connected? false})
+        (events/flush!)))))
 
 (deftest beat-indicator-moves-on-each-beat-test
   ;; app/start-test! runs no show clock: tick it by hand, on a fake clock

@@ -17,7 +17,15 @@
                  :state state}
           result (timing/handle event)]
       (is (= 140.0 (get-in result [:state :timing :bpm])))
-      (is (double? (get-in result [:state :timing :bpm]))))))
+      (is (double? (get-in result [:state :timing :bpm])))))
+  (testing "While the app follows Link's tempo a typed BPM changes nothing; Link on without Sync BPM, or Sync BPM kept with Link off, it sets"
+    (let [state {:timing {:bpm 128.0}
+                 :backend {:link {:carabiner-connected? true :link-enabled? true :sync-enabled? true}}}
+          set-bpm #(:state (timing/handle {:event/type :timing/set-bpm :bpm 140 :state %}))]
+      (is (identical? state (set-bpm state)))
+      (doseq [link [{:link-enabled? true :sync-enabled? false}
+                    {:link-enabled? false :sync-enabled? true}]]
+        (is (= 140.0 (get-in (set-bpm (assoc-in state [:backend :link] link)) [:timing :bpm])) (pr-str link))))))
 
 
 (defn- taps
@@ -106,6 +114,21 @@
     (is (= [1000 1500] (get-in s2 [:timing :tap :taps])) "the input's own time, not when the tap was handled")
     (is (= 120.0 (get-in s2 [:timing :bpm])) "handled 100 ms apart, pressed 500 ms apart")
     (is (= [1000 1500 2000] (get-in (handle s2 {:time 2000}) [:timing :tap :taps])) "with no input time, the pipeline's")))
+
+(deftest taps-do-nothing-while-the-app-follows-link-test
+  (let [state {:timing {:bpm 128.0 :tap (taps [1000])} :playback {}
+               :backend {:link {:carabiner-connected? true :link-enabled? true :sync-enabled? true}}}]
+    (is (identical? state (tap state 1500))
+        "following Link's tempo: no tap kept, no tempo from it, no realign of the beat")
+    (is (identical? state (:state (timing/handle {:event/type :timing/tap-tempo :state state :time 1600 :input-time 1500})))
+        "nor a mapped control's tap, at its own time")
+    (testing "Link on without Sync BPM, or Sync BPM kept with Link off: taps work"
+      (doseq [link [{:link-enabled? true :sync-enabled? false}
+                    {:link-enabled? false :sync-enabled? true}]]
+        (let [tapped (tap (assoc-in state [:backend :link] link) 1500)]
+          (is (= [1000 1500] (get-in tapped [:timing :tap :taps])) (pr-str link))
+          (is (= 120.0 (get-in tapped [:timing :bpm])))
+          (is (uuid? (get-in tapped [:playback :requests :align :id]))))))))
 
 
 (deftest transport-play-test

@@ -484,19 +484,16 @@
 
 ;; Link Effects
 
-(defn- effect-link-sync-to-downbeat
-  "Effect that queries Link's beat phase against the show clock's beats and
-   continues with a phase correction."
-  [_ dispatch]
-  (link/sync-to-downbeat! #(run-inline % dispatch) (show-time/global-beats)))
-
 (defn- effect-link-connect
   "Effect that has the Link owner connect to Carabiner on its own thread
    (input.link/connect!): :timing/carabiner-connected, then the status
-   listener's reports, come back through dispatch, the dispatcher of the
-   app this effect is for."
+   listener's reports and the beat checks' corrections, come back through
+   dispatch, the dispatcher of the app this effect is for. A connect the
+   owner refuses (released: the app stops) is answered not connected at
+   once, so nothing waits for it."
   [request dispatch]
-  (link/connect! request dispatch))
+  (when-not (link/connect! request dispatch)
+    (dispatch {:event/type :timing/carabiner-connected :connected? false})))
 
 ;; Show Clock Effects
 
@@ -975,11 +972,11 @@
    - :history/gesture-alarm - keep the open press's one wake-up: cancel
      its, arm the next; it dispatches :history/gesture-timeout (later,
      wake-up thread)
-   - :link/sync-to-downbeat - align phase to Link's downbeat (inline; while
-     Link's beat isn't known, which beat-carabiner 8.0.0 never gives, nothing)
    - :link/connect - connect to Carabiner on the Link thread (input.link);
-     :timing/carabiner-connected and the status listener's reports come
-     back (later, Link thread and Carabiner's)
+     :timing/carabiner-connected, the status listener's reports and, while
+     the app aligns its beats with Link's, the beat checks' corrections
+     (:timing/align-to-link-beat) come back (later, Link thread and
+     Carabiner's)
    - :show-clock/read - continue :on-read with the show clock's beats, or
      with :chase-cell its timecode episode there (inline)
    - :input/sync-learn - the router's learn slot to the active learn
@@ -1026,7 +1023,6 @@
     :dispatch-n effect-dispatch-n
     :dispatch-later effect-dispatch-later
     :history/gesture-alarm effect-gesture-alarm
-    :link/sync-to-downbeat effect-link-sync-to-downbeat
     :link/connect effect-link-connect
     :show-clock/read effect-show-clock-read
     :input/sync-learn effect-sync-learn

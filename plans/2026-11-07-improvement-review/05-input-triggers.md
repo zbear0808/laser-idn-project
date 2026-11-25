@@ -73,7 +73,7 @@ There is no per-mapping range, so a mapping can't say "this address sends 0–1 
 - `stop!` in `app.clj` doesn't stop the OSC server, so a dev restart gets "address in use".
 - `register-handler` (`:238-246`) returns `nil`-safe state, but its `osc-handle` side effect runs inside a supposedly pure function.
 
-**F8. Link: downbeat sync remains open (L2); BPM following is fixed (Q7, `0bbe0cb`).** Findings below describe the original behavior.
+**F8. Link: downbeat sync replaced by beat alignment on 2026-11-25 (`input/link.clj` queries Carabiner's `phase-at-time`; bar sync is parked); BPM following is fixed (Q7, `0bbe0cb`).** Findings below describe the original behavior.
 - `link.clj:207-219`: `bc/beat-at-time` expects Link-timeline microseconds based on `System/nanoTime` (see `beat_carabiner/core.clj:603,613`), but gets `currentTimeMillis*1000`. It is also *asynchronous*: it writes a socket message and returns the stream-flush result, not a beat. `(mod beat 1.0)` therefore throws, gets caught and logged, and returns `nil`, so `sync-to-downbeat!` (`:221-243`) does nothing on every call (wired at `timing.clj:106-112`). The result arrives later through the status listener (`:beat` in client state), which this code ignores.
 - `link.clj:73-77` compares the incoming BPM against `(:link-bpm link-state)`, which `:timing/link-bpm-changed` (`:63-65`) already updates on every status. If the user turns sync on while Link is steady, `:timing/set-bpm` never fires. It should compare against the app's `[:timing :bpm]`.
 - `:63-65` sends `link-bpm-changed` on every Carabiner status, even when the value is unchanged, causing state churn and re-renders.

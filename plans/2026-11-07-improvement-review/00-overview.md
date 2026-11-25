@@ -40,7 +40,7 @@ The ranked priorities below, as of `111f3a0`; rows 12, 14 and 17 updated after t
 
 Open decisions: `/plans` stays in git (`ba3c911`). The keyboard input source went into `plans/2026-11-13-keyboard-focus-window-lifecycle/` (Phase 5). Still open: adopt or delete the `triggers/` engine; the sequel-fragment chunk header (fragmentation stays off until a reference receiver is available, output runtime §7).
 
-Active plans (2026-11-23): the keyboard plan's manual desktop checks (`plans/2026-11-13-keyboard-focus-window-lifecycle/05` §8; all five phases are on `master`), the output runtime's hardware and hidden-window checks (05 §8), and `plans/2026-11-23-cljfx-reactivity-audit.md`. `plans/2026-11-20-state-integrity/` is done and deleted (`09b6db7`..`7412ac6`). `plans/2026-11-17-show-clock/` is done (`dd106de`, `7d67aff`, `378db47`).
+Active plans (2026-11-23): the keyboard plan's manual desktop checks (`plans/2026-11-13-keyboard-focus-window-lifecycle/05` §8; all five phases are on `master`), the output runtime's hardware and hidden-window checks (05 §8), and `plans/2026-11-24-reactivity-follow-ups.md` (what's left of the cljfx reactivity repairs; their audit and plan are done and deleted, merged in `4c5eae64` and `385b6bac`). `plans/2026-11-20-state-integrity/` is done and deleted (`09b6db7`..`7412ac6`). `plans/2026-11-17-show-clock/` is done (`dd106de`, `7d67aff`, `378db47`).
 
 **Deferred — very low priority (2026-11-23): live controls during project Save/Open.** Project ZIP reads and writes run inline on the event thread, so live inputs wait. If 02 M3 step 4 is picked up later, preserve Save-then-Exit: the pending action must wait for a successful write, and later edits must stay unsaved. The independent device-connect work remains in 02 M4.
 
@@ -68,7 +68,7 @@ These came up in more than one review and are best fixed once, centrally.
 ### T4. Timing: no single clock
 - Cue timing mixes relative and absolute time, so once-mode modulators are stuck at 0 (03).
 - Cue timing advances at 30 Hz (preview timer) while hardware streams at 60 Hz. `Thread/sleep` pacing jitters; `:scan-rate` is ignored; wall-clock ms timestamps are used (04).
-- Input timestamps are overwritten by queue time, which adds tap-tempo jitter (02, 05). Link downbeat sync uses the wrong clock (05).
+- Input timestamps are overwritten by queue time, which adds tap-tempo jitter (02, 05). Link downbeat sync used the wrong clock (05); it was replaced on 2026-11-25 by beat alignment through Carabiner's `phase-at-time` query (`input/link.clj`), and bar sync is parked.
 - **Fix:** one monotonic frame-clock thread (nanoTime) that renders once per tick, feeds every projector and the preview, and passes a single relative timing context down the effect chain.
 
 ### T5. Over-broad subscriptions and hot-path allocation

@@ -115,9 +115,12 @@
 
 (defn bpm-display
   "BPM display with editable value. It sets the BPM on Enter or when it
-   loses focus; text that is no BPM puts the BPM back."
+   loses focus; text that is no BPM puts the BPM back. Disabled while the
+   app follows Link's tempo (Link on with Sync BPM): it shows Link's then,
+   and a typed one would change nothing."
   [{:keys [fx/context]}]
-  (let [bpm (fx/sub-ctx context subs/bpm)]
+  (let [bpm (fx/sub-ctx context subs/bpm)
+        following-link? (boolean (fx/sub-ctx context subs/link-sync-enabled?))]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
@@ -127,6 +130,7 @@
                 {:fx/type commit-field/commit-field
                  :id "bpm-input"
                  :text (format "%.1f" (double bpm))
+                 :disable following-link?
                  :pref-width 60
                  :style-class "text-field-dark-sm"
                  :on-commit (fn [typed]
@@ -135,10 +139,12 @@
                                  :bpm new-bpm}))}]}))
 
 (defn tap-tempo-button
-  "Tap tempo button."
+  "Tap tempo button. Disabled while the app follows Link's tempo (Link on
+   with Sync BPM): taps do nothing then, from any source."
   [{:keys [fx/context]}]
   {:fx/type :button
    :id "tap-tempo-btn"
+   :disable (boolean (fx/sub-ctx context subs/link-sync-enabled?))
    :pref-width 50
    :text "TAP"
    :graphic {:fx/type fa/icon
@@ -192,26 +198,33 @@
 
 
 (defn link-sync-button
-  "Enable Link; once enabled, toggle whether the app follows its tempo."
+  "Connect Carabiner while it isn't connected (one click, as Settings'
+   Connect: :timing/carabiner-connect; disabled while that connect waits);
+   then enable Link; once enabled, toggle whether the app follows its
+   tempo."
   [{:keys [fx/context]}]
-  (let [{:keys [carabiner-connected? link-enabled? sync-enabled? link-bpm link-peers]}
+  (let [{:keys [carabiner-connected? connecting link-enabled? sync-enabled? link-bpm link-peers]}
         (fx/sub-ctx context subs/link-status)
         tempo (if link-bpm (format "%.1f BPM" (double link-bpm)) "waiting for tempo")
         tooltip-text (cond
-                       (not carabiner-connected?) "Carabiner not connected"
+                       (and (not carabiner-connected?) connecting) "Connecting to Carabiner…"
+                       (not carabiner-connected?) "Carabiner not connected — click to connect"
                        (not link-enabled?) "Carabiner ready - Click to enable Link"
                        :else (format "%s (%s, %d peers)\nClick to %s BPM sync"
                                      (if sync-enabled? "Syncing BPM from Ableton Link" "Link enabled")
                                      tempo (or link-peers 0) (if sync-enabled? "stop" "enable")))]
     {:fx/type :button
      :id "link-sync-btn"
-     :disable (not carabiner-connected?)
+     :disable (and (not carabiner-connected?) (some? connecting))
      :pref-width 50
      :graphic {:fx/type svg/icon :src "ableton.svg" :color :white :size 36}
      :style-class (if (and link-enabled? sync-enabled?) "transport-btn-active" "transport-btn")
      :focus-traversable false
      :tooltip {:fx/type :tooltip :text tooltip-text}
-     :on-action {:event/type (if link-enabled? :timing/toggle-link-sync :timing/link-toggle)}}))
+     :on-action {:event/type (cond
+                               (not carabiner-connected?) :timing/carabiner-connect
+                               link-enabled? :timing/toggle-link-sync
+                               :else :timing/link-toggle)}}))
 
 
 (defn connection-indicator

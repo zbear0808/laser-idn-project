@@ -579,11 +579,12 @@
    :link {:default {:carabiner-connected? false    ;; Carabiner daemon connected (auto on startup)
                     :link-enabled? false           ;; Link sync enabled (user toggles via button)
                     :sync-enabled? false           ;; Whether to apply Link BPM to app
-                    :beat-sync? true               ;; Whether to sync downbeat alignment (not applied: beat-carabiner gives no Link beat, input.link/get-link-beat-position)
+                    :beat-sync? true               ;; Align beats with Link: the beat phase follows Link's while Link and BPM sync are on (input.link's beat checks; beats, not bars)
                     :auto-connect? true            ;; Auto-connect Carabiner on startup
-                    :latency-ms 0                  ;; Latency compensation
+                    :latency-ms 0                  ;; Latency compensation: our output arrives this late, so the aligned beats run this far ahead of Link's
                     :link-bpm nil                  ;; Current Link session BPM
-                    :link-peers 0}                 ;; Number of Link peers
+                    :link-peers 0                  ;; Number of Link peers
+                    :connecting nil}               ;; A connect asked for and not answered yet: :manual (the Connect button) or :auto (start-up), else nil
           :doc "Ableton Link state. Carabiner auto-connects on startup. Button toggles Link sync mode. Plain data: the connection and its status listener belong to their owner (laser-show.input.link), which reports their status back as events"}})
 
 
