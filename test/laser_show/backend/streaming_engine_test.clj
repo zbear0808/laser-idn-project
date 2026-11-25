@@ -303,7 +303,7 @@
             (is (= [0 1 2] (dedupe (map first sends))))
             (is (keepalive-repeats-only? sends))))))))
 
-(deftest new-tick-goes-out-without-the-minimum-gap-test
+(deftest ^:timing new-tick-goes-out-without-the-minimum-gap-test
   (testing "a tick published just after the last send goes out at once, not half an interval
             later (A2). Under load a single try can be slow, so 3 of 5 must be"
     (with-clock-engine
