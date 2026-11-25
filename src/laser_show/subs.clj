@@ -2771,3 +2771,53 @@
        (sort-by (fn [{:keys [id title]}] [(nil? title) (some-> title str/lower-case) (str id)]))
        vec))
 
+
+
+;; The Shows table (plans/2026-11-25-timeline-shows 06 §4.4)
+
+(defn show-rows
+  "Every show's table row (timeline.shows/rows), in library order. No
+   global BPM in them, so a tempo change keeps them."
+  [context]
+  (shows/rows (fx/sub-val context get-in [:chains :shows])))
+
+(defn show-table-ui
+  "The Shows tab header's values: {:query :scope :sort}."
+  [context]
+  {:query (or (fx/sub-val context get-in [:ui :shows :query]) "")
+   :scope (or (fx/sub-val context get-in [:ui :shows :scope]) :all)
+   :sort (or (fx/sub-val context get-in [:ui :shows :sort]) {:column :title :dir :asc})})
+
+(defn show-selection
+  "The ids of the selected shows, as a set (some may be filtered out)."
+  [context]
+  (or (fx/sub-val context get-in [:ui :shows :selected]) #{}))
+
+(defn visible-show-rows
+  "The rows the Shows table shows, filtered and in its order (timeline.shows
+   filter-rows, sort-rows). It reads the global BPM only while sorting or
+   searching by duration, where an unlocked show's duration follows it, so
+   a tempo change re-runs nothing otherwise."
+  [context]
+  (let [{:keys [query scope] sort-spec :sort} (fx/sub-ctx context show-table-ui)
+        global-bpm (when (or (= :duration scope) (= :duration-s (:column sort-spec)))
+                     (fx/sub-ctx context bpm))]
+    (-> (fx/sub-ctx context show-rows)
+        (shows/filter-rows query scope global-bpm)
+        (shows/sort-rows sort-spec global-bpm))))
+
+(defn show-table-status
+  "The Shows tab's counts: {:total :visible :on-tc :selected-visible
+   :query-problem}. :on-tc counts the whole library, :selected-visible only
+   the selected shows the filter keeps; :query-problem is
+   timeline.shows/query-problem's (nil or :unparsed)."
+  [context]
+  (let [rows (fx/sub-ctx context show-rows)
+        visible (fx/sub-ctx context visible-show-rows)
+        selected (fx/sub-ctx context show-selection)
+        {:keys [query scope]} (fx/sub-ctx context show-table-ui)]
+    {:total (count rows)
+     :visible (count visible)
+     :on-tc (count (filter :timecode? rows))
+     :selected-visible (count (filter #(contains? selected (:id %)) visible))
+     :query-problem (shows/query-problem query scope)}))

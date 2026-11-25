@@ -2950,3 +2950,86 @@
     (let [ctx' (fx/swap-context ctx assoc-in [:chains :shows a :name] "Aardvark")]
       (is (= [a c d e b] (mapv :id (fx/sub-ctx ctx' subs/show-list-rows))) "a rename re-sorts"))))
 
+
+
+;; The Shows table (plans/2026-11-25-timeline-shows 06 §4.4, §8)
+
+(def ^:private table-ids
+  (mapv #(parse-uuid (str "00000000-0000-0000-0000-0000000000a" %)) (range 1 5)))
+
+(defn- table-state
+  "base-state with four shows: three locked at 120 (a 64 s, b 32 s, c
+   16 s) and d unlocked (64 beats, 32 s at 120); a and c follow timecode."
+  []
+  (let [[a b c d] table-ids
+        show (fn [name len & {:as more}]
+               (merge {:name name :editor-type :timeline :timeline/tempo-bpm 120.0
+                       :items [{:id 1 :track-id 1 :timeline/start 0.0 :timeline/duration len}]}
+                      more))]
+    (-> base-state
+        (assoc-in [:chains :shows] {a (show "Alpha" 128.0 :show/info {:artist "Daft Punk"} :timeline/chase :mtc)
+                                    b (show "Bravo" 64.0 :show/info {:artist "deadmau5"})
+                                    c (show "Charlie" 32.0 :show/info {:artist "Daft Punk"} :timeline/chase :mtc
+                                            :timeline/tc-start 600.0)
+                                    d (dissoc (show "Delta" 64.0) :timeline/tempo-bpm)})
+        (assoc-in [:timing :bpm] 120.0))))
+
+(deftest visible-show-rows-test
+  (let [[a b c d] table-ids
+        ctx (context (table-state))
+        before (fx/sub-ctx ctx subs/visible-show-rows)]
+    (is (= [a b c d] (mapv :id before)) "by title, ascending, by default")
+    (is (= (fx/sub-ctx ctx subs/visible-show-rows) (shows/sort-rows (shows/rows (get-in (table-state) [:chains :shows]))
+                                                                    {:column :title :dir :asc} nil)))
+    (testing "sorted by title: playback and tempo don't re-run it"
+      (let [ctx' (fx/swap-context ctx assoc-in [:playback :active-cues (shows/play-key a)] {:run (random-uuid) :timeline? true})]
+        (is (identical? before (fx/sub-ctx ctx' subs/visible-show-rows)) "a show starts playing"))
+      (let [ctx' (fx/swap-context ctx assoc-in [:timing :bpm] 240.0)]
+        (is (identical? before (fx/sub-ctx ctx' subs/visible-show-rows)) "the global BPM changes"))
+      (let [ctx' (fx/swap-context ctx assoc-in [:ui :shows :selected] #{b})]
+        (is (identical? before (fx/sub-ctx ctx' subs/visible-show-rows)) "the selection changes")))
+    (testing "sorted by duration: the BPM moves the unlocked show"
+      (let [by-dur (fx/swap-context ctx assoc-in [:ui :shows :sort] {:column :duration-s :dir :asc})
+            rows (fx/sub-ctx by-dur subs/visible-show-rows)
+            faster (fx/swap-context by-dur assoc-in [:timing :bpm] 480.0)]
+        (is (= [c b d a] (mapv :id rows)) "Delta 32 s at 120, after Bravo's 32 s by title")
+        (is (not (identical? rows (fx/sub-ctx faster subs/visible-show-rows))))
+        (is (= [d c b a] (mapv :id (fx/sub-ctx faster subs/visible-show-rows))) "Delta 8 s at 480")
+        (is (identical? rows (fx/sub-ctx (fx/swap-context by-dur assoc-in [:playback :active-cues (shows/play-key a)] {:run (random-uuid)})
+                                         subs/visible-show-rows))
+            "playback still doesn't")))
+    (testing "searching by duration follows the BPM too"
+      (let [by-dur (fx/swap-context ctx update-in [:ui :shows] assoc :scope :duration :query "0:32")]
+        (is (= [b d] (mapv :id (fx/sub-ctx by-dur subs/visible-show-rows))))
+        (is (= [b] (mapv :id (fx/sub-ctx (fx/swap-context by-dur assoc-in [:timing :bpm] 60.0) subs/visible-show-rows))))))
+    (testing "query, scope and sort"
+      (is (= [a c] (mapv :id (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :shows :query] "daft") subs/visible-show-rows))))
+      (is (= [d c b a] (mapv :id (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :shows :sort] {:column :title :dir :desc})
+                                             subs/visible-show-rows))))
+      (is (= [] (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :shows :query] "zzz") subs/visible-show-rows))))
+    (testing "an edit to a show re-runs it"
+      (let [ctx' (fx/swap-context ctx assoc-in [:chains :shows d :name] "Aardvark")]
+        (is (= [d a b c] (mapv :id (fx/sub-ctx ctx' subs/visible-show-rows))))))
+    (testing "show-rows ignores the BPM"
+      (let [rows (fx/sub-ctx ctx subs/show-rows)]
+        (is (identical? rows (fx/sub-ctx (fx/swap-context ctx assoc-in [:timing :bpm] 90.0) subs/show-rows)))))
+    (testing "the header values and the selection"
+      (is (= {:query "" :scope :all :sort {:column :title :dir :asc}} (fx/sub-ctx ctx subs/show-table-ui)))
+      (is (= #{} (fx/sub-ctx ctx subs/show-selection)))
+      (is (= #{a} (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :shows :selected] #{a}) subs/show-selection))))))
+
+(deftest show-table-status-test
+  (let [[a b c d] table-ids
+        ctx (context (table-state))
+        status #(fx/sub-ctx % subs/show-table-status)]
+    (is (= {:total 4 :visible 4 :on-tc 2 :selected-visible 0 :query-problem nil} (status ctx)))
+    (let [ctx' (fx/swap-context ctx update-in [:ui :shows] assoc :query "daft" :selected #{a b})]
+      (is (= {:total 4 :visible 2 :on-tc 2 :selected-visible 1 :query-problem nil} (status ctx'))
+          "b is selected but filtered out"))
+    (let [ctx' (fx/swap-context ctx update-in [:ui :shows] assoc :scope :duration :query "5:")]
+      (is (= {:total 4 :visible 0 :on-tc 2 :selected-visible 0 :query-problem :unparsed} (status ctx'))))
+    (let [ctx' (fx/swap-context ctx update-in [:ui :shows] assoc :scope :bpm :query "120-128" :selected #{c d})]
+      (is (= {:total 4 :visible 3 :on-tc 2 :selected-visible 1 :query-problem nil} (status ctx'))
+          "the unlocked show has no BPM"))
+    (is (= {:total 0 :visible 0 :on-tc 0 :selected-visible 0 :query-problem nil}
+           (status (context (assoc-in base-state [:chains :shows] {})))))))
