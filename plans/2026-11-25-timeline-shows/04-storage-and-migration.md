@@ -1,6 +1,6 @@
 # Timeline shows: storage, undo, migration, triggers, paste, lock
 
-**Status:** Proposed   **Last verified against:** `63240576`
+**Status:** Storage built (`shows/s2-storage`). **The migration parts (§4.3–§4.4, §4.9, §7.1, the migration tests in §8) are dropped:** no backward compatibility   **Last verified against:** `63240576`
 **Supersedes / Superseded by:** none. It details S2 steps 1, 3, 4 and 5 of `02-phases.md`, and `01-spec.md` §1 and §6.   **Related findings:** see §10 (corrections to `00`–`02`)
 
 Paths are under `src/laser_show/` unless they start with `test/` (`T/` = `test/laser_show/`) or `plans/`. **NEW** marks anything that doesn't exist yet.

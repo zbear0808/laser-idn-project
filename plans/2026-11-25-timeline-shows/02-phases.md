@@ -87,7 +87,7 @@ These results are already folded into `00` (TS-7, TS-8) and into `01` §3 and §
    - `shows-using`;
    - a 3-arity `chain-ref-usage`;
    - shows also counted by `cue-ref-sets`, `zone-patterns-in-use?`, and the zone-group delete message.
-3. **Migration** (`04` §4.3–§4.4, §4.9)
+3. ~~**Migration**~~ **Dropped** (no backward compatibility; built, then removed in `354f98b1`). What follows is kept for the record
    - NEW `migration/timeline-shows`, run after `zones-z4` and before `rename-pins`. It must never throw (M-8).
    - NEW `refs/rehome-trigger-targets` and `refs/cue-ref-count`.
    - `handle-file-project-loaded` switches to the Shows tab when anything moved. Save's dry run doesn't.

@@ -295,7 +295,9 @@ A show plays under `[:show id]` in every map today keyed by cell:
 | visible `[a b c]`, `:manual b` | `:shows/next` | plays `c` |
 | visible `[a b c]`, `:manual c` | `:shows/next` | unchanged |
 
-## 6. Migration on Open (TS-3, TS-11, TS-12)
+## 6. Migration on Open: DROPPED
+
+**Dropped 2026-11-25: no backward compatibility.** Kept below for the record only; nothing in this section is built.
 
 NEW `migration/timeline-shows [state {:keys [id-fn]}]` runs in `apply-loaded-project` (`state/persistent.clj:316-348`):
 - after `normalize-timeline-cues` (:342), the NEW normalize of `[:chains :shows]`, and the Z2 and Z4 migrations (:343-344);
