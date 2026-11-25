@@ -1551,6 +1551,58 @@
       (is (= items (get-in (piped-state s0 (first late)) [:chains :projector-effects test-projector-id :items])))
       (is (= 0.9 (get-in (piped-state s0 (second late)) [:chains :projector-effects test-projector-id :items 0 :params :gamma]))))))
 
+(deftest late-keyframe-and-modulator-writes-make-no-orphan-calibration-test
+  ;; Follow-up N7: the :keyframe/* writers took :projector-effects for any id
+  ;; as the :chain/* ones did (B11), so a late one could make a removed
+  ;; projector's chain again; the :modulator/* ones name their effect by its
+  ;; instance, and commit nothing for one that is gone either
+  (let [pin-id #uuid "00000000-0000-0000-0000-000000000002"
+        s0 (history/mark-clean state-with-projector)
+        removed (piped-state s0 {:event/type :projectors/remove :projector-id test-projector-id})
+        at {:domain :projector-effects :entity-key test-projector-id}
+        by-place (assoc at :effect-path [1])
+        by-instance (assoc at :effect-instance-id pin-id)
+        late [(merge by-place {:event/type :keyframe/toggle-enabled :enabled? true})
+              (merge by-place {:event/type :keyframe/update-setting :setting-key :period :fx/event 2.0})
+              (merge by-place {:event/type :keyframe/select :keyframe-idx 0})
+              (merge by-place {:event/type :keyframe/add :position 0.5})
+              (merge by-place {:event/type :keyframe/move :keyframe-idx 0 :new-position 0.2})
+              (merge by-place {:event/type :keyframe/delete :keyframe-idx 0})
+              (merge by-place {:event/type :keyframe/update-param :keyframe-idx 0 :param-key :tl-x :value -0.9})
+              (merge by-place {:event/type :keyframe/update-spatial-params :keyframe-idx 0 :point-id :tl :x -0.8 :y 0.8
+                               :param-map {:tl {:x :tl-x :y :tl-y}}})
+              (merge by-place {:event/type :keyframe/set-zone-value :keyframe-idx 0 :param-key :target-zone :value :zone/a})
+              (merge by-place {:event/type :keyframe/set-interpolation :keyframe-idx 0 :interpolation :step})
+              (merge by-place {:event/type :keyframe/set-driver :driver :pos-x})
+              (merge by-place {:event/type :keyframe/set-edge-behavior :edge-behavior :wrap})
+              (merge by-place {:event/type :keyframe/set-normalize :normalize? true})
+              (merge by-instance {:event/type :keyframe/update-color-param :keyframe-idx 0 :color [0.1 0.2 0.3]})
+              (merge by-instance {:event/type :modulator/toggle :param-key :tl-x :param-spec {:min -1.0 :max 1.0} :fx/event true})
+              (merge by-instance {:event/type :modulator/set-type :param-key :tl-x :mod-type :square
+                                  :param-spec {:min -1.0 :max 1.0}})
+              (merge by-instance {:event/type :modulator/update-param :param-key :tl-x :mod-param-key :max :fx/event 0.9})
+              (merge by-instance {:event/type :modulator/update-static-value :param-key :tl-x :fx/event 0.5})
+              (merge by-instance {:event/type :chain/update-color-param :color [0.1 0.2 0.3]})]]
+    (doseq [event late]
+      (testing (str (:event/type event))
+        (let [effects (events/handle-event-pipeline (assoc event :state removed :time 2000))
+              after (or (:state effects) removed)]
+          (is (nil? (:state effects)) "nothing to commit")
+          (is (not (contains? (get-in after [:chains :projector-effects]) test-projector-id)) "no orphan chain")
+          (is (= [(get-in removed [:project :dirty?]) (:history removed)] [(get-in after [:project :dirty?]) (:history after)])
+              "no unsaved change, no undo step"))))
+    (testing "nor into a chain an earlier build left for it"
+      (let [orphaned (assoc-in removed [:chains :projector-effects test-projector-id]
+                               (get-in s0 [:chains :projector-effects test-projector-id]))]
+        (doseq [event late]
+          (is (nil? (:state (events/handle-event-pipeline (assoc event :state orphaned :time 2000))))
+              (str (:event/type event))))))
+    (testing "a projector that is there still takes them"
+      (is (true? (get-in (piped-state s0 (first late))
+                         [:chains :projector-effects test-projector-id :items 1 :keyframe-modulator :enabled?])))
+      (is (= :sine (get-in (piped-state s0 (nth late 14))
+                           [:chains :projector-effects test-projector-id :items 1 :params :tl-x :type]))))))
+
 
 ;; Projector ids a show and the rig file can hold (follow-up B2)
 

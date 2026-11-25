@@ -281,11 +281,9 @@
 ;; Main Dispatcher
 
 
-(defn handle
-  "Main dispatcher for modulator events.
-   
-   Routes to appropriate handler based on :event/type. The toggle and the
-   field edits return their :state, or {} when nothing changes; the
+(defn- handle-modulator-event
+  "A modulator event (handle), routed by its :event/type. The toggle and
+   the field edits return their :state, or {} when nothing changes; the
    retrigger a :dispatch."
   [{:keys [event/type] :as event}]
   (log/trace "modulator/handle - type:" type)
@@ -299,3 +297,14 @@
     (do
       (log/warn "Unknown modulator event type:" type)
       {})))
+
+(defn handle
+  "Main dispatcher for modulator events (handle-modulator-event). One for a
+   projector's calibration whose projector is gone
+   (chain-helpers/missing-owner?), a late one, does nothing ({}), whatever
+   is still stored under its id (follow-up N7)."
+  [{:keys [event/type domain entity-key state] :as event}]
+  (if (chain-helpers/missing-owner? state domain entity-key)
+    (do (log/debug "Ignoring" type "for a projector that is gone:" entity-key)
+        {})
+    (handle-modulator-event event)))

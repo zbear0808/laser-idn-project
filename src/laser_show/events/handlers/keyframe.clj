@@ -512,8 +512,8 @@
                                merge {:red red :green green :blue blue})
     state))
 
-(defn handle
-  "Handle keyframe modulator events.
+(defn- handle-keyframe-event
+  "A keyframe modulator event (handle), by its :event/type.
    
    Events use :domain and :entity-key to locate the chain via chain-config,
    and :effect-path to locate the effect within that chain.
@@ -607,3 +607,14 @@
       (do
         (log/warn "Unknown keyframe event type:" type)
         {}))))
+
+(defn handle
+  "Handle keyframe modulator events (handle-keyframe-event). One for a
+   projector's calibration whose projector is gone
+   (chain-helpers/missing-owner?), a late one, does nothing ({}), so it
+   never makes its chain again (follow-up N7)."
+  [{:keys [event/type domain entity-key state] :as event}]
+  (if (chain-helpers/missing-owner? state domain entity-key)
+    (do (log/debug "Ignoring" type "for a projector that is gone:" entity-key)
+        {})
+    (handle-keyframe-event event)))

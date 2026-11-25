@@ -133,7 +133,8 @@
                                (merge (field-edit :modulator/set-type :param-spec sample-param-spec) payload)))
           (pr-str payload))))
   (testing "calibration's dropdown has no type that follows a press"
-    (let [state {:chains {:projector-effects {:p1 {:items [{:id effect-id :effect-id :test
+    (let [state {:projectors {:p1 {:name "Laser L"}}
+                 :chains {:projector-effects {:p1 {:items [{:id effect-id :effect-id :test
                                                             :params {:test-param sample-modulator-config}}]}}}}]
       (is (= {} (modulator/handle (assoc (field-edit :modulator/set-type :param-spec sample-param-spec :mod-type :envelope)
                                          :domain :projector-effects :entity-key :p1 :state state))))
@@ -491,7 +492,9 @@
               [items effect-path] (if owned?
                                     [[{:id owner-id :type :preset :preset-id :circle :effects [group]}] [0 :effects 0 :items 0]]
                                     [[group] [0 :items 0]])
-              state (assoc-in {} items-path items)
+              ;; a calibration chain is its projector's: there is one
+              state (cond-> (assoc-in {} items-path items)
+                      (= :projector-effects domain) (assoc-in [:projectors entity-key] {:name "Laser L"}))
               result (modulator/handle (cond-> (assoc field-base :event/type :modulator/toggle :state state
                                                       :domain domain :entity-key entity-key
                                                       :param-spec sample-param-spec :fx/event true)
