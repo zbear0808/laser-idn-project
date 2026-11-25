@@ -332,6 +332,250 @@
     (is (= {} (shows-handlers/handle {:event/type :shows/nope :state (base)})))))
 
 
+;; The table (S3, plans/2026-11-25-timeline-shows 06 §6-§8)
+
+(def w #uuid "00000000-0000-0000-0000-0000000000a3")
+(def x #uuid "00000000-0000-0000-0000-0000000000a4")
+
+(defn- named [title & {:as more}] (merge a-show {:name title} more))
+
+(defn- table-state
+  "Four shows: u One More Time (Daft Punk), v Strobe (deadmau5), w Around
+   the World (Daft Punk, follows timecode), x Genesis (Justice)."
+  []
+  (with-shows (base) {u (named "One More Time" :show/info {:artist "Daft Punk"})
+                      v (named "Strobe" :show/info {:artist "deadmau5"})
+                      w (named "Around the World" :show/info {:artist "Daft Punk"} :timeline/chase :mtc)
+                      x (named "Genesis" :show/info {:artist "Justice"})}))
+
+(defn- ui-shows [s] (get-in s [:ui :shows]))
+
+(deftest set-sort-maps-cleared-sort-to-ascending-test
+  (let [sort-after (fn [before event]
+                     (-> (base)
+                         (assoc-in [:ui :shows :sort] before)
+                         (handle (assoc event :event/type :shows/set-sort))
+                         :state :ui :shows :sort))]
+    (is (= {:column :artist :dir :asc} (sort-after {:column :title :dir :asc} {:column :artist :dir :asc})))
+    (is (= {:column :artist :dir :desc} (sort-after {:column :artist :dir :asc} {:column :artist :dir :desc})))
+    (is (= {:column :artist :dir :asc} (sort-after {:column :artist :dir :desc} {:column nil :dir nil}))
+        "the third click: JavaFX cleared it, ascending again")
+    (is (= {:column :bpm :dir :asc} (sort-after {:column :artist :dir :asc} {:column :bpm :dir :asc})))
+    (is (= {:column :bpm :dir :asc} (sort-after {:column :bpm :dir :asc} {:column :status :dir :asc}))
+        "▶ isn't sortable: unchanged")
+    (is (= {:column :bpm :dir :asc} (sort-after {:column :bpm :dir :asc} {:column :nope :dir :asc})))
+    (is (= {:column :duration-s :dir :desc} (sort-after {:column :bpm :dir :asc} {:column :duration-s :dir :desc})))))
+
+(deftest select-replaces-with-gesture-test
+  (let [s (assoc-in (table-state) [:ui :shows :selected] #{u v})]
+    (is (= #{w} (:selected (ui-shows (:state (handle s {:event/type :shows/select :show-ids [w]}))))))
+    (is (= #{} (:selected (ui-shows (:state (handle s {:event/type :shows/select :show-ids []}))))))))
+
+(deftest query-and-scope-test
+  (let [s (table-state)]
+    (is (= "daft" (:query (ui-shows (:state (handle s {:event/type :shows/set-query :text "daft"}))))))
+    (is (= "daft p" (:query (ui-shows (:state (handle s {:event/type :shows/set-query :fx/event "daft p"})))))
+        "the field's :on-text-changed sends its text as :fx/event")
+    (is (= :bpm (:scope (ui-shows (:state (handle s {:event/type :shows/set-scope :scope :bpm}))))))
+    (is (= {:state s} (handle s {:event/type :shows/set-scope :scope :nope})) "not a scope: nothing")))
+
+(deftest from-row-uses-selection-test
+  (let [s (assoc-in (table-state) [:ui :shows :selected] #{u v})
+        dup (fn [s event] (set (keys (get-in (:state (handle s (assoc event :event/type :shows/duplicate))) [:chains :shows]))))]
+    (testing ":from-row on a selected row: the visible selection"
+      (is (= 6 (count (dup s {:from-row u})))))
+    (testing ":from-row on another row: that row"
+      (is (= 5 (count (dup s {:from-row w})))))
+    (testing "a selected row the search hides is left out"
+      (let [hidden (assoc-in s [:ui :shows :query] "strobe")]
+        (is (= 5 (count (dup hidden {:from-row v}))))
+        (is (= 5 (count (dup hidden {:from-selection true}))))))
+    (testing "Play and Open in Editor take the first in the table's order"
+      (let [played (:state (handle s {:event/type :shows/play :from-selection true}))]
+        (is (= u (get-in played [:ui :shows :manual])) "One More Time before Strobe"))
+      (is (= u (get-in (handle s {:event/type :shows/open-editor :from-row v}) [:dispatch :data :show-id]))
+          "v is selected: the selection, whose first in the table's order is u")
+      (is (= w (get-in (handle s {:event/type :shows/open-editor :from-row w}) [:dispatch :data :show-id]))))))
+
+(deftest edit-lifecycle-test
+  (let [s0 (-> (table-state) (assoc-in [:ui :shows :selected] #{v}) history/mark-clean)
+        editing (fn [s] (:editing (ui-shows s)))]
+    (testing "a slow click on Strobe's Artist starts its edit, its draft the cell's text"
+      (let [s1 (run s0 {:event/type :shows/start-edit :show-id v :column :artist})]
+        (is (= {:show-id v :column :artist :draft "deadmau5" :invalid? false} (editing s1)))
+        (is (= 0 (undo-count s1)))
+        (testing "a stale draft, for another cell, is ignored"
+          (is (= (editing s1) (editing (run s1 {:event/type :shows/edit-draft :show-id u :column :artist :text "x"}))))
+          (is (= (editing s1) (editing (run s1 {:event/type :shows/edit-draft :show-id v :column :title :text "x"})))))
+        (let [s2 (run s1 {:event/type :shows/edit-draft :show-id v :column :artist :fx/event "deadmau5Z"})]
+          (is (= "deadmau5Z" (:draft (editing s2))))
+          (testing "Enter: one undo step, Edit Show Info, the edit ends"
+            (let [s3 (run s2 {:event/type :shows/commit-edit :show-id v :column :artist})]
+              (is (= "deadmau5Z" (get-in s3 [:chains :shows v :show/info :artist])))
+              (is (nil? (editing s3)))
+              (is (= 1 (undo-count s3)))
+              (is (= "Edit Show Info" (history/undo-label (:history s3))))
+              (is (= #{v} (:selected (ui-shows s3))) "still selected")
+              (is (= s3 (run s3 {:event/type :shows/commit-edit :show-id v :column :artist}))
+                  "a second commit (the field's focus loss) does nothing")))
+          (testing "Escape: the show unchanged, no undo step"
+            (let [s3 (run s2 {:event/type :shows/cancel-edit})]
+              (is (nil? (editing s3)))
+              (is (= (get-in s0 [:chains :shows]) (get-in s3 [:chains :shows])))
+              (is (= 0 (undo-count s3))))))
+        (testing "a draft equal to what the cell shows: no change, no undo step"
+          (let [s3 (run s1 {:event/type :shows/commit-edit :show-id v :column :artist})]
+            (is (nil? (editing s3)))
+            (is (identical? (get-in s0 [:chains :shows]) (get-in s3 [:chains :shows])))
+            (is (= 0 (undo-count s3)))
+            (is (false? (get-in s3 [:project :dirty?])))))
+        (testing "a blank artist removes it, and :show/info with it"
+          (let [s3 (-> s1
+                       (run {:event/type :shows/edit-draft :show-id v :column :artist :text "  "})
+                       (run {:event/type :shows/commit-edit :show-id v :column :artist}))]
+            (is (not (contains? (get-in s3 [:chains :shows v]) :show/info)))))))
+    (testing "BPM: a draft that doesn't parse stays open, invalid, with a notice"
+      (let [s1 (-> s0
+                   (run {:event/type :shows/start-edit :show-id v :column :bpm})
+                   (run {:event/type :shows/edit-draft :show-id v :column :bpm :text "12x"}))
+            effects (pipeline (assoc {:event/type :shows/commit-edit :show-id v :column :bpm} :state s1))
+            s2 (:state effects)]
+        (is (= "120.0" (:draft (editing (run s0 {:event/type :shows/start-edit :show-id v :column :bpm})))))
+        (is (= 120.0 (get-in s2 [:chains :shows v :timeline/tempo-bpm])) "unchanged")
+        (is (= {:show-id v :column :bpm :draft "12x" :invalid? true :refused 1} (editing s2)))
+        (is (= "'Strobe': BPM must be a number, e.g. 128" (get-in s2 [:ui :notice :text])))
+        (is (= 0 (undo-count s2)))
+        (testing "typing clears invalid; a number commits as Set Timeline Tempo"
+          (let [s3 (-> s2
+                       (run {:event/type :shows/edit-draft :show-id v :column :bpm :text "128"})
+                       (run {:event/type :shows/commit-edit :show-id v :column :bpm}))]
+            (is (= 128.0 (get-in s3 [:chains :shows v :timeline/tempo-bpm])))
+            (is (= "Set Timeline Tempo" (history/undo-label (:history s3))))))
+        (testing "an empty BPM unlocks the tempo"
+          (let [s3 (-> s2
+                       (run {:event/type :shows/edit-draft :show-id v :column :bpm :text ""})
+                       (run {:event/type :shows/commit-edit :show-id v :column :bpm}))]
+            (is (not (contains? (get-in s3 [:chains :shows v]) :timeline/tempo-bpm)))))))
+    (testing "TC start: a timecode at the show's frame rate, Set Timecode"
+      (let [s1 (run s0 {:event/type :shows/start-edit :show-id v :column :tc-start})
+            s2 (-> s1
+                   (run {:event/type :shows/edit-draft :show-id v :column :tc-start :text "01:00:00:15"})
+                   (run {:event/type :shows/commit-edit :show-id v :column :tc-start}))]
+        (is (= "00:00:00:00" (:draft (editing s1))))
+        (is (= 3600.5 (get-in s2 [:chains :shows v :timeline/tc-start])) "30 fps")
+        (is (= "Set Timecode" (history/undo-label (:history s2))))
+        (is (:invalid? (editing (-> s1
+                                    (run {:event/type :shows/edit-draft :show-id v :column :tc-start :text "1:00"})
+                                    (run {:event/type :shows/commit-edit :show-id v :column :tc-start})))))))
+    (testing "Tab commits the title, then edits the artist; Shift-Tab goes back"
+      (let [s1 (-> s0
+                   (run {:event/type :shows/start-edit :show-id v :column :title})
+                   (run {:event/type :shows/edit-draft :show-id v :column :title :text "Strobe (Live)"})
+                   (run {:event/type :shows/commit-edit :show-id v :column :title :then :next}))]
+        (is (= "Strobe (Live)" (get-in s1 [:chains :shows v :name])))
+        (is (= {:show-id v :column :artist :draft "deadmau5" :invalid? false} (editing s1)))
+        (is (= :title (:column (editing (run s1 {:event/type :shows/commit-edit :show-id v :column :artist :then :previous})))))
+        (is (nil? (editing (run s1 {:event/type :shows/commit-edit :show-id v :column :artist :then :nope}))))))
+    (testing "the last column's Tab ends the edit"
+      (is (nil? (editing (-> s0
+                             (run {:event/type :shows/start-edit :show-id v :column :tc-start})
+                             (run {:event/type :shows/commit-edit :show-id v :column :tc-start :then :next}))))))
+    (testing "editing another cell commits this one first, in one step"
+      (let [s1 (-> s0
+                   (run {:event/type :shows/start-edit :show-id v :column :album})
+                   (run {:event/type :shows/edit-draft :show-id v :column :album :text "For Lack of a Better Name"})
+                   (run {:event/type :shows/start-edit :show-id u :column :genre}))]
+        (is (= "For Lack of a Better Name" (get-in s1 [:chains :shows v :show/info :album])))
+        (is (= {:show-id u :column :genre :draft "" :invalid? false} (editing s1)))
+        (is (= 1 (undo-count s1)))))
+    (testing "F2: the first selected visible show's title"
+      (is (= {:show-id v :column :title :draft "Strobe" :invalid? false}
+             (editing (run s0 {:event/type :shows/start-edit :from-selection true :column :title})))))
+    (testing "refused: a column that isn't edited in the table, a missing show"
+      (is (nil? (editing (run s0 {:event/type :shows/start-edit :show-id v :column :duration}))))
+      (is (nil? (editing (run s0 {:event/type :shows/start-edit :show-id #uuid "00000000-0000-0000-0000-0000000000ff" :column :title})))))))
+
+(deftest new-show-edits-its-title-test
+  (let [s (run (assoc-in (table-state) [:ui :shows :query] "daft") {:event/type :shows/create})
+        id (first (get-in s [:ui :shows :selected]))]
+    (is (= {:show-id id :column :title :draft "Untitled" :invalid? false :select? true} (:editing (ui-shows s))))
+    (is (= "" (:query (ui-shows s))) "a search that hides it is cleared")
+    (is (nil? (:select? (:editing (ui-shows (run s {:event/type :shows/edit-draft :show-id id :column :title :text "A"}))))))))
+
+(deftest set-info-bpm-and-tc-start-test
+  (let [s (table-state)]
+    (is (= "Discovery" (get-in (handle s {:event/type :shows/set-info :show-id u :field :album :value " Discovery "})
+                               [:state :chains :shows u :show/info :album])))
+    (is (= "Edit Show Info" (:history/description (handle s {:event/type :shows/set-info :show-id u :field :name :value "X"}))))
+    (is (= {:state s} (handle s {:event/type :shows/set-info :show-id u :field :tracks :value "X"})))
+    (is (= 99.5 (get-in (handle s {:event/type :shows/set-bpm :show-id u :text "99.5"}) [:state :chains :shows u :timeline/tempo-bpm])))
+    (is (string? (get-in (handle s {:event/type :shows/set-bpm :show-id u :text "fast"}) [:state :ui :notice :text])))
+    (is (= 60.0 (get-in (handle s {:event/type :shows/set-tc-start :show-id u :text "00:01:00:00"})
+                        [:state :chains :shows u :timeline/tc-start])))))
+
+(deftest duplicate-copies-without-timecode-test
+  (let [s0 (history/mark-clean (assoc-in (table-state) [:ui :shows :selected] #{w}))
+        s1 (run s0 {:event/type :shows/duplicate :from-row w})
+        [copy-id copy] (first (apply dissoc (get-in s1 [:chains :shows]) [u v w x]))]
+    (is (= 5 (count (get-in s1 [:chains :shows]))))
+    (is (= "Around the World (copy)" (:name copy)))
+    (is (not (contains? copy :timeline/chase)) "timecode off")
+    (is (empty? (set/intersection (uuids (get-in s0 [:chains :shows w])) (uuids copy))) "new ids throughout")
+    (is (= (get-in copy [:tracks 0 :id]) (get-in copy [:items 0 :track-id])) "its clip still on its track")
+    (is (= #{copy-id} (:selected (ui-shows s1))) "the copy is selected")
+    (is (= "Duplicate Show" (history/undo-label (:history s1))))
+    (is (= "Duplicate 2 Shows" (history/undo-label (:history (run (assoc-in s0 [:ui :shows :selected] #{u v})
+                                                              {:event/type :shows/duplicate :from-row u})))))))
+
+(deftest delete-asks-then-cleans-up-test
+  (let [ku (shows/play-key u)
+        s0 (-> (table-state)
+               (assoc-in [:ui :shows :selected] #{u v})
+               (assoc-in [:ui :shows :manual] u)
+               (assoc-in [:ui :shows :editing] {:show-id u :column :artist :draft "Daft" :invalid? false})
+               (assoc-in [:playback :active-cues ku] {:run (random-uuid) :timeline? true})
+               (assoc-in [:playback :chase-stopped (shows/play-key v)] [:chase 1])
+               (assoc-in [:ui :timeline-editor u] {:cursor-beat 4.0})
+               (assoc-in [:ui :dialogs :timeline-cue-editor] {:open? true :show-id u})
+               (assoc-in [:config :input :trigger-map] {:midi-1 {:type :toggle-show :target ku}
+                                                        :midi-2 {:type :toggle-show :target (shows/play-key w)}
+                                                        :key-a {:type :trigger-cue :target [0 0]}})
+               history/mark-clean)]
+    (testing "Delete asks first, about the visible selection"
+      (let [asked (run s0 {:event/type :shows/request-delete :from-selection true})
+            dialog (get-in asked [:ui :dialogs :confirm])]
+        (is (= (get-in s0 [:chains :shows]) (get-in asked [:chains :shows])) "nothing gone yet")
+        (is (:open? dialog))
+        (is (= "Delete 2 shows?" (:title dialog)))
+        (is (= {:event/type :shows/delete :show-ids [u v]} (:confirm-event dialog)))
+        (is (= "Delete \"Genesis\"?" (get-in (run s0 {:event/type :shows/request-delete :from-row x})
+                                             [:ui :dialogs :confirm :title]))
+            "x isn't selected: x alone")
+        (testing "yes deletes them, and what they leave behind"
+          (let [s1 (run asked {:event/type :ui/confirm})]
+            (is (= #{w x} (set (keys (get-in s1 [:chains :shows])))))
+            (is (nil? (get-in s1 [:playback :active-cues ku])) "its intent")
+            (is (not (contains? (get-in s1 [:playback :chase-stopped]) (shows/play-key v))))
+            (is (not (contains? (get-in s1 [:ui :timeline-editor]) u)) "its editor's view state")
+            (is (false? (get-in s1 [:ui :dialogs :timeline-cue-editor :open?])) "its editor closes")
+            (is (= #{:midi-2 :key-a} (set (keys (get-in s1 [:config :input :trigger-map])))) "its triggers")
+            (is (nil? (:editing (ui-shows s1))))
+            (is (nil? (:manual (ui-shows s1))))
+            (is (= #{} (:selected (ui-shows s1))))
+            (is (= "Delete 2 Shows" (history/undo-label (:history s1))))
+            (is (= 1 (undo-count s1)))
+            (testing "undo brings them back"
+              (is (= #{u v w x} (set (keys (get-in (run s1 {:event/type :edit/undo}) [:chains :shows]))))))))))
+    (testing "nothing to delete: nothing"
+      (is (= {:state s0} (handle s0 {:event/type :shows/request-delete :show-ids []})))
+      (is (= {:state s0} (handle s0 {:event/type :shows/delete :show-ids [#uuid "00000000-0000-0000-0000-0000000000ff"]}))))))
+
+(deftest table-events-return-state-test
+  (doseq [type [:shows/set-info :shows/set-bpm :shows/set-tc-start :shows/start-edit :shows/edit-draft
+                :shows/commit-edit :shows/cancel-edit :shows/duplicate :shows/request-delete :shows/delete
+                :shows/set-query :shows/set-scope :shows/set-sort :shows/select]]
+    (let [s (base)]
+      (is (contains? (handlers/handle-event {:event/type type :state s}) :state) (str type)))))
 ;; Timecode (plans/2026-11-25-timeline-shows 01 §4, 07 §4.2, §4.5, §8)
 
 (def sa #uuid "00000000-0000-0000-0000-0000000000d1")

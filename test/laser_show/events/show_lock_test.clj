@@ -958,6 +958,32 @@
           (is (= (history/extract-document-state (run s0 event)) (history/extract-document-state s))
               "as it does unlocked"))))))
 
+(deftest locked-shows-table-keeps-timing-and-the-library-test
+  (let [id #uuid "00000000-0000-0000-0000-0000000000a1"
+        show {:name "Strobe" :editor-type :timeline :timeline/tempo-bpm 120.0 :tracks [] :items []}
+        s (lock (assoc-in (starter) [:chains :shows id] show))
+        edit (fn [column text]
+               (-> s
+                   (run {:event/type :shows/start-edit :show-id id :column column})
+                   (run {:event/type :shows/edit-draft :show-id id :column column :text text})
+                   (run {:event/type :shows/commit-edit :show-id id :column column})))]
+    (testing "tempo and TC start edits are refused, the edit stays open"
+      (let [s1 (edit :bpm "128")]
+        (is (= 120.0 (get-in s1 [:chains :shows id :timeline/tempo-bpm])))
+        (is (= :bpm (get-in s1 [:ui :shows :editing :column])))
+        (is (= "Show tempo or TC start edit refused" (get-in s1 [:ui :show-lock-notice :text]))))
+      (is (= 0.0 (double (or (get-in (edit :tc-start "01:00:00:00") [:chains :shows id :timeline/tc-start]) 0.0)))))
+    (testing "metadata edits, search and sort go through"
+      (is (= "deadmau5" (get-in (edit :artist "deadmau5") [:chains :shows id :show/info :artist])))
+      (is (= "x" (get-in (run s {:event/type :shows/set-query :text "x"}) [:ui :shows :query]))))
+    (testing "set-bpm, set-tc-start, request-delete and delete are refused"
+      (doseq [event [{:event/type :shows/set-bpm :show-id id :text "128"}
+                     {:event/type :shows/set-tc-start :show-id id :text "01:00:00:00"}
+                     {:event/type :shows/request-delete :show-ids [id]}
+                     {:event/type :shows/delete :show-ids [id]}]]
+        (let [s1 (run s event)]
+          (is (= show (get-in s1 [:chains :shows id])) (str (:event/type event)))
+          (is (not (get-in s1 [:ui :dialogs :confirm :open?])) (str (:event/type event))))))))
 
 ;; Timeline shows (plans/2026-11-25-timeline-shows 00 Show lock, S4)
 

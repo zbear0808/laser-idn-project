@@ -84,7 +84,12 @@
     :timeline/set-cue-target
     ;; A show's timecode (timeline shows S4): it starts or stops light, as
     ;; timecode runs through the show
-    :shows/set-timecode    ;; A cue's zone pattern and a new pattern or Map cycle cell (zones plan
+    :shows/set-timecode
+    ;; A show's tempo and TC start move what lights when, and deleting one
+    ;; can stop it mid-show (plans/2026-11-25-timeline-shows 00 §6); the
+    ;; table's edit of either is refused by commit-edit-refused?
+    :shows/set-bpm :shows/set-tc-start :shows/request-delete :shows/delete
+    ;; A cue's zone pattern and a new pattern or Map cycle cell (zones plan
     ;; Z5): they move pictures between places, as a target does; a pattern
     ;; pad's setting and its key, as a map pad's. A pad's press, STEP, CYCLE,
     ;; their keys and a due switch are a performer's, and go through
@@ -135,6 +140,15 @@
           false))))
 
 (def ^:private pattern-edit-refused "Zone pattern edit refused")
+
+(defn commit-edit-refused?
+  "Is event the Shows table's commit of a BPM or TC start edit? Those move
+   what lights when, as :shows/set-bpm and :shows/set-tc-start do; its
+   metadata edits go through."
+  [{:keys [event/type column]}]
+  (and (= :shows/commit-edit type) (contains? #{:bpm :tc-start} column)))
+
+(def ^:private show-timing-refused "Show tempo or TC start edit refused")
 
 (def safety-edits
   "The safety zone edits (zones plan Z1). The lock refuses one only when it
@@ -221,6 +235,7 @@
       (h/stale-paste? state event) {}
       (contains? blocked-events type) (refuse (answered state event) type (refused-text type))
       (pattern-edit? event) (refuse state type pattern-edit-refused)
+      (commit-edit-refused? event) (refuse state type show-timing-refused)
       (contains? reviewed-edits type) (if-let [from (reviewed-widening event)]
                                         (refuse from type larger-zone-refused)
                                         (handler event))

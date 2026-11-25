@@ -27,7 +27,8 @@
             [laser-show.css.visual-editors :as visual-editors]
             [laser-show.css.timeline :as timeline]
             [laser-show.css.vibes :as vibes]
-            [laser-show.css.zones :as zones]))
+            [laser-show.css.zones :as zones]
+            [laser-show.css.shows :as shows]))
 
 
 
@@ -56,7 +57,8 @@
    (::css/url visual-editors/visual-editors)
    (::css/url timeline/timeline)
    (::css/url vibes/vibes)
-   (::css/url zones/zones)])
+   (::css/url zones/zones)
+   (::css/url shows/shows)])
 
 (defn bg-primary
   "Root/window background color. Darkest."
