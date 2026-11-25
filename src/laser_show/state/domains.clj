@@ -551,7 +551,7 @@
                      :osc {:enabled? false
                            :server-running? false      ; The device worker's server is listening
                            :listening-port nil         ; The port it listens on, as the device worker answered the latest Start (nil: not listening)
-                           :port 9000                  ; The port Start Server listens on (while listening: the one it listens on)
+                           :port 9000                  ; The port Start Server listens on: the next Start's (set while listening, it waits for one)
                            :requests {}                ; {:server id}: the latest Start or Stop, until its result is in
                            :address-mappings {}}       ; Map of OSC address -> event config
                      :mtc {:state :stopped :fps nil :text nil} ; the show clock's status of laser-show.input.mtc, see mirror-status

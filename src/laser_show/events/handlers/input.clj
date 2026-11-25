@@ -213,7 +213,7 @@
           moved? (and listening? (some? listening-port) (not= listening-port port))]
       (if server-running?
         (cond-> {:state (update-in state (osc-path) assoc
-                                   :server-running? true :listening-port port :port port :enabled? true)}
+                                   :server-running? true :listening-port port :enabled? true)}
           moved? (assoc :dispatch {:event/type :trigger/retire :source :osc}))
         (assoc (h/show-notice (update-in state (osc-path) assoc
                                          :server-running? false :listening-port nil :enabled? false)
@@ -245,7 +245,10 @@
   "Set the port Start Server listens on: an integer from 1 to 65535 (else
    nothing changes). It takes effect at the next Start: the Port field
    applies it on Enter or when it loses focus, so a click on Start applies
-   what the field shows first."
+   what the field shows first. Set while the server listens (not from the
+   field, disabled then), it waits for a Start, which moves the server
+   there; until then the card says where the server listens
+   (:listening-port, the device worker's answer)."
   [{:keys [state port]}]
   (if (and (int? port) (<= 1 port 65535))
     {:state (assoc-in state (osc-path :port) port)}
