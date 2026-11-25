@@ -593,7 +593,7 @@
       (is (true? (:enabled? kf-mod))))))
 
 
-;; A keyframe's colour (follow-up B4)
+;; A keyframe's colour (follow-ups B4, N2)
 
 
 (deftest update-keyframe-color-param-takes-a-plain-colour-test
@@ -606,7 +606,7 @@
         state (make-test-state [effect])
         event (fn [& {:as more}]
                 (merge {:event/type :keyframe/update-color-param :domain :effect-chains :entity-key [0 0]
-                        :effect-path [0] :keyframe-idx 1 :state state}
+                        :effect-instance-id (:id effect) :keyframe-idx 1 :state state}
                        more))
         frames #(mapv (fn [kf] (select-keys (:params kf) [:red :green :blue]))
                       (get-in % [:state :chains :effect-chains [0 0] :items 0 :keyframe-modulator :keyframes]))]
@@ -619,5 +619,37 @@
                     {:color [0.0 0.5 1.0] :keyframe-idx 5} {:color [0.0 0.5 1.0] :keyframe-idx nil}
                     {:color [1.0 1.0 1.0]}]]
         (is (= {} (keyframe/handle (merge (event) more))) (pr-str (dissoc more :fx/event)))))))
+
+(deftest update-keyframe-color-param-follows-the-instance-test
+  ;; Follow-up N2: a keyframe's colour edit names its effect by its instance
+  ;; (and owner), like the modulator's (reactivity plan 07, B6): queued
+  ;; behind a reorder, it lands on that effect's keyframe where the effect
+  ;; is now, or nowhere once it is gone; never on a place
+  (let [a #uuid "aaaaaaaa-0000-0000-0000-0000000000c3"
+        b #uuid "bbbbbbbb-0000-0000-0000-0000000000c3"
+        p #uuid "cccccccc-0000-0000-0000-0000000000c3"
+        white {:red 1.0 :green 1.0 :blue 1.0}
+        keyframed (fn [id] {:id id :effect-id :set-color :enabled? true :params white
+                            :keyframe-modulator {:enabled? true :selected-keyframe 1
+                                                 :keyframes [{:position 0.0 :params white} {:position 1.0 :params white}]}})
+        ;; A's pick for its keyframe 1, rendered while A was first
+        pick {:event/type :keyframe/update-color-param :domain :effect-chains :entity-key [0 0]
+              :effect-instance-id a :effect-path [0] :keyframe-idx 1 :color [0.0 0.5 1.0]}
+        cell [:chains :effect-chains [0 0] :items]
+        frame-1 #(select-keys (get-in %1 (conj %2 :keyframe-modulator :keyframes 1 :params)) [:red :green :blue])]
+    (testing "B now where A was rendered: A's keyframe, where A is now"
+      (let [state (assoc-in {} cell [(keyframed b) (keyframed a)])
+            after (:state (keyframe/handle (assoc pick :state state)))]
+        (is (= {:red 0.0 :green 0.5 :blue 1.0} (frame-1 after (conj cell 1))))
+        (is (= white (frame-1 after (conj cell 0))) "B's stays")))
+    (testing "A gone, B in its place; or the pick names no instance: nothing ({})"
+      (is (= {} (keyframe/handle (assoc pick :state (assoc-in {} cell [(keyframed b)])))))
+      (is (= {} (keyframe/handle (assoc (dissoc pick :effect-instance-id) :state (assoc-in {} cell [(keyframed a)]))))))
+    (testing "a cue item's effect: the owner, then the effect among its own"
+      (let [root [:chains :cue-chains [0 0] :items]
+            state (assoc-in {} root [{:id p :type :preset :preset-id :circle :effects [(keyframed b) (keyframed a)]}])
+            event (assoc pick :domain :cue-chains :owner-id p :state state)]
+        (is (= {:red 0.0 :green 0.5 :blue 1.0} (frame-1 (:state (keyframe/handle event)) (conj root 0 :effects 1))))
+        (is (= {} (keyframe/handle (dissoc event :owner-id))) "no owner named")))))
 
 

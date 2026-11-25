@@ -3,10 +3,13 @@
    follow-up B4): a pick sends its colour as plain data, :color [red green
    blue], read from the picker on the FX thread, never the picker or its
    ActionEvent. The Set Color effect's picker stores it, in the selected
-   keyframe while keyframes are on, as one undo step. After a pick that
-   changed nothing it shows the colour that applies again; a colour it
-   shows while its palette or custom colour dialog is open is a preview,
-   sent only by its action and not put back before it closes."
+   keyframe while keyframes are on, as one undo step, on the effect it
+   names by its instance, wherever that effect is when the pick is handled
+   (follow-up N2). After a pick that changed nothing it shows the colour
+   that applies again; a colour it shows while its palette or custom
+   colour dialog is open is a preview, sent only by its action and not put
+   back before it closes. A channel's modulator that is off shows as its
+   static value (N3)."
   (:require [cljfx.api :as fx]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.walk :as walk]
@@ -156,3 +159,38 @@
     (events/flush!)
     (is (ui/wait-for! #(= Color/WHITE (shown (picker)))) "the colour that applies again")
     (is (= white (stored)))))
+
+(deftest pick-queued-behind-a-reorder-colours-its-own-effect-test
+  ;; Follow-up N2: a colour edit names its effect by its instance. Picked
+  ;; for A, and queued behind a reorder that puts B in A's place, it colours
+  ;; A where A is now and leaves B white; the same in keyframe mode, A's
+  ;; selected keyframe
+  (doseq [[what keyframes] [["the effect's own colour" nil]
+                            ["the selected keyframe's" {:enabled? true :driver :time :period 4.0 :time-unit :beats
+                                                        :loop-mode :loop :selected-keyframe 1
+                                                        :keyframes [{:position 0.0 :params white} {:position 1.0 :params white}]}]]]
+    (testing what
+      (let [a (random-uuid)
+            b (random-uuid)
+            set-color (fn [id] (cond-> {:id id :effect-id :set-color :enabled? true :params white}
+                                 keyframes (assoc :keyframe-modulator keyframes)))
+            items #(get-in (state/get-raw-state) [:chains :effect-chains [0 0] :items])
+            colour-of (fn [id] (let [fx (some #(when (= id (:id %)) %) (items))]
+                                 (select-keys (if keyframes (get-in fx [:keyframe-modulator :keyframes 1 :params]) (:params fx))
+                                              [:red :green :blue])))]
+        (events/write-state! #(-> %
+                                  (assoc-in [:chains :effect-chains [0 0]] {:active? false :items [(set-color a) (set-color b)]})
+                                  (assoc-in [:list-ui [:effect-chain 0 0]] {:selected-ids #{a} :last-selected-id a})))
+        (events/dispatch! {:event/type :effect-chain/open-editor :col 0 :row 0})
+        (ui/wait-for! #(some? (picker)))
+        ;; The reorder the chain list sends, then a pick on A's picker, in one
+        ;; FX turn: the pick's event is the one rendered while A was first
+        (ui/on-fx-thread #(do (events/dispatch! {:event/type :chain/set-items :domain :effect-chains :entity-key [0 0]
+                                                 :items [(set-color b) (set-color a)]})
+                              (pick! (picker) Color/RED)))
+        (is (ui/wait-for! #(= {:red 1.0 :green 0.0 :blue 0.0} (colour-of a))) "A's colour, A now second")
+        (is (= [b a] (mapv :id (items))))
+        (is (= white (colour-of b)) "B's, in A's old place, stays")
+        (is (ui/wait-for! #(= Color/RED (shown (picker)))) "and A's editor shows it")
+        (events/dispatch! {:event/type :ui/close-dialog :dialog-id :effect-chain-editor})
+        (ui/wait-for! #(nil? (picker)))))))

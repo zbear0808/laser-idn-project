@@ -129,7 +129,7 @@
    - :item-path - Path to parent item (required for cue chains only)
    - :owner-id - The :id of the item, clip, track or folder that owns the
      effect (cue chains and the timeline's): with the effect's own :id, how
-     the modulator's field edits find it (reactivity plan 07)
+     the modulator's edits (reactivity plan 07) and its colour edits find it
    - :effect - The effect instance map (required)
    - :effect-def - Effect definition from registry (required)
    - :dialog-data - Dialog state data for UI modes, etc. (required)
@@ -191,17 +191,20 @@
                          :entity-key entity-key
                          :effect-path full-effect-path})
 
-        ;; Color change event (depends on keyframe mode)
-        on-color-change-event (if keyframe-enabled?
-                                {:event/type :keyframe/update-color-param
-                                 :domain domain
-                                 :entity-key entity-key
-                                 :effect-path full-effect-path
-                                 :keyframe-idx selected-kf-idx}
-                                {:event/type :chain/update-color-param
-                                 :domain domain
-                                 :entity-key entity-key
-                                 :effect-path full-effect-path})
+        ;; Color change event (depends on keyframe mode): names the effect by
+        ;; its id and its owner's, not its place, so a pick queued behind a
+        ;; reorder colours this effect (follow-up N2)
+        on-color-change-event (cond-> (if keyframe-enabled?
+                                        {:event/type :keyframe/update-color-param
+                                         :domain domain
+                                         :entity-key entity-key
+                                         :effect-instance-id (:id effect)
+                                         :keyframe-idx selected-kf-idx}
+                                        {:event/type :chain/update-color-param
+                                         :domain domain
+                                         :entity-key entity-key
+                                         :effect-instance-id (:id effect)})
+                                (some? owner-id) (assoc :owner-id owner-id))
 
         ;; Spatial editor event template
         ;; Note: Using :keyframe/update-spatial-params which converts point-id/x/y

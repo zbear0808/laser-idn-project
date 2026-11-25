@@ -1,7 +1,8 @@
 (ns laser-show.events.chain-params-handlers-test
   "Tests that boolean parameter edits keep `false` instead of turning it into
    nil, that a numeric field's typed text commits only a number, and that a
-   colour edit takes only a plain colour (follow-up B4)."
+   colour edit takes only a plain colour (follow-up B4), for the effect it
+   names by its instance (N2)."
   (:require
    [clojure.test :refer [deftest is testing]]
    [laser-show.events.handlers.chain.helpers :as chain-helpers]
@@ -64,6 +65,52 @@
     (testing "no effect at its path: nothing, not a new item"
       (is (identical? cell (commit {:effect-path [1] :color [0.1 0.2 0.3]})))
       (is (identical? cell (commit {:effect-path nil :color [0.1 0.2 0.3]}))))))
+
+(deftest update-color-param-follows-the-instance-test
+  ;; Follow-up N2: an effect's colour edit names its effect by its instance
+  ;; (and owner), like the modulator's (reactivity plan 07, B6): queued
+  ;; behind a reorder, it lands on that effect where it is now, or nowhere
+  ;; once it is gone. One that names no instance (the preset editor's, a
+  ;; cue item's own colour) still goes by its :effect-path
+  (let [a #uuid "aaaaaaaa-0000-0000-0000-0000000000c2"
+        b #uuid "bbbbbbbb-0000-0000-0000-0000000000c2"
+        p #uuid "cccccccc-0000-0000-0000-0000000000c2"
+        other #uuid "dddddddd-0000-0000-0000-0000000000c2"
+        white {:red 1.0 :green 1.0 :blue 1.0}
+        set-color (fn [id] {:id id :effect-id :set-color :enabled? true :params white})
+        ;; A's pick, rendered while A was first (and its owner P first)
+        pick (fn [domain & {:as more}]
+               (merge {:domain domain :entity-key [0 0] :effect-instance-id a :effect-path [0] :color [0.0 0.5 1.0]}
+                      more))
+        commit (fn [state event]
+                 (params/handle-update-color-param state (chain-helpers/chain-config (:domain event) [0 0]) event))
+        colour-of #(select-keys (get-in %1 (conj %2 :params)) [:red :green :blue])
+        lands-on (fn [state event leaf]
+                   (let [after (commit state event)]
+                     (is (= {:red 0.0 :green 0.5 :blue 1.0} (colour-of after leaf)) (str "A, now at " leaf))
+                     (is (= state (update-in after (conj leaf :params) merge white)) "nothing else")))]
+    (testing "an effects cell's chain, B now where A was rendered"
+      (let [cell [:chains :effect-chains [0 0] :items]
+            event (pick :effect-chains)]
+        (lands-on (assoc-in {} cell [(set-color b) (set-color a)]) event (conj cell 1))
+        (lands-on (assoc-in {} cell [{:type :group :id other :items [(set-color b) (set-color a)]}]) event (conj cell 0 :items 1))
+        (let [b-only (assoc-in {} cell [(set-color b)])]
+          (is (identical? b-only (commit b-only event)) "A gone, B in its place: nothing"))
+        (let [unnamed (assoc-in {} cell [(set-color a)])]
+          (is (identical? unnamed (commit unnamed (assoc event :effect-instance-id nil))) "an instance it can't find: nothing"))))
+    (testing "a cue item's effect: the owner, then the effect among its own"
+      (let [root [:chains :cue-chains [0 0] :items]
+            event (pick :cue-chains :owner-id p)
+            moved (assoc-in {} root [{:id other :type :preset :preset-id :circle :effects [(set-color b)]}
+                                     {:id p :type :preset :preset-id :circle :effects [(set-color b) (set-color a)]}])]
+        (lands-on moved event (conj root 1 :effects 1))
+        (is (identical? moved (commit moved (dissoc event :owner-id))) "no owner named: nothing")))
+    (testing "one that names no instance: a cue item's own colour, at its :effect-path"
+      (let [root [:chains :cue-chains [0 0] :items]
+            items (assoc-in {} root [{:id p :type :preset :preset-id :circle :params (assoc white :radius 0.5)}])]
+        (is (= {:red 0.0 :green 0.5 :blue 1.0}
+               (colour-of (commit items {:domain :cue-chains :entity-key [0 0] :effect-path [0] :color [0.0 0.5 1.0]})
+                          (conj root 0))))))))
 
 (deftest update-param-unchecked-checkbox-test
   (testing "checkbox :fx/event false is stored as false"

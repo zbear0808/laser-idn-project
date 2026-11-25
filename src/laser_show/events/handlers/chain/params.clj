@@ -9,6 +9,7 @@
    [clojure.tools.logging :as log]
    [laser-show.animation.effects :as effects]
    [laser-show.events.helpers :as h]
+   [laser-show.events.handlers.chain.helpers :as chain-helpers]
    [laser-show.events.handlers.effect-params :as effect-params]))
 
 ;; Effect Parameter Operations (Delegate to effect-params)
@@ -141,9 +142,21 @@
     (when (and (vector? c) (= 3 (count c)) (every? h/finite-number? c))
       (mapv #(max 0.0 (min 1.0 (double %))) c))))
 
+(defn- color-target
+  "Where a colour edit goes, under config's :items-path: the effect it names
+   by its instance (and owner), where that effect is now
+   (chain-helpers/resolve-effect-instance-path), or nil once it is gone; an
+   edit that names no instance (the preset editor's: a cue item's own
+   colour, whose parameters all go by their place) goes to its
+   :effect-path."
+  [state event]
+  (if (contains? event :effect-instance-id)
+    (chain-helpers/resolve-effect-instance-path state event)
+    (:effect-path event)))
+
 (defn handle-update-color-param
-  "Update the color parameters of the effect at :effect-path to the
-   event's :color (color-value): :red, :green and :blue, separate
+  "Update the color parameters of the effect the event names (color-target)
+   to the event's :color (color-value): :red, :green and :blue, separate
    parameters for modulator support.
    
    NOTE: Uses NORMALIZED values (0.0-1.0), not 8-bit (0-255).
@@ -152,15 +165,19 @@
    Parameters:
    - state: Application state
    - config: Configuration map with :items-path
-   - event: Map with :effect-path and :color [red green blue]
+   - event: Map with :domain, :entity-key, :effect-instance-id (and
+     :owner-id for an owned effect), or for a cue item's own colour
+     :effect-path, and :color [red green blue]
    
    Returns: Updated state (unchanged without a colour, or without an effect
-   at :effect-path)"
-  [state config {:keys [effect-path] :as event}]
+   there)"
+  [state config event]
   (let [items-path (:items-path config)
         items-vec (vec (get-in state items-path []))
-        params-path (conj (vec effect-path) :params)]
-    (if-let [[red green blue] (when (map? (get-in items-vec (vec effect-path))) (color-value event))]
+        effect-path (vec (color-target state event))
+        params-path (conj effect-path :params)]
+    (if-let [[red green blue] (when (and (seq effect-path) (map? (get-in items-vec effect-path)))
+                                (color-value event))]
       (do (log/debug "handle-update-color-param: effect-path=" effect-path "rgb=" [red green blue])
           (assoc-in state items-path (-> items-vec
                                          (assoc-in (conj params-path :red) red)
