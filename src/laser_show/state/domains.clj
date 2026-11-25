@@ -105,7 +105,7 @@
    :held-inputs {:default #{}
                  :doc "Input identities currently held"}
    :activations {:default {}
-                 :doc "Key -> the action its press played, until the key's release ends it (events/handlers/triggers.clj), whatever the key is bound to by then. A key as lookup-key names it, for every source: {:source :midi :channel :note} (channels 0-15), {:source :osc|:gamepad|:keyboard :id}. Retired, without its release, when its source can't send releases any more (:trigger/retire: a MIDI input disconnected or MIDI off, the OSC server stopped or OSC off), and with every other on New and Open"}
+                 :doc "Key -> the action its press played, until the key's release ends it (events/handlers/triggers.clj), whatever the key is bound to by then. A key as lookup-key names it, for every source: {:source :midi :channel :note} (channels 0-15), {:source :osc|:gamepad|:keyboard :id}. Retired, without its release, when its source can't send releases any more (:trigger/retire: a MIDI input disconnected, MIDI off or MIDI's All Notes Off, the OSC server stopped or moved to another port, OSC off), and with every other on New and Open"}
    :last-input-time {:default nil
                      :doc "Timestamp of the most recent discrete input"}})
 
@@ -550,6 +550,7 @@
                             :cc-mappings {}}           ; Optional CC remapping
                      :osc {:enabled? false
                            :server-running? false      ; The device worker's server is listening
+                           :listening-port nil         ; The port it listens on, as the device worker answered the latest Start (nil: not listening)
                            :port 9000                  ; The port Start Server listens on (while listening: the one it listens on)
                            :requests {}                ; {:server id}: the latest Start or Stop, until its result is in
                            :address-mappings {}}       ; Map of OSC address -> event config

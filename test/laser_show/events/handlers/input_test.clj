@@ -71,24 +71,25 @@
           stop (handle (:state started) {:event/type :input/osc-stop-server})
           stopped (handle (:state stop) (answer stop :input/osc-stop :input/osc-stopped :server-running? false))]
       (testing "Start Server listens and lets the messages in: there is no second switch to find"
-        (is (= {:port 9100 :server-running? true :enabled? true}
-               (select-keys (osc-of (:state started)) [:port :server-running? :enabled?])))
+        (is (= {:port 9100 :listening-port 9100 :server-running? true :enabled? true}
+               (select-keys (osc-of (:state started)) [:port :listening-port :server-running? :enabled?])))
         (is (empty? (:requests (osc-of (:state started)))) "the request is over")
-        (is (nil? (get-in started [:state :ui :notice]))))
+        (is (nil? (get-in started [:state :ui :notice])))
+        (is (nil? (:dispatch started)) "it didn't move: nothing to retire"))
       (testing "Stop Server does both the other way: the messages stop at once, then the server"
         (is (= {:request-id (get-in stop [:state :backend :input :osc :requests :server])} (:input/osc-stop stop)))
         (is (= {:event/type :trigger/retire :source :osc} (:dispatch stop))
             "and what OSC keys hold lets go, as their releases can't come in (reactivity plan 26)")
         (is (= {:server-running? true :enabled? false} (select-keys (osc-of (:state stop)) [:server-running? :enabled?])))
-        (is (= {:server-running? false :enabled? false}
-               (select-keys (osc-of (:state stopped)) [:server-running? :enabled?])))))
+        (is (= {:server-running? false :listening-port nil :enabled? false}
+               (select-keys (osc-of (:state stopped)) [:server-running? :listening-port :enabled?])))))
     (testing "a port that won't open: still off, and a notice says so"
       (let [result (handle (:state start) (answer start :input/osc-start :input/osc-started
                                                   :server-running? false :port 9100
                                                   :error "Could not listen for OSC on port 9100"))
             {:keys [id] :as notice} (get-in result [:state :ui :notice])]
-        (is (= {:server-running? false :enabled? false}
-               (select-keys (osc-of (:state result)) [:server-running? :enabled?])))
+        (is (= {:server-running? false :listening-port nil :enabled? false}
+               (select-keys (osc-of (:state result)) [:server-running? :listening-port :enabled?])))
         (is (= {:text "Could not listen for OSC on port 9100" :level :error} (dissoc notice :id)))
         (is (= {:event {:event/type :ui/clear-notice :id id} :delay-ms 6000}
                (:dispatch-later result)))))))

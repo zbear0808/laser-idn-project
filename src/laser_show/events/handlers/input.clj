@@ -200,14 +200,23 @@
 (defn- handle-osc-started
   "The latest Start's result. Listening, the server lets its messages in:
    one switch, as the server without :enabled? drops every message
-   (osc/create-osc-handler). A port that won't open leaves OSC off, and a
-   notice says so; what OSC keys held (on a server it replaced) lets go."
+   (osc/create-osc-handler); :listening-port is where. Moved there from
+   another port (a Start after the port changed), it can't hear the
+   releases its controls send to the port it left: what OSC keys hold lets
+   go (:trigger/retire, handlers/triggers.clj). A port that won't open
+   leaves OSC off, and a notice says so; what OSC keys held (on a server it
+   replaced) lets go."
   [{:keys [state server-running? port error] :as event}]
   (if (latest? state :osc :server event)
-    (let [state (answered state :osc :server)]
+    (let [state (answered state :osc :server)
+          {:keys [listening-port] listening? :server-running?} (get-osc-state state)
+          moved? (and listening? (some? listening-port) (not= listening-port port))]
       (if server-running?
-        {:state (update-in state (osc-path) assoc :server-running? true :port port :enabled? true)}
-        (assoc (h/show-notice (update-in state (osc-path) assoc :server-running? false :enabled? false)
+        (cond-> {:state (update-in state (osc-path) assoc
+                                   :server-running? true :listening-port port :port port :enabled? true)}
+          moved? (assoc :dispatch {:event/type :trigger/retire :source :osc}))
+        (assoc (h/show-notice (update-in state (osc-path) assoc
+                                         :server-running? false :listening-port nil :enabled? false)
                               (or error (str "Could not listen for OSC on port " port))
                               :error)
                :dispatch {:event/type :trigger/retire :source :osc})))
@@ -229,7 +238,7 @@
   (if (latest? state :osc :server event)
     {:state (-> state
                 (answered :osc :server)
-                (assoc-in (osc-path :server-running?) false))}
+                (update-in (osc-path) assoc :server-running? false :listening-port nil))}
     {}))
 
 (defn- handle-osc-set-port
