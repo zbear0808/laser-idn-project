@@ -40,7 +40,7 @@ The ranked priorities below, as of `111f3a0`; rows 12, 14 and 17 updated after t
 
 Open decisions: `/plans` stays in git (`ba3c911`). The keyboard input source went into `plans/2026-11-13-keyboard-focus-window-lifecycle/` (Phase 5). Still open: adopt or delete the `triggers/` engine; the sequel-fragment chunk header (fragmentation stays off until a reference receiver is available, output runtime §7).
 
-Active plans (2026-11-23): the keyboard plan's manual desktop checks (`plans/2026-11-13-keyboard-focus-window-lifecycle/05` §8; all five phases are on `master`), the output runtime's hardware and hidden-window checks (05 §8), and `plans/2026-11-23-cljfx-reactivity-audit.md`. `plans/2026-11-20-state-integrity/` is done and deleted (`09b6db7`..`7412ac6`). `plans/2026-11-17-show-clock/` is done (`dd106de`, `7d67aff`, `378db47`).
+Active plans (2026-11-23): the keyboard plan's manual desktop checks (`plans/2026-11-13-keyboard-focus-window-lifecycle/05` §8; all five phases are on `master`), the output runtime's hardware and hidden-window checks (05 §8), and `plans/2026-11-24-reactivity-follow-ups.md` (what's left of the cljfx reactivity repairs; their audit and plan are done and deleted, merged in `4c5eae64` and `385b6bac`). `plans/2026-11-20-state-integrity/` is done and deleted (`09b6db7`..`7412ac6`). `plans/2026-11-17-show-clock/` is done (`dd106de`, `7d67aff`, `378db47`).
 
 **Deferred — very low priority (2026-11-23): live controls during project Save/Open.** Project ZIP reads and writes run inline on the event thread, so live inputs wait. If 02 M3 step 4 is picked up later, preserve Save-then-Exit: the pending action must wait for a successful write, and later edits must stay unsaved. The independent device-connect work remains in 02 M4.
 
