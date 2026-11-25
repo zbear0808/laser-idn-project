@@ -16,6 +16,9 @@
      MIDI timecode, k the episode it was installed for;
    - [:playback :chase-sources]: the version of each cue following timecode,
      which an episode belongs to (timeline.playback/source-version);
+   - [:playback :chase-stopped]: {cell chase-id}, a follower a grid press
+     stopped for that episode, which the clock goes on chasing unseen
+     (chase's :stopped?) until a new one begins there;
    - [:playback :requests]: {:restart {:id} :align {:id} :shift {:id :offset}},
      each applied once per id;
    - [:playback :pulses]: {source {:id :held?}}, the presses tap reactions
@@ -237,9 +240,12 @@
    timecode's beat, with :chase-id [document-id cell version origin-ns
    tick] (the clock's :t0-ns and this tick's number) and :start, what may
    start the transport for it, as it was then: {:restart (the restart
-   request's id) :allowed? (free-to-start?)}."
+   request's id) :allowed? (free-to-start?)}. One a grid press stopped
+   ([:playback :chase-stopped], follow-up B7) goes on as the same episode,
+   :stopped? true: it is neither drawn, positioned nor reported."
   [runtime state mtc-pos bpm now-ms]
   (let [seed (into {} (filter (fn [[cell timing]] (current-episode? state cell timing))) (:chase runtime))
+        stopped (get-in state [:playback :chase-stopped])
         chased (:active-cues (playback/apply-chase {:active-cues seed}
                                                    (get-in state [:chains :cue-chains])
                                                    mtc-pos bpm now-ms))
@@ -250,9 +256,9 @@
                          :allowed? (free-to-start? state)}})]
     (assoc runtime :chase
            (reduce-kv (fn [acc cell timing]
-                        (if (:chase-id timing)
-                          acc
-                          (assoc acc cell (merge timing (entry cell)))))
+                        (let [timing (if (:chase-id timing) timing (merge timing (entry cell)))
+                              stopped? (= (:chase-id timing) (get stopped cell))]
+                          (assoc acc cell (if stopped? (assoc timing :stopped? true) (dissoc timing :stopped?)))))
                       chased
                       chased))))
 
@@ -267,7 +273,8 @@
    of the owner there, :expected-owner (playback/intent-owner); with the
    episode's :start authority. Off (:active? false) when no episode is
    there and app state still has a marker, or a run the following cue takes
-   over. None for an ordinary cue's run or an empty cell. Each names the
+   over. None for an ordinary cue's run or an empty cell, nor for an episode
+   a grid press stopped (:stopped?). Each names the
    show (:document-id) and the cue's version (:source-version, nil when it
    doesn't follow) it was decided for, never a beat or a time, so a retry
    is the same report and a changed owner a new one."
@@ -281,14 +288,14 @@
                                                 cell))
                                             intents))))]
     (keep (fn [cell]
-            (let [{:keys [chase-id start]} (get chase cell)
+            (let [{:keys [chase-id start stopped?]} (get chase cell)
                   intent (get intents cell)
                   owner (playback/intent-owner intent)
                   version (playback/source-version state cell)
                   report {:event/type :show-clock/chase :cell cell :document-id (document-id state)
                           :source-version version :expected-owner owner}]
               (cond
-                chase-id (when (not= owner [:chase chase-id])
+                chase-id (when (and (not stopped?) (not= owner [:chase chase-id]))
                            (assoc report :active? true :chase-id chase-id :start start))
                 (:chasing? intent) (assoc report :active? false)
                 (and (some? version) (some? (:run intent))) (assoc report :active? false))))
@@ -381,17 +388,19 @@
   (pulses/view (:pulses runtime) (:pulse-clock runtime)))
 
 (defn positions
-  "{cell beats} of every run and chased cue in runtime."
+  "{cell beats} of every run and chased cue in runtime, but an episode a
+   grid press stopped (:stopped?, chase)."
   [runtime]
   (into {}
         (concat (map (fn [run] [(:cell run) (:accumulated-beats run)]) (vals (:runs runtime)))
-                (map (fn [[cell timing]] [cell (:accumulated-beats timing)]) (:chase runtime)))))
+                (keep (fn [[cell timing]] (when-not (:stopped? timing) [cell (:accumulated-beats timing)])) (:chase runtime)))))
 
 (defn active-runs
   "The cues to render: [{:cell :run :cue-chain :cue-timing} …], in the order
    of app state's intents. Runs the clock hasn't started yet, ended runs and
    chains without items are left out. A chased cue takes its intent's place,
-   or goes last (by cell) while app state has no chasing intent for it yet."
+   or goes last (by cell) while app state has no chasing intent for it yet,
+   unless a grid press stopped its episode (:stopped?, chase)."
   ([state] (active-runs state @!runtime))
   ([state {:keys [runs chase]}]
    (let [chains (get-in state [:chains :cue-chains])
@@ -407,7 +416,7 @@
                                    :else (entry cell (:run intent) (get runs (:run intent)))))
                                intents)
          chased-later (keep (fn [cell]
-                              (when-not (:chasing? (get intents cell))
+                              (when-not (or (:chasing? (get intents cell)) (:stopped? (get chase cell)))
                                 (entry cell nil (get chase cell))))
                             (sort (keys chase)))]
      (into from-intents chased-later))))

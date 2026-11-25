@@ -230,7 +230,10 @@
    playback/source-version) and the same owner there (:expected-owner,
    playback/intent-owner, :none for an empty cell); then
    - On (:active? true): the cue follows timecode and the clock is still on
-     the report's episode (:chase-id): its marker goes in (install-chase);
+     the report's episode (:chase-id): its marker goes in (install-chase),
+     unless a grid press stopped the cue for that very episode
+     ([:playback :chase-stopped], follow-up B7); another episode ends that
+     stop;
    - Off (:active? false): the clock chases nothing there: a chase marker
      goes, its cue gone or not; a run only while its cue follows timecode.
      It stops as any cue stops (cue-timing/deactivate-cue): the last one
@@ -243,6 +246,7 @@
         owner (playback/intent-owner intent)
         version (playback/source-version state cell)
         observed (:chase-id clock)
+        stopped (get-in state [:playback :chase-stopped])
         holds? (and (some? document-id)
                     (h/same-document? state event)
                     (contains? event :source-version)
@@ -254,8 +258,9 @@
       (not holds?) {}
 
       (true? active?)
-      (if (and (some? version) (some? chase-id) (= chase-id observed))
-        {:state (update state :playback install-chase cell owner chase-id start)}
+      (if (and (some? version) (some? chase-id) (= chase-id observed) (not= chase-id (get stopped cell)))
+        {:state (cond-> (update state :playback install-chase cell owner chase-id start)
+                  (contains? stopped cell) (update-in [:playback :chase-stopped] dissoc cell))}
         {})
 
       (and (false? active?)
