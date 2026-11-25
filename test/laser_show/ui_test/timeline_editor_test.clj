@@ -1,7 +1,10 @@
 (ns laser-show.ui-test.timeline-editor-test
-  "Timeline editor window for cell [0 0]: track, content and loop controls,
-   canvas clicks and the Delete key, and drags from the browser."
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  "Timeline editor window on a show copied from the cue at [0 0] (New Show
+   from Cue): track, content and loop controls, canvas clicks and the Delete
+   key, drags from the browser, and the footer and the placeholder while the
+   show is gone."
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.tools.logging :as log]
             [laser-show.animation.show-time :as show-time]
             [laser-show.events.core :as events]
@@ -11,6 +14,7 @@
             [laser-show.state.history :as history]
             [laser-show.timeline.layout :as layout]
             [laser-show.timeline.model :as model]
+            [laser-show.timeline.shows :as shows]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]
             [laser-show.views.components.drag-drop-cell :as dd]
@@ -26,27 +30,76 @@
   (show-clock/tick! (System/nanoTime)))
 
 (defn- position
-  "Where the show clock has the cue at cell."
-  [cell]
-  (get (show-time/positions @show-time/!runtime) cell))
+  "Where the show clock has the cue playing under playback key k."
+  [k]
+  (get (show-time/positions @show-time/!runtime) k))
+
+(def ^:private !show
+  "The show the test's editor was opened on (open-timeline!)."
+  (atom nil))
+
+(defn- sid [] @!show)
+
+(defn- show-path [& ks] (into (shows/show-path (sid)) ks))
+
+(defn- ui-path [& ks] (into [:ui :timeline-editor (sid)] ks))
+
+(defn- play-key [] (shows/play-key (sid)))
+
+(defn- play-path [& ks] (into [:playback :active-cues (play-key)] ks))
+
+(defn- tracks-list-id
+  ([] (tracks-list-id (sid)))
+  ([id] [:timeline-tracks id]))
+
+(defn- dialog-show [] (get-in (state/get-raw-state) [:ui :dialogs :timeline-cue-editor :show-id]))
+
+(defn- editor-shown? []
+  (some (fn [title] (and title (.startsWith ^String title "Timeline Editor")))
+        (ui/window-titles)))
+
+(defn- new-show-from-cue!
+  "Copy the cue at [col row] into a new show, which opens the editor on it
+   (or shows it in the open editor); its id."
+  [col row]
+  (let [before (dialog-show)]
+    (events/dispatch! {:event/type :shows/new-from-cue :col col :row row})
+    (ui/wait-for! #(let [id (dialog-show)]
+                     (and (some? id) (not= before id)
+                          (get-in (state/get-raw-state) (shows/show-path id))
+                          (get-in (state/get-raw-state) [:ui :dialogs :timeline-cue-editor :open?]))))
+    (dialog-show)))
+
+(defn- open-timeline!
+  "A new show copied from the starter cue at [0 0] (its zone folder, clips
+   and content width), its editor open: the test's show."
+  []
+  (reset! !show (new-show-from-cue! 0 0))
+  (ui/wait-for! editor-shown?)
+  (ui/assert-visible! "#timeline-lanes"))
+
+(defn- reopen-timeline!
+  "Open the editor on the test's show again (:shows/open-editor)."
+  []
+  (events/dispatch! {:event/type :shows/open-editor :show-id (sid)})
+  (ui/wait-for! editor-shown?)
+  (ui/assert-visible! "#timeline-lanes"))
+
+(defn- close-timeline! []
+  (events/dispatch! {:event/type :ui/close-dialog :dialog-id :timeline-cue-editor})
+  (ui/wait-for! #(not (get-in (state/get-raw-state) [:ui :dialogs :timeline-cue-editor :open?]))))
 
 (deftest timeline-editor-controls-and-canvas-respond-to-clicks
   (let [robot (ui/robot)]
-    (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
-    (ui/wait-for! #(some (fn [title]
-                           (and title (.startsWith ^String title "Timeline Editor")))
-                         (ui/window-titles)))
-    (ui/assert-visible! "#timeline-lanes")
-    (let [track-count (count (get-in (state/get-raw-state)
-                                     [:chains :cue-chains [0 0] :tracks]))]
+    (open-timeline!)
+    (let [track-count (count (get-in (state/get-raw-state) (show-path :tracks)))]
       (ui/click! robot "#timeline-add-track")
       (ui/wait-for! #(= (inc track-count)
-                        (count (get-in (state/get-raw-state)
-                                       [:chains :cue-chains [0 0] :tracks])))))
+                        (count (get-in (state/get-raw-state) (show-path :tracks))))))
     (ui/click! robot "#timeline-add-content")
     (ui/wait-for! #(true? (get-in (state/get-raw-state)
                                   [:ui :timeline-prefs :add-panel :open?])))
-    (let [loop-path [:chains :cue-chains [0 0] :loop :enabled?]
+    (let [loop-path (show-path :loop :enabled?)
           before (boolean (get-in (state/get-raw-state) loop-path))]
       (ui/click! robot "#timeline-loop-toggle")
       (ui/wait-for! #(= (not before) (boolean (get-in (state/get-raw-state) loop-path)))))
@@ -54,20 +107,16 @@
     (is (some? (ui/query ".timeline-canvas")))))
 
 (deftest timeline-delete-key-removes-selected-clip
-  (let [robot (ui/robot)
-        items-path [:chains :cue-chains [0 0] :items]]
-    (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
-    (ui/wait-for! #(some (fn [title]
-                           (and title (.startsWith ^String title "Timeline Editor")))
-                         (ui/window-titles)))
-    (ui/assert-visible! "#timeline-lanes")
-    (let [count-before (count (get-in (state/get-raw-state) items-path))]
+  (let [robot (ui/robot)]
+    (open-timeline!)
+    (let [items-path (show-path :items)
+          count-before (count (get-in (state/get-raw-state) items-path))]
       (events/dispatch! {:event/type :timeline/add-preset-to-track
-                         :col 0 :row 0 :item-id :square})
+                         :show-id (sid) :item-id :square})
       (ui/wait-for! #(and (= (inc count-before)
                              (count (get-in (state/get-raw-state) items-path)))
-                          (seq (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection]))))
-      (let [added-id (first (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection]))]
+                          (seq (get-in (state/get-raw-state) (ui-path :selection)))))
+      (let [added-id (first (get-in (state/get-raw-state) (ui-path :selection)))]
         (ui/focus! robot "#timeline-canvas")
         (let [canvas (ui/query "#timeline-canvas")
               claims? (fn [id] (ui/on-fx-thread #(keys/claims? (.getFocusOwner (.getScene canvas)) id)))]
@@ -76,14 +125,7 @@
         (ui/press! robot javafx.scene.input.KeyCode/DELETE)
         (ui/wait-for! #(= count-before (count (get-in (state/get-raw-state) items-path))))
         (is (not-any? #(= added-id (:id %)) (get-in (state/get-raw-state) items-path)))
-        (is (empty? (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection])))))))
-
-(defn- open-timeline! []
-  (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
-  (ui/wait-for! #(some (fn [title]
-                         (and title (.startsWith ^String title "Timeline Editor")))
-                       (ui/window-titles)))
-  (ui/assert-visible! "#timeline-lanes"))
+        (is (empty? (get-in (state/get-raw-state) (ui-path :selection))))))))
 
 (defn- slider-value []
   (.getValue ^javafx.scene.control.Slider (ui/query "#timeline-zoom-slider")))
@@ -112,14 +154,12 @@
     (is (snap-on?))))
 
 (deftest timeline-open-does-not-convert-twice
-  (let [cue-path [:chains :cue-chains [0 0]]]
-    (open-timeline!)
-    (let [after-first (get-in (state/get-raw-state) cue-path)]
-      (is (= :timeline (:editor-type after-first)))
-      (events/dispatch! {:event/type :ui/close-dialog :dialog-id :timeline-cue-editor})
-      (ui/wait-for! #(not (get-in (state/get-raw-state) [:ui :dialogs :timeline-cue-editor :open?])))
-      (open-timeline!)
-      (is (= after-first (get-in (state/get-raw-state) cue-path))))))
+  (open-timeline!)
+  (let [after-first (get-in (state/get-raw-state) (show-path))]
+    (is (= :timeline (:editor-type after-first)))
+    (close-timeline!)
+    (reopen-timeline!)
+    (is (= after-first (get-in (state/get-raw-state) (show-path))))))
 
 (deftest empty-timeline-opens-the-browser-test
   (let [browser-open? #(get-in (state/get-raw-state) [:ui :timeline-prefs :add-panel :open?])]
@@ -127,15 +167,18 @@
       (open-timeline!)
       (is (false? (browser-open?)))
       (is (not (ui/visible? "#timeline-browser")))
-      (events/dispatch! {:event/type :ui/close-dialog :dialog-id :timeline-cue-editor})
-      (ui/wait-for! #(not (get-in (state/get-raw-state) [:ui :dialogs :timeline-cue-editor :open?]))))
-    (testing "an empty cell's timeline has no clips: the browser opens, so the hint's browser is there"
-      (events/dispatch! {:event/type :timeline-cue-editor/open :col 2 :row 2})
-      (ui/wait-for! #(some (fn [title] (and title (.startsWith ^String title "Timeline Editor")))
-                           (ui/window-titles)))
-      (ui/wait-for! #(ui/visible? "#timeline-browser"))
-      (is (empty? (get-in (state/get-raw-state) [:chains :cue-chains [2 2] :items])))
-      (is (true? (browser-open?))))))
+      (close-timeline!))
+    (testing "a new, empty show has no clips: the browser opens, so the hint's browser is there"
+      (let [ids #(set (keys (get-in (state/get-raw-state) [:chains :shows])))
+            before (ids)]
+        (events/dispatch! {:event/type :shows/create})
+        (ui/wait-for! #(seq (remove before (ids))))
+        (reset! !show (first (remove before (ids))))
+        (events/dispatch! {:event/type :shows/open-editor :show-id (sid)})
+        (ui/wait-for! editor-shown?)
+        (ui/wait-for! #(ui/visible? "#timeline-browser"))
+        (is (empty? (get-in (state/get-raw-state) (show-path :items))))
+        (is (true? (browser-open?)))))))
 
 (deftest timeline-inspector-shows-folder-properties
   (let [robot (ui/robot)]
@@ -143,19 +186,19 @@
     (ui/click! robot "#timeline-add-content")
     (ui/wait-for! #(true? (get-in (state/get-raw-state) [:ui :timeline-prefs :add-panel :open?])))
     (let [folder (first (filter #(= :group (:type %))
-                                (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :tracks])))]
+                                (get-in (state/get-raw-state) (show-path :tracks))))]
       (is (some? folder) "conversion creates a zone folder")
-      (events/dispatch! {:event/type :timeline/select-track :col 0 :row 0 :track-id (:id folder)})
+      (events/dispatch! {:event/type :timeline/select-track :show-id (sid) :track-id (:id folder)})
       (ui/wait-for! #(= "FOLDER PROPERTIES" (ui/node-text "#timeline-inspector-title")))
       (is (= "FOLDER PROPERTIES" (ui/node-text "#timeline-inspector-title"))))))
 
 (defn- add-clip-at-zero!
   "Add a clip at beat 0 on the first track; returns its id."
   []
-  (let [items-path [:chains :cue-chains [0 0] :items]
+  (let [items-path (show-path :items)
         before (count (get-in (state/get-raw-state) items-path))]
-    (events/dispatch! {:event/type :timeline/set-cursor-beat :col 0 :row 0 :beat 0.0})
-    (events/dispatch! {:event/type :timeline/add-preset-to-track :col 0 :row 0 :item-id :square :start 0.0})
+    (events/dispatch! {:event/type :timeline/set-cursor-beat :show-id (sid) :beat 0.0})
+    (events/dispatch! {:event/type :timeline/add-preset-to-track :show-id (sid) :item-id :square :start 0.0})
     (ui/wait-for! #(= (inc before) (count (get-in (state/get-raw-state) items-path))))
     (:id (last (get-in (state/get-raw-state) items-path)))))
 
@@ -173,7 +216,7 @@
 
 (defn- clip-start [id]
   (some #(when (= id (:id %)) (:timeline/start %))
-        (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :items])))
+        (get-in (state/get-raw-state) (show-path :items))))
 
 (def ^:private first-track-y
   "Middle of the first track lane (row 1, under the zone folder row):
@@ -211,13 +254,13 @@
 
 (deftest timeline-headers-align-with-lanes
   (let [robot (ui/robot)
-        tracks-path [:chains :cue-chains [0 0] :tracks]]
+        tracks-path #(show-path :tracks)]
     (open-timeline!)
     ;; Enough tracks to scroll: 2 starter rows + 24 tracks of 37 px
-    (dotimes [_ 24] (events/dispatch! {:event/type :timeline/add-track :col 0 :row 0}))
-    (ui/wait-for! #(<= 26 (count (layout/rows (get-in (state/get-raw-state) tracks-path) []))))
+    (dotimes [_ 24] (events/dispatch! {:event/type :timeline/add-track :show-id (sid)}))
+    (ui/wait-for! #(<= 26 (count (layout/rows (get-in (state/get-raw-state) (tracks-path)) []))))
     (let [check! (fn [scroll-y]
-                   (let [rows (layout/rows (get-in (state/get-raw-state) tracks-path) [])
+                   (let [rows (layout/rows (get-in (state/get-raw-state) (tracks-path)) [])
                          canvas (ui/query "#timeline-canvas")
                          canvas-top (scene-min-y canvas)]
                      (doseq [[i r] (map-indexed vector rows)
@@ -248,46 +291,46 @@
 
 (deftest timeline-long-show-reachable
   (let [robot (ui/robot)
-        items-path [:chains :cue-chains [0 0] :items]
+        items-path #(show-path :items)
         start 300.0]
     (open-timeline!)
-    (events/dispatch! {:event/type :timeline/add-preset-to-track :col 0 :row 0 :item-id :square :start start})
-    (ui/wait-for! #(some (fn [c] (= start (:timeline/start c))) (get-in (state/get-raw-state) items-path)))
-    (let [id (:id (first (filter #(= start (:timeline/start %)) (get-in (state/get-raw-state) items-path))))]
-      (events/dispatch! {:event/type :timeline/clear-selection :col 0 :row 0})
-      (ui/wait-for! #(empty? (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection])))
+    (events/dispatch! {:event/type :timeline/add-preset-to-track :show-id (sid) :item-id :square :start start})
+    (ui/wait-for! #(some (fn [c] (= start (:timeline/start c))) (get-in (state/get-raw-state) (items-path))))
+    (let [id (:id (first (filter #(= start (:timeline/start %)) (get-in (state/get-raw-state) (items-path)))))]
+      (events/dispatch! {:event/type :timeline/clear-selection :show-id (sid)})
+      (ui/wait-for! #(empty? (get-in (state/get-raw-state) (ui-path :selection))))
       (ui/click! robot "#timeline-zoom-fit")
       (ui/sync-fx!)
       (let [canvas (ui/query "#timeline-canvas")
             width (.getWidth ^javafx.scene.canvas.Canvas canvas)
             ;; Fit spreads the whole content over the canvas width
-            beats (layout/content-beats (get-in (state/get-raw-state) [:chains :cue-chains [0 0]]))
+            beats (layout/content-beats (get-in (state/get-raw-state) (show-path)))
             zoom (/ width beats)
             x (+ (* start zoom) 1 (/ (* 4 zoom) 2))]
         (is (> zoom 2.0) "fits without hitting the minimum zoom")
         (ui/drag-by! robot "#timeline-canvas" x first-track-y 0 0)
-        (ui/wait-for! #(= #{id} (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection])))
-        (is (= #{id} (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection])))))))
+        (ui/wait-for! #(= #{id} (get-in (state/get-raw-state) (ui-path :selection))))
+        (is (= #{id} (get-in (state/get-raw-state) (ui-path :selection))))))))
 
 (deftest timeline-play-button-starts-from-cursor
   (let [robot (ui/robot)
-        timing-path [:playback :active-cues [0 0]]]
+        timing-path #(play-path)]
     (open-timeline!)
-    (events/dispatch! {:event/type :timeline/seek :col 0 :row 0 :beat 6.0})
-    (ui/wait-for! #(= 6.0 (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :cursor-beat])))
+    (events/dispatch! {:event/type :timeline/seek :show-id (sid) :beat 6.0})
+    (ui/wait-for! #(= 6.0 (get-in (state/get-raw-state) (ui-path :cursor-beat))))
     (ui/click! robot "#timeline-play")
-    (ui/wait-for! #(some? (get-in (state/get-raw-state) timing-path)))
+    (ui/wait-for! #(some? (get-in (state/get-raw-state) (timing-path))))
     (tick-clock!)
     (Thread/sleep 50)
     (tick-clock!)
-    (is (>= (position [0 0]) 6.0))
+    (is (>= (position (play-key)) 6.0))
     (testing "the play button becomes pause, and pause freezes the cue"
       (ui/click! robot "#timeline-play")
-      (ui/wait-for! #(true? (get-in (state/get-raw-state) (conj timing-path :paused?)))))
+      (ui/wait-for! #(true? (get-in (state/get-raw-state) (conj (timing-path) :paused?)))))
     (testing "stop deactivates it and keeps the cursor"
       (ui/click! robot "#timeline-stop")
-      (ui/wait-for! #(nil? (get-in (state/get-raw-state) timing-path)))
-      (is (= 6.0 (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :cursor-beat]))))))
+      (ui/wait-for! #(nil? (get-in (state/get-raw-state) (timing-path))))
+      (is (= 6.0 (get-in (state/get-raw-state) (ui-path :cursor-beat)))))))
 
 (deftest timeline-readout-follows-the-clock-test
   ;; The readout draws from the show clock's newest tick, on a fake clock here
@@ -296,10 +339,10 @@
         tick! #(show-clock/tick! (+ t0 (* % 1000000)))
         readout #(ui/node-text "#timeline-readout")]
     (open-timeline!)
-    (events/dispatch! {:event/type :timeline/apply-op :col 0 :row 0 :op {:op :set-length :beats 64.0}})
+    (events/dispatch! {:event/type :timeline/apply-op :show-id (sid) :op {:op :set-length :beats 64.0}})
     (ui/wait-for! #(= "1.1.1" (readout)))
     (ui/click! robot "#timeline-play")
-    (ui/wait-for! #(some? (get-in (state/get-raw-state) [:playback :active-cues [0 0]])))
+    (ui/wait-for! #(some? (get-in (state/get-raw-state) (play-path))))
     (tick! 0)
     (doseq [[ms text] [[600 "1.2.1"] [1100 "1.3.1"]]]
       (tick! ms)
@@ -307,7 +350,7 @@
       (is (= text (readout)) (str (/ ms 500.0) " beats from the cursor at 120 BPM")))
     (testing "stopped: the cursor's position again"
       (ui/click! robot "#timeline-stop")
-      (ui/wait-for! #(nil? (get-in (state/get-raw-state) [:playback :active-cues [0 0]])))
+      (ui/wait-for! #(nil? (get-in (state/get-raw-state) (play-path))))
       (tick! 1200)
       (ui/wait-for! #(= "1.1.1" (readout))))))
 
@@ -319,21 +362,21 @@
     (ui/click! robot "#timeline-ruler-time")
     (ui/wait-for! #(= :time (get-in (state/get-raw-state) [:ui :timeline-prefs :ruler-mode])))
     (ui/click! robot "#timeline-tempo-lock")
-    (ui/wait-for! #(some? (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :timeline/tempo-bpm])))
-    (events/dispatch! {:event/type :timeline/seek :col 0 :row 0 :beat 4.0})
+    (ui/wait-for! #(some? (get-in (state/get-raw-state) (show-path :timeline/tempo-bpm))))
+    (events/dispatch! {:event/type :timeline/seek :show-id (sid) :beat 4.0})
     ;; 4 beats at the locked 120 BPM = 2 s
     (ui/wait-for! #(= "00:00:02:00" (ui/node-text "#timeline-readout-tc")))
     (is (= "00:00:02:00" (ui/node-text "#timeline-readout-tc")))))
 
 (deftest timeline-follows-midi-timecode
   (let [robot (ui/robot)
-        timing-path [:playback :active-cues [0 0]]
+        timing-path #(play-path)
         tick! tick-clock!]
     (mtc/reset-decoder!)
     (open-timeline!)
-    (events/dispatch! {:event/type :timeline/apply-op :col 0 :row 0 :op {:op :set-length :beats 64.0}})
+    (events/dispatch! {:event/type :timeline/apply-op :show-id (sid) :op {:op :set-length :beats 64.0}})
     (ui/click! robot "#timeline-chase-mtc")
-    (ui/wait-for! #(= :mtc (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :timeline/chase])))
+    (ui/wait-for! #(= :mtc (get-in (state/get-raw-state) (show-path :timeline/chase))))
     (ui/wait-for! #(ui/visible? "#timeline-mtc-chip"))
     (tick!)
     (ui/wait-for! #(= "MTC —" (ui/node-text "#timeline-mtc-chip")))
@@ -343,9 +386,9 @@
       (doseq [b [0x00 0x10 0x21 0x30 0x40 0x50 0x60 0x72]]
         (mtc/on-quarter-frame! b))
       (tick!)
-      (ui/wait-for! #(some? (get-in (state/get-raw-state) timing-path)))
-      (ui/wait-for! #(some? (position [0 0])))
-      (is (< 2.0 (position [0 0]) 2.3) "1.07 s at 120 BPM")
+      (ui/wait-for! #(some? (get-in (state/get-raw-state) (timing-path))))
+      (ui/wait-for! #(some? (position (play-key))))
+      (is (< 2.0 (position (play-key)) 2.3) "1.07 s at 120 BPM")
       (ui/wait-for! #(re-matches #"MTC 00:00:01:\d\d" (ui/node-text "#timeline-mtc-chip")))
       (is (ui/has-style-class? "#timeline-mtc-chip" "tl-mtc-running"))
       (ui/wait-for! #(ui/visible? "#timeline-mtc-rate-warning"))
@@ -353,7 +396,7 @@
     (testing "no more timecode: the timeline stops"
       (mtc/reset-decoder!)
       (tick!)
-      (ui/wait-for! #(nil? (get-in (state/get-raw-state) timing-path)))
+      (ui/wait-for! #(nil? (get-in (state/get-raw-state) (timing-path))))
       (ui/wait-for! #(= "MTC —" (ui/node-text "#timeline-mtc-chip"))))
     (mtc/reset-decoder!)))
 
@@ -365,8 +408,8 @@
 
 (deftest timeline-effects-from-browser-show-in-detail-panel
   (let [robot (ui/robot)
-        cue-path [:chains :cue-chains [0 0]]
-        clip-fx (fn [id] (:effects (first (filter #(= id (:id %)) (get-in (state/get-raw-state) (conj cue-path :items))))))]
+        cue-path #(show-path)
+        clip-fx (fn [id] (:effects (first (filter #(= id (:id %)) (get-in (state/get-raw-state) (conj (cue-path) :items))))))]
     (open-timeline!)
     (when-not (get-in (state/get-raw-state) [:ui :timeline-prefs :add-panel :open?])
       (ui/click! robot "#timeline-add-content"))
@@ -384,16 +427,16 @@
         (ui/click! robot "#timeline-device-remove-0")
         (ui/wait-for! #(empty? (clip-fx clip-id)))))
     (testing "with a track selected, effects go to the track"
-      (let [track-id (:id (model/first-leaf-track (get-in (state/get-raw-state) (conj cue-path :tracks))))]
-        (events/dispatch! {:event/type :timeline/clear-selection :col 0 :row 0})
-        (events/dispatch! {:event/type :timeline/select-track :col 0 :row 0 :track-id track-id})
+      (let [track-id (:id (model/first-leaf-track (get-in (state/get-raw-state) (conj (cue-path) :tracks))))]
+        (events/dispatch! {:event/type :timeline/clear-selection :show-id (sid)})
+        (events/dispatch! {:event/type :timeline/select-track :show-id (sid) :track-id track-id})
         (ui/wait-for! #(= "TRACK PROPERTIES" (ui/node-text "#timeline-inspector-title")))
         (click-bank-button! robot "Rotation")
-        (ui/wait-for! #(= [:rotation] (mapv :effect-id (:effects (model/find-track (get-in (state/get-raw-state) (conj cue-path :tracks)) track-id)))))
+        (ui/wait-for! #(= [:rotation] (mapv :effect-id (:effects (model/find-track (get-in (state/get-raw-state) (conj (cue-path) :tracks)) track-id)))))
         (is (= "Rotation" (ui/node-text "#timeline-device-name-0")))))))
 
 
-;; Detail panel height and cell switches (plans/2026-11-08-timeline-rework/10-detail-panel-size.md)
+;; Detail panel height and show switches (plans/2026-11-08-timeline-rework/10-detail-panel-size.md)
 
 (defn- canvas-width []
   (.getWidth ^javafx.scene.canvas.Canvas (ui/query "#timeline-canvas")))
@@ -403,12 +446,11 @@
 
 (defn- near? [a b] (< (Math/abs (- (double a) (double b))) 1.0))
 
-(defn- switch-cell!
-  "Show another cell in the open editor, the way a grid click does."
+(defn- switch-show!
+  "Show another show in the open editor: a second one, copied from the cue
+   at [col row] (New Show from Cue opens it in the open editor). Its id."
   [col row]
-  (events/dispatch! {:event/type :timeline-cue-editor/open :col col :row row})
-  (ui/wait-for! #(= [col row] ((juxt :col :row)
-                               (get-in (state/get-raw-state) [:ui :dialogs :timeline-cue-editor])))))
+  (new-show-from-cue! col row))
 
 (deftest timeline-cell-switch-resets-zoom-keeps-lanes
   (let [robot (ui/robot)]
@@ -417,7 +459,7 @@
     (let [initial (slider-value)]
       (ui/click! robot "#timeline-zoom-in")
       (ui/wait-for! #(> (slider-value) initial))
-      (switch-cell! 1 0)
+      (switch-show! 1 0)
       (ui/wait-for! #(< (Math/abs (- (slider-value) initial)) 1e-6))
       (dotimes [_ 3] (ui/sync-fx!))
       (is (pos? (canvas-width)) "the lanes are still drawn after the switch"))))
@@ -443,9 +485,8 @@
     (testing "the release commits the height"
       (ui/wait-for! #(near? 380.0 (get-in (state/get-raw-state) detail-pref-path)))
       (is (near? 380.0 (detail-height))))
-    (events/dispatch! {:event/type :ui/close-dialog :dialog-id :timeline-cue-editor})
-    (ui/wait-for! #(not (get-in (state/get-raw-state) [:ui :dialogs :timeline-cue-editor :open?])))
-    (open-timeline!)
+    (close-timeline!)
+    (reopen-timeline!)
     (ui/wait-for! #(near? 380.0 (detail-height)))
     (is (near? 380.0 (detail-height)) "reopening keeps the height")))
 
@@ -458,7 +499,7 @@
       (ui/wait-for! #(near? 380.0 (get-in (state/get-raw-state) detail-pref-path)))
       (ui/click! robot "#timeline-zoom-in")
       (ui/wait-for! #(> (slider-value) initial))
-      (switch-cell! 1 0)
+      (switch-show! 1 0)
       (ui/wait-for! #(< (Math/abs (- (slider-value) initial)) 1e-6))
       (dotimes [_ 3] (ui/sync-fx!))
       (is (near? 380.0 (detail-height)) "the panel keeps its height")
@@ -473,9 +514,9 @@
 (defn- bank-content [kind id category]
   (dd/drag-content :bank-item {:kind kind :id id :category category}))
 
-(defn- items [] (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :items]))
+(defn- items [] (get-in (state/get-raw-state) (show-path :items)))
 
-(defn- tracks [] (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :tracks]))
+(defn- tracks [] (get-in (state/get-raw-state) (show-path :tracks)))
 
 (defn- first-leaf-id [] (:id (model/first-leaf-track (tracks))))
 
@@ -510,7 +551,7 @@
         (ui/wait-for! #(= (inc before) (count (items))))
         (let [clip (last (items))]
           (is (= [:square track 8.25] [(:preset-id clip) (:track-id clip) (:timeline/start clip)]))
-          (is (= #{(:id clip)} (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection]))))
+          (is (= #{(:id clip)} (get-in (state/get-raw-state) (ui-path :selection)))))
         (is (= (inc undo-before) (undo-count)))
         (is (= "Add Clip" (undo-label)))
         (is (nil? (canvas-drop-preview)) "the ghost is gone"))
@@ -570,8 +611,8 @@
         (is (:completed? (ui/fire-drop! header scale 100 10)))
         (ui/wait-for! #(= [:scale] (effect-ids (model/find-track (tracks) track))))
         (is (not (pseudo-class? header "drop-target")))
-        (ui/wait-for! #(= #{track} (get-in (state/get-raw-state) [:list-ui [:timeline-tracks 0 0] :selected-ids])))
-        (is (empty? (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection])))
+        (ui/wait-for! #(= #{track} (get-in (state/get-raw-state) [:list-ui (tracks-list-id) :selected-ids])))
+        (is (empty? (get-in (state/get-raw-state) (ui-path :selection))))
         (ui/wait-for! #(= "TRACK PROPERTIES" (ui/node-text "#timeline-inspector-title")))))
     (testing "zone effects don't go on tracks"
       (is (not (:accepted? (ui/fire-drop! (ui/query "#timeline-track-header-1")
@@ -580,8 +621,8 @@
       (let [fx-count (fn [] (into {} (map (juxt :id #(count (:effects %)))) (items)))
             before (fx-count)]
         (is (:completed? (ui/fire-drop! (ui/query "#timeline-canvas") scale 100 first-track-y)))
-        (ui/wait-for! #(= 1 (count (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection]))))
-        (let [id (first (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection]))]
+        (ui/wait-for! #(= 1 (count (get-in (state/get-raw-state) (ui-path :selection)))))
+        (let [id (first (get-in (state/get-raw-state) (ui-path :selection)))]
           (ui/wait-for! #(= (assoc before id (inc (before id))) (fx-count))))))))
 
 (deftest timeline-real-drag-from-browser
@@ -719,7 +760,7 @@
 
 (deftest timeline-track-reorder-survives-bank-drop-targets
   (open-timeline!)
-  (events/dispatch! {:event/type :timeline/add-track :col 0 :row 0})
+  (events/dispatch! {:event/type :timeline/add-track :show-id (sid)})
   (ui/wait-for! #(= 2 (count (tracks))))
   (ui/wait-for! #(some? (ui/query "#timeline-track-header-2")))
   (let [moved (:id (last (tracks)))
@@ -733,9 +774,9 @@
         (is (= (inc undo-before) (undo-count)))))
     (testing "a list drag (a string, MOVE) still reorders the tracks"
       ;; The source side of a header drag, as list-dnd's drag-detected does it
-      (events/dispatch! {:event/type :list/start-drag :component-id [:timeline-tracks 0 0]
-                         :item-id moved :items-path [:chains :cue-chains [0 0] :tracks]})
-      (ui/wait-for! #(seq (get-in (state/get-raw-state) [:list-ui [:timeline-tracks 0 0] :dragging-ids])))
+      (events/dispatch! {:event/type :list/start-drag :component-id (tracks-list-id)
+                         :item-id moved :items-path (show-path :tracks)})
+      (ui/wait-for! #(seq (get-in (state/get-raw-state) [:list-ui (tracks-list-id) :dragging-ids])))
       (is (:completed? (ui/fire-drop! (ui/query "#timeline-track-header-0")
                                       (doto (javafx.scene.input.ClipboardContent.) (.putString (pr-str moved)))
                                       100 2 :mode javafx.scene.input.TransferMode/MOVE)))
@@ -743,34 +784,35 @@
       (is (= 2 (count (tracks)))))))
 
 (deftest track-drop-on-the-column-reorders-the-cell-shown-test
-  ;; Reactivity plan 04: showing another cell keeps the header column, whose
-  ;; drop on empty space kept the first cell's tracks, so it moved nothing
-  (let [tracks-of #(get-in (state/get-raw-state) [:chains :cue-chains [% 0] :tracks])
+  ;; Reactivity plan 04: showing another show keeps the header column, whose
+  ;; drop on empty space kept the first show's tracks, so it moved nothing
+  (let [tracks-of #(get-in (state/get-raw-state) (conj (shows/show-path %) :tracks))
         column #(some-> ^javafx.scene.Node (ui/query "#timeline-track-header-0") .getParent .getParent)]
     (open-timeline!)
     (ui/wait-for! #(some? (column)))
     (let [pane (column)
-          first-cell (tracks-of 0)]
-      (switch-cell! 1 0)
-      (events/dispatch! {:event/type :timeline/add-track :col 1 :row 0})
-      (ui/wait-for! #(= 2 (count (tracks-of 1))))
-      (is (identical? pane (column)) "the same column shows the other cell's tracks")
-      (let [[t1 t2] (map :id (tracks-of 1))]
-        (events/dispatch! {:event/type :list/start-drag :component-id [:timeline-tracks 1 0]
-                           :item-id t1 :items-path [:chains :cue-chains [1 0] :tracks]})
-        (ui/wait-for! #(seq (get-in (state/get-raw-state) [:list-ui [:timeline-tracks 1 0] :dragging-ids])))
+          first-show (sid)
+          first-tracks (tracks-of first-show)
+          other (switch-show! 1 0)]
+      (events/dispatch! {:event/type :timeline/add-track :show-id other})
+      (ui/wait-for! #(= 2 (count (tracks-of other))))
+      (is (identical? pane (column)) "the same column shows the other show's tracks")
+      (let [[t1 t2] (map :id (tracks-of other))]
+        (events/dispatch! {:event/type :list/start-drag :component-id (tracks-list-id other)
+                           :item-id t1 :items-path (conj (shows/show-path other) :tracks)})
+        (ui/wait-for! #(seq (get-in (state/get-raw-state) [:list-ui (tracks-list-id other) :dragging-ids])))
         (is (:completed? (ui/fire-drop! pane
                                         (doto (javafx.scene.input.ClipboardContent.) (.putString (pr-str t1)))
                                         20 5 :mode javafx.scene.input.TransferMode/MOVE)))
-        (ui/wait-for! #(= [t2 t1] (map :id (tracks-of 1))))
-        (is (= first-cell (tracks-of 0)) "the first cell's tracks are as they were")))))
+        (ui/wait-for! #(= [t2 t1] (map :id (tracks-of other))))
+        (is (= first-tracks (tracks-of first-show)) "the first show's tracks are as they were")))))
 
 (deftest escape-cancels-a-track-rename-test
   ;; Keyboard plan 03: the rename field keeps its keys (Delete, letters) and
   ;; Escape ends the rename, leaving the name as it was
   (let [robot (ui/robot)
-        track-name #(:name (first (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :tracks])))]
-    (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
+        track-name #(:name (first (get-in (state/get-raw-state) (show-path :tracks))))]
+    (open-timeline!)
     (ui/wait-for! #(some? (ui/query "#timeline-track-header-0")))
     (let [before (track-name)]
       (.doubleClickOn ^org.testfx.api.FxRobotInterface robot ^javafx.scene.Node (ui/query "#timeline-track-header-0")
@@ -784,3 +826,87 @@
       (ui/wait-for! #(nil? (ui/query "#timeline-track-rename")))
       (is (= before (track-name)))
       (is (some? (ui/query "#timeline-track-header-0")) "no track deleted"))))
+
+
+;; The show the editor addresses (plans/2026-11-25-timeline-shows/05-editor-rekey.md §5.1-§5.3)
+
+(defn- title-showing? [title] (some #{title} (ui/window-titles)))
+
+(deftest deleted-show-shows-placeholder-test
+  (open-timeline!)
+  (is (title-showing? "Timeline Editor - Untitled") "a cue with no name makes an Untitled show")
+  (events/dispatch! {:event/type :timeline/set-cursor-beat :show-id (sid) :beat 4.0})
+  (ui/wait-for! #(= "2.1.1" (ui/node-text "#timeline-readout")))
+  (testing "undoing New Show from Cue takes the show away: the window stays, with a placeholder"
+    (is (= "New Show from Cue" (undo-label)))
+    (events/dispatch! {:event/type :edit/undo})
+    (ui/wait-for! #(nil? (get-in (state/get-raw-state) (show-path))))
+    (ui/wait-for! #(ui/visible? "#timeline-show-gone"))
+    (is (= "This show is no longer in the library." (ui/node-text "#timeline-show-gone")))
+    (ui/wait-for! #(title-showing? "Timeline Editor - (deleted)"))
+    (is (nil? (ui/query "#timeline-lanes")) "no editor for a show that isn't there")
+    (is (= (sid) (dialog-show)) "the dialog still names the show"))
+  (testing "redo brings it back in the same window, at the same cursor"
+    (events/dispatch! {:event/type :edit/redo})
+    (ui/wait-for! #(some? (get-in (state/get-raw-state) (show-path))))
+    (ui/wait-for! #(ui/visible? "#timeline-lanes"))
+    (is (nil? (ui/query "#timeline-show-gone")))
+    (ui/wait-for! #(title-showing? "Timeline Editor - Untitled"))
+    (is (= 4.0 (get-in (state/get-raw-state) (ui-path :cursor-beat))))
+    (ui/wait-for! #(= "2.1.1" (ui/node-text "#timeline-readout")))))
+
+(defn- labeled-texts
+  "The texts of the labels and buttons found by selector."
+  [selector]
+  (ui/on-fx-thread #(into [] (keep (fn [n] (when (instance? javafx.scene.control.Labeled n)
+                                             (.getText ^javafx.scene.control.Labeled n))))
+                          (ui/query-all selector))))
+
+(defn- fire-chip-item!
+  "Fire the item of the menu button at selector whose text, without its
+   tick, is text, as a click on it does."
+  [selector text]
+  (let [^javafx.scene.control.MenuButton chip (ui/query selector)
+        items (ui/on-fx-thread #(vec (.getItems chip)))
+        text-of (fn [^javafx.scene.control.MenuItem i]
+                  (str/trim (str/replace (str (ui/on-fx-thread #(.getText i))) #"^✓ " "")))
+        item (some #(when (= text (text-of %)) %) items)]
+    (is (some? item) (str "an item " (pr-str text) " in " (mapv text-of items)))
+    (when item
+      (ui/on-fx-thread #(.fire ^javafx.scene.control.MenuItem item))
+      (ui/sync-fx!))))
+
+(deftest footer-target-and-pattern-on-a-show-test
+  (open-timeline!)
+  ;; Set after the copy, which would take the column's default as its own
+  (events/write-state! #(-> %
+                            (assoc-in [:grid :column-targets] {0 :zone/a})
+                            (assoc-in [:config :default-target] :graphics)))
+  (testing "Target: a show has no column, so Inherit is the show default"
+    (ui/wait-for! #(some? (ui/query "#target-chip-cue")))
+    (ui/wait-for! #(= "(Graphics)" (ui/node-text "#target-chip-cue")))
+    (ui/assert-text! "#target-from-cue" "from the show default"))
+  (testing "Pattern: the show's chip is there"
+    (is (ui/visible? "#pattern-chip-cue")))
+  (testing "no trigger mode and no way to the cue chain editor"
+    (let [texts (into (labeled-texts ".dialog-footer .label") (labeled-texts ".dialog-footer .button"))]
+      (is (some #{"Close"} texts))
+      (is (not-any? #(and % (str/starts-with? % "Trigger")) texts))
+      (is (not-any? #{"Open in Cue Chain Editor"} texts))))
+  (testing "choosing a Target sets the show's own, as one undo step"
+    (fire-chip-item! "#target-chip-cue" "B → Right")
+    (ui/wait-for! #(= :zone/b (get-in (state/get-raw-state) (show-path :target))))
+    (ui/wait-for! #(= "B → Right" (ui/node-text "#target-chip-cue")))
+    (is (empty? (ui/query-all "#target-from-cue")) "the show's own: no from")
+    (is (= "Change Show Target" (undo-label))))
+  (testing "Inherit takes it away again"
+    (fire-chip-item! "#target-chip-cue" "Inherit (Graphics · from the show default)")
+    (ui/wait-for! #(not (contains? (get-in (state/get-raw-state) (show-path)) :target)))
+    (ui/wait-for! #(= "(Graphics)" (ui/node-text "#target-chip-cue")))))
+
+(deftest name-field-renames-the-show-test
+  (open-timeline!)
+  (events/dispatch! {:event/type :timeline/set-name :show-id (sid) :name "One More Time"})
+  (ui/wait-for! #(= "One More Time" (get-in (state/get-raw-state) (show-path :name))))
+  (ui/wait-for! #(title-showing? "Timeline Editor - One More Time"))
+  (is (= "Rename Show" (undo-label))))
