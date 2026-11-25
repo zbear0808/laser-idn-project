@@ -24,10 +24,8 @@
   (:refer-clojure :exclude [bound?])
   (:require [clojure.tools.logging :as log]
             [laser-show.input.events :as input-events]
+            [laser-show.timeline.shows :as shows]
             [laser-show.triggers.matcher :as matcher]))
-
-(defn- cell? [target]
-  (and (vector? target) (= 2 (count target)) (every? int? target)))
 
 (defn- lookup-key [event]
   (cond
@@ -90,7 +88,8 @@
   (boolean (resolve-action state input-event)))
 
 (defn- momentary-event
-  "Momentary cells play while held: press starts, release stops."
+  "Momentary cells and shows play while held: press starts, release stops.
+   A show starts from beat 0."
   [{:keys [type target]} input-event]
   (when (vector? target)
     (let [press? (pressed? input-event)
@@ -103,6 +102,10 @@
                          :col col
                          :row row
                          :fx/event press?}
+        :toggle-show (when-let [id (shows/key-show-id target)]
+                       (if press?
+                         {:event/type :timeline/play :show-id id :from 0.0}
+                         {:event/type :timeline/stop :show-id id}))
         nil))))
 
 (def ^:private vibe-action?
@@ -153,7 +156,7 @@
         {:event/type :pattern-pads/step :src :input :input-time (:timestamp input-event)})
 
       (and (= :momentary (:behavior action))
-           (#{:trigger-cue :trigger-effect} type))
+           (#{:trigger-cue :trigger-effect :toggle-show} type))
       (momentary-event action input-event)
 
       (pressed? input-event)
@@ -169,12 +172,16 @@
         :stop-all {:event/type :transport/stop}
         :blackout {:event/type :transport/stop}
         :tap-tempo {:event/type :timing/tap-tempo :input-time (:timestamp input-event)}
-        :start-timeline (if (cell? target)
-                          {:event/type :timeline/play :col (first target) :row (second target)}
-                          (log/debug "start-timeline needs a [col row] target, got" (pr-str target)))
-        :stop-timeline (if (cell? target)
-                         {:event/type :timeline/stop :col (first target) :row (second target)}
-                         (log/debug "stop-timeline needs a [col row] target, got" (pr-str target)))
+        ;; A show's [:show id] target; a grid cell holds no timeline any
+        ;; more (Open moves them into the show library)
+        :start-timeline (if-let [id (shows/key-show-id target)]
+                          {:event/type :timeline/play :show-id id}
+                          (log/debug "start-timeline needs a [:show id] target, got" (pr-str target)))
+        :stop-timeline (if-let [id (shows/key-show-id target)]
+                         {:event/type :timeline/stop :show-id id}
+                         (log/debug "stop-timeline needs a [:show id] target, got" (pr-str target)))
+        :toggle-show (when-let [id (shows/key-show-id target)]
+                       {:event/type :shows/toggle-run :show-id id})
         :apply-preset (when target
                         {:event/type :preset/apply :preset-id target})
         nil)
