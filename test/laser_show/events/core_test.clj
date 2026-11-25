@@ -355,6 +355,41 @@
         (is (nil? (get-in (state/get-raw-state) [:project :current-file])) "the save's follow-up wrote nothing")
         (is (zero? @exits) "and the Exit after it didn't run")))))
 
+(deftest a-retired-app-s-try-again-never-quits-the-next-app-test
+  ;; Follow-up B9: a rig that takes the place of one with a waiting Exit
+  ;; carries that Exit on (rig-store/submit!), but only within its app. Here
+  ;; the next app's rig edit takes the place of a retired app's Try again,
+  ;; whose write was still waiting behind a stuck one
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "core-rig-then" (make-array java.nio.file.attribute.FileAttribute 0)))
+        path (str (io/file dir "rig.edn"))
+        exits (atom 0)
+        entered (promise)
+        gate (promise)
+        write! rig-store/write!]
+    (events/set-exit-fn! #(swap! exits inc))
+    (state/swap-state! assoc-in [:rig-file :path] path)
+    (with-redefs [rig-store/write! (fn [p doc] (deliver entered true) (deref gate 5000 nil) (write! p doc))]
+      (try
+        (with-instance
+          (fn [first-app]
+            (first-app {:event/type :rig/retry-write})
+            (is (deref entered 2000 false) "the writer is stuck in a write")
+            (first-app {:event/type :rig/retry-write :then {:event/type :file/exit :force? true :rig-force? true}})
+            (is (handled? first-app))
+            (let [next-app (dispatcher-of (events/new-instance!))]
+              (next-app {:event/type :rig/set-middle :middle :both})
+              (is (handled? next-app))
+              (deliver gate true)
+              (is (true? (rig-store/flush! 5000)))
+              (is (handled? next-app) "the write's result has come back to the next app")
+              (is (= :saved (get-in (state/get-raw-state) [:rig-file :status])))
+              (is (= :both (get-in (rig-store/read! path) [:doc :rig :middle])))
+              (is (zero? @exits) "the retired app's Exit doesn't quit the next one"))))
+        (finally
+          (deliver gate true)
+          (rig-store/flush! 2000)
+          (doseq [^File f (reverse (file-seq dir))] (.delete f)))))))
+
 (deftest an-instance-writes-only-into-its-own-context-test
   (log-test/with-log
     (with-instance

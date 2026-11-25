@@ -44,15 +44,21 @@
    Undo, Redo and a press's abort. The effect cells the vibe engine
    switched on stay its own where the restore takes their on/off
    (history/effect-cell-sources, on the state before it; refs/restore-fx),
-   so the next vibe and Save still switch them off. The projector UI lets go
+   so the next vibe and Save still switch them off, and so do the vibe's
+   refusal and what a held key switched on; a cell a move had replaced
+   goes back to what owned it then (history/replaced-effect-cells, the
+   snapshot's :effect-owners). The projector UI lets go
    of a projector or virtual projector the restore took away
    (h/prune-projector-ui), and selects nothing: Redo of an Add brings the
-   projector back unselected (reactivity plans 22, 23, 14)."
+   projector back unselected (reactivity plans 22, 23, 14; follow-up B8)."
   [state snapshot]
-  (-> state
-      (history/restore-snapshot snapshot)
-      (refs/restore-fx (history/effect-cell-sources state (:document-state snapshot)))
-      (h/prune-projector-ui)))
+  (let [document (:document-state snapshot)]
+    (-> state
+        (history/restore-snapshot snapshot)
+        (refs/restore-fx (history/effect-cell-sources state document)
+                         (history/replaced-effect-cells state document)
+                         (:effect-owners snapshot))
+        (h/prune-projector-ui))))
 
 (defn handle-begin-transaction
   "A press's transaction, on mouse down: :history/gesture-id is the press's

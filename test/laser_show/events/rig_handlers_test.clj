@@ -183,13 +183,51 @@
                  (assoc-in [:projectors :a :enabled?] true)
                  (assoc-in [:projectors :a :safety] {:limit [-0.5 -0.5 0.5 0.5] :blocked []})
                  (assoc-in [:backend :streaming :running?] true))
-        asked (handle live {:event/type :rig/set-up-from-show})]
+        asked (handle live {:event/type :rig/set-up-from-show})
+        allow (get-in asked [:ui :dialogs :confirm :confirm-event])]
     (is (= (:projectors live) (:projectors asked)) "nothing changes yet")
     (is (= "Allow light in a larger area?" (get-in asked [:ui :dialogs :confirm :title])))
-    (is (= {:event/type :rig/set-up-from-show :confirmed? true} (get-in asked [:ui :dialogs :confirm :confirm-event])))
-    (is (= [-1.0 -1.0 1.0 1.0] (get-in (handle asked {:event/type :rig/set-up-from-show :confirmed? true})
-                                       [:projectors :a :safety :limit]))
-        "confirmed, it applies")))
+    (is (= {:event/type :rig/set-up-from-show :confirmed? true} (dissoc allow :review-id)))
+    (is (some? (:review-id allow)) "a question of its own (follow-up N8)")
+    (is (= [-1.0 -1.0 1.0 1.0] (get-in (handle asked allow) [:projectors :a :safety :limit]))
+        "allowed, it applies")))
+
+(deftest set-up-allows-only-the-zones-it-asked-about-test
+  ;; Follow-up N8: the set-up question's Allow came back as a bare
+  ;; :confirmed? true, which applied whatever the set-up gave by then: a
+  ;; larger safety zone than the one it asked about, or another laser's
+  (let [live (-> (asking-to-set-up (assoc-in show-hardware [:projectors :a :safety] {:limit [-1.0 -1.0 1.0 1.0] :blocked []}))
+                 (assoc-in [:projectors :a :enabled?] true)
+                 (assoc-in [:projectors :a :safety] {:limit [-0.5 -0.5 0.5 0.5] :blocked []})
+                 (assoc-in [:backend :streaming :running?] true))
+        run #(:state (pipeline %1 %2))
+        asked (run live {:event/type :rig/set-up-from-show})
+        allow (get-in asked [:ui :dialogs :confirm :confirm-event])
+        limit #(get-in % [:projectors :a :safety :limit])
+        steps #(mapv :description (get-in % [:history :undo-stack]))]
+    (testing "unchanged: the Allow applies, once"
+      (let [allowed (run asked allow)]
+        (is (= [-1.0 -1.0 1.0 1.0] (limit allowed)))
+        (is (false? (get-in allowed [:ui :dialogs :confirm :open?])))
+        (is (= ["Set Up Rig From Show"] (steps allowed)) "one undo step")
+        (let [again (run allowed allow)]
+          (is (= [(:projectors allowed) (steps allowed)] [(:projectors again) (steps again)]) "the same Allow again: nothing"))))
+    (testing "Laser A's zone changed while it asks: refused, with its notice"
+      (let [changed (run asked {:event/type :projectors/add-blocked-area :projector-id :a})
+            refused (run changed allow)]
+        (is (= 1 (count (get-in changed [:projectors :a :safety :blocked]))) "a smaller area, at once")
+        (is (= (:projectors changed) (:projectors refused)) "nothing written")
+        (is (false? (get-in refused [:ui :dialogs :confirm :open?])) "the question closes")
+        (is (= "Safety zone changed; review the edit again" (get-in refused [:ui :notice :text])))))
+    (testing "the show's zone for it changed while it asks: refused too"
+      (let [changed (assoc-in asked [:ui :dialogs :rig-report :hardware :projectors :a :safety :limit] [-0.9 -0.9 0.9 0.9])
+            refused (run changed allow)]
+        (is (= [-0.5 -0.5 0.5 0.5] (limit refused)))
+        (is (= "Safety zone changed; review the edit again" (get-in refused [:ui :notice :text])))))
+    (testing ":confirmed? true alone is no permission: it asks"
+      (let [again (run live {:event/type :rig/set-up-from-show :confirmed? true})]
+        (is (= [-0.5 -0.5 0.5 0.5] (limit again)))
+        (is (true? (get-in again [:ui :dialogs :confirm :open?])))))))
 
 
 ;; The report's buttons
@@ -222,15 +260,24 @@
         (is (= [-0.8 -0.8 0.8 0.8] (get-in used [:projectors :a :safety :limit])))
         (is (= ["Use Show's Setup"] (mapv :description (get-in used [:history :undo-stack]))))
         (is (false? (get-in used [:project :dirty?])))))
-    (testing "while A outputs, the larger area asks again (Z1's rule, D-28), and only then applies"
+    (testing "while A outputs, the larger area asks again (Z1's rule, D-28), in a question of its own, and only
+              its Allow applies"
       (let [live (assoc-in s [:backend :streaming :running?] true)
-            again (handle live {:event/type :rig/use-show-setup :projector-id :a})]
+            again (handle live {:event/type :rig/use-show-setup :projector-id :a})
+            allow (get-in again [:ui :dialogs :confirm :confirm-event])]
         (is (= [-0.5 -0.5 0.5 0.5] (get-in again [:projectors :a :safety :limit])) "nothing yet")
         (is (= "Allow light in a larger area?" (get-in again [:ui :dialogs :confirm :title])))
-        (is (= {:event/type :rig/use-show-setup :projector-id :a :confirmed? true}
-               (get-in again [:ui :dialogs :confirm :confirm-event])))
-        (is (= [-0.8 -0.8 0.8 0.8] (get-in (handle again {:event/type :rig/use-show-setup :projector-id :a :confirmed? true})
-                                           [:projectors :a :safety :limit])))))
+        (is (= {:event/type :rig/use-show-setup :confirmed? true} (dissoc allow :review-id)))
+        (is (= [-0.8 -0.8 0.8 0.8] (get-in (handle again allow) [:projectors :a :safety :limit])))
+        (is (= [-0.5 -0.5 0.5 0.5] (get-in (handle live {:event/type :rig/use-show-setup :projector-id :a :confirmed? true})
+                                           [:projectors :a :safety :limit]))
+            ":confirmed? true alone: no permission, it asks")
+        (testing "; A's zone changed while it asks: refused, with its notice"
+          (let [changed (:state (pipeline again {:event/type :projectors/add-blocked-area :projector-id :a}))
+                refused (:state (pipeline changed allow))]
+            (is (= (get-in changed [:projectors :a :safety]) (get-in refused [:projectors :a :safety])))
+            (is (false? (get-in refused [:ui :dialogs :confirm :open?])))
+            (is (= "Safety zone changed; review the edit again" (get-in refused [:ui :notice :text])))))))
     (testing "a shrinking zone on a live laser applies at once"
       (let [live (-> s
                      (assoc-in [:backend :streaming :running?] true)

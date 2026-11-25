@@ -100,6 +100,61 @@
       (let [bare {:chains {:effect-chains {[0 0] {:items []}}}}]
         (is (= bare (refs/restore-fx bare {[0 0] [0 0]})))))))
 
+(def ^:private k40 {:source :midi :channel 0 :note 40})
+
+(deftest refusal-and-held-keys-follow-an-effect-cell-test
+  ;; Follow-up B8: the vibe's refusal and what a held key switched on name
+  ;; the cell their content is in
+  (let [s (-> state
+              (assoc-in [:vibe-runtime :problem] {:why :audience-fx :cell [0 0]})
+              (assoc-in [:trigger-runtime :activations] {k40 {:type :trigger-effect :target [0 0] :behavior :momentary}
+                                                         {:source :midi :channel 0 :note 41} {:type :trigger-cue :target [0 0]}}))
+        problem #(get-in % [:vibe-runtime :problem])
+        target #(get-in % [:trigger-runtime :activations k40 :target])]
+    (testing "moved"
+      (let [moved (refs/move-fx s [0 0] [4 4])]
+        (is (= [{:why :audience-fx :cell [4 4]} [4 4]] [(problem moved) (target moved)]))
+        (is (= [0 0] (get-in moved [:trigger-runtime :activations {:source :midi :channel 0 :note 41} :target]))
+            "a cue key is the other grid's")))
+    (testing "another cell moved onto it, or it cleared: let go of"
+      (doseq [s' [(refs/move-fx s [1 1] [0 0]) (refs/remove-fx s [0 0])]]
+        (is (= [nil nil] [(problem s') (target s')]))
+        (is (= {:type :trigger-effect :target nil :behavior :momentary} (get-in s' [:trigger-runtime :activations k40]))
+            "the key keeps its activation, so its release still ends it")))
+    (testing "restored: where its content went, or let go of"
+      (is (= [{:why :audience-fx :cell [2 3]} [2 3]] ((juxt problem target) (refs/restore-fx s {[2 3] [0 0]}))))
+      (is (= [nil nil] ((juxt problem target) (refs/restore-fx s {[2 3] [1 1]})))))))
+
+(deftest a-replaced-cell-goes-back-to-its-owner-while-it-is-there-test
+  ;; Follow-up B8: restore-fx with the cell a move had replaced, on again
+  ;; (state.history/restore-document), and the step's fx-owners
+  (let [on (fn [s cell] (assoc-in s [:chains :effect-chains cell] {:items [] :active? true}))
+        s (-> {:vibe-runtime {:current :v :entered-at 10 :fx-on [] :voices {} :held {}}}
+              (on [2 3]))
+        owners {:fx-on [[2 3]] :look [:v 10]}
+        fx-on #(get-in % [:vibe-runtime :fx-on])
+        on? #(get-in % [:chains :effect-chains [2 3] :active?])]
+    (is (= [[[2 3]] true] ((juxt fx-on on?) (refs/restore-fx s {} #{[2 3]} owners))) "the same look: the FX set's again")
+    (is (= [[] false] ((juxt fx-on on?) (refs/restore-fx (assoc-in s [:vibe-runtime :entered-at] 20) {} #{[2 3]} owners)))
+        "another look since: off, nobody's")
+    (is (= [[] false] ((juxt fx-on on?) (refs/restore-fx (assoc-in s [:vibe-runtime :blackout?] true) {} #{[2 3]} owners)))
+        "during blackout too")
+    (is (= [[] true] ((juxt fx-on on?) (refs/restore-fx s {} #{[2 3]} nil))) "on by hand: it stays on")
+    (testing "the held flash's, while the same press holds it"
+      (let [held (-> s
+                     (assoc-in [:vibe-runtime :voices :flash] {:fx [] :fx-on []})
+                     (assoc-in [:vibe-runtime :held :flash] {:at 1500}))
+            owners {:flash {:fx [[2 3]] :fx-on [[2 3]] :press 1500}}
+            flash #((juxt :fx :fx-on) (get-in % [:vibe-runtime :voices :flash]))]
+        (is (= [[[2 3]] [[2 3]]] (flash (refs/restore-fx held {} #{[2 3]} owners))))
+        (is (false? (on? (refs/restore-fx (assoc-in held [:vibe-runtime :held :flash :at] 2500) {} #{[2 3]} owners)))
+            "pressed again since: off")))
+    (testing "a key's, while it holds the activation the move let go of"
+      (let [held (assoc-in s [:trigger-runtime :activations k40] {:type :trigger-effect :target nil :behavior :momentary})
+            owners {:holds {k40 [2 3]}}]
+        (is (= [2 3] (get-in (refs/restore-fx held {} #{[2 3]} owners) [:trigger-runtime :activations k40 :target])))
+        (is (false? (on? (refs/restore-fx s {} #{[2 3]} owners))) "let go of since: off")))))
+
 (deftest trigger-targets-follow-a-move-test
   (let [k1 {:source :midi :channel 0 :note 60}
         k2 {:source :midi :channel 0 :note 61}

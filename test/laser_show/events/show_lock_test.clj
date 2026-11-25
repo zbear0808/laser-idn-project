@@ -230,6 +230,38 @@
         (is (= #{:state :dispatch-later} (set (keys effects))))
         (is (nil? (get-in effects [:state :chains :cue-chains [5 2]])))))))
 
+(deftest locked-paste-back-for-a-replaced-show-says-nothing-test
+  ;; Follow-up B12 (a): a paste waiting for the OS clipboard when New or
+  ;; Open replaced its show does nothing at all once it is back. With the
+  ;; lock on by then, the lock refused it first, and said so, about a show
+  ;; that was gone
+  (let [s0 (-> (starter)
+               (assoc-in [:project :document-id] (random-uuid))
+               (assoc-in [:ui :clipboard] nil)
+               (with-b1-grid)
+               (assoc-in [:ui :active-tab] :grid)
+               (assoc-in [:grid :selected-cell] [5 2])
+               (history/mark-clean))
+        clip {:type :cue-chain :data {:items []} :copied-at 1}
+        replacements [["New" {:event/type :file/new-project}]
+                      ["Open" {:event/type :file/project-loaded :file-path "/tmp/other.zip"
+                               :contents (persistent/project-files (starter))}]]]
+    (doseq [event [{:event/type :grid/paste-cell :col 5 :row 2}
+                   {:event/type :effects/paste-cell :col 5 :row 2}
+                   {:event/type :edit/paste}
+                   {:event/type :step-grid/paste :target b1-grid}]
+            [label replace] replacements]
+      (testing (str (:event/type event) " back after " label)
+        (let [back (assoc (get-in (handle s0 event) [:clipboard/read :then]) :clipboard/system clip)
+              replaced (lock (run s0 replace))]
+          (is (= (get-in s0 [:project :document-id]) (:document-id back)) "stamped for the show it came from")
+          (is (not= (:document-id back) (get-in replaced [:project :document-id])) "which is gone")
+          (is (= {} (handle replaced back)) "nothing at all: no notice, no state")
+          (testing "; back in the same show, the lock refuses it, and says so"
+            (let [effects (handle (lock s0) back)]
+              (is (= #{:state :dispatch-later} (set (keys effects))))
+              (is (= (:event/type back) (get-in effects [:state :ui :show-lock-notice :event]))))))))))
+
 (deftest locked-allows-performance-events-test
   (let [s0 (starter)
         ;; Stop's restart request has a random id

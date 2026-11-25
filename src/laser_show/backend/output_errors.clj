@@ -78,6 +78,15 @@
                           (pr-str key) (:count entry)
                           (if (= 1 (:count entry)) "failure" "failures")))))))
 
+(defn forget!
+  "Forget key's failure without logging: what failed is gone, and the key
+   isn't its any more (a streaming engine's next run takes [:engine id]
+   over). Nothing for a key that isn't failing."
+  [key]
+  (when (contains? @errors key)
+    (swap! errors dissoc key))
+  nil)
+
 (defn failing?
   "True if any key is failing."
   []

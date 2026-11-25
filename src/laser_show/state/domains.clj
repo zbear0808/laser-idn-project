@@ -84,6 +84,8 @@
                        them once :hold? is false."}
    :chase-sources {:default {:next 1 :cells {}}
                    :doc "{:next n :cells {[col row] version}}: which version of each cue that follows timecode the show clock may chase (timeline.playback/source-version). The edit that makes or changes a follower gives it the next version, one that removes it or stops it following drops its entry (events.handlers.timeline/reconcile-chase-sources, on every changed cue, undo and redo too); :next never goes back. A new show's followers are 0. Session only: not saved, undone or compared for unsaved changes"}
+   :chase-stopped {:default {}
+                   :doc "{[col row] chase-id}: a cue that follows timecode which a grid press stopped while the show clock chased it as that episode (events.handlers.grid): the clock neither draws nor reports the episode, and its On is ignored (:show-clock/apply-chase), until a new episode begins there, which plays; pressed again, it follows again. Session only: not saved, undone or compared for unsaved changes; New and Open start without"}
    :requests {:default {}
               :doc "{:restart {:id} :align {:id} :shift {:id :offset}}: the show clock applies each id once (Stop and Retrigger, tap tempo, Link)"}
    :pulses {:default {}

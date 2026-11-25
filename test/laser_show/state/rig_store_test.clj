@@ -233,6 +233,66 @@
         (finally
           (deliver gate true))))))
 
+(deftest superseding-rig-carries-the-waiting-then-test
+  ;; Follow-up B9: Exit's Try again submits its rig with what waits for it;
+  ;; before, an autosave that took its place before the writer took it
+  ;; dropped that, so Exit had to be pressed again
+  (let [results (atom [])
+        report (fn [label] #(swap! results conj [label (:then %) (contains? % :at)]))
+        while-busy (fn [f]
+                     (let [entered (promise)
+                           gate (promise)]
+                       (reset! results [])
+                       (with-redefs [rig-store/write! (gated-write entered gate)]
+                         (try
+                           (rig-store/submit! (rig-path) (doc "A") (report :a) 0)
+                           (is (true? (deref entered 2000 false)) "the writer is writing A")
+                           (f)
+                           (deliver gate true)
+                           (is (true? (rig-store/flush! 5000)))
+                           (finally
+                             (deliver gate true))))))]
+    (testing "a rig with no then of its own takes the waiting one over"
+      (while-busy (fn []
+                    (rig-store/submit! (rig-path) (doc "B") (report :b) 0 :exit)
+                    (rig-store/submit! (rig-path) (doc "C") (report :c) 0)))
+      (is (= [[:a nil true] [:c :exit true]] @results) "B was never written nor reported; C carries its then")
+      (is (= (doc "C") (:doc (rig-store/read! (rig-path))))))
+    (testing "a rig with a then of its own keeps its own: there is only ever one"
+      (while-busy (fn []
+                    (rig-store/submit! (rig-path) (doc "B") (report :b) 0 :first-exit)
+                    (rig-store/submit! (rig-path) (doc "C") (report :c) 0 :second-exit)))
+      (is (= [[:a nil true] [:c :second-exit true]] @results)))
+    (testing "a rig the writer has taken already reports its own then; the next one carries none"
+      (let [entered (promise)
+            gate (promise)]
+        (reset! results [])
+        (with-redefs [rig-store/write! (gated-write entered gate)]
+          (try
+            (rig-store/submit! (rig-path) (doc "B") (report :b) 0 :exit)
+            (is (true? (deref entered 2000 false)) "the writer is writing B")
+            (rig-store/submit! (rig-path) (doc "C") (report :c) 0)
+            (deliver gate true)
+            (is (true? (rig-store/flush! 5000)))
+            (finally
+              (deliver gate true)))))
+      (is (= [[:b :exit true] [:c nil true]] @results)))
+    (testing "the rig that carries it fails: the then comes with the failure, once"
+      (let [entered (promise)
+            gate (promise)]
+        (reset! results [])
+        (with-redefs [rig-store/write! (fn [_ _] (deliver entered true) @gate {:error "No space left on device"})]
+          (try
+            (rig-store/submit! (rig-path) (doc "A") (report :a) 0)
+            (is (true? (deref entered 2000 false)))
+            (rig-store/submit! (rig-path) (doc "B") (report :b) 0 :exit)
+            (rig-store/submit! (rig-path) (doc "C") (report :c) 0)
+            (deliver gate true)
+            (is (true? (rig-store/flush! 5000)))
+            (finally
+              (deliver gate true)))))
+      (is (= [[:a nil false] [:c :exit false]] @results)))))
+
 (defn- inline-writer
   "A rig writer that runs a task due at once inside schedule, before submit!
    goes on: as when the writer's thread starts it straight away. Other

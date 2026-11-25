@@ -122,6 +122,16 @@
   [state event]
   (= (:document-id event) (document-id state)))
 
+(defn stale-paste?
+  "Is event a paste back from the OS clipboard's read (:clipboard/system,
+   with-clipboard) for a show that New or Open has replaced since
+   (same-document?)? It does nothing at all ({}), whatever would look at it
+   first: with-clipboard, and the show lock, which would otherwise refuse
+   it, and say so, about a show that is gone."
+  [state event]
+  (and (contains? event :clipboard/system)
+       (not (same-document? state event))))
+
 
 ;; The clipboard (keyboard plan Phase 4, Step 4a)
 
@@ -134,16 +144,17 @@
    with event and :clipboard/system, the clip it found or nil, which the
    slot takes if it is still empty (clipboard/adopt). A read that comes back
    after New or Open replaced that show does nothing at all ({}: no paste,
-   no slot, no notice). A paste after a read that finds nothing to paste
-   says so: \"Nothing to paste here\". Without a read, a clip the target
-   doesn't take does nothing."
+   no slot, no notice; stale-paste?, which the show lock checks first too).
+   A paste after a read that finds nothing to paste says so: \"Nothing to
+   paste here\". Without a read, a clip the target doesn't take does
+   nothing."
   [{:keys [state] :as event} f]
   (let [read? (contains? event :clipboard/system)]
     (cond
       (and (nil? (get-in state [:ui :clipboard])) (not read?))
       {:clipboard/read {:then (for-document (parked event) state)}}
 
-      (and read? (not (same-document? state event)))
+      (stale-paste? state event)
       {}
 
       :else

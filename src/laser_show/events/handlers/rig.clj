@@ -133,7 +133,9 @@
 
 (defn- handle-retry-write
   "Retry, and Exit's Try again: write the rig as it is now, at once. :then
-   is the event to continue with once it is written."
+   is the event to continue with once it is written, or once a newer rig
+   that took its place before the writer got to it is (an autosave carries
+   it on, rig-store/submit!)."
   [{:keys [then state]}]
   (if (rig-autosave/writable? state)
     (rig-autosave/write-request state {:then then :now? true})
@@ -160,33 +162,61 @@
 
 (defn- ask-if-it-grows
   "{:state after}, unless after gives a laser that is outputting a larger
-   safety zone and event isn't :confirmed?: then Z1's question first, and
-   nothing changes (D-28)."
-  [state after {:keys [confirmed?] :as event}]
+   safety zone: then Z1's question first (D-28), one of its own
+   (guard/ask-review) about intent, the plain data of the event that asks,
+   and the larger zones it would give (guard/growth), and nothing changes.
+   Its Allow comes back with :review-id (and :confirmed? true, which alone
+   is no permission: allowed, follow-up N8)."
+  [state after intent]
   (let [grown (guard/growing state after)]
     (cond
-      (or confirmed? (empty? grown)) {:state after}
+      (empty? grown) {:state after}
       (guard/asking? state) {:state state}
-      :else {:state (guard/ask state {:message (str (guard/names-text (map #(guard/projector-name state %) grown))
-                                                    (if (= 1 (count grown)) " is" " are")
-                                                    " on. The show's safety zone lets light reach places it couldn't before.")
-                                      :event event})})))
+      :else {:state (guard/ask-review state {:message (str (guard/names-text (map #(guard/projector-name state %) grown))
+                                                           (if (= 1 (count grown)) " is" " are")
+                                                           " on. The show's safety zone lets light reach places it couldn't before.")
+                                             :intent intent
+                                             :zones (guard/growth state after)})})))
+
+(defn- allowed
+  "What the Allow of a question ask-if-it-grows asked gives: the change
+   (after-of closed intent) makes to the state with the question closed,
+   while it gives the same larger zones it asked about and none of those
+   lasers' zones changed since (guard/review-answer); after any change,
+   nothing changes but the question closing, and a notice says to review
+   it again. An Allow of no open question of its own: nothing."
+  [state event after-of]
+  (if-let [{:keys [intent closed stale? zones]} (guard/review-answer state event)]
+    (let [after (after-of closed intent)]
+      (if (and after (not stale?) (= zones (guard/growth closed after)))
+        {:state after}
+        (h/show-notice closed guard/zone-changed-text :warning)))
+    {:state state}))
+
+(defn- set-up-after
+  "state with the lasers the show was made with as this rig
+   (rig-file/set-up-from-show) and the question closed, the report's from
+   then on; nil without a show's lasers to set up."
+  [state]
+  (let [{:keys [hardware chains pins]} (opened-show state)]
+    (when (rig-file/set-up-question state hardware)
+      (-> (rig-file/set-up-from-show state hardware chains pins)
+          (update-in [:ui :dialogs :rig-report] assoc
+                     :open? false :mode :report :pins (rig-file/pin-map state hardware))))))
 
 (defn- handle-set-up-from-show
   "Set up rig: the lasers the show was made with become this rig
-   (rig-file/set-up-from-show), in one undo step, and the question closes;
-   from then on, what doesn't fit is the report's. A laser turned on since
-   the question came up whose area this would grow asks first. Nothing
-   without a show's lasers to set up."
-  [{:keys [state] :as event}]
-  (let [{:keys [hardware chains pins]} (opened-show state)]
-    (if-not (rig-file/set-up-question state hardware)
-      {:state state}
-      (ask-if-it-grows state
-                       (-> (rig-file/set-up-from-show state hardware chains pins)
-                           (update-in [:ui :dialogs :rig-report] assoc
-                                      :open? false :mode :report :pins (rig-file/pin-map state hardware)))
-                       event))))
+   (set-up-after), in one undo step, and the question closes; from then on,
+   what doesn't fit is the report's. A laser turned on since the question
+   came up whose area this would grow asks first (ask-if-it-grows), and its
+   Allow sets up only what it asked about (allowed). Nothing without a
+   show's lasers to set up."
+  [{:keys [review-id state] :as event}]
+  (if (some? review-id)
+    (allowed state event (fn [s _] (set-up-after s)))
+    (if-let [after (set-up-after state)]
+      (ask-if-it-grows state after {:event/type :rig/set-up-from-show})
+      {:state state})))
 
 
 ;; The report's buttons (09 §7)
@@ -269,17 +299,26 @@
                            :confirm-label "Replace"
                            :confirm-event {:event/type :rig/use-show-setup :projector-id projector-id}})}))))
 
+(defn- use-show-setup-after
+  "state with the show's safety zone and calibration for projector-id
+   (rig-file/use-show-setup, the zone through safety/normalize), or nil: no
+   show's lasers, or a zone in the show it can't read."
+  [state projector-id]
+  (let [{:keys [hardware chains]} (opened-show state)]
+    (when (seq (:projectors hardware))
+      (rig-file/use-show-setup state hardware chains projector-id))))
+
 (defn- handle-use-show-setup
   "Replace: the show's safety zone and calibration for projector-id
-   (rig-file/use-show-setup, the zone through safety/normalize; one it can't
-   read is refused). While the laser outputs and its area grows, Z1's
-   \"Allow light in a larger area?\" first (D-28), which sends this again
-   with :confirmed? true. One undo step."
-  [{:keys [projector-id state] :as event}]
-  (let [{:keys [hardware chains]} (opened-show state)]
-    (if-let [after (when (seq (:projectors hardware))
-                     (rig-file/use-show-setup state hardware chains projector-id))]
-      (ask-if-it-grows state after event)
+   (use-show-setup-after; one it can't read is refused). While the laser
+   outputs and its area grows, Z1's \"Allow light in a larger area?\" first
+   (D-28, ask-if-it-grows), whose Allow replaces only what it asked about
+   (allowed). One undo step."
+  [{:keys [projector-id review-id state] :as event}]
+  (if (some? review-id)
+    (allowed state event (fn [s intent] (use-show-setup-after s (:projector-id intent))))
+    (if-let [after (use-show-setup-after state projector-id)]
+      (ask-if-it-grows state after {:event/type :rig/use-show-setup :projector-id projector-id})
       {:state state})))
 
 

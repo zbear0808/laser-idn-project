@@ -140,6 +140,37 @@
       (is (= 1 @exits))
       (is (not (:open? (confirm-dialog)))))))
 
+(deftest try-again-superseded-by-an-autosave-still-quits-test
+  ;; Follow-up B9: Try again's write waited behind one the writer was busy
+  ;; with, and a rig edit's autosave took its place before the writer took
+  ;; it. Before, the Exit waiting for the write went with it: the newer rig
+  ;; was written, and the app stayed open
+  (let [dir (temp-dir)
+        path (str (io/file dir "rig.edn"))
+        exits (atom 0)
+        entered (promise)
+        gate (promise)]
+    (events/set-exit-fn! #(swap! exits inc))
+    (with-redefs [rig-store/write! (gated-write entered gate)]
+      (try
+        (state/reset-state! (update (rigged path) :rig-file assoc :status :write-failed :error "No space left on device"))
+        (events/event-handler {:event/type :rig/retry-write})
+        (is (true? (deref entered 2000 false)) "the writer is busy with a write")
+        (events/event-handler {:event/type :file/exit})
+        (is (= :rig (:reason (confirm-dialog))) "the rig's question")
+        (events/event-handler {:event/type :file/confirm-retry})
+        (events/event-handler {:event/type :rig/set-middle :middle :both})
+        (deliver gate true)
+        (is (eventually #(= 1 @exits)) "the newer rig is written, and Exit carries on")
+        (is (= :both (get-in (rig-store/read! path) [:doc :rig :middle])) "with the edit in the file")
+        (is (= :saved (get-in (state/get-raw-state) [:rig-file :status])))
+        (Thread/sleep 600)
+        (is (= 1 @exits) "once")
+        (finally
+          (deliver gate true)
+          (rig-store/flush! 2000)
+          (delete-tree! dir))))))
+
 (deftest exit-waits-for-a-rig-write-in-flight-test
   ;; 00-overview's "19 shutdown → 21 rig writer": a write the writer has
   ;; taken is held at a gate; Exit is asked for; then the gate opens. Before:

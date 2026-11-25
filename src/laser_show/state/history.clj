@@ -7,7 +7,9 @@
      the project unsaved, and which is live (neither)
    - Capturing immutable snapshots: the document, and beside it the
      definitions of the groups only the rig's copy defines that its
-     membership lists (:rig-only-group-definitions, reactivity plan 23)
+     membership lists (:rig-only-group-definitions, reactivity plan 23),
+     and who owns the effect cells that are on (:effect-owners,
+     vibes.refs/fx-owners, follow-up B8)
    - Pushing/popping undo and redo stacks
    - Gesture transactions (press -> continuous drag -> release): one open
      whole-document baseline at a time, owned by one press, its
@@ -36,7 +38,8 @@
    also has a file of its own, saved by itself (zones plan ZR, state.rig-file)."
   (:require [clojure.walk :as walk]
             [laser-show.common.util :as u]
-            [laser-show.state.rig-file :as rig-file]))
+            [laser-show.state.rig-file :as rig-file]
+            [laser-show.vibes.refs :as refs]))
 
 (def default-max-depth
   "Default maximum number of history snapshots to retain."
@@ -273,35 +276,84 @@
 (defn- item-id-set [entry]
   (not-empty (set (keep :id (:items entry)))))
 
+(defn- holding
+  "The current effect cell that holds exactly the items ids, or nil."
+  [current-cells ids]
+  (when ids
+    (some (fn [[ck e]] (when (= ids (item-id-set e)) ck)) current-cells)))
+
+(defn- taken-by-another?
+  "Does the current cell at k hold another restored cell's content (its
+   items), which a move put there?"
+  [current-cells restored-cells k]
+  (when-let [ids (item-id-set (get current-cells k))]
+    (some (fn [[rk e]] (and (not= rk k) (map? e) (= ids (item-id-set e)))) restored-cells)))
+
 (defn- effect-source
   "The current effect cell a restored one (k, restored-entry) takes its
-   on/off from: the cell at k; for a cell that doesn't exist now, the cell
-   holding the same items (it was moved); otherwise none (nil)."
-  [current-cells k restored-entry]
-  (if (get current-cells k)
-    k
-    (when-let [ids (item-id-set restored-entry)]
-      (some (fn [[ck e]] (when (= ids (item-id-set e)) ck)) current-cells))))
+   on/off from, the one with its content: the cell at k while it holds the
+   same items; else the cell that holds them now (it was moved); else the
+   cell at k, edited in place, unless what it holds is another restored
+   cell's (a move put it there in place of k's own: replaced?); otherwise
+   none (nil). restored-cells: every restored effect cell."
+  [current-cells restored-cells k restored-entry]
+  (let [ids (item-id-set restored-entry)
+        here (get current-cells k)]
+    (or (when (and here (= ids (item-id-set here))) k)
+        (holding current-cells ids)
+        (when (and here (not (taken-by-another? current-cells restored-cells k))) k))))
+
+(defn- replaced?
+  "Did a move put another restored cell's content where restored cell k's
+   was, so k's own is nowhere now (effect-source has none for it, though
+   the cell at k is there)?"
+  [current-cells restored-cells k restored-entry]
+  (and (some? (get current-cells k))
+       (nil? (effect-source current-cells restored-cells k restored-entry))))
 
 (defn- restored-effect-active
-  "On/off state for a restored effect cell: its effect-source's state, off
-   without one."
-  [current-cells k restored-entry]
-  (boolean (:active? (get current-cells (effect-source current-cells k restored-entry)))))
+  "On/off state for a restored effect cell: its effect-source's state; for
+   one a move had replaced (replaced?), its own, as the snapshot has it
+   (vibes.refs/restore-fx gives it back to what owned it then, or switches
+   it off when that owner is gone); off otherwise."
+  [current-cells restored-cells k restored-entry]
+  (if-let [source (effect-source current-cells restored-cells k restored-entry)]
+    (boolean (:active? (get current-cells source)))
+    (boolean (and (replaced? current-cells restored-cells k restored-entry)
+                  (:active? restored-entry)))))
 
 (defn effect-cell-sources
   "{restored cell -> cell of state} for restoring document-state into state
    (restore-document): for each restored effect cell, the current one whose
    on/off it takes (effect-source). A restored cell without one comes back
-   off and isn't a key. Live state that names effect cells uses it to follow
-   them as their on/off does (vibes.refs/restore-fx)."
+   off, or with its own on/off when a move had replaced it
+   (replaced-effect-cells), and isn't a key. Live state that names effect
+   cells uses it to follow them as their on/off does
+   (vibes.refs/restore-fx)."
   [state document-state]
-  (let [current-cells (get-in state [:chains :effect-chains])]
+  (let [current-cells (get-in state [:chains :effect-chains])
+        restored-cells (get-in document-state [:chains :effect-chains])]
     (into {}
           (keep (fn [[k entry]]
-                  (when-let [source (and (map? entry) (effect-source current-cells k entry))]
+                  (when-let [source (and (map? entry) (effect-source current-cells restored-cells k entry))]
                     [k source])))
-          (get-in document-state [:chains :effect-chains]))))
+          restored-cells)))
+
+(defn replaced-effect-cells
+  "The restored effect cells of document-state a move had replaced in
+   state (replaced?): the restore puts their own content back, which is
+   nowhere in state, in place of another restored cell's. Each comes back
+   on or off as document-state has it (restore-document); live state gives
+   it back to what owned it then (vibes.refs/restore-fx, with the step's
+   :effect-owners)."
+  [state document-state]
+  (let [current-cells (get-in state [:chains :effect-chains])
+        restored-cells (get-in document-state [:chains :effect-chains])]
+    (into #{}
+          (keep (fn [[k entry]]
+                  (when (and (map? entry) (replaced? current-cells restored-cells k entry))
+                    k)))
+          restored-cells)))
 
 (defn- graft-live-chains
   [current-chains restored-chains]
@@ -312,7 +364,7 @@
               (reduce-kv (fn [m k entry]
                            (let [grafted (graft-live-entry (get current-cells k) entry)]
                              (assoc m k (if (and (= domain :effect-chains) (map? grafted))
-                                          (assoc grafted :active? (restored-effect-active current-cells k entry))
+                                          (assoc grafted :active? (restored-effect-active current-cells entries k entry))
                                           grafted))))
                          entries
                          entries))))
@@ -418,14 +470,18 @@
 (defn make-snapshot
   "Create a HistorySnapshot map from current state: its document and, beside
    it, :rig-only-group-definitions (rig-only-definitions), what a restore of
-   its membership needs (restore-snapshot). Neither the document nor the
-   saved baseline holds them."
+   its membership needs (restore-snapshot), and :effect-owners
+   (vibes.refs/fx-owners), who owns the effect cells that are on, which a
+   restore gives a cell a move had replaced back to (replaced-effect-cells).
+   Neither the document nor the saved baseline holds them."
   [{:keys [state description ui-context timestamp]}]
   (let [document-state (extract-document-state state)
         rig-only-group-definitions (rig-only-definitions state)
+        effect-owners (refs/fx-owners state)
         snapshot-time (or timestamp (System/currentTimeMillis))]
-    (u/->map& document-state rig-only-group-definitions description ui-context
-              :timestamp snapshot-time)))
+    (cond-> (u/->map& document-state rig-only-group-definitions description ui-context
+                      :timestamp snapshot-time)
+      effect-owners (assoc :effect-owners effect-owners))))
 
 (defn- cap-stack
   [stack max-depth]

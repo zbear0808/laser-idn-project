@@ -384,6 +384,48 @@
            (update-vals (get-in (history/restore-document current snapshot-doc) [:chains :effect-chains]) :active?))
         "their on/off is what restore-document grafts")))
 
+(deftest a-cell-a-move-replaced-comes-back-with-its-own-switch-test
+  ;; Follow-up B8: the cell at a replaced cell's key holds the moved one's
+  ;; content; the replaced cell took its on/off (and the vibe engine its
+  ;; owner) from there too
+  (let [x {:id #uuid "55555555-5555-5555-5555-5555555555a2" :effect-id :scale}
+        y {:id #uuid "55555555-5555-5555-5555-5555555555b2" :effect-id :hue-shift}
+        cells #(assoc-in sample-state [:chains :effect-chains] %)
+        before (cells {[0 0] {:active? true :items [x]} [1 0] {:active? false :items [y]}})
+        ;; Since: [0 0] moved onto [1 0]
+        moved (cells {[1 0] {:active? true :items [x]}})
+        undone (history/restore-document moved (doc before))]
+    (is (= {[0 0] [1 0]} (history/effect-cell-sources moved (doc before)))
+        "the moved cell from where it went; the replaced one from none")
+    (is (= #{[1 0]} (history/replaced-effect-cells moved (doc before))))
+    (is (= {[0 0] true [1 0] false} (update-vals (get-in undone [:chains :effect-chains]) :active?))
+        "the replaced cell on or off as it was")
+    (is (true? (get-in (history/restore-document moved (doc (assoc-in before [:chains :effect-chains [1 0] :active?] true)))
+                       [:chains :effect-chains [1 0] :active?]))
+        "on, when it was")
+    (testing "Redo: the moved cell from where it is now, nothing replaced"
+      (is (= {[1 0] [0 0]} (history/effect-cell-sources undone (doc moved))))
+      (is (= #{} (history/replaced-effect-cells undone (doc moved)))))
+    (testing "a cell edited in place, its items not another restored cell's, still takes its own"
+      (let [z {:id #uuid "55555555-5555-5555-5555-5555555555c2" :effect-id :rotation}
+            edited (cells {[0 0] {:active? true :items [x]} [1 0] {:active? true :items [y z]}})]
+        (is (= #{} (history/replaced-effect-cells edited (doc before))))
+        (is (= [1 0] (get (history/effect-cell-sources edited (doc before)) [1 0])))))))
+
+(deftest snapshot-keeps-who-owns-the-effect-cells-test
+  (let [owned (assoc sample-state
+                     :vibe-runtime {:current :vibe-2 :entered-at 1000 :fx-on [[0 3]]
+                                    :voices {:flash {:fx [[2 3]] :fx-on [[2 3]]}} :held {:flash {:at 1500}}}
+                     :trigger-runtime {:activations {{:source :midi :channel 0 :note 40} {:type :trigger-effect :target [4 3]}
+                                                     {:source :midi :channel 0 :note 41} {:type :trigger-cue :target [4 3]}}})]
+    (is (= {:fx-on [[0 3]] :look [:vibe-2 1000] :flash {:fx [[2 3]] :fx-on [[2 3]] :press 1500}
+            :holds {{:source :midi :channel 0 :note 40} [4 3]}}
+           (:effect-owners (history/make-snapshot {:state owned :description "Move"}))))
+    (is (not (contains? (:document-state (history/make-snapshot {:state owned})) :effect-owners)) "not the document's")
+    (is (not (contains? (history/make-snapshot {:state sample-state}) :effect-owners)) "none, nothing owned")
+    (testing "during blackout the FX set has no look to come back to"
+      (is (nil? (:look (:effect-owners (history/make-snapshot {:state (assoc-in owned [:vibe-runtime :blackout?] true)}))))))))
+
 (deftest restore-clamps-selected-keyframe-test
   (let [kf (fn [n sel] {:enabled? true :selected-keyframe sel
                         :keyframes (vec (for [i (range n)] {:position (/ i 4.0) :params {}}))})

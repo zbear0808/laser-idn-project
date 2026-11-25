@@ -74,3 +74,21 @@
         (oe/report! [:provider :a] e)
         (is (= 3 (count (entries))))
         (is (identical? e (:throwable (nth (entries) 2))))))))
+
+(deftest forget-clears-a-key-without-a-recovery-test
+  ;; Follow-up B10: a streaming engine's next run takes [:engine id] over
+  ;; from the run before, whose failure isn't a recovery
+  (log-test/with-log
+    (let [e (ex-info "send failed" {})]
+      (oe/report! [:engine :p] e)
+      (oe/report! [:engine :q] e)
+      (is (= 2 (count (entries))))
+      (oe/forget! [:engine :p])
+      (is (= #{[:engine :q]} (set (keys (oe/snapshot)))) "only that key goes")
+      (is (= 2 (count (entries))) "and nothing is logged")
+      (oe/forget! [:never-failed])
+      (is (= #{[:engine :q]} (set (keys (oe/snapshot)))))
+      (testing "the key's next failure logs its stack, as a first one"
+        (oe/report! [:engine :p] e)
+        (is (= 3 (count (entries))))
+        (is (identical? e (:throwable (nth (entries) 2))))))))

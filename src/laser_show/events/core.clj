@@ -362,21 +362,40 @@
     (when on-failed
       (run-inline (assoc on-failed :file-path file-path) dispatch))))
 
+(defn- carried-then
+  "The event that waited for a rig write (Exit's Try again), from the rig
+   writer's :then ({:event :instance}, effect-rig-write), when it came from
+   instance, the app instance this write is for. A newer rig takes the
+   place of an older one whichever app submitted it, and an event of an app
+   that was stopped mustn't run in the app after it: nil then (logged)."
+  [waiting instance]
+  (when waiting
+    (if (identical? instance (:instance waiting))
+      (:event waiting)
+      (log/info "Dropped" (:event/type (:event waiting)) "waiting for the rig file: its app instance"
+                (:id (:instance waiting)) "was stopped"))))
+
 (defn- effect-rig-write
   "Effect that hands the rig to the rig writer (state.rig-store/submit!): it
    writes the newest one half a second after the last change (at once with
    :now?), on its own thread, so a drag never waits for the disk. The result
-   comes back later through dispatch, as :rig/written (with :then, the event
-   to continue with) or :rig/write-failed.
+   comes back later through dispatch, as :rig/written or :rig/write-failed.
+   :then, the event to continue with once the rig is written, goes with the
+   rig and its app instance: when a newer rig takes its place before it is
+   written, that one carries it on, and :rig/written brings it back for the
+   same app instance only (carried-then).
    Args: {:path :doc :seq :then :now?}"
   [{:keys [path doc seq then now?]} dispatch]
-  (rig-store/submit! path doc
-                     (fn [{:keys [at error]}]
-                       (dispatch (if error
-                                   {:event/type :rig/write-failed :path path :seq seq :error error}
-                                   (cond-> {:event/type :rig/written :path path :seq seq :at at}
-                                     then (assoc :then then)))))
-                     (if now? 0 rig-store/write-delay-ms)))
+  (let [instance (current-instance)]
+    (rig-store/submit! path doc
+                       (fn [{:keys [at error] waiting :then}]
+                         (dispatch (if error
+                                     {:event/type :rig/write-failed :path path :seq seq :error error}
+                                     (let [then (carried-then waiting instance)]
+                                       (cond-> {:event/type :rig/written :path path :seq seq :at at}
+                                         then (assoc :then then))))))
+                       (if now? 0 rig-store/write-delay-ms)
+                       (when then {:event then :instance instance}))))
 
 (defn- effect-rig-flush
   "Effect that waits, off the event thread (in a future), for the rig writer

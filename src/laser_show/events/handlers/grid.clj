@@ -63,6 +63,30 @@
   [state col row]
   (:has-content? (cue-chains/grid-content (get-in state [:chains :cue-chains [col row]]))))
 
+(defn- stop-chase
+  "state with the cue at cell, which timecode drives as the show clock's
+   episode k (its marker), stopped as any cue stops (untrigger-cue: the
+   last one stops the transport, another leaves it as it is), for that
+   episode only ([:playback :chase-stopped]): the clock doesn't take it
+   over again while k lasts, and a new episode plays (follow-up B7)."
+  [state [col row :as cell] k]
+  (cond-> (untrigger-cue state col row)
+    (some? k) (assoc-in [:playback :chase-stopped cell] k)))
+
+(defn- chase-stopped?
+  "Is the cue at cell one that follows timecode and that a press stopped
+   for an episode (stop-chase)?"
+  [state cell]
+  (and (contains? (get-in state [:playback :chase-stopped]) cell)
+       (playback/chases-mtc? (get-in state [:chains :cue-chains cell]))))
+
+(defn- follow-again
+  "state with the cue at cell following timecode again: its stop let go
+   of, so the show clock takes it over at its next tick while timecode runs
+   inside it."
+  [state cell]
+  (update-in state [:playback :chase-stopped] dissoc cell))
+
 (defn- handle-grid-trigger-cell
   "Press the cell at [col row]: a single primary click on it, or a bound
    input's press that isn't momentary. The press names the cell, not what
@@ -70,20 +94,25 @@
    press is handled (cue-content?) decides. A cue there is started or
    stopped by its trigger mode (resolve-trigger-mode): :toggle stops it
    while in play and starts it otherwise, :retrigger starts it as a new run.
-   Without a cue there, playback stays as it is."
+   A cue that follows timecode toggles too: one the show clock chases stops
+   until timecode enters it again (stop-chase), and one stopped so follows
+   again (follow-again). Without a cue there, playback stays as it is."
   [{:keys [col row state]}]
   (let [state-with-selected (assoc-in state [:grid :selected-cell] [col row])]
     (if (cue-content? state col row)
       (let [trigger-mode (resolve-trigger-mode state-with-selected col row)
+            intent (get-in state-with-selected [:playback :active-cues [col row]])
             cue-active? (contains? (get-in state-with-selected [:playback :active-cues]) [col row])]
         (log/info "Grid cell pressed:"
                   {:col col :row row
                    :trigger-mode trigger-mode
                    :cue-active? cue-active?})
         (case trigger-mode
-          :toggle (if cue-active?
-                    {:state (untrigger-cue state-with-selected col row)}
-                    {:state (start-cue state-with-selected col row)})
+          :toggle (cond
+                    (:chasing? intent) {:state (stop-chase state-with-selected [col row] (:chase-id intent))}
+                    cue-active? {:state (untrigger-cue state-with-selected col row)}
+                    (chase-stopped? state [col row]) {:state (follow-again state-with-selected [col row])}
+                    :else {:state (start-cue state-with-selected col row)})
           ;; :retrigger or any other value - always trigger/restart
           {:state (start-cue state-with-selected col row)}))
       ;; Pressing an empty cell just selects it

@@ -208,11 +208,14 @@
 (defn wrap-show-lock
   "The pipeline's innermost wrapper around handler: while the lock is on, a
    blocked event's result is the notice and nothing else, and so is a safety
-   zone edit that would make a zone larger."
+   zone edit that would make a zone larger. A paste back from the OS
+   clipboard for a show New or Open has replaced (h/stale-paste?) is
+   nothing at all, as it is with the lock off: no refusal, no notice."
   [handler]
   (fn [{:keys [state event/type] :as event}]
     (cond
       (not (locked? state)) (handler event)
+      (h/stale-paste? state event) {}
       (contains? blocked-events type) (refuse (answered state event) type (refused-text type))
       (pattern-edit? event) (refuse state type pattern-edit-refused)
       (contains? reviewed-edits type) (if-let [from (reviewed-widening event)]
