@@ -878,7 +878,8 @@
   (testing "Pattern: the show's chip is there"
     (is (ui/visible? "#pattern-chip-cue")))
   (testing "no trigger mode and no way to the cue chain editor"
-    (let [texts (into (labeled-texts ".dialog-footer .label") (labeled-texts ".dialog-footer .button"))]
+    (let [texts (into [] (mapcat #(labeled-texts (str ".dialog-footer " %)))
+                      [".label" ".button" ".button-primary" ".button-secondary"])]
       (is (some #{"Close"} texts))
       (is (not-any? #(and % (str/starts-with? % "Trigger")) texts))
       (is (not-any? #{"Open in Cue Chain Editor"} texts))))
