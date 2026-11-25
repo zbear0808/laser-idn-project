@@ -115,8 +115,8 @@
   (:playing? (playback state)))
 
 (defn active-cues
-  "Get the map of active cues.
-   Returns {[col row] {:trigger-time :accumulated-beats ...} ...}"
+  "Get the map of active cues: {key intent}, a key a grid cell [col row] or
+   a show [:show id] (timeline.shows/play-key)."
   [state]
   (or (:active-cues (playback state)) {}))
 
