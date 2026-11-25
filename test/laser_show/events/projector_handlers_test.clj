@@ -1492,6 +1492,31 @@
           "today's shape exactly: no :driver, no :driver-config")))
   (is (thrown? AssertionError (add-manual driver-state {:driver :idn :host " "})) "and still a host"))
 
+(deftest two-adds-in-one-millisecond-add-two-projectors-test
+  ;; Follow-up B16a: the id was :projector-<ms>, so a second add in the same
+  ;; millisecond replaced the first
+  (let [t 1700000000000
+        add (fn [state event] (:state (add-manual state (assoc event :time t))))
+        idn (-> driver-state
+                (add {:name "Stage L" :host "10.0.0.5"})
+                (add {:name "Stage R" :host "10.0.0.6"}))
+        all (add idn {:driver :lsps :name "Bridge" :driver-config {:host "127.0.0.1"}})]
+    (is (= {:projector-1700000000000 "Stage L" :projector-1700000000000-2 "Stage R"}
+           (update-vals (:projectors idn) :name)))
+    (is (= [[:rgb-curves :corner-pin] [:rgb-curves :corner-pin]]
+           (mapv #(mapv :effect-id (get-in idn [:chains :projector-effects % :items]))
+                 [:projector-1700000000000 :projector-1700000000000-2]))
+        "each with its own calibration")
+    (is (= :projector-1700000000000-2 (get-in idn [:projector-ui :active-projector])) "the second selected")
+    (is (= [:manual :lsps :projector-1700000000000-3] (get-in all [:projectors :projector-1700000000000-3 :stable-id]))
+        "another driver's too, with a stable id of its own")
+    (testing "the dialog's Add, through the pipeline, at its event's time"
+      (let [submit #(:state (events/handle-event-pipeline
+                             {:event/type :projectors/submit-manual-form :time t
+                              :state (assoc-in % [:ui :dialogs :add-projector-manual] {:open? true :host "10.0.0.7"})}))]
+        (is (= #{:projector-1700000000000 :projector-1700000000000-2}
+               (set (keys (:projectors (submit (submit driver-state)))))))))))
+
 (defn- submit-form
   "The Add Projector dialog's Add on state, through the real pipeline."
   [state]

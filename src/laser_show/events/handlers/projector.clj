@@ -373,9 +373,14 @@
    another laser, and it starts at the driver's default scan rate. An
    unnamed one is its driver's short name and a number
    (driver/default-projector-name: \"LSPS 1\"), so its card doesn't say its
-   settings twice; an unnamed IDN one is named after its host."
-  [{:keys [name host port driver driver-config state]}]
-  (let [projector-id (keyword (str "projector-" (System/currentTimeMillis)))]
+   settings twice; an unnamed IDN one is named after its host.
+   
+   Its id is :projector-<time> (the event's :time), with -2, -3 … added
+   while another projector has it (rig/unique-projector-id), so two adds in
+   one millisecond add two projectors."
+  [{:keys [name host port driver driver-config state] :as event}]
+  (let [projector-id (rig/unique-projector-id (:projectors state)
+                                              (keyword (str "projector-" (h/current-time-ms event))))]
     (if (and driver (not= :idn driver))
       (let [descriptor (descriptor-of state driver)
             {:keys [config errors]} (driver/coerce-config (:fields descriptor) driver-config)]
@@ -449,10 +454,10 @@
    second submit queued behind the first) nothing is added. A form that
    can't be added (no host; a driver field that doesn't coerce, or a driver
    that isn't installed) adds nothing, and the dialog stays open as typed."
-  [{:keys [state]}]
+  [{:keys [state time]}]
   (let [form (get-in state manual-dialog-path)]
     (if-let [add (and (:open? form) (manual-form-add form))]
-      (handle-projectors-add-manual (assoc add :state state))
+      (handle-projectors-add-manual (assoc add :state state :time time))
       {:state state})))
 
 
