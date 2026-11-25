@@ -135,3 +135,80 @@
   [a b]
   (and (< (double (:start a)) (- (double (:end b)) tc-eps))
        (< (double (:start b)) (- (double (:end a)) tc-eps))))
+
+(defn- by-id-str
+  "[id x] pairs in (str id) order."
+  [pairs]
+  (sort-by (comp str key) pairs))
+
+(defn- enabled-ranges
+  "{id range} for the shows that follow MTC and have a range."
+  [shows]
+  (reduce-kv (fn [acc id show]
+               (if-let [r (and (follows-mtc? show) (tc-range show))] (assoc acc id r) acc))
+             {}
+             (or shows {})))
+
+(defn- problem-against
+  "Why show can't follow timecode beside others ([id range] pairs, in the
+   order to check), or nil."
+  [show others]
+  (let [bpm (:timeline/tempo-bpm show)]
+    (if-not (and (number? bpm) (pos? bpm))
+      {:reason :no-bpm}
+      (if-let [r (tc-range show)]
+        (some (fn [[id2 r2]] (when (tc-overlap? r r2) {:reason :overlap :with id2 :range r2}))
+              others)
+        {:reason :empty}))))
+
+(defn timecode-problem
+  "Why show id can't follow timecode, checked against every other show that
+   follows MTC, in (str id) order: {:reason :no-bpm} without a locked tempo,
+   {:reason :empty} when its length is 0, {:reason :overlap :with id2
+   :range (tc-range id2's show)} for the first it overlaps; nil when it
+   can (or there is no show id). Whether id itself follows doesn't matter.
+   TS-6 (plans/2026-11-25-timeline-shows/07 §4.4)."
+  [shows id]
+  (when-let [show (get shows id)]
+    (problem-against show (by-id-str (dissoc (enabled-ranges shows) id)))))
+
+(defn invalid-timecode-ids
+  "The changed shows (ids in changed-ids) that follow MTC but break TS-6,
+   as [[id problem] …], problem as timecode-problem's. Each is checked,
+   in (str id) order, against a kept set: every unchanged show that follows,
+   plus each changed one already checked that passed. So of two changed
+   shows that overlap, only the later is reported. 07 §4.4, §7.3."
+  [shows changed-ids]
+  (let [ranges (enabled-ranges shows)
+        changed (->> (set changed-ids)
+                     (filter #(follows-mtc? (get shows %)))
+                     (sort-by str))]
+    (loop [kept (reduce dissoc ranges changed)
+           [id & more :as ids] changed
+           bad []]
+      (if (empty? ids)
+        bad
+        (if-let [p (problem-against (get shows id) (by-id-str kept))]
+          (recur kept more (conj bad [id p]))
+          (recur (assoc kept id (get ranges id)) more bad))))))
+
+(defn invariant-violations
+  "Every breach of TS-6 among the shows that follow MTC, as [[id problem] …]
+   (problem as timecode-problem's): no locked tempo, empty, or overlapping
+   an earlier-starting one. [] when they all hold. For tests."
+  [shows]
+  (let [enabled (by-id-str (filter #(follows-mtc? (val %)) (or shows {})))
+        unranged (keep (fn [[id show]] (when-let [p (problem-against show nil)] [id p])) enabled)
+        ranged (sort-by (juxt (comp :start second) (comp str first))
+                        (keep (fn [[id show]] (when-let [r (tc-range show)] [id r])) enabled))]
+    (into (vec unranged)
+          (second
+           (reduce (fn [[latest bad] [id r :as entry]]
+                     ;; latest: the [id range] seen so far that ends last
+                     (let [[lid lr] latest]
+                       [(if (or (nil? latest) (> (:end r) (:end lr))) entry latest)
+                        (if (and latest (tc-overlap? r lr))
+                          (conj bad [id {:reason :overlap :with lid :range lr}])
+                          bad)]))
+                   [nil []]
+                   ranged)))))
