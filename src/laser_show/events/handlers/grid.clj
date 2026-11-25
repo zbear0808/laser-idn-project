@@ -8,6 +8,7 @@
   (:require [laser-show.events.helpers :as h]
             [laser-show.animation.chains :as chains]
             [laser-show.state.migration :as migration]
+            [laser-show.state.clipboard :as clipboard]
             [laser-show.routing.targets :as targets]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.timeline.playback :as playback]
@@ -177,12 +178,22 @@
    clipboard first while nothing is copied in this app). A cue copied from an
    older build is converted as an old show is when it opens
    (state.migration/cue-z4), so it routes the same, and everything in it
-   gets a new id (chains/fresh-ids), so two cells never share one."
+   gets a new id (chains/fresh-ids), so two cells never share one. A
+   timeline (clipboard/timeline-clip?) is refused with a notice: the grid
+   never holds one (timeline-shows plan TS-3). The cell stays as it was, and
+   the slot keeps an adopted read, so no undo step comes of it."
   [{:keys [col row] :as event}]
-  (h/handle-paste-from-clipboard event
-                                 [:chains :cue-chains [col row]]
-                                 :cue-chain
-                                 (comp chains/fresh-ids migration/cue-z4)))
+  (h/with-clipboard event
+    (fn [state clip]
+      (cond
+        (clipboard/timeline-clip? clip)
+        (h/show-notice state "Timeline shows live in the Shows tab. Paste it there with New Show from Cue." :info)
+
+        (clipboard/accepts? clip :cue-chain)
+        {:state (assoc-in state [:chains :cue-chains [col row]]
+                          ((comp chains/fresh-ids migration/cue-z4) (clipboard/payload clip :cue-chain)))}
+
+        :else nil))))
 
 (defn- handle-grid-clear-cell
   "Clear a cell's cue chain, and the triggers and vibes that named it. A cue
@@ -208,14 +219,11 @@
     {:state state}))
 
 (defn- handle-grid-open-cell-editor
-  "Open the appropriate editor for a cell based on its cue configuration.
-   Dispatches :timeline-cue-editor/open for timeline cues,
-   or :cue-chain/open-editor for standard cues."
-  [{:keys [col row state]}]
-  (let [cue-chain (get-in state [:chains :cue-chains [col row]])]
-    {:dispatch (if (cue-chains/timeline-cue? cue-chain)
-                 {:event/type :timeline-cue-editor/open :col col :row row}
-                 {:event/type :cue-chain/open-editor :col col :row row})}))
+  "Open the cue chain editor for a cell (:cue-chain/open-editor). The grid
+   holds no timelines (timeline-shows plan TS-3): they open from the Shows
+   tab."
+  [{:keys [col row]}]
+  {:dispatch {:event/type :cue-chain/open-editor :col col :row row}})
 
 
 ;; Public API
