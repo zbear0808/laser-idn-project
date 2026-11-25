@@ -26,7 +26,8 @@
    its halves fit into. The show clock keeps it (cached-routing) and puts it
    in each tick's snapshot; everything reads a ref through resolve-ref,
    which sends a zone through the map's lanes (zones plan Z4)."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [laser-show.animation.effects.points :as points]
             [laser-show.animation.fit-guard :as fit-guard]
             [laser-show.animation.safety :as safety]
@@ -614,11 +615,27 @@
 
 ;; The scan's matching (04 §4)
 
+(defn- id-safe
+  "text with every character outside [A-Za-z0-9-] made -, so a keyword made
+   of it reads back as EDN."
+  [text]
+  (str/replace (str text) #"[^A-Za-z0-9-]" "-"))
+
 (defn projector-id
-  "A new projector's id, from its host and service id:
-   :projector-10-0-0-5-1."
+  "A new projector's id, from its host and service id, every character of
+   the host outside [A-Za-z0-9-] made -, so that a show or rig file holding
+   it reads back: :projector-10-0-0-5-1, and for the IPv6 host fe80::1 and
+   no service id :projector-fe80--1-0."
   [host service-id]
-  (keyword (str "projector-" (str/replace (str host) "." "-") "-" (output-number service-id))))
+  (keyword (str "projector-" (id-safe host) "-" (output-number service-id))))
+
+(defn readable-id?
+  "Does projector id read back as itself from EDN, so a show or rig file can
+   hold it? An earlier build made ids from IPv6 hosts that don't
+   (:projector-fe80::1-0)."
+  [id]
+  (try (= id (edn/read-string (pr-str id)))
+       (catch Exception _ false)))
 
 (defn unique-projector-id
   "A base projector id (or one made from an IDN host and service), with
@@ -629,14 +646,28 @@
         first))
   ([taken host service-id] (unique-projector-id taken (projector-id host service-id))))
 
+(defn readable-renames
+  "{id new-id} for the projectors (a map or set of ids) whose id doesn't
+   read back (readable-id?): the same id with every character outside
+   [A-Za-z0-9-] made -, as projector-id makes one now
+   (:projector-fe80::1-0 → :projector-fe80--1-0), with -2, -3 … added while
+   another projector has it. {} when every id reads back."
+  [projectors]
+  (let [ids (if (map? projectors) (keys projectors) projectors)
+        unreadable (sort-by id-text (filter #(and (keyword? %) (not (readable-id? %))) ids))]
+    (first (reduce (fn [[renames taken] id]
+                     (let [new-id (unique-projector-id taken (keyword (id-safe (name id))))]
+                       [(assoc renames id new-id) (conj taken new-id)]))
+                   [{} (set ids)]
+                   unreadable))))
+
 (defn driver-projector-id
   "A new projector's id for output-id of another driver's device
    (plans/2026-11-19-output-drivers/01 §5.3): \"projector-\", the driver's
    namespace and name, the device key and the output, joined by -, every
    character outside [A-Za-z0-9-] made -: :projector-acme-nova-NV-00123-0."
   [driver device-key output-id]
-  (keyword (str/replace (str/join "-" (remove nil? ["projector" (namespace driver) (name driver) device-key output-id]))
-                        #"[^A-Za-z0-9-]" "-")))
+  (keyword (id-safe (str/join "-" (remove nil? ["projector" (namespace driver) (name driver) device-key output-id])))))
 
 (defn- host-id [p]
   [:host (:host p) (output-number (:service-id p))])

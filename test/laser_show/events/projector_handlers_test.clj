@@ -9,6 +9,7 @@
    - Virtual projector management
    - Path-based selection with Ctrl/Shift modifiers"
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
    [laser-show.state.history :as history]
    [clojure.string :as str]
@@ -21,7 +22,10 @@
    [laser-show.routing.refs :as refs]
    [laser-show.routing.rig :as rig]
    [laser-show.vibes.library :as library]
-   [laser-show.state.domains :refer [build-initial-state]]))
+   [laser-show.state.domains :refer [build-initial-state]]
+   [laser-show.state.persistent :as persistent]
+   [laser-show.state.rig-file :as rig-file]
+   [laser-show.state.rig-store :as rig-store]))
 
 
 ;; Test Data Fixtures
@@ -1335,6 +1339,81 @@
         (is (some? (get-in during [:projector-ui :active-projector])))
         (is (= #{:q} (set (keys (:projectors aborted)))))
         (is (nil? (get-in aborted [:projector-ui :active-projector])))))))
+
+
+;; Projector ids a show and the rig file can hold (follow-up B2)
+
+
+(defn- reopened
+  "What a show saved from state, and the rig file written from it, hold when
+   read again: {:saved? (persistent/write-project!'s answer) :show (the ids
+   in the show's hardware.edn, when it opens again) :rig (the ids in the rig
+   file, when it reads back)}, in a temporary folder."
+  [state]
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "projector-ids" (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (try
+      (let [zip (str (io/file dir "show.zip"))
+            rig-path (str (io/file dir "rig.edn"))
+            saved? (persistent/write-project! zip (persistent/project-files state))
+            contents (persistent/read-project zip)
+            _ (rig-store/write! rig-path (rig-file/rig-document state))
+            {:keys [status doc]} (rig-store/read! rig-path)]
+        {:saved? saved?
+         :show (when (and contents (persistent/apply-loaded-project state contents zip))
+                 (set (keys (get-in contents ["hardware.edn" :projectors]))))
+         :rig (when (= :ok status) (set (keys (:projectors doc))))})
+      (finally
+        (doseq [^java.io.File f (reverse (file-seq dir))] (.delete f))))))
+
+(deftest ipv6-scan-gives-ids-that-read-back-test
+  (let [state (:state (scan base-state (scanned "fe80::1" unit-l 1) (scanned "2001:db8::5" nil)))
+        ids #{:projector-fe80--1-1 :projector-2001-db8--5-0}]
+    (is (= ids (set (keys (:projectors state)))))
+    (is (every? rig/readable-id? (keys (:projectors state))))
+    (is (= {:saved? true :show ids :rig ids} (reopened state))
+        "the show is saved and opens again, and the rig file reads back")
+    (testing "IPv4 hosts keep the ids they had"
+      (is (= #{:projector-10-0-0-5-1 :projector-10-0-0-5-2}
+             (set (keys (get-in (scan base-state (scanned "10.0.0.5" unit-l 1 2)) [:state :projectors]))))))
+    (testing "found again at another IPv6 address, a laser keeps its projector"
+      (let [moved (:state (scan state (scanned "fe80::7" unit-l 1)))]
+        (is (= ids (set (keys (:projectors moved)))))
+        (is (= "fe80::7" (get-in moved [:projectors :projector-fe80--1-1 :host])))))))
+
+(deftest scan-renames-an-id-that-doesnt-read-back-test
+  ;; An earlier build named a laser at an IPv6 host :projector-fe80::1-1,
+  ;; which no show or rig file can hold: the next scan gives it an id that
+  ;; reads back, wherever it is named
+  (let [old (keyword "projector-fe80::1-1")
+        new :projector-fe80--1-1
+        before (-> base-state
+                   (assoc-in [:projectors old] {:name "Laser L" :host "fe80::1" :port 7255 :service-id 1 :unit-id unit-l
+                                                :stable-id [:unit unit-l 1] :enabled? true :zone-groups [] :tags #{}})
+                   (assoc-in [:chains :projector-effects old :items] [{:id #uuid "00000000-0000-0000-0000-0000000000b2"
+                                                                       :effect-id :rgb-curves :enabled? true :params {}}])
+                   (assoc-in [:rig :order] [old])
+                   (assoc-in [:chains :cue-chains [0 0]] {:items [] :target (keyword "auto.laser" (name old))})
+                   (assoc-in [:projector-ui :active-projector] old)
+                   (history/mark-clean))
+        edited (piped-state before {:event/type :projectors/update-settings :projector-id old :updates {:name "Stage L"}})
+        found (piped-state edited {:event/type :projectors/scan-complete :devices [(scanned "fe80::1" unit-l 1)]})]
+    (is (= {:saved? false :show nil :rig nil} (reopened edited)) "with it, the show can't be saved, nor the rig read back")
+    (is (= #{new} (set (keys (:projectors found)))))
+    (is (= (assoc (get-in edited [:projectors old]) :name "Stage L") (get-in found [:projectors new]))
+        "the same projector, under its new id")
+    (is (= (get-in edited [:chains :projector-effects old]) (get-in found [:chains :projector-effects new])) "its calibration")
+    (is (= [new] (get-in found [:rig :order])) "its place")
+    (is (= :auto.laser/projector-fe80--1-1 (get-in found [:chains :cue-chains [0 0] :target])) "the cue pinned to it")
+    (is (= new (get-in found [:projector-ui :active-projector])) "and it stays selected")
+    (is (= {:saved? true :show #{new} :rig #{new}} (reopened found)) "now the show is saved, and the rig file reads back")
+    (is (= (count (get-in edited [:history :undo-stack])) (count (get-in found [:history :undo-stack])))
+        "the rename is no undo step")
+    (is (false? (get-in found [:project :dirty?])) "nor an unsaved change")
+    (let [undone (piped-state found {:event/type :edit/undo})]
+      (is (= {new "Laser L"} (update-vals (:projectors undone) :name)) "Undo takes back the edit, never the new id")
+      (is (= :auto.laser/projector-fe80--1-1 (get-in undone [:chains :cue-chains [0 0] :target]))))
+    (testing "a scan with nothing to rename changes no id"
+      (is (= #{new} (set (keys (:projectors (piped-state found {:event/type :projectors/scan-complete :devices []})))))))))
 
 
 

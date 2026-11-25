@@ -141,6 +141,47 @@
                                  (keep (fn [[s r]] (when (not= s r) [(rig/laser-ref s) (rig/laser-ref r)])))
                                  (pin-map state hardware))))
 
+(defn- rename-keys-in
+  "m with each key in renames ({old new}) at its new key; m when it isn't a
+   map."
+  [m renames]
+  (if (map? m)
+    (reduce-kv (fn [m old new] (if (contains? m old) (-> m (dissoc old) (assoc new (get m old))) m)) m renames)
+    m))
+
+(defn- renamed-projector
+  "p with a stable id that names its old id ([:manual driver id], output
+   drivers 01 §5.3) naming the new one."
+  [p renames]
+  (let [[kind driver id :as sid] (:stable-id p)]
+    (if (and (= :manual kind) (contains? renames id))
+      (assoc p :stable-id [kind driver (get renames id)])
+      p)))
+
+(defn rename-projectors
+  "state (the app state, or a document as undo keeps it) with each projector
+   in renames ({old-id new-id}) at its new id: its settings, calibration,
+   place in the order and virtual projectors, and every pin to it
+   (:auto.laser/<id>), wherever routing.refs/replace-refs finds one, as
+   rename-pins re-points a show's. A rename whose old id isn't there, or
+   whose new id is taken, is left out. Nothing else changes: state comes
+   back identical? with nothing to rename."
+  [state renames]
+  (let [projectors (:projectors state)
+        renames (into {} (filter (fn [[old new]] (and (contains? projectors old) (not (contains? projectors new))))) renames)]
+    (if (empty? renames)
+      state
+      (-> state
+          (assoc :projectors (update-vals (rename-keys-in projectors renames) #(renamed-projector % renames)))
+          (cond-> (map? (get-in state [:chains :projector-effects]))
+            (update-in [:chains :projector-effects] rename-keys-in renames))
+          (cond-> (sequential? (get-in state [:rig :order]))
+            (update-in [:rig :order] #(mapv (fn [id] (get renames id id)) %)))
+          (cond-> (map? (:virtual-projectors state))
+            (update :virtual-projectors update-vals
+                    (fn [vp] (cond-> vp (contains? renames (:parent-projector-id vp)) (update :parent-projector-id renames)))))
+          (refs/replace-refs (into {} (map (fn [[old new]] [(rig/laser-ref old) (rig/laser-ref new)])) renames))))))
+
 ;; Setting the rig up from a show (09 §7)
 
 (defn set-up?

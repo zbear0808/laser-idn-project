@@ -37,7 +37,8 @@
             [laser-show.events.safety-guard :as guard]
             [laser-show.output.driver :as driver]
             [laser-show.routing.refs :as refs]
-            [laser-show.routing.rig :as rig]))
+            [laser-show.routing.rig :as rig]
+            [laser-show.state.rig-file :as rig-file]))
 
 
 (def DEFAULT_PROJECTOR_EFFECTS
@@ -230,6 +231,16 @@
           (update :projectors #(-> (merge new-projectors %) move upgrade))
           (update-in [:chains :projector-effects] #(merge new-effects %))))))
 
+(defn- follow-renames
+  "state with the selection following each projector renamed to an id that
+   reads back (rig/readable-renames, {old new}); what else of the projector
+   UI named an old id lets go of it (h/prune-projector-ui)."
+  [state renames]
+  (let [selected (get-in state [:projector-ui :active-projector])]
+    (cond-> state
+      (contains? renames selected) (assoc-in [:projector-ui :active-projector] (get renames selected))
+      (seq renames) (h/prune-projector-ui))))
+
 (defn- handle-projectors-scan-complete
   "Handle scan completion: the discovered devices list, and each output found
    matched to a projector by its stable id (routing.rig/match-discovered):
@@ -245,6 +256,11 @@
    :warnings (a discoverer that failed or timed out, a device left out) show
    as one :warning notice, after any move's.
    
+   A projector whose id doesn't read back as EDN, which an earlier build
+   made from an IPv6 host (:projector-fe80::1-0: no show or rig file can
+   hold it), takes one that does first (rig/readable-renames), wherever it
+   is named (rig-file/rename-projectors), and stays selected.
+   
    Discovery isn't a user edit: all of it is backfilled into undo history and
    the saved baseline, so it is never undone and never counts as an unsaved
    change. The result of a scan that isn't the one in progress
@@ -253,20 +269,25 @@
   (if-not (current-scan? state event)
     (do (log/info "Ignoring the result of a scan that is over or was replaced")
         {})
-    (let [{:keys [moves upgrades new notices]} (rig/match-discovered (:projectors state) devices)
+    (let [renames (rig/readable-renames (:projectors state))
+          rename #(rig-file/rename-projectors % renames)
+          {:keys [moves upgrades new notices]} (rig/match-discovered (:projectors (rename state)) devices)
           new-projectors (into {} (map (fn [output] [(:id output) (discovered-projector state output)])) new)
           new-effects (into {} (map (fn [id] [id {:items (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS)}]))
                             (keys new-projectors))
-          found (found-in-scan new-projectors new-effects moves upgrades)
+          found (comp (found-in-scan new-projectors new-effects moves upgrades) rename)
           new-state (-> (found state)
+                        (follow-renames renames)
                         (scan-over)
                         (assoc-in [:projector-ui :discovered-devices] (vec devices))
                         (assoc-in [:rig-ui :scanned?] true))]
+      (when (seq renames)
+        (log/info "Projector ids that couldn't be saved now read back:" renames))
       (cond-> (cond
                 (seq warnings) (h/show-notice new-state (str/join " " (conj (vec notices) (str/join "; " warnings))) :warning)
                 (seq notices) (h/show-notice new-state (str/join " " notices) :info)
                 :else {:state new-state})
-        (or (seq new-projectors) (seq moves) (seq upgrades))
+        (or (seq new-projectors) (seq moves) (seq upgrades) (seq renames))
         (assoc :history/backfill found)))))
 
 
