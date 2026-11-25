@@ -2896,3 +2896,28 @@
       (finally
         (modulator-registry/register-modulator! envelope)))
     (is (= before (shown (published ctx))) "put back, and published: as before")))
+
+(deftest show-list-rows-test
+  (let [[a b c d e] (map #(parse-uuid (str "00000000-0000-0000-0000-00000000000" %)) (range 1 6))
+        shows {e {:name "beta" :editor-type :timeline}
+               a {:name nil :editor-type :timeline}
+               d {:name "Alpha" :editor-type :timeline}
+               c {:name "alpha" :editor-type :timeline}
+               b {:name "" :editor-type :timeline}}
+        s (assoc-in base-state [:chains :shows] shows)
+        ctx (context s)
+        rows (fx/sub-ctx ctx subs/show-list-rows)]
+    (is (= [{:id c :title "alpha"} {:id d :title "Alpha"} {:id e :title "beta"}
+            {:id a :title nil} {:id b :title nil}]
+           rows)
+        "by title whatever its case, ties by id, the untitled ones (blank too) last")
+    (is (= [] (fx/sub-ctx (context base-state) subs/show-list-rows)) "an empty library")
+    (let [ctx' (fx/swap-context ctx assoc-in [:chains :shows c :items] [{:id 1 :type :preset}])]
+      (is (identical? rows (fx/sub-ctx ctx' subs/show-list-rows)) "an edit inside a show keeps the rows"))
+    (let [ctx' (fx/swap-context ctx assoc-in [:chains :shows a :name] "Aardvark")]
+      (is (= [a c d e b] (mapv :id (fx/sub-ctx ctx' subs/show-list-rows))) "a rename re-sorts"))))
+
+(deftest show-migration-test
+  (is (nil? (fx/sub-ctx (context base-state) subs/show-migration)))
+  (let [migrated {:moved 2 :timecode-off ["Timeline A2"] :vibe-refs-removed 0 :triggers-rewritten 0}]
+    (is (= migrated (fx/sub-ctx (context (assoc-in base-state [:ui :shows :migrated] migrated)) subs/show-migration)))))

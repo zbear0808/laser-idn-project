@@ -2737,3 +2737,29 @@
   [context]
   (let [n (count (filter #(= :error (:level %)) (fx/sub-ctx context vibe-lint)))]
     (if (pos? n) (str "Vibes ⚠ " n) "Vibes")))
+
+
+;; The Shows tab (plans/2026-11-25-timeline-shows 01 §7)
+
+(defn- show-title
+  "Show id's title, its :name, or nil while it has none (blank is none)."
+  [context id]
+  (let [title (fx/sub-val context get-in [:chains :shows id :name])]
+    (when-not (str/blank? title) title)))
+
+(defn show-list-rows
+  "The Shows tab's list, [{:id :title}], one row per show in the library:
+   by title, case-insensitive, the untitled ones (:title nil) last, ties by
+   the id's string. An edit inside a show doesn't change it."
+  [context]
+  (->> (fx/sub-ctx context show-ids)
+       (map (fn [id] {:id id :title (fx/sub-ctx context show-title id)}))
+       (sort-by (fn [{:keys [id title]}] [(nil? title) (some-> title str/lower-case) (str id)]))
+       vec))
+
+(defn show-migration
+  "What Open moved from the grid into the library, for the Shows tab's
+   banner: {:moved :timecode-off :vibe-refs-removed :triggers-rewritten},
+   or nil (none, or dismissed)."
+  [context]
+  (fx/sub-val context get-in [:ui :shows :migrated]))

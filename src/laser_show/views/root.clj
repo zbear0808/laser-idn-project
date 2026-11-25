@@ -12,7 +12,7 @@
    ├── toolbar
    ├── tab-bar
    ├── main-content (split-pane)
-   │   ├── tab-content (grid/vibes/perform/effects/projectors/zone-groups/settings)
+   │   ├── tab-content (grid/vibes/perform/shows/effects/projectors/zone-groups/settings)
    │   └── preview-panel
    ├── status-bar
    └── dialogs (via fx/ext-many)"
@@ -44,6 +44,7 @@
    [laser-show.views.tabs.projectors :as projectors-tab]
    [laser-show.views.tabs.zones :as zones-tab]
    [laser-show.views.tabs.settings :as settings-tab]
+   [laser-show.views.tabs.shows :as shows-tab]
    [laser-show.views.tabs.vibes :as vibes-tab]
    [laser-show.views.toolbar :as toolbar])
   (:import [javafx.scene.input KeyCombination]
@@ -71,6 +72,7 @@
       :grid {:fx/type grid-tab/grid-tab}
       :vibes {:fx/type vibes-tab/vibes-tab}
       :perform {:fx/type perform-tab/perform-tab}
+      :shows {:fx/type shows-tab/shows-tab}
       :effects {:fx/type effects-tab/effects-tab}
       :projectors {:fx/type projectors-tab/projectors-tab}
       :zones {:fx/type zones-tab/zones-tab}
@@ -87,6 +89,7 @@
   [{:id :grid :label "Grid"}
    {:id :vibes :label "Vibes"}
    {:id :perform :label "Perform"}
+   {:id :shows :label "Shows"}
    {:id :effects :label "Effects"}
    {:id :projectors :label "Projectors"}
    {:id :zones :label "Zone Groups"}

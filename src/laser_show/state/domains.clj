@@ -162,7 +162,7 @@
    :clipboard {:default nil
                :doc "The clipboard: the last clip copied in this app ({:type :copied-at ...}, state/clipboard.clj), or one a paste read from the OS clipboard while this was nil. Written only in the :state copy and paste handlers return; not saved, not undone, kept across Open and New"}
    :active-tab {:default :grid
-                :doc "currently active tab (:grid :effects :projectors :settings)"}
+                :doc "currently active tab (views/root.clj main-tabs): :grid :vibes :perform :shows :effects :projectors :zones :settings"}
    :notice {:default nil
             :doc "the notice at the left of the status bar, {:id uuid :text :level (:error :warning :info)}, or nil; set by failure handlers (events/helpers.clj show-notice), cleared by :ui/clear-notice after 6 s or on a click"}
    :drag {:default {:active? false
