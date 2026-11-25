@@ -364,6 +364,9 @@
     (mtc/reset-decoder!)
     (open-timeline!)
     (events/dispatch! {:event/type :timeline/apply-op :show-id (sid) :op {:op :set-length :beats 64.0}})
+    ;; Timecode needs a locked tempo (TS-6), the global 120 BPM here
+    (ui/click! robot "#timeline-tempo-lock")
+    (ui/wait-for! #(some? (get-in (state/get-raw-state) (show-path :timeline/tempo-bpm))))
     (ui/click! robot "#timeline-chase-mtc")
     (ui/wait-for! #(= :mtc (get-in (state/get-raw-state) (show-path :timeline/chase))))
     (ui/wait-for! #(ui/visible? "#timeline-mtc-chip"))
