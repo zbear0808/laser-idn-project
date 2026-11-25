@@ -10,6 +10,7 @@
             [laser-show.animation.chains :as chains]
             [laser-show.events.core :as events]
             [laser-show.subs :as subs]
+            [laser-show.timeline.shows :as shows]
             [laser-show.views.components.drag-drop-cell :as dd]
             [laser-show.views.components.effect-parameter-editor :as param-editor]
             [laser-show.views.components.visual-editors.timeline.drop :as drop]
@@ -19,8 +20,8 @@
            [javafx.scene.input DragEvent TransferMode]))
 
 
-(defn- op-event [col row target op]
-  {:event/type :timeline/apply-op :col col :row row
+(defn- op-event [show-id target op]
+  {:event/type :timeline/apply-op :show-id show-id
    :op (merge op (if (= :clip (:kind target))
                    {:clip-id (:id (:entity target))}
                    {:track-id (:id (:entity target))}))})
@@ -37,14 +38,14 @@
 
 (defn- effect-card
   "An effect's card, its definition as published (subs/effect-descriptor)."
-  [{:keys [fx/context col row target idx n effect]}]
+  [{:keys [fx/context show-id target idx n effect]}]
   (let [group? (chains/group? effect)
         effect-def (when-not group? (fx/sub-ctx context subs/effect-descriptor (:effect-id effect)))
         enabled? (:enabled? effect true)
         domain (if (= :clip (:kind target)) :timeline-items :timeline-tracks)
         ui-key (if (= :clip (:kind target)) :items :tracks)
         dialog-data (fx/sub-val context get-in [:ui :dialogs :timeline-cue-editor :effect-ui ui-key])
-        ev #(op-event col row target (assoc % :effect-instance-id (:id effect)))]
+        ev #(op-event show-id target (assoc % :effect-instance-id (:id effect)))]
     {:fx/type :v-box
      :style-class (cond-> ["tl-device"] (not enabled?) (conj "tl-device-off"))
      :children
@@ -79,7 +80,7 @@
         {:fx/type param-editor/effect-parameter-editor
          :v-box/vgrow :always
          :domain domain
-         :entity-key [col row]
+         :entity-key (shows/play-key show-id)
          :item-path (:path target)
          :owner-id (:id (:entity target))
          :effect-path [idx]
@@ -103,7 +104,7 @@
 (defn- chain-drop
   "The browser drop at the event's position, plus where its insertion line
    goes: {:event :index :cards}, or nil."
-  [^DragEvent e target col row]
+  [^DragEvent e target show-id]
   (when-let [payload (dd/read-payload e :bank-item drop/valid-payload?)]
     (let [chain ^Parent (.getSource e)
           box (.lookup chain "#timeline-device-cards")
@@ -114,7 +115,7 @@
                      (mapv (fn [^Node c] (let [b (.getBoundsInParent c)] [(.getMinX b) (.getWidth b)])) cards)
                      (.getX p)))
                   0)]
-      (when-let [t (drop/drop-target payload {:type :chain :target target :index index} {:col col :row row})]
+      (when-let [t (drop/drop-target payload {:type :chain :target target :index index} {:show-id show-id})]
         (assoc t :index index :cards cards)))))
 
 (defn- show-insertion!
@@ -129,8 +130,8 @@
       (.pseudoClassStateChanged hint drop-target-class (boolean (and at (zero? n)))))))
 
 (defn device-chain
-  "Props: :col :row :target (inspector/selection-target)."
-  [{:keys [col row target]}]
+  "Props: :show-id :target (inspector/selection-target)."
+  [{:keys [show-id target]}]
   (let [{:keys [kind entity]} target
         fx-list (vec (:effects entity))
         hint (fn [text] {:fx/type :label
@@ -143,14 +144,14 @@
      :style-class "tl-device-chain"
      :on-drag-over (fn [^DragEvent e]
                      (when (dd/has-payload? (.getDragboard e) :bank-item)
-                       (let [at (chain-drop e target col row)]
+                       (let [at (chain-drop e target show-id)]
                          (when at (.acceptTransferModes e (into-array TransferMode [TransferMode/COPY])))
                          (show-insertion! (.getSource e) at)
                          (.consume e))))
      :on-drag-exited (fn [^DragEvent e] (show-insertion! (.getSource e) nil))
      :on-drag-dropped (fn [^DragEvent e]
                         (when (dd/has-payload? (.getDragboard e) :bank-item)
-                          (let [at (chain-drop e target col row)]
+                          (let [at (chain-drop e target show-id)]
                             (show-insertion! (.getSource e) nil)
                             (when at (events/dispatch! (:event at)))
                             (.setDropCompleted e (some? at))
@@ -185,6 +186,6 @@
                                    (fn [i fx]
                                      {:fx/type effect-card
                                       :fx/key (:id fx i)
-                                      :col col :row row :target target
+                                      :show-id show-id :target target
                                       :idx i :n (count fx-list) :effect fx})
                                    fx-list))}})]}))
