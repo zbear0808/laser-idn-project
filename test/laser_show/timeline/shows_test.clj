@@ -1,6 +1,7 @@
 (ns laser-show.timeline.shows-test
   (:require [clojure.edn :as edn]
             [clojure.test :refer [deftest is testing]]
+            [laser-show.timeline.model :as model]
             [laser-show.timeline.shows :as shows]
             [laser-show.timeline.timecode :as tc]))
 
@@ -40,6 +41,20 @@
         "a show key never reads cue-chains")
     (is (= [:chains :shows u1] (shows/cue-path [:show u1])))
     (is (= [:chains :cue-chains [2 1]] (shows/cue-path [2 1])))))
+
+(deftest new-show-test
+  (let [show (shows/new-show {:name " One More Time "})]
+    (is (= "One More Time" (:name show)))
+    (is (= :timeline (:editor-type show)))
+    (is (not (contains? show :id)) "its id is only its key")
+    (is (not (contains? show :timeline/chase)) "timecode off")
+    (is (seq (:tracks show)) "a track to add clips to")
+    (is (empty? (:items show)))
+    (is (nil? (:loop show)))
+    (is (identical? show (model/normalize-timeline-cue show)) "normalized"))
+  (is (= "Untitled" (:name (shows/new-show {}))))
+  (is (= "Untitled" (:name (shows/new-show {:name "  "}))))
+  (is (not= (:tracks (shows/new-show {})) (:tracks (shows/new-show {}))) "fresh track ids"))
 
 (deftest key-order-test
   (testing "03 §4 examples"
