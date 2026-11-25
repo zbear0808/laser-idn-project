@@ -560,6 +560,43 @@
         (is (= {:open? false} (question allowed-back)))
         (is (= changed (get-in allowed-back [:ui :notice :text])))))))
 
+(deftest locked-drags-removals-and-copies-only-make-zones-smaller-test
+  ;; Follow-up B3: a drag on the canvas, a blocked area's removal and a Copy
+  ;; are judged by the change they propose now, outputting or not, and so
+  ;; are their questions' answers
+  (let [z {:limit [-0.5 -0.5 0.5 0.5] :blocked [[-0.1 -0.1 0.1 0.1]]}
+        s0 (-> (starter)
+               (assoc-in [:projectors :p1 :safety] z)
+               (assoc-in [:projectors :p2 :safety] {:limit [-0.9 -0.9 0.9 0.9] :blocked []})
+               (history/mark-clean))
+        live (assoc-in s0 [:backend :streaming :running?] true)
+        zone #(get-in % [:projectors :p1 :safety])
+        question #(get-in % [:ui :dialogs :confirm])
+        allow (fn [s] {:event/type :ui/confirm :review-id (get-in s [:ui :dialogs :confirm :safety-review :id])})
+        drag (fn [coordinates] {:event/type :projectors/drag-safety :projector-id :p1 :path [:limit] :coordinates coordinates})
+        larger [(drag {2 0.75})
+                {:event/type :projectors/remove-blocked-area :projector-id :p1 :index 0 :row-version 0}
+                {:event/type :projectors/copy-safety :from :p2 :to [:p1]}]
+        refused (fn [type] {:text "Larger safety zone refused" :event type})]
+    (testing "locked, outputting or not: larger is refused with the lock's notice, a drag in applies"
+      (doseq [[label s] [["off" s0] ["outputting" live]]]
+        (testing label
+          (doseq [event larger]
+            (let [effects (handle (lock s) event)]
+              (is (= (lock s) (without-notices (:state effects))) (str (:event/type event) ": no question, no edit"))
+              (is (= (refused (:event/type event)) (get-in effects [:state :ui :show-lock-notice])))))
+          (let [smaller (run (lock s) (drag {2 0.4}))]
+            (is (= [-0.5 -0.5 0.4 0.5] (:limit (zone smaller))))
+            (is (nil? (get-in smaller [:ui :show-lock-notice])))))))
+    (testing "the lock on between a question and its Allow: refused, and the question closed"
+      (doseq [event larger]
+        (let [asked (run live event)
+              allowed (run (lock asked) (allow asked))]
+          (is (true? (:open? (question asked))) (str (:event/type event) " asks"))
+          (is (= z (zone allowed)))
+          (is (= {:open? false} (question allowed)))
+          (is (= (refused (:event/type event)) (get-in allowed [:ui :show-lock-notice]))))))))
+
 
 (deftest driver-config-edit-is-refused-while-locked-test
   (let [s0 (-> (starter)

@@ -1047,8 +1047,12 @@
         live (remove (with-zone outputting-state :p1 zone))]
     (is (= zone (get-in live [:state :projectors :p1 :safety])))
     (is (= "Laser L is on. Light can reach Blocked 2 again." (get-in live [:state :ui :dialogs :confirm :message])))
-    (is (= {:event/type :projectors/remove-blocked-area :projector-id :p1 :index 1 :confirmed? true}
-           (get-in live [:state :ui :dialogs :confirm :confirm-event])))
+    (is (= {:event/type :projectors/remove-blocked-area :review-id (get-in live [:state :ui :dialogs :confirm :safety-review :id])
+            :confirmed? true}
+           (get-in live [:state :ui :dialogs :confirm :confirm-event]))
+        "a question of its own (follow-up B3): its Allow answers it only")
+    (is (= {:event/type :projectors/remove-blocked-area :projector-id :p1 :index 1}
+           (get-in live [:state :ui :dialogs :confirm :safety-review :intent])))
     (testing "off, it applies at once"
       (is (= [[-0.2 -0.2 0.2 0.2]]
              (get-in (remove (with-zone (assoc-in outputting-state [:backend :streaming :running?] false) :p1 zone))
@@ -1076,8 +1080,9 @@
                (get-in asked [:state :ui :dialogs :confirm :title])))
         (is (= small (get-in asked [:state :projectors :p2 :safety])))
         (is (= zone (get-in (projectors/handle (assoc (get-in asked [:state :ui :dialogs :confirm :confirm-event])
-                                                      :state live))
-                            [:state :projectors :p3 :safety])))))))
+                                                      :state (:state asked)))
+                            [:state :projectors :p3 :safety]))
+            "its Allow, answering the question it asked (follow-up B3)")))))
 
 (deftest safety-events-on-a-missing-projector-change-nothing-test
   (doseq [event [{:event/type :projectors/set-safety :projector-id :nope :safety small}
@@ -1245,6 +1250,161 @@
           (let [gone (run-pipeline s0 {:event/type :projectors/remove :projector-id :p1})]
             (doseq [event [old-edit (coord [:limit 0] -0.4) {:event/type :projectors/reset-safety :projector-id :p1}]]
               (is (not (contains? (:projectors (run-pipeline gone event)) :p1)) (pr-str (:path event))))))))))
+
+
+;; A drag on the canvas, a blocked area's removal and a Copy: the change
+;; each names, judged against the zone stored now, and a question of its
+;; own (follow-up B3)
+
+
+(defn- drag
+  "A drag's event on :p1's zone: the numbers it moved of the rectangle at
+   path (more: :row-version, …)."
+  [path coordinates & {:as more}]
+  (merge {:event/type :projectors/drag-safety :projector-id :p1 :path path :coordinates coordinates} more))
+
+(defn- allow
+  "The confirm dialog's Allow of the safety question open in state."
+  [state]
+  {:event/type :ui/confirm :review-id (get-in state [:ui :dialogs :confirm :safety-review :id])})
+
+(def ^:private changed-text "Safety zone changed; review the edit again")
+
+(deftest drag-sets-what-it-moved-in-the-zone-stored-now-test
+  (let [off (assoc-in outputting-state [:backend :streaming :running?] false)
+        zone-of #(get-in % [:projectors :p1 :safety])]
+    (testing "a field's edit that landed after the editor drew, then a drag of another edge: both stay"
+      (is (= {:limit [-0.4 -0.5 0.3 0.5] :blocked []}
+             (zone-of (handle-all (with-zone off :p1 small) [(coord [:limit 0] -0.4) (drag [:limit] {2 0.3})])))))
+    (testing "a corner sets its two numbers, each move again; a blocked area moved, its four, on its row"
+      (is (= {:limit [-0.5 -0.5 0.4 0.7] :blocked []}
+             (zone-of (handle-all (with-zone off :p1 small) [(drag [:limit] {2 0.6 3 0.7}) (drag [:limit] {2 0.4 3 0.7})]))))
+      (is (= {:limit [-0.5 -0.5 0.5 0.5] :blocked [[-0.2 -0.2 0.2 0.2] [0.25 0.25 0.35 0.35]]}
+             (zone-of (handle-all (with-zone off :p1 two-rows) [(drag [:blocked 1] {0 0.25 1 0.25 2 0.35 3 0.35} :row-version 0)])))))
+    (testing "the value it has already: nothing"
+      (let [s (with-zone off :p1 small)]
+        (is (identical? s (:state (projectors/handle (assoc (drag [:limit] {2 0.5}) :state s)))))))
+    (testing "refused, the zone and everything else as it was"
+      (let [s (with-zone off :p1 two-rows)]
+        (doseq [[label event] [["no path" (drag nil {0 -0.4})]
+                               ["a number's path" (drag [:limit 0] {0 -0.4})]
+                               ["a row that isn't there" (drag [:blocked 2] {0 0.1} :row-version 0)]
+                               ["another row layout" (drag [:blocked 0] {0 -0.3} :row-version 7)]
+                               ["no row layout" (drag [:blocked 0] {0 -0.3})]
+                               ["no numbers" (drag [:limit] {})]
+                               ["numbers not in a map" (drag [:limit] [[0 -0.4]])]
+                               ["a fifth corner" (drag [:limit] {4 -0.4})]
+                               ["NaN" (drag [:limit] {0 ##NaN})]
+                               ["past 1" (drag [:limit] {2 1.5})]
+                               ["text" (drag [:limit] {0 "-0.4"})]
+                               ["x0 past x1" (drag [:limit] {0 0.6})]
+                               ["a projector that isn't there" (assoc (drag [:limit] {0 -0.4}) :projector-id :nope)]]]
+          (is (identical? s (:state (projectors/handle (assoc event :state s)))) label)))
+      (testing "a zone that can't be read stays as it is"
+        (let [s (with-zone off :p1 {:limit [0 0]})]
+          (is (identical? s (:state (projectors/handle (assoc (drag [:limit] {2 0.3}) :state s))))))))
+    (testing "a drag of a blocked area keeps the rows' layout: a field from before still lands on its row"
+      (let [s0 (with-zone off :p1 two-rows)
+            v0 (guard/rows-version s0 :p1)
+            moved (run-pipeline s0 (drag [:blocked 0] {0 -0.3 1 -0.3 2 0.1 3 0.1} :row-version v0))]
+        (is (= v0 (guard/rows-version moved :p1)))
+        (is (not= (guard/geometry-version s0 :p1) (guard/geometry-version moved :p1)))
+        (is (= [[-0.3 -0.3 0.1 0.1] [0.35 0.3 0.4 0.4]]
+               (:blocked (zone-of (run-pipeline moved (coord [:blocked 1 0] 0.35 :row-version v0))))))))))
+
+(deftest a-drag-asks-a-question-of-its-own-test
+  (let [live (with-zone outputting-state :p1 small)
+        zone-of #(get-in % [:projectors :p1 :safety])
+        question #(get-in % [:ui :dialogs :confirm])
+        wider (drag [:limit] {2 0.75})
+        asked (run-pipeline live wider)
+        id (get-in asked [:ui :dialogs :confirm :safety-review :id])]
+    (testing "a drag that widens a live laser's zone asks, and changes nothing yet"
+      (is (= small (zone-of asked)))
+      (is (= {:open? true
+              :title "Allow light in a larger area?"
+              :message "Laser L is on. Light can reach places it couldn't before."
+              :confirm-label "Allow"
+              :confirm-event {:event/type :projectors/drag-safety :review-id id :confirmed? true}
+              :safety-review {:id id :geometry 0
+                              :intent {:event/type :projectors/drag-safety :projector-id :p1 :path [:limit] :coordinates {2 0.75}}}}
+             (question asked)))
+      (is (= asked (run-pipeline asked (drag [:limit] {3 0.8}))) "another widening while it asks is dropped"))
+    (testing "its Allow sets what it moved, in the zone it asked about"
+      (let [allowed (run-pipeline asked (allow asked))]
+        (is (= [-0.5 -0.5 0.75 0.5] (:limit (zone-of allowed))))
+        (is (= {:open? false} (question allowed)))
+        (is (= "Change Safety Zone" (history/undo-label (:history allowed))))))
+    (testing "a field's edit before it asked: the drag lands beside it, Allow and all"
+      (let [first-edit (run-pipeline live (coord [:limit 0] -0.4))
+            asked (run-pipeline first-edit wider)]
+        (is (= [-0.4 -0.5 0.75 0.5] (:limit (zone-of (run-pipeline asked (allow asked))))))))
+    (testing "a field's edit while it asks, then the Allow: it writes nothing, and says so"
+      (let [tightened (run-pipeline asked (coord [:limit 0] -0.4))
+            stale (run-pipeline tightened (allow asked))]
+        (is (= [-0.4 -0.5 0.5 0.5] (:limit (zone-of tightened))) "the edit applies while it asks")
+        (is (= [-0.4 -0.5 0.5 0.5] (:limit (zone-of stale))) "the old Allow neither undoes it nor widens the zone")
+        (is (= {:open? false} (question stale)))
+        (is (= changed-text (get-in stale [:ui :notice :text])))
+        (is (= (get-in tightened [:history :undo-stack]) (get-in stale [:history :undo-stack])) "and adds no undo step")))
+    (testing "a bare :confirmed? is no permission, nor an answer to no question"
+      (let [s (run-pipeline live (assoc wider :confirmed? true))]
+        (is (= small (zone-of s)))
+        (is (true? (:open? (question s)))))
+      (is (= live (run-pipeline live {:event/type :projectors/drag-safety :review-id id :confirmed? true}))))))
+
+(deftest removing-a-blocked-area-asks-a-question-of-its-own-test
+  (let [three {:limit [-0.9 -0.9 0.9 0.9] :blocked [[-0.8 -0.8 -0.7 -0.7] [-0.2 -0.2 0.2 0.2] [0.5 0.5 0.6 0.6]]}
+        live (with-zone outputting-state :p1 three)
+        zone-of #(get-in % [:projectors :p1 :safety])
+        off #(assoc-in % [:backend :streaming :running?] false)
+        remove (fn [index] {:event/type :projectors/remove-blocked-area :projector-id :p1 :index index :row-version 0})
+        asked (run-pipeline live (remove 1))]
+    (is (= three (zone-of asked)) "it asks first")
+    (testing "its Allow removes the area it asked about"
+      (is (= [[-0.8 -0.8 -0.7 -0.7] [0.5 0.5 0.6 0.6]] (:blocked (zone-of (run-pipeline asked (allow asked)))))))
+    (testing "Blocked 1 removed while it asks: the Allow removes no other area, and says so"
+      (let [shifted (run-pipeline (off asked) {:event/type :projectors/remove-blocked-area :projector-id :p1 :index 0})
+            stale (run-pipeline (assoc-in shifted [:backend :streaming :running?] true) (allow asked))]
+        (is (= [[-0.2 -0.2 0.2 0.2] [0.5 0.5 0.6 0.6]] (:blocked (zone-of shifted))))
+        (is (= [[-0.2 -0.2 0.2 0.2] [0.5 0.5 0.6 0.6]] (:blocked (zone-of stale))))
+        (is (= changed-text (get-in stale [:ui :notice :text])))
+        (testing "and its button, from the layout before, removes nothing either"
+          (is (= (zone-of shifted) (zone-of (run-pipeline shifted (remove 1))))))))))
+
+(deftest copy-asks-a-question-of-its-own-test
+  (let [zone {:limit [-0.7 -0.9 0.8 0.95] :blocked []}
+        live (-> outputting-state
+                 (with-zone :p1 zone)
+                 (assoc-in [:projectors :p2 :enabled?] true)
+                 (with-zone :p2 small))
+        off #(assoc-in % [:backend :streaming :running?] false)
+        on #(assoc-in % [:backend :streaming :running?] true)
+        zone-of (fn [s id] (get-in s [:projectors id :safety]))
+        copy {:event/type :projectors/copy-safety :from :p1 :to [:p2]}
+        asked (run-pipeline live copy)
+        id (get-in asked [:ui :dialogs :confirm :safety-review :id])]
+    (is (= small (zone-of asked :p2)) "it asks first")
+    (is (= {:id id :intent copy :zones {:p2 zone} :geometries {:p2 0}}
+           (get-in asked [:ui :dialogs :confirm :safety-review])))
+    (testing "its Allow copies the zone it asked about"
+      (is (= zone (zone-of (run-pipeline asked (allow asked)) :p2))))
+    (testing "the zone it copies changed while it asks: the Allow copies nothing, and says so"
+      (let [wider (on (run-pipeline (off asked) (coord [:limit 1] -1.0)))
+            stale (run-pipeline wider (allow asked))]
+        (is (= -1.0 (get-in (zone-of wider :p1) [:limit 1])))
+        (is (= small (zone-of stale :p2)))
+        (is (= {:open? false} (get-in stale [:ui :dialogs :confirm])))
+        (is (= changed-text (get-in stale [:ui :notice :text])))))
+    (testing "the zone it copies onto changed: nothing copied"
+      (let [tightened (run-pipeline asked (assoc (coord [:limit 0] -0.4) :projector-id :p2))
+            stale (run-pipeline tightened (allow asked))]
+        (is (= [-0.4 -0.5 0.5 0.5] (:limit (zone-of stale :p2))))
+        (is (= changed-text (get-in stale [:ui :notice :text])))))
+    (testing "a bare :confirmed? is no permission: it asks"
+      (let [s (run-pipeline live (assoc copy :confirmed? true))]
+        (is (= small (zone-of s :p2)))
+        (is (true? (get-in s [:ui :dialogs :confirm :open?])))))))
 
 
 ;; A projector Undo took away (reactivity plan 14): nothing selects it, and
