@@ -121,6 +121,7 @@
       (testing "content includes all chain types"
         (let [paths (get-in mapping [:content :paths])]
           (is (some #(= (:path %) [:chains :cue-chains]) paths))
+          (is (some #(= {:path [:chains :shows] :owner :show} %) paths) "the timeline show library")
           (is (some #(= (:path %) [:chains :effect-chains]) paths))
           (is (some #(= (:path %) [:chains :projector-effects]) paths)))))))
 
@@ -284,6 +285,13 @@
       (is (not (contains? domains :cue-lists)))
       (is (not (contains? domains :effect-registry))))))
 
+;; Timeline show ids (plans/2026-11-25-timeline-shows)
+
+(def ^:private u1 #uuid "00000000-0000-0000-0000-000000000001")
+(def ^:private u2 #uuid "00000000-0000-0000-0000-000000000002")
+(def ^:private track-1 #uuid "00000000-0000-0000-0000-0000000000f1")
+(def ^:private track-2 #uuid "00000000-0000-0000-0000-0000000000f2")
+
 (deftest load-normalizes-timeline-cues-and-stays-clean-test
   (let [track-id #uuid "33333333-3333-3333-3333-333333333333"
         untimed {:editor-type :timeline
@@ -300,7 +308,81 @@
       (is (= 4.0 (get-in cue [:items 0 :timeline/duration])))
       (is (= track-id (get-in cue [:items 0 :track-id])))
       (is (true? (get-in cue [:tracks 0 :muted?])) "old disabled track becomes muted")
-      (is (false? (get-in loaded [:project :dirty?])) "loading doesn't make the project unsaved"))))
+      (is (false? (get-in loaded [:project :dirty?])) "loading doesn't make the project unsaved"))
+    (testing "an untimed show in the library opens normalized, and clean (timeline shows plan 04 §4.2)"
+      (let [saved (assoc-in (domains/build-initial-state) [:chains :shows u1] (assoc untimed :name "Untimed"))]
+        (is (persistent/write-project! test-project-file (persistent/project-files saved)))
+        (let [loaded (persistent/apply-loaded-project (domains/build-initial-state)
+                                                      (persistent/read-project test-project-file)
+                                                      test-project-file)
+              show (get-in loaded [:chains :shows u1])]
+          (is (= "Untimed" (:name show)))
+          (is (= 0.0 (get-in show [:items 0 :timeline/start])))
+          (is (= 4.0 (get-in show [:items 0 :timeline/duration])))
+          (is (= track-id (get-in show [:items 0 :track-id])))
+          (is (true? (get-in show [:tracks 0 :muted?])) "old disabled track becomes muted")
+          (is (false? (get-in loaded [:project :dirty?])) "normalized before the saved baseline")
+          (is (empty? (get-in loaded [:history :undo-stack]))))))))
+
+;; Timeline shows (plans/2026-11-25-timeline-shows/04 §4.2, §8)
+
+(def ^:private library
+  "Two shows as the library holds them: normalized, with :show/info, and a
+   muted track."
+  {u1 {:name "One More Time" :editor-type :timeline
+       :show/info {:artist "Daft Punk" :album "Discovery" :key "F#m" :genre "House"}
+       :timeline/tempo-bpm 122.7 :timeline/tc-start 3600.0 :timeline/tc-fps 25 :timeline/chase :mtc
+       :tracks [{:id track-1 :type :track :name "Track 1" :muted? true}]
+       :items [{:id #uuid "00000000-0000-0000-0000-0000000000c1" :type :preset :preset-id :circle
+                :track-id track-1 :timeline/start 0.0 :timeline/duration 16.0}]}
+   u2 {:name "Around the World" :editor-type :timeline
+       :show/info {:artist "Daft Punk"}
+       :tracks [{:id track-2 :type :track :name "Track 1"}]
+       :items []}})
+
+(deftest shows-survive-save-and-load-test
+  (let [saved (-> (test-state)
+                  (assoc-in [:chains :shows] library)
+                  history/mark-clean)
+        files (persistent/project-files saved)]
+    (is (= library (get-in files ["content.edn" :chains :shows])) "in content.edn, beside the grids")
+    (is (persistent/write-project! test-project-file files) "#uuid keys print and read back")
+    (is (= files (persistent/read-project test-project-file)))
+    (let [loaded (persistent/apply-loaded-project (domains/build-initial-state)
+                                                  (persistent/read-project test-project-file)
+                                                  test-project-file)]
+      (is (= library (get-in loaded [:chains :shows])))
+      (is (every? uuid? (keys (get-in loaded [:chains :shows]))))
+      (is (true? (get-in loaded [:chains :shows u1 :tracks 0 :muted?])) "a track's mute is saved, though it is live")
+      (is (false? (get-in loaded [:project :dirty?])))
+      (is (empty? (get-in loaded [:history :undo-stack]))))
+    (testing "an older file, without the library: none, and clean"
+      (let [old (update-in files ["content.edn" :chains] dissoc :shows)
+            loaded (persistent/apply-loaded-project saved old "old.zip")]
+        (is (not (contains? (get-in old ["content.edn" :chains]) :shows)))
+        (is (= {} (get-in loaded [:chains :shows])) "the old show's library goes")
+        (is (false? (get-in loaded [:project :dirty?])))))))
+
+(deftest session-reset-keeps-show-search-test
+  (testing "the Shows tab's search and sort survive New and Open; its selection, edit and manual show, and the editor's views, go"
+    (let [busy (-> (test-state)
+                   (assoc-in [:chains :shows] library)
+                   (assoc-in [:ui :shows] {:query "daft" :scope :artist :sort {:column :bpm :dir :desc}
+                                           :selected #{u1} :editing {:show-id u1 :column :title :text "One"}
+                                           :manual u1})
+                   (assoc-in [:ui :timeline-editor] {u1 {:selection #{} :cursor-beat 4.0}}))
+          expected {:query "daft" :scope :artist :sort {:column :bpm :dir :desc}
+                    :selected #{} :editing nil :manual nil}]
+      (is (= {:query "" :scope :all :sort {:column :title :dir :asc} :selected #{} :editing nil :manual nil}
+             (get-in (domains/build-initial-state) [:ui :shows])) "the defaults")
+      (doseq [[label s] [["New" (persistent/new-project-state busy)]
+                         ["Open" (persistent/apply-loaded-project busy (persistent/project-files busy) "x.zip")]]]
+        (testing label
+          (is (= expected (get-in s [:ui :shows])))
+          (is (= {} (get-in s [:ui :timeline-editor])))))
+      (testing "nothing set yet: the defaults"
+        (is (= (get-in (domains/build-initial-state) [:ui :shows])
+               (get-in (persistent/new-project-state (update busy :ui dissoc :shows)) [:ui :shows])))))))
 
 (defn- with-starter-vibes []
   (-> (domains/build-initial-state)
@@ -798,8 +880,25 @@
                ["a cell that isn't a map" (assoc-in good ["content.edn" :chains :effect-chains [0 1]] [:scale]) [:chains :effect-chains [0 1]]]
                ["items that aren't maps" (assoc-in good ["content.edn" :chains :cue-chains [0 0] :items] [:circle]) [:chains :cue-chains [0 0] :items]]
                ["zone maps that aren't a map" (assoc-in good ["content.edn" :zone-maps] [:map/custom-1]) [:zone-maps]]
-               ["calibration that isn't a map" (assoc-in good ["content.edn" :chains :projector-effects] []) [:chains :projector-effects]]]]
+               ["calibration that isn't a map" (assoc-in good ["content.edn" :chains :projector-effects] []) [:chains :projector-effects]]
+               ["shows in a vector" (assoc-in good ["content.edn" :chains :shows] []) [:chains :shows]]
+               ["a show id that isn't a uuid" (assoc-in good ["content.edn" :chains :shows] {"abc" {:editor-type :timeline}}) [:chains :shows "abc"]]
+               ["a show that isn't a map" (assoc-in good ["content.edn" :chains :shows] {u1 [:x]}) [:chains :shows u1]]
+               ["a show that isn't a timeline" (assoc-in good ["content.edn" :chains :shows] {u1 {:name "x"}}) [:chains :shows u1 :editor-type]]
+               ["a show's items that aren't maps" (assoc-in good ["content.edn" :chains :shows] {u1 {:editor-type :timeline :items [:circle]}}) [:chains :shows u1 :items]]
+               ["a show's tracks that aren't maps" (assoc-in good ["content.edn" :chains :shows] {u1 {:editor-type :timeline :tracks {:a 1}}}) [:chains :shows u1 :tracks]]
+               ["a show's info that isn't text" (assoc-in good ["content.edn" :chains :shows] {u1 {:editor-type :timeline :show/info {:artist 3}}}) [:chains :shows u1 :show/info]]
+               ["a show's info that isn't a map" (assoc-in good ["content.edn" :chains :shows] {u1 {:editor-type :timeline :show/info "Daft Punk"}}) [:chains :shows u1 :show/info]]]]
         (is (= {:member "content.edn" :path path} (refused files)) label)))
+    (testing "shows (timeline shows plan 04 §7.2): absent, empty, or {uuid timeline}; what normalizing fixes is accepted"
+      (is (= ::accepted (refused (update-in good ["content.edn" :chains] dissoc :shows))) "absent: a file from before the library")
+      (is (= ::accepted (refused (assoc-in good ["content.edn" :chains :shows] {}))))
+      (is (= ::accepted (refused (assoc-in good ["content.edn" :chains :shows]
+                                           {u1 {:editor-type :timeline :items [{:id "c" :timeline/start -4}]}})))
+          "clip timing is normalize-timeline-cue's, and item ids may be strings")
+      (is (= ::accepted (refused (assoc-in good ["content.edn" :chains :shows]
+                                           {u1 {:editor-type :timeline :show/info {:artist "Daft Punk" :album "Discovery"}
+                                                :tracks [{:id track-1 :type :track}] :items []}})))))
     (testing "the others may be missing; one that is there is a map, with a map (or nothing) at its paths"
       (is (= ::accepted (refused (dissoc good "hardware.edn" "project-metadata.edn"))))
       (is (= ::accepted (refused (update good "hardware.edn" dissoc :rig :zone-groups))) "an old one's paths default")

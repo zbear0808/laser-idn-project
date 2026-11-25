@@ -83,6 +83,7 @@
    
    :content
    {:paths [{:path [:chains :cue-chains] :owner :show}
+            {:path [:chains :shows] :owner :show}
             {:path [:chains :effect-chains] :owner :show}
             {:path [:chains :projector-effects] :owner :rig}
             {:path [:zone-maps] :owner :show}
@@ -118,14 +119,42 @@
         (when-not (or (nil? items) (and (sequential? items) (every? map? items)))
           (throw (format-error member (conj at :items) "is not a sequence of maps")))))))
 
+(defn- maps-or-nil? [v]
+  (or (nil? v) (and (sequential? v) (every? map? v))))
+
+(defn- check-shows!
+  "Throw unless the shows in content.edn's data, when there are any, are
+   {uuid show} with map shows whose :editor-type is :timeline, whose :items
+   and :tracks, when there are any, are sequences of maps, and whose
+   :show/info, when there is one, is a map of strings. The generic loop of
+   checked-project-files has already refused a [:chains :shows] that isn't
+   a map. Clip timing, tempo and timecode are normalize-timeline-cue's."
+  [member data]
+  (let [path [:chains :shows]]
+    (doseq [[k show] (get-in data path)
+            :let [at (conj path k)]]
+      (when-not (uuid? k)
+        (throw (format-error member at "is not a show id (a uuid)")))
+      (when-not (map? show)
+        (throw (format-error member at "is not a map")))
+      (when-not (= :timeline (:editor-type show))
+        (throw (format-error member (conj at :editor-type) "is not :timeline")))
+      (doseq [field [:items :tracks]]
+        (when-not (maps-or-nil? (get show field))
+          (throw (format-error member (conj at field) "is not a sequence of maps"))))
+      (let [info (:show/info show)]
+        (when-not (or (nil? info) (and (map? info) (every? string? (vals info))))
+          (throw (format-error member (conj at :show/info) "is not a map of text")))))))
+
 (defn checked-project-files
   "files ({filename data}, as a project zip is read) when a show is in it,
    else throws ex-info naming the member and the path in it (:member :path):
    - content.edn must be there: a map whose :chains holds :cue-chains and
      :effect-chains, each a map ({} for an empty grid) of [col row] integer
      cells, each a map whose :items, when there are any, are a sequence of
-     maps. Its later paths ([:chains :projector-effects], :zone-maps,
-     :zones) may be missing.
+     maps. Its later paths ([:chains :shows], [:chains :projector-effects],
+     :zone-maps, :zones) may be missing. Shows, when there are any, are
+     {uuid show} (check-shows!).
    - project-metadata.edn and hardware.edn may be missing (their paths then
      take their defaults, as an old show's do), but one that is there is a
      map. A damaged one isn't a missing one: it fails.
@@ -152,6 +181,7 @@
       (throw (format-error content [:chains] "is not a map")))
     (check-grid! content (get files content) [:chains :cue-chains])
     (check-grid! content (get files content) [:chains :effect-chains])
+    (check-shows! content (get files content))
     files))
 
 
@@ -269,7 +299,9 @@
 (defn- reset-session
   "Reset state that refers to the previous document (playback, what vibe
    mode is doing, what the keys hold, selection, list UI, dialogs, the
-   status bar's notice, the Vibes tab's selection, a pending zone map
+   status bar's notice, the Vibes tab's selection, the Shows tab's
+   selection, edit and banner (its search and sort are kept), the timeline
+   editor's views, a pending zone map
    switch and the Map cycle's pause, the pattern pads' style, learning an
    input, undo history, project metadata), and give the new document its
    own identity (begin-document). Learning starts afresh ([:ui
@@ -292,6 +324,12 @@
       (assoc-in [:ui :dialogs] (get-in initial [:ui :dialogs]))
       (assoc-in [:ui :notice] (get-in initial [:ui :notice]))
       (assoc-in [:ui :vibes] (get-in initial [:ui :vibes]))
+      ;; The Shows tab's search and sort are how the user browses, so they
+      ;; survive; its selection, edit, manual show and migration banner
+      ;; belong to the show that was open, as do the editor's views
+      (assoc-in [:ui :shows] (merge (get-in initial [:ui :shows])
+                                    (select-keys (get-in state [:ui :shows]) [:query :scope :sort])))
+      (assoc-in [:ui :timeline-editor] (get-in initial [:ui :timeline-editor]))
       (assoc-in [:grid :selected-cell] nil)
       ;; A switch waiting for a beat of the show that was open, the Map
       ;; cycle's pause and the pattern pads' style (zones plan Z5): a show
@@ -340,6 +378,7 @@
         (reset-session initial)
         ;; Before mark-clean, so an old project isn't "unsaved" right after loading
         (update-in [:chains :cue-chains] model/normalize-timeline-cues)
+        (update-in [:chains :shows] model/normalize-timeline-cues)
         (migration/zones-z2-show hardware)
         (migration/zones-z4)
         (rig-file/rename-pins hardware)

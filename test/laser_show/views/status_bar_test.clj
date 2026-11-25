@@ -185,3 +185,14 @@
                   :children
                   (take 2)
                   (map :fx/type)))))))
+
+(deftest playing-list-with-shows-test
+  (is (= "A1 circle · ♪ One More Time"
+         (status-bar/playing-list [{:col 0 :row 0 :name "circle"}] [{:title "One More Time"}])))
+  (is (= "♪ One More Time" (status-bar/playing-list [] [{:title "One More Time"}])) "shows alone")
+  (is (nil? (status-bar/playing-list [] [])))
+  (testing "cues and shows count together towards the two named, then \"+n\""
+    (is (= "A1 circle · A2 square · +1"
+           (status-bar/playing-list [(cue 0 0 :circle 1) (cue 1 0 :square 1)] [{:title "Strobe"}])))
+    (is (= "A1 circle · ♪ Strobe · +1"
+           (status-bar/playing-list [(cue 0 0 :circle 1)] [{:title "Strobe"} {:title "Untitled"}])))))

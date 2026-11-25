@@ -26,6 +26,7 @@
    [laser-show.routing.zone-maps :as zone-maps]
    [laser-show.routing.zone-patterns :as zone-patterns]
    [laser-show.state.templates :as templates]
+   [laser-show.timeline.shows :as shows]
    [laser-show.vibes.engine :as engine]
    [laser-show.vibes.faders :as faders]
    [laser-show.vibes.library :as library]
@@ -863,20 +864,51 @@
             (is (true? (:held? (fx/sub-ctx pressed subs/vibe-pad :hit))))
             (is (false? (:held? (fx/sub-ctx (release pressed :hit 1100) subs/vibe-pad :hit))))))))))
 
-(deftest timeline-dialog-subs-ignore-playback-and-other-cells-test
-  (let [ctx (context base-state)
-        chain (fx/sub-ctx ctx subs/cue-cell-chain 0 0)
-        ui (fx/sub-ctx ctx subs/timeline-ui 0 0)]
+(def ^:private dialog-u1 #uuid "00000000-0000-0000-0000-00000000d1a1")
+(def ^:private dialog-u2 #uuid "00000000-0000-0000-0000-00000000d1a2")
+
+(deftest timeline-dialog-subs-ignore-playback-and-other-shows-test
+  (let [ctx (context (assoc-in base-state [:chains :shows] {dialog-u1 {:editor-type :timeline :name "One" :items []}
+                                                            dialog-u2 {:editor-type :timeline :items []}}))
+        show (fx/sub-ctx ctx subs/show-cue dialog-u1)
+        ui (fx/sub-ctx ctx subs/timeline-ui dialog-u1)]
+    (is (= "One" (:name show)))
+    (is (= {:selection #{} :cursor-beat 0.0} ui))
     (testing "the show clock's status doesn't invalidate the dialog's subs"
       (let [ctx' (status-write ctx)]
-        (is (identical? chain (fx/sub-ctx ctx' subs/cue-cell-chain 0 0)))
-        (is (identical? ui (fx/sub-ctx ctx' subs/timeline-ui 0 0)))))
-    (testing "another cell's edits and view don't either"
+        (is (identical? show (fx/sub-ctx ctx' subs/show-cue dialog-u1)))
+        (is (identical? ui (fx/sub-ctx ctx' subs/timeline-ui dialog-u1)))))
+    (testing "another show's edits and view don't either"
       (let [ctx' (-> ctx
-                     (fx/swap-context assoc-in [:chains :cue-chains [1 0] :name] "Other")
-                     (fx/swap-context assoc-in [:ui :timeline-editor [1 0] :selection] #{:x}))]
-        (is (identical? chain (fx/sub-ctx ctx' subs/cue-cell-chain 0 0)))
-        (is (identical? ui (fx/sub-ctx ctx' subs/timeline-ui 0 0)))))))
+                     (fx/swap-context assoc-in [:chains :shows dialog-u2 :name] "Other")
+                     (fx/swap-context assoc-in [:ui :timeline-editor dialog-u2 :selection] #{:x}))]
+        (is (identical? show (fx/sub-ctx ctx' subs/show-cue dialog-u1)))
+        (is (identical? ui (fx/sub-ctx ctx' subs/timeline-ui dialog-u1)))))
+    (testing "a show that isn't there is nil, not an empty cue"
+      (is (nil? (fx/sub-ctx ctx subs/show-cue (random-uuid)))))))
+
+(deftest timeline-transport-reads-the-show-key-test
+  (let [ctx (context (-> base-state
+                         (assoc-in [:chains :shows dialog-u1] {:editor-type :timeline :items []})
+                         (assoc-in [:chains :cue-chains [0 0]] {:editor-type :timeline :items []})
+                         (assoc-in [:playback :active-cues [0 0]] {:run :r0 :timeline? true})))]
+    (is (= :stopped (fx/sub-ctx ctx subs/timeline-transport dialog-u1)) "a grid cell's run isn't the show's")
+    (is (= :playing (fx/sub-ctx (fx/swap-context ctx assoc-in [:playback :active-cues (shows/play-key dialog-u1)]
+                                                 {:run :r1 :timeline? true})
+                                subs/timeline-transport dialog-u1)))
+    (is (= :paused (fx/sub-ctx (fx/swap-context ctx assoc-in [:playback :active-cues (shows/play-key dialog-u1)]
+                                                {:run :r1 :timeline? true :paused? true})
+                               subs/timeline-transport dialog-u1)))))
+
+(deftest show-target-explain-has-no-column-test
+  (let [s0 (-> base-state
+               (assoc-in [:grid :column-targets 0] :zone/b)
+               (assoc-in [:chains :shows dialog-u1] {:editor-type :timeline :items []}))
+        cue-of #(:cue (fx/sub-ctx (context %) subs/show-target-explain dialog-u1))]
+    (is (= {:target :all :from :default} (cue-of s0)) "no show default: All, never column 0's")
+    (is (= {:target :zone/a :from :show} (cue-of (assoc-in s0 [:config :default-target] :zone/a))))
+    (is (= {:target :zone/c :from :cue} (cue-of (assoc-in s0 [:chains :shows dialog-u1 :target] :zone/c))))
+    (is (not-any? #(= :column (:from %)) (map cue-of [s0 (assoc-in s0 [:config :default-target] :zone/a)])))))
 
 (def ^:private playing-state
   "Three cues playing, started in no particular order: [0 1] (B1), [1 0] (A2)
@@ -942,6 +974,20 @@
                               subs/playing-cues)))))
     (testing "nothing plays while Stop holds them"
       (is (= [] (fx/sub-ctx (context (after playing-state :transport/stop)) subs/playing-cues))))))
+
+(deftest playing-cues-skips-show-keys-test
+  (let [u #uuid "00000000-0000-0000-0000-0000000005a1"
+        with-show (-> playing-state
+                      (assoc-in [:chains :shows u] {:editor-type :timeline :items []})
+                      (assoc-in [:playback :active-cues (shows/play-key u)] {:run #uuid "00000000-0000-0000-0000-000000000004"}))]
+    (testing "a show playing beside them: the grid's cues, in grid order, and no throw"
+      (is (= [[0 0] [1 0] [0 1]] (map (juxt :col :row) (fx/sub-ctx (context with-show) subs/playing-cues)))))
+    (testing "a show alone: no grid cue plays"
+      (is (= [] (fx/sub-ctx (context (assoc-in with-show [:playback :active-cues]
+                                               {(shows/play-key u) {:run #uuid "00000000-0000-0000-0000-000000000004"}}))
+                            subs/playing-cues))))
+    (testing "Stop holds the show too"
+      (is (= 4 (fx/sub-ctx (context (after with-show :transport/stop)) subs/held-cue-count))))))
 
 (deftest connection-status-says-why-nothing-streams-test
   (let [said-at (fn [running? status]
@@ -1642,7 +1688,7 @@
         pattern [:chains :cue-chains [0 0] :zone-patterns 0 :params]
         others [[:lane/lasers] [:auto.laser/p1 :graphics]]
         shown (fn [ctx]
-                (let [lane (get-in (fx/sub-ctx ctx subs/cue-zone-pattern 0 0) [:params :zones])]
+                (let [lane (get-in (fx/sub-ctx ctx subs/cue-zone-pattern [0 0]) [:params :zones])]
                   {:lane lane
                    :texts (mapv #(fx/sub-ctx ctx subs/pattern-fold %) (cons lane others))
                    :folds @folds}))
@@ -1893,6 +1939,24 @@
                                     subs/cue-warning 2 0)
                         :item-name))
         "no item counts (its editor is closed): no item")))
+
+(deftest key-cue-warning-on-a-show-test
+  (let [u #uuid "6f1c0000-0000-0000-0000-000000000001"
+        ring #uuid "00000000-0000-0000-0000-0000000000a1"
+        warning {:projector :p3 :points 1750 :fps 14 :min-fps 20 :scan-rate 25000 :item {:id ring :points 1200}}
+        state (-> (domains/build-initial-state)
+                  (assoc :projectors {:p3 {:name "Laser R"}})
+                  (assoc-in [:chains :shows u] {:editor-type :timeline :items [{:id ring :type :preset :preset-id :circle}]})
+                  (assoc-in [:chains :cue-chains [2 0]] {:items [{:id ring :type :preset :preset-id :wave :name "Swell"}]})
+                  (assoc-in [:backend :streaming :cue-warnings] {[:show u] warning}))
+        ctx (context state)]
+    (is (= (assoc warning :laser "Laser R" :item-name "Circle") (fx/sub-ctx ctx subs/key-cue-warning [:show u]))
+        "keyed by the show's playback key, its item named from the show")
+    (is (nil? (fx/sub-ctx ctx subs/key-cue-warning [:show #uuid "6f1c0000-0000-0000-0000-000000000002"])) "another show has none")
+    (is (nil? (fx/sub-ctx ctx subs/cue-warning 2 0)) "the grid cell has none of the show's")
+    (is (= "Swell" (:item-name (fx/sub-ctx (context (assoc-in state [:backend :streaming :cue-warnings] {[2 0] warning}))
+                                           subs/key-cue-warning [2 0])))
+        "a grid cell's key reads the cell, as cue-warning does")))
 
 ;; Projectors with another output driver (output drivers D2)
 
@@ -2585,6 +2649,30 @@
 
 ;; Who uses a group (zones plan Z4, 06 §8.7)
 
+(deftest shows-count-in-the-zone-subs-test
+  ;; plans/2026-11-25-timeline-shows 04 §4.6: a library show names zones and
+  ;; draws as a cue does, with no column
+  (let [id #uuid "00000000-0000-0000-0000-0000000000aa"
+        s (-> (domains/build-initial-state)
+              (assoc-in [:chains :cue-chains] {})
+              (assoc-in [:grid :column-targets] {0 :zone/b}))
+        show {:editor-type :timeline
+              :tracks [{:id "t1" :type :track :target :zone/k}]
+              :items [{:type :preset :id "c1" :preset-id :circle :track-id "t1"
+                       :timeline/start 0.0 :timeline/duration 4.0}]}
+        with-show (assoc-in s [:chains :shows id] show)
+        ctx (context with-show)]
+    (is (some #{:zone/k} (fx/sub-ctx ctx subs/zones-in-use)) "the catalogue lists the show's zone")
+    (is (not (some #{:zone/k} (fx/sub-ctx (context s) subs/zones-in-use))))
+    (is (= 1 (:direct (fx/sub-ctx ctx subs/ref-usage :zone/k))) "the show draws there")
+    (is (= 0 (:direct (fx/sub-ctx ctx subs/ref-usage :zone/b))) "no column: column 1's default is not the show's")
+    (is (false? (fx/sub-ctx ctx subs/zone-patterns-in-use?)))
+    (is (true? (fx/sub-ctx (context (assoc-in with-show [:chains :shows id :zone-patterns]
+                                              [(zone-patterns/preset-instance :alternate :cue)]))
+                           subs/zone-patterns-in-use?))
+        "a show's zone pattern shows the pattern pads")
+    (is (false? (fx/sub-ctx (context (assoc-in s [:chains :shows] nil)) subs/zone-patterns-in-use?)) "no shows: fine")))
+
 (deftest ref-usage-direct-and-through-test
   (let [cue (fn [t] {:items [{:type :preset :preset-id :circle :target t}]})
         cells (concat (for [c (range 3)] [[c 0] (cue :auto/left)])
@@ -2872,3 +2960,257 @@
       (finally
         (modulator-registry/register-modulator! envelope)))
     (is (= before (shown (published ctx))) "put back, and published: as before")))
+
+(deftest show-list-rows-test
+  (let [[a b c d e] (map #(parse-uuid (str "00000000-0000-0000-0000-00000000000" %)) (range 1 6))
+        shows {e {:name "beta" :editor-type :timeline}
+               a {:name nil :editor-type :timeline}
+               d {:name "Alpha" :editor-type :timeline}
+               c {:name "alpha" :editor-type :timeline}
+               b {:name "" :editor-type :timeline}}
+        s (assoc-in base-state [:chains :shows] shows)
+        ctx (context s)
+        rows (fx/sub-ctx ctx subs/show-list-rows)]
+    (is (= [{:id c :title "alpha"} {:id d :title "Alpha"} {:id e :title "beta"}
+            {:id a :title nil} {:id b :title nil}]
+           rows)
+        "by title whatever its case, ties by id, the untitled ones (blank too) last")
+    (is (= [] (fx/sub-ctx (context base-state) subs/show-list-rows)) "an empty library")
+    (let [ctx' (fx/swap-context ctx assoc-in [:chains :shows c :items] [{:id 1 :type :preset}])]
+      (is (identical? rows (fx/sub-ctx ctx' subs/show-list-rows)) "an edit inside a show keeps the rows"))
+    (let [ctx' (fx/swap-context ctx assoc-in [:chains :shows a :name] "Aardvark")]
+      (is (= [a c d e b] (mapv :id (fx/sub-ctx ctx' subs/show-list-rows))) "a rename re-sorts"))))
+
+
+
+;; The Shows table (plans/2026-11-25-timeline-shows 06 §4.4, §8)
+
+(def ^:private table-ids
+  (mapv #(parse-uuid (str "00000000-0000-0000-0000-0000000000a" %)) (range 1 5)))
+
+(defn- table-state
+  "base-state with four shows: three locked at 120 (a 64 s, b 32 s, c
+   16 s) and d unlocked (64 beats, 32 s at 120); a and c follow timecode."
+  []
+  (let [[a b c d] table-ids
+        show (fn [name len & {:as more}]
+               (merge {:name name :editor-type :timeline :timeline/tempo-bpm 120.0
+                       :items [{:id 1 :track-id 1 :timeline/start 0.0 :timeline/duration len}]}
+                      more))]
+    (-> base-state
+        (assoc-in [:chains :shows] {a (show "Alpha" 128.0 :show/info {:artist "Daft Punk"} :timeline/chase :mtc)
+                                    b (show "Bravo" 64.0 :show/info {:artist "deadmau5"})
+                                    c (show "Charlie" 32.0 :show/info {:artist "Daft Punk"} :timeline/chase :mtc
+                                            :timeline/tc-start 600.0)
+                                    d (dissoc (show "Delta" 64.0) :timeline/tempo-bpm)})
+        (assoc-in [:timing :bpm] 120.0))))
+
+(deftest visible-show-rows-test
+  (let [[a b c d] table-ids
+        ctx (context (table-state))
+        before (fx/sub-ctx ctx subs/visible-show-rows)]
+    (is (= [a b c d] (mapv :id before)) "by title, ascending, by default")
+    (is (= (fx/sub-ctx ctx subs/visible-show-rows) (shows/sort-rows (shows/rows (get-in (table-state) [:chains :shows]))
+                                                                    {:column :title :dir :asc} nil)))
+    (testing "sorted by title: playback and tempo don't re-run it"
+      (let [ctx' (fx/swap-context ctx assoc-in [:playback :active-cues (shows/play-key a)] {:run (random-uuid) :timeline? true})]
+        (is (identical? before (fx/sub-ctx ctx' subs/visible-show-rows)) "a show starts playing"))
+      (let [ctx' (fx/swap-context ctx assoc-in [:timing :bpm] 240.0)]
+        (is (identical? before (fx/sub-ctx ctx' subs/visible-show-rows)) "the global BPM changes"))
+      (let [ctx' (fx/swap-context ctx assoc-in [:ui :shows :selected] #{b})]
+        (is (identical? before (fx/sub-ctx ctx' subs/visible-show-rows)) "the selection changes")))
+    (testing "sorted by duration: the BPM moves the unlocked show"
+      (let [by-dur (fx/swap-context ctx assoc-in [:ui :shows :sort] {:column :duration-s :dir :asc})
+            rows (fx/sub-ctx by-dur subs/visible-show-rows)
+            faster (fx/swap-context by-dur assoc-in [:timing :bpm] 480.0)]
+        (is (= [c b d a] (mapv :id rows)) "Delta 32 s at 120, after Bravo's 32 s by title")
+        (is (not (identical? rows (fx/sub-ctx faster subs/visible-show-rows))))
+        (is (= [d c b a] (mapv :id (fx/sub-ctx faster subs/visible-show-rows))) "Delta 8 s at 480")
+        (is (identical? rows (fx/sub-ctx (fx/swap-context by-dur assoc-in [:playback :active-cues (shows/play-key a)] {:run (random-uuid)})
+                                         subs/visible-show-rows))
+            "playback still doesn't")))
+    (testing "searching by duration follows the BPM too"
+      (let [by-dur (fx/swap-context ctx update-in [:ui :shows] assoc :scope :duration :query "0:32")]
+        (is (= [b d] (mapv :id (fx/sub-ctx by-dur subs/visible-show-rows))))
+        (is (= [b] (mapv :id (fx/sub-ctx (fx/swap-context by-dur assoc-in [:timing :bpm] 60.0) subs/visible-show-rows))))))
+    (testing "query, scope and sort"
+      (is (= [a c] (mapv :id (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :shows :query] "daft") subs/visible-show-rows))))
+      (is (= [d c b a] (mapv :id (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :shows :sort] {:column :title :dir :desc})
+                                             subs/visible-show-rows))))
+      (is (= [] (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :shows :query] "zzz") subs/visible-show-rows))))
+    (testing "an edit to a show re-runs it"
+      (let [ctx' (fx/swap-context ctx assoc-in [:chains :shows d :name] "Aardvark")]
+        (is (= [d a b c] (mapv :id (fx/sub-ctx ctx' subs/visible-show-rows))))))
+    (testing "show-rows ignores the BPM"
+      (let [rows (fx/sub-ctx ctx subs/show-rows)]
+        (is (identical? rows (fx/sub-ctx (fx/swap-context ctx assoc-in [:timing :bpm] 90.0) subs/show-rows)))))
+    (testing "the header values and the selection"
+      (is (= {:query "" :scope :all :sort {:column :title :dir :asc}} (fx/sub-ctx ctx subs/show-table-ui)))
+      (is (= #{} (fx/sub-ctx ctx subs/show-selection)))
+      (is (= #{a} (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :shows :selected] #{a}) subs/show-selection))))))
+
+(deftest show-table-status-test
+  (let [[a b c d] table-ids
+        ctx (context (table-state))
+        status #(fx/sub-ctx % subs/show-table-status)]
+    (is (= {:total 4 :visible 4 :on-tc 2 :selected-visible 0 :query-problem nil} (status ctx)))
+    (let [ctx' (fx/swap-context ctx update-in [:ui :shows] assoc :query "daft" :selected #{a b})]
+      (is (= {:total 4 :visible 2 :on-tc 2 :selected-visible 1 :query-problem nil} (status ctx'))
+          "b is selected but filtered out"))
+    (let [ctx' (fx/swap-context ctx update-in [:ui :shows] assoc :scope :duration :query "5:")]
+      (is (= {:total 4 :visible 0 :on-tc 2 :selected-visible 0 :query-problem :unparsed} (status ctx'))))
+    (let [ctx' (fx/swap-context ctx update-in [:ui :shows] assoc :scope :bpm :query "120-128" :selected #{c d})]
+      (is (= {:total 4 :visible 3 :on-tc 2 :selected-visible 1 :query-problem nil} (status ctx'))
+          "the unlocked show has no BPM"))
+    (is (= {:total 0 :visible 0 :on-tc 0 :selected-visible 0 :query-problem nil}
+           (status (context (assoc-in base-state [:chains :shows] {})))))))
+
+
+;; Shows table: editing and row status (S3, plans/2026-11-25-timeline-shows 06 §4.4, §8)
+
+(defn- through-handler
+  "ctx after event, run by its handler on ctx's state, as a commit swaps
+   the context."
+  [ctx event]
+  (let [s (fx/sub-val ctx identity)]
+    (fx/swap-context ctx (constantly (or (:state (handlers/handle-event (assoc event :state s))) s)))))
+
+(deftest visible-show-rows-ignores-status-and-editing-test
+  (let [[_ b] table-ids
+        ctx (context (table-state))
+        before (fx/sub-ctx ctx subs/visible-show-rows)
+        editing (through-handler ctx {:event/type :shows/start-edit :show-id b :column :artist})]
+    (testing "sorted by title"
+      (is (identical? before (fx/sub-ctx (through-handler ctx {:event/type :shows/play :show-id b}) subs/visible-show-rows))
+          "a show starts")
+      (is (= {:show-id b :column :artist :invalid? false} (fx/sub-ctx editing subs/show-editing)))
+      (let [typed (through-handler editing {:event/type :shows/edit-draft :show-id b :column :artist :text "deadmau5Z"})]
+        (is (identical? before (fx/sub-ctx typed subs/visible-show-rows)) "a keystroke")
+        (is (= (fx/sub-ctx editing subs/show-editing) (fx/sub-ctx typed subs/show-editing)) "show-editing keeps its value")
+        (is (= "deadmau5Z" (fx/sub-ctx typed subs/show-edit-draft))))
+      (is (identical? before (fx/sub-ctx (through-handler ctx {:event/type :timing/set-bpm :bpm 140.0}) subs/visible-show-rows))
+          "the tempo"))
+    (testing "sorted by duration, the tempo moves the unlocked show"
+      (let [by-dur (through-handler ctx {:event/type :shows/set-sort :column :duration-s :dir :asc})
+            rows (fx/sub-ctx by-dur subs/visible-show-rows)]
+        (is (not (identical? rows (fx/sub-ctx (through-handler by-dur {:event/type :timing/set-bpm :bpm 480.0})
+                                              subs/visible-show-rows))))))))
+
+(deftest show-row-status-test
+  (let [[a b c] table-ids
+        ctx (context (-> (table-state)
+                         (assoc-in [:playback :active-cues (shows/play-key a)] {:run (random-uuid) :timeline? true})
+                         (assoc-in [:playback :active-cues (shows/play-key c)] {:chasing? true :timeline? true})))]
+    (is (= {a :manual c :timecode} (fx/sub-ctx ctx subs/show-row-status)) "grid cues aren't in it")
+    (is (nil? (get (fx/sub-ctx ctx subs/show-row-status) b)))
+    (is (nil? (fx/sub-ctx ctx subs/show-editing)))
+    (is (= "" (fx/sub-ctx ctx subs/show-edit-draft)))))
+
+(deftest ref-usage-counts-shows-apart-test
+  (let [id #uuid "00000000-0000-0000-0000-0000000000ab"
+        s (-> (domains/build-initial-state)
+              (assoc-in [:chains :cue-chains] {[0 0] {:items [{:type :preset :preset-id :circle :target :zone/k}]}})
+              (assoc-in [:chains :shows id] {:editor-type :timeline
+                                             :tracks [{:id "t1" :type :track :target :zone/k}]
+                                             :items [{:type :preset :id "c1" :preset-id :circle :track-id "t1"
+                                                      :timeline/start 0.0 :timeline/duration 4.0}]}))]
+    (is (= {:direct 2 :through 0 :zones [] :shows {:direct 1 :through 0}}
+           (fx/sub-ctx (context s) subs/ref-usage :zone/k)))
+    (is (= {:direct 1 :through 0 :zones []}
+           (fx/sub-ctx (context (assoc-in s [:chains :shows] {})) subs/ref-usage :zone/k))
+        "no show: no :shows")))
+;; Shows: timecode (plans/2026-11-25-timeline-shows 07 §4.7, S4)
+
+(deftest show-timecode-problem-test
+  (let [[a b c d] (map #(parse-uuid (str "00000000-0000-0000-0000-0000000000f" %)) (range 1 5))
+        show (fn [start len & {:as more}]
+               (merge {:editor-type :timeline :timeline/tempo-bpm 120.0 :timeline/tc-start start :timeline/tc-fps 25
+                       :items [{:id 1 :track-id 1 :timeline/start 0.0 :timeline/duration len}]}
+                      more))
+        library {a (show 0.0 600.0 :name "A" :timeline/chase :mtc)
+                 b (show 299.0 600.0 :name "B")
+                 c (dissoc (show 900.0 8.0) :timeline/tempo-bpm)
+                 d (show 300.0 600.0 :name "D")}
+        ctx (context (assoc-in base-state [:chains :shows] library))
+        problem #(fx/sub-ctx %1 subs/show-timecode-problem %2)]
+    (is (= {:reason :overlap :with a :range {:start 0.0 :end 300.0 :fps 25}} (problem ctx b)) "would overlap A")
+    (is (= {:reason :no-bpm} (problem ctx c)))
+    (is (nil? (problem ctx d)) "the ends touch")
+    (is (nil? (problem ctx a)) "already following: nothing to warn of")
+    (is (nil? (problem ctx #uuid "00000000-0000-0000-0000-0000000000ff")) "no such show")
+    (let [ctx' (fx/swap-context ctx assoc-in [:chains :shows a :timeline/chase] nil)]
+      (is (nil? (problem ctx' b)) "A off: B is free")
+      (is (= {:reason :empty} (problem (fx/swap-context ctx' assoc-in [:chains :shows b :items] []) b))))))
+
+
+
+;; Shows: now playing (S5), plans/2026-11-25-timeline-shows 07 §4.7, §7.4
+
+(def ^:private np-u #uuid "00000000-0000-0000-0000-0000000005b1")
+(def ^:private np-v #uuid "00000000-0000-0000-0000-0000000005b2")
+
+(def ^:private np-show
+  {:name "One More Time" :editor-type :timeline :show/info {:artist "Daft Punk"}
+   :timeline/tempo-bpm 122.7 :timeline/tc-start 3600.0 :timeline/tc-fps 25
+   :tracks [] :items [] :timeline/length 656.0})
+
+(defn- np-state [manual intents playing?]
+  (-> base-state
+      (assoc-in [:chains :shows] {np-u np-show
+                                  np-v (assoc np-show :name "Strobe" :show/info {} :timeline/chase :mtc)})
+      (assoc-in [:ui :shows :manual] manual)
+      (assoc-in [:playback :active-cues] intents)
+      (assoc-in [:playback :playing?] playing?)))
+
+(deftest now-playing-examples-test
+  (let [r #uuid "00000000-0000-0000-0000-0000000005c1"
+        ku (shows/play-key np-u)
+        kv (shows/play-key np-v)
+        np (fn [manual intents & [playing?]]
+             (fx/sub-ctx (context (np-state manual intents (if (some? playing?) playing? true))) subs/now-playing))]
+    (is (nil? (np nil {})) ":manual nil, no intents: nil")
+    (is (= {:show-id np-u :title "One More Time" :artist "Daft Punk"
+            :source :manual :state :playing :held? false
+            :length 656.0 :bpm 122.7 :approx? false
+            :tc-start 3600.0 :fps 25 :loop? false}
+           (np np-u {ku {:run r}}))
+        ":manual u with an intent: the whole shape")
+    (is (= :paused (:state (np np-u {ku {:run r :paused? true}}))))
+    (is (= {:show-id np-v :source :timecode :state :playing}
+           (select-keys (np np-u {kv {:chasing? true :timeline? true}}) [:show-id :source :state]))
+        ":manual u ended, timecode drives v")
+    (is (= {:show-id np-u :source :manual :state :stopped :held? false}
+           (select-keys (np np-u {}) [:show-id :source :state :held?]))
+        ":manual u ended, nothing else")
+    (is (true? (:held? (np np-u {ku {:run r}} false))) "Stop holds it")
+    (testing "the show played by hand wins over timecode while it plays"
+      (is (= :manual (:source (np np-u {ku {:run r} kv {:chasing? true}})))))
+    (testing "the first show timecode drives, in key-order, when several are"
+      (is (= np-u (:show-id (np nil {kv {:chasing? true} ku {:chasing? true}})))))
+    (testing "an unlocked show: the global BPM, approximate; untitled; looping"
+      (let [s (-> (np-state np-u {ku {:run r}} true)
+                  (update-in [:chains :shows np-u] dissoc :timeline/tempo-bpm :name)
+                  (assoc-in [:chains :shows np-u :loop] {:enabled? true :start 0.0 :duration 4.0})
+                  (assoc-in [:timing :bpm] 128.0))]
+        (is (= {:bpm 128.0 :approx? true :title "Untitled" :loop? true}
+               (select-keys (fx/sub-ctx (context s) subs/now-playing) [:bpm :approx? :title :loop?])))))
+    (testing ":manual names a show that's gone: nil"
+      (is (nil? (np #uuid "00000000-0000-0000-0000-0000000005ff" {})))))
+  (testing "a position change inside the intent leaves it identical"
+    (let [r #uuid "00000000-0000-0000-0000-0000000005c1"
+          ku (shows/play-key np-u)
+          ctx (context (np-state np-u {ku {:run r}} true))
+          v1 (fx/sub-ctx ctx subs/now-playing)
+          ctx' (fx/swap-context ctx assoc-in [:playback :active-cues ku :seek] {:id r :beat 4.0})]
+      (is (identical? v1 (fx/sub-ctx ctx' subs/now-playing))))))
+
+(deftest playing-shows-test
+  (let [r #uuid "00000000-0000-0000-0000-0000000005c1"
+        ku (shows/play-key np-u)
+        kv (shows/play-key np-v)
+        ps #(fx/sub-ctx (context %) subs/playing-shows)]
+    (is (= [{:show-id np-u :title "One More Time"} {:show-id np-v :title "Strobe"}]
+           (ps (np-state nil {kv {:chasing? true} ku {:run r} [0 0] {:run r}} true)))
+        "shows only, in key-order")
+    (is (= [] (ps (np-state nil {ku {:run r}} false))) "none while Stop holds them")
+    (is (= [] (ps (np-state nil {} true))))))

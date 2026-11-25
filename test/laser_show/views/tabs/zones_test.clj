@@ -39,3 +39,13 @@
   (is (= "Used by 3 cues · 11 more through Zones A, C" (zones/usage-text {:direct 3 :through 11 :zones [:zone/a :zone/c]})))
   (is (= "Used by 9 cues through Zone A" (zones/usage-text {:direct 0 :through 9 :zones [:zone/a]})))
   (is (= "Used by 1 cue through Zone B" (zones/usage-text {:direct 0 :through 1 :zones [:zone/b]}))))
+
+(deftest usage-text-counts-shows-apart-test
+  (is (= "Used by 3 cues and 1 show" (zones/usage-text {:direct 4 :through 0 :zones [] :shows {:direct 1 :through 0}})))
+  (is (= "Used by 1 cue and 2 shows" (zones/usage-text {:direct 3 :through 0 :zones [] :shows {:direct 2 :through 0}})))
+  (is (= "Used by 1 show" (zones/usage-text {:direct 1 :through 0 :zones [] :shows {:direct 1 :through 0}})))
+  (is (= "Used by 3 cues and 1 show · 2 more through Zone A"
+         (zones/usage-text {:direct 4 :through 2 :zones [:zone/a] :shows {:direct 1 :through 1}})))
+  (is (= "Used by 2 cues and 1 show through Zone B"
+         (zones/usage-text {:direct 0 :through 3 :zones [:zone/b] :shows {:direct 0 :through 1}})))
+  (is (= "Used by 3 cues" (zones/usage-text {:direct 3 :through 0 :zones []})) "no :shows: cues only"))

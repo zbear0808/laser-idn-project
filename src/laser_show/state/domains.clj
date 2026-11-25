@@ -58,7 +58,8 @@
   "Playback control state for animation triggering.
    
    MULTI-CUE ARCHITECTURE:
-   - active-cues: Map of [col row] -> intent; the show clock
+   - active-cues: Map of key -> intent, a key a grid cell [col row] or a
+     show [:show id] (timeline.shows/play-key); the show clock
      (laser-show.animation.show-time) owns each cue's timing
    - requests: one-shot transport requests the show clock applies
    - where each cue is never reaches app state: views draw it from the show
@@ -72,7 +73,8 @@
 
    ;; Multi-cue playback
    :active-cues {:default {}
-                 :doc "Map of [col row] -> intent, with no position:
+                 :doc "Map of key -> intent, a key a grid cell [col row] or a
+                       show [:show id] (timeline.shows/play-key), with no position:
                        {:run uuid :timeline? bool :start-beat double
                         :paused? bool :seek {:id uuid :beat double}
                         :decay-beats double :hold? bool}
@@ -83,9 +85,9 @@
                        (show-time/step); a run with :decay-beats ends after
                        them once :hold? is false."}
    :chase-sources {:default {:next 1 :cells {}}
-                   :doc "{:next n :cells {[col row] version}}: which version of each cue that follows timecode the show clock may chase (timeline.playback/source-version). The edit that makes or changes a follower gives it the next version, one that removes it or stops it following drops its entry (events.handlers.timeline/reconcile-chase-sources, on every changed cue, undo and redo too); :next never goes back. A new show's followers are 0. Session only: not saved, undone or compared for unsaved changes"}
+                   :doc "{:next n :cells {key version}}, key a grid cell [col row] or a show [:show id] (timeline.shows/play-key): which version of each cue that follows timecode the show clock may chase (timeline.playback/source-version). The edit that makes or changes a follower gives it the next version, one that removes it or stops it following drops its entry (events.handlers.timeline/reconcile-chase-sources, on every changed cue, undo and redo too); :next never goes back. A new show's followers are 0. Session only: not saved, undone or compared for unsaved changes"}
    :chase-stopped {:default {}
-                   :doc "{[col row] chase-id}: a cue that follows timecode which a grid press stopped while the show clock chased it as that episode (events.handlers.grid): the clock neither draws nor reports the episode, and its On is ignored (:show-clock/apply-chase), until a new episode begins there, which plays; pressed again, it follows again. Session only: not saved, undone or compared for unsaved changes; New and Open start without"}
+                   :doc "{key chase-id}, key a grid cell [col row] or a show [:show id] (timeline.shows/play-key): a cue that follows timecode which a grid press stopped while the show clock chased it as that episode (events.handlers.grid): the clock neither draws nor reports the episode, and its On is ignored (:show-clock/apply-chase), until a new episode begins there, which plays; pressed again, it follows again. Session only: not saved, undone or compared for unsaved changes; New and Open start without"}
    :requests {:default {}
               :doc "{:restart {:id} :align {:id} :shift {:id :offset}}: the show clock applies each id once (Stop and Retrigger, tap tempo, Link)"}
    :pulses {:default {}
@@ -162,7 +164,7 @@
    :clipboard {:default nil
                :doc "The clipboard: the last clip copied in this app ({:type :copied-at ...}, state/clipboard.clj), or one a paste read from the OS clipboard while this was nil. Written only in the :state copy and paste handlers return; not saved, not undone, kept across Open and New"}
    :active-tab {:default :grid
-                :doc "currently active tab (:grid :effects :projectors :settings)"}
+                :doc "currently active tab (views/root.clj main-tabs): :grid :vibes :perform :shows :effects :projectors :zones :settings"}
    :notice {:default nil
             :doc "the notice at the left of the status bar, {:id uuid :text :level (:error :warning :info)}, or nil; set by failure handlers (events/helpers.clj show-notice), cleared by :ui/clear-notice after 6 s or on a click"}
    :drag {:default {:active? false
@@ -211,7 +213,7 @@
                        :last-render-time 0}
              :doc "preview panel state"}
    :timeline-editor {:default {}
-                     :doc "timeline editor view state per cue: [col row] -> {:selection #{clip-id} :cursor-beat}"}
+                     :doc "timeline editor view state per show: show-id -> {:selection #{clip-id} :cursor-beat}; for the session, reset on New and Open"}
    :timeline-prefs {:default {:snap {:enabled? true :value 0.25}
                               :add-panel {:open? false :preset-tab :geometric :effect-tab :shape}
                               :inspector-open? true
@@ -222,6 +224,9 @@
                                 :doc "Cell index whose zone selector popup is open, or nil if none"}
    :vibes {:default {:selected nil :slot :hit}
            :doc "the Vibes tab (views/tabs/vibes.clj): :selected, the vibe edited (nil: the first); :slot, what a click on the picker fills (vibes.library/slots); for the session, not saved. Learn all is a learn attempt ([:ui :input-learn])"}
+   :shows {:default {:query "" :scope :all :sort {:column :title :dir :asc}
+                     :selected #{} :editing nil :manual nil}
+           :doc "the Shows tab (plans/2026-11-25-timeline-shows), for the session, not saved: :query and :scope, the search; :sort {:column :dir}; :selected, a set of show ids; :editing, the one table cell being edited and its draft; :manual, the show played by hand. New and Open keep :query, :scope and :sort and reset the rest"}
    :input-learn {:default {:active nil :settings {}}
                  :doc "Learning an input (reactivity plan 24, events/handlers/input.clj), for the session: never saved or undone, and New and Open start it afresh. :active, the one attempt waiting for an input, or nil: {:learn-id (new for each attempt, each Learn all step and retry too) :owner (:settings Settings' identify, :binding a cell's, a pad's, a role's or a fader's learn, :trigger-editor, :learn-all) :capture (:observe, :press, :continuous)}, with :source (:midi, :osc) for :settings, else :document-id (the show it binds into, [:project :document-id]) and :target-action (what it binds, for the trigger editor with the behaviour shown), and for :learn-all :wizard {:queue (its role first) :done :refused}. :settings {source {:status :captured :input-event (what it says: :type :source :channel :note ...)} or {:status :timeout|:failed}}: what each Settings card identified last. Only plain data: the listener, its gate and its waiter are laser-show.input.learn's"}
    :zone-maps {:default {:selected nil}
@@ -507,10 +512,11 @@
   "Unified chain storage for all hierarchical lists.
    
    SIMPLIFIED ARCHITECTURE (v2):
-   Three chain types with consistent structure:
+   Chain types with consistent structure:
    - :effect-chains - Effect modifiers for grid cells
    - :cue-chains - Cue presets/groups for grid cells
    - :projector-effects - Calibration effects for projectors (RGB curves, corner-pin)
+   - :shows - The timeline show library, {show-id show}
    
    Corner-pin geometry IS stored as an effect in [:chains :projector-effects projector-id :items].
    It is applied as a normal effect during frame rendering in multi_engine.clj.
@@ -522,7 +528,9 @@
    :cue-chains {:default {}
                 :doc "Map of [col row] -> {:items [...]}. Starter content is applied via laser-show.state.templates/apply-starter-cue-chains"}
    :projector-effects {:default {}
-                       :doc "Map of projector-id -> {:items [...]} - RGB curves and corner-pin for calibration"}})
+                       :doc "Map of projector-id -> {:items [...]} - RGB curves and corner-pin for calibration"}
+   :shows {:default {}
+           :doc "{show-id (uuid) show}: the timeline show library (plans/2026-11-25-timeline-shows). A show is a timeline cue map with :editor-type :timeline and no :id. Show content: undoable, unsaved, saved in content.edn"}})
 
 
 ;; Backend State Domain

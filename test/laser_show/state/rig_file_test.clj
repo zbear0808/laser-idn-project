@@ -50,9 +50,9 @@
     (testing "the paths it holds are the ones the project's mapping marks :rig"
       (is (= (set rig-file/rig-paths) (set (persistent/owned-paths :rig))))
       (is (= #{[:config] [:timing] [:grid] [:zone-groups] [:chains :cue-chains] [:chains :effect-chains]
-               [:zone-map] [:zone-maps] [:zones]}
+               [:chains :shows] [:zone-map] [:zone-maps] [:zones]}
              (set (persistent/owned-paths :show)))
-          "the zone maps, the zones' labels and the map in use are the show's (zones plan Z4)")
+          "the zone maps, the zones' labels and the map in use are the show's (zones plan Z4), and so is the timeline show library")
       (is (every? #{:show :rig} (map :owner (mapcat :paths (vals persistent/persistent-state-mapping))))
           "every saved path is the show's or the rig's"))
     (testing "a document this build can read"
@@ -144,6 +144,11 @@
     (is (= :auto.laser/projector-10-0-0-57-1 (target renamed [0 0])) "Laser L's pin follows the unit to .57")
     (is (= :auto.laser/projector-10-0-0-57-1 (get-in renamed [:chains :cue-chains [5 0] :items 0 :target])) "an item's too")
     (is (= :auto.laser/projector-10-0-0-57-1 (get-in renamed [:config :preview :grid-cells 1 :target])) "and a preview cell")
+    (is (= :auto.laser/projector-10-0-0-57-1 (get-in (rig-file/rename-pins (assoc-in here [:chains :shows #uuid "00000000-0000-0000-0000-0000000000aa"]
+                                                                                       {:editor-type :timeline :tracks [{:id "t1" :type :track :target :auto.laser/projector-10-0-0-5-1}] :items []})
+                                                                             hardware)
+                                                      [:chains :shows #uuid "00000000-0000-0000-0000-0000000000aa" :tracks 0 :target]))
+        "and a show's track (plans/2026-11-25-timeline-shows 04 §4.6)")
     (is (= :auto.laser/projector-10-0-0-7-1 (target renamed [1 0])) "Laser R has the same id here")
     (is (= :auto.laser/projector-10-0-0-9-1 (target renamed [2 0])) "a laser that isn't here keeps its id, which reaches nothing")
     (is (= :graphics (target renamed [4 0])) "groups are left alone")
@@ -486,6 +491,23 @@
            (:missing-pins report))
         "one row per pin: two effect cells and no cue; a group the show doesn't define, or a laser that is here, is none")
     (is (= 5 (rig-file/warning-count report)))))
+
+(deftest report-counts-shows-test
+  ;; plans/2026-11-25-timeline-shows 04 §4.6: a show names groups and pins as a cue
+  (let [id #uuid "00000000-0000-0000-0000-0000000000aa"
+        s (assoc-in (rig-here) [:chains :shows id]
+                    {:editor-type :timeline :target :crowd
+                     :tracks [{:id "t1" :type :track :target :auto.laser/projector-10-0-0-9-1}]
+                     :items [{:id "c" :type :preset :preset-id :circle :track-id "t1"}]})
+        report (rig-file/match-report s friday-on-a-bigger-rig friday-calibration)]
+    (is (= {:group-id :crowd :name "Crowd Scanning" :cues 1 :shows 1} (first (:groups-without-lasers report))))
+    (is (= [{:ref :auto.laser/projector-10-0-0-9-1 :name "SR Beam" :cues 2 :shows 1}] (:missing-pins report)))
+    (is (= 3 (rig-file/warning-count report)) "one row per ref, as before")
+    (testing "a group only a show names is a row"
+      (let [s (assoc-in s [:chains :shows id :target] :group-show-only)
+            s (assoc-in s [:zone-groups :group-show-only] {:id :group-show-only :name "Show only"})]
+        (is (some #{{:group-id :group-show-only :name "Show only" :cues 0 :shows 1}}
+                  (:groups-without-lasers (rig-file/match-report s friday-on-a-bigger-rig {}))))))))
 
 (deftest report-is-empty-on-the-same-rig-test
   (let [s (-> (rig-here)

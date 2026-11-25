@@ -681,6 +681,8 @@
     :set-chase (if (= :mtc (:source o))
                  (assoc cue :timeline/chase :mtc)
                  (dissoc cue :timeline/chase))
+    ;; The show's own target, already in normal form; none clears it
+    :set-cue-target (if-let [t (:target o)] (assoc cue :target t) (dissoc cue :target))
     cue))
 
 (def op-types
@@ -690,7 +692,7 @@
     :add-folder :delete-tracks :move-tracks :rename-track :set-track-color
     :set-track-muted :set-collapsed :set-loop :move-loop :trim-loop-start
     :trim-loop-end :set-length :set-tempo :set-tc-start :set-tc-fps
-    :set-chase :set-effect-enabled :move-effect})
+    :set-chase :set-effect-enabled :move-effect :set-cue-target})
 
 (defn apply-op
   "Apply one edit op to a timeline cue chain. Returns the cue normalized
@@ -739,5 +741,6 @@
     :set-length "Set Timeline Length"
     :set-tempo "Set Timeline Tempo"
     :set-chase "Set Follow Timecode"
+    :set-cue-target "Change Show Target"
     (:set-tc-start :set-tc-fps) "Set Timecode"
     "Edit Timeline"))

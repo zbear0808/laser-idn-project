@@ -29,6 +29,13 @@
                     :-fx-text-fill text-primary
                     :-fx-background-radius 3}
 
+                   ;; A text field whose text doesn't parse (the Shows search
+                   ;; in a number scope, the Shows table's edit field)
+                   ".text-field-invalid"
+                   {:-fx-border-color (:accent-danger theme/semantic-colors)
+                    :-fx-border-radius 3
+                    :-fx-border-width 1}
+
                    ;; Small text field (used in dialogs and parameter editors)
                    ".text-field-dark-sm"
                    {:-fx-background-color bg-interactive

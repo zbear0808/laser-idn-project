@@ -4,6 +4,7 @@
    Tests the hierarchical list UI state management including
    selection, drag-drop, and rename operations."
   (:require [clojure.test :refer [deftest is testing]]
+            [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.list :as list-handlers]
             [laser-show.state.clipboard :as clipboard]
@@ -450,11 +451,12 @@
   ;; 4b: a list's type comes from its component id (clipboard/list-type),
   ;; and the timeline's track sidebar has none: an event's :clipboard-type
   ;; is ignored
-  (let [state {:chains {:cue-chains {[0 0] {:tracks [{:id :t1 :type :track :name "T1"}]}}}
-               :list-ui {[:timeline-tracks 0 0] {:selected-ids #{:t1}}}}
+  (let [u #uuid "00000000-0000-0000-0000-0000000005b1"
+        state {:chains {:shows {u {:tracks [{:id :t1 :type :track :name "T1"}]}}}
+               :list-ui {[:timeline-tracks u] {:selected-ids #{:t1}}}}
         result (list-handlers/handle {:event/type :list/copy-selected
-                                      :component-id [:timeline-tracks 0 0]
-                                      :items-path [:chains :cue-chains [0 0] :tracks]
+                                      :component-id [:timeline-tracks u]
+                                      :items-path [:chains :shows u :tracks]
                                       :clipboard-type :timeline-tracks
                                       :state state})]
     (is (= {:state state} result) "no clip, no OS write")))
@@ -680,6 +682,29 @@
       (let [s (lists-state {:type :cue-chain :data {:items [{:id id-a :type :preset :preset-id :circle}]} :copied-at 1})]
         (is (= {:state s} (list-handlers/handle (assoc fx-chain-paste :state s))))))))
 
+(deftest pasted-cue-items-lose-timeline-timing-test
+  ;; timeline-shows plan 04 §7.4, row 4: timed items (an older build's
+  ;; timeline clips) never make a plain cue an inferred timeline
+  (let [i-id #uuid "00000000-0000-0000-0000-0000000000a3"
+        t-id #uuid "00000000-0000-0000-0000-0000000000a4"
+        clip {:type :cue-chain-items :copied-at 1
+              :items [{:id i-id :type :preset :preset-id :circle :effects []
+                       :track-id t-id :timeline/start 4.0 :timeline/duration 2.0}]}
+        s0 (-> (domains/build-initial-state)
+               (merge (select-keys (cue-state clip) [:list-ui]))
+               (assoc-in [:chains :cue-chains [0 0]] (get-in (cue-state nil) [:chains :cue-chains [0 0]]))
+               (assoc-in [:ui :clipboard] clip))
+        effects (events/handle-event-pipeline (paste-event s0))
+        s1 (:state (events/handle-event-pipeline (assoc (:dispatch effects) :state (:state effects))))
+        cell (get-in s1 [:chains :cue-chains [0 0]])
+        pasted (get-in cell [:items 1])]
+    (is (= [:circle :circle :square] (mapv :preset-id (:items cell))) "pasted after the selection")
+    (is (not= i-id (:id pasted)) "with an id of its own")
+    (is (not-any? #(contains? pasted %) [:track-id :timeline/start :timeline/duration])
+        "without its timeline timing")
+    (is (not (cue-chains/timeline-cue? cell)) "[0 0] stays a plain cue")
+    (is (= clip (get-in s1 [:ui :clipboard])) "the clip keeps its timing")))
+
 
 (deftest paste-regenerates-ids-at-every-depth-test
   ;; p15: before Step 4b a pasted item's effects kept their ids, in a group too
@@ -727,8 +752,8 @@
   (let [state (assoc-in (cue-state triangle-clip) [:list-ui [:cue-chain 0 0] :selected-ids] #{})]
     (is (= {:state state} (list-handlers/handle (cut-event state))) "nothing selected"))
   (let [state (-> (cue-state triangle-clip)
-                  (assoc-in [:list-ui [:timeline-tracks 0 0]] {:selected-ids #{id-a}}))]
-    (is (= {:state state} (list-handlers/handle (assoc (cut-event state) :component-id [:timeline-tracks 0 0])))
+                  (assoc-in [:list-ui [:timeline-tracks #uuid "00000000-0000-0000-0000-0000000005b1"]] {:selected-ids #{id-a}}))]
+    (is (= {:state state} (list-handlers/handle (assoc (cut-event state) :component-id [:timeline-tracks #uuid "00000000-0000-0000-0000-0000000005b1"])))
         "a list without a type: nothing copied, so nothing deleted")))
 
 (deftest cut-selected-is-one-undo-step-test

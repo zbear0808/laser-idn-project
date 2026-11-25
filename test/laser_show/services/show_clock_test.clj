@@ -6,6 +6,7 @@
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.animation.effects.shape]
+            [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.animation.show-time :as show-time]
             [laser-show.app]
             [laser-show.backend.multi-engine :as me]
@@ -37,6 +38,8 @@
             [laser-show.state.history :as history]
             [laser-show.state.persistent :as persistent]
             [laser-show.state.templates :as templates]
+            [laser-show.timeline.model :as model]
+            [laser-show.timeline.shows :as shows]
             [laser-show.vibes.faders :as faders]
             [laser-show.views.components.slider-meters :as meters]))
 
@@ -59,11 +62,14 @@
    :items [{:id :a :type :preset :preset-id :circle :track-id :t :enabled? true :effects []
             :timeline/start 0.0 :timeline/duration 4.0}]})
 
-(defn- init! [chains]
-  (state/init-state! (-> (domains/build-initial-state)
-                         (assoc-in [:chains :cue-chains] chains)
-                         (assoc-in [:timing :bpm] 120.0)))
-  (show-time/reset-runtime!))
+(defn- init!
+  ([chains] (init! chains nil))
+  ([chains shows]
+   (state/init-state! (cond-> (-> (domains/build-initial-state)
+                                  (assoc-in [:chains :cue-chains] chains)
+                                  (assoc-in [:timing :bpm] 120.0))
+                        shows (assoc-in [:chains :shows] shows)))
+   (show-time/reset-runtime!)))
 
 (use-fixtures :each (fn [f]
                       (init! {})
@@ -146,13 +152,14 @@
         (is (empty? (filter neg? (map - (rest s) s))) "the cue never moved back")))))
 
 (deftest reports-reach-app-state-test
-  (testing "a timeline's end stops the cue through the :show-clock/cue-ended event"
-    (init! {[0 0] one-clip-timeline})
-    (events/event-handler {:event/type :timeline/play :col 0 :row 0 :from 3.9})
-    (is (some? (get-in (state/get-raw-state) [:playback :active-cues [0 0]])))
-    (show-clock/tick! 0)
-    (show-clock/tick! 100000000)
-    (is (nil? (get-in (state/get-raw-state) [:playback :active-cues [0 0]])))
+  (testing "a timeline show's end stops it through the :show-clock/cue-ended event"
+    (let [u #uuid "00000000-0000-0000-0000-0000000005a1"]
+      (init! {} {u one-clip-timeline})
+      (events/event-handler {:event/type :timeline/play :show-id u :from 3.9})
+      (is (some? (get-in (state/get-raw-state) [:playback :active-cues [:show u]])))
+      (show-clock/tick! 0)
+      (show-clock/tick! 100000000)
+      (is (nil? (get-in (state/get-raw-state) [:playback :active-cues [:show u]]))))
     (is (false? (get-in (state/get-raw-state) [:playback :playing?])))))
 
 (deftest vibe-report-is-sent-once-per-interval-test
@@ -478,6 +485,31 @@
       (is (= {[2 0] [:zone/a] [3 0] [:graphics]}
              (into {} (map (fn [{:keys [cell zone-frames]}] [cell (vec (keys zone-frames))])) (:cues s)))))))
 
+(deftest show-key-ignores-column-target-test
+  (testing "a show has no column: it draws to the show's default target, a grid cue in column 0 to its column's"
+    (let [u #uuid "00000000-0000-0000-0000-0000000005a1"
+          sk (shows/play-key u)]
+      (init! {[0 0] (cue :circle)} {u one-clip-timeline})
+      (state/swap-state! #(-> %
+                              (assoc-in [:grid :column-targets] {0 :zone/a})
+                              (assoc-in [:config :default-target] :graphics)))
+      (trigger! 0 0)
+      (state/swap-state! update :playback cue-timing/activate-cue sk (random-uuid) {:timeline? true :start-beat 0.0})
+      (let [s (ticks! 2)]
+        (is (= {[0 0] [:zone/a] sk [:graphics]}
+               (into {} (map (fn [{:keys [cell zone-frames]}] [cell (vec (keys zone-frames))])) (:cues s))))
+        (is (not (contains? (output-errors/snapshot) [:render sk])))))))
+
+(deftest edited-cells-name-a-shows-key-test
+  (let [u #uuid "00000000-0000-0000-0000-0000000005a1"
+        edited #'show-clock/edited-cells]
+    (is (= #{[1 2] [:show u]}
+           (edited {:ui {:dialogs {:cue-chain-editor {:open? true :col 1 :row 2}
+                                   :timeline-cue-editor {:open? true :show-id u}}}})))
+    (is (= #{} (edited {:ui {:dialogs {:timeline-cue-editor {:open? true :col 3 :row 0}}}}))
+        "the timeline editor yields only its show's key, never a cell")
+    (is (= #{} (edited {:ui {:dialogs {:timeline-cue-editor {:open? false :show-id u}}}})))))
+
 (deftest a-throwing-resolver-keeps-the-last-routing-test
   (init! {[0 0] (cue :circle)})
   (two-lasers!)
@@ -657,17 +689,24 @@
     (state/assoc-in-state! [:ui :dialogs :cue-chain-editor] {:open? true :col 0 :row 0})
     (ticks! 20 50000000)
     (is (= {:id :big :points 2000} (get-in (cue-warnings) [[0 0] :item])) "open: the circle's 2,000 points")
-    (testing "the timeline editor's cue too"
-      (state/swap-state! #(-> %
-                              (assoc-in [:ui :dialogs :cue-chain-editor] {:open? false})
-                              (assoc-in [:ui :dialogs :timeline-cue-editor] {:open? true :col 0 :row 0})))
-      (ticks! 20 400000000)
-      (is (= :big (get-in (cue-warnings) [[0 0] :item :id]))))
-    (testing "another cell's editor: not this cue's"
-      (state/assoc-in-state! [:ui :dialogs :timeline-cue-editor] {:open? true :col 1 :row 0})
-      (ticks! 20 750000000)
-      (is (some? (get (cue-warnings) [0 0])))
-      (is (not (contains? (get (cue-warnings) [0 0]) :item))))))
+    (testing "the timeline editor's show too, played under its key"
+      (let [u #uuid "00000000-0000-0000-0000-0000000005a1"
+            u2 #uuid "00000000-0000-0000-0000-0000000005a2"
+            sk (shows/play-key u)]
+        (state/swap-state! #(-> %
+                                (assoc-in [:chains :shows u] (model/convert-to-timeline (heavy-cue) {}))
+                                (assoc-in [:chains :shows u2] (model/convert-to-timeline (cue :circle) {}))
+                                (assoc-in [:ui :dialogs :cue-chain-editor] {:open? false})
+                                (assoc-in [:ui :dialogs :timeline-cue-editor] {:open? true :show-id u})))
+        (events/event-handler {:event/type :timeline/play :show-id u :from 0.0})
+        (ticks! 20 400000000)
+        (is (= :big (get-in (cue-warnings) [sk :item :id])))
+        (is (not (contains? (get (cue-warnings) [0 0]) :item)) "the grid cue's editor is closed")
+        (testing "another show's editor: not this show's"
+          (state/assoc-in-state! [:ui :dialogs :timeline-cue-editor] {:open? true :show-id u2})
+          (ticks! 20 750000000)
+          (is (some? (get (cue-warnings) sk)))
+          (is (not (contains? (get (cue-warnings) sk) :item))))))))
 
 (def ^:private decimate
   {:id (random-uuid) :effect-id :decimate :enabled? true :params {:kpps 25 :fps 30}})

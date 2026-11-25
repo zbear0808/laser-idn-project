@@ -46,6 +46,9 @@
             [laser-show.routing.targets :as targets]
             [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.routing.zone-patterns :as zone-patterns]
+            [laser-show.timeline.shows :as shows]
+            [laser-show.timeline.model :as model]
+            [laser-show.timeline.timecode :as tc]
             [laser-show.dev-config :as dev-config]))
 
 
@@ -258,15 +261,28 @@
   [context]
   (set (keys (fx/sub-val context get-in [:chains :cue-chains]))))
 
+(defn- show-ids
+  "The ids of the shows in the library ([:chains :shows]), as a set: only a
+   show added or taken away changes it."
+  [context]
+  (set (keys (fx/sub-val context get-in [:chains :shows]))))
+
+(defn show-cue
+  "The show id (a timeline cue map), or nil when the library has no such
+   show: the timeline editor's, which tells a show that went from an empty
+   one by it."
+  [context id]
+  (fx/sub-val context get-in (shows/show-path id)))
+
 (def ^:private timeline-view-defaults
   {:selection #{} :cursor-beat 0.0})
 
 (defn timeline-ui
-  "Timeline editor view state for the cue at [col row]
-   ({:selection :cursor-beat}), with defaults."
-  [context col row]
+  "Timeline editor view state for show show-id ({:selection :cursor-beat}),
+   with defaults."
+  [context show-id]
   (merge timeline-view-defaults
-         (fx/sub-val context get-in [:ui :timeline-editor [col row]])))
+         (fx/sub-val context get-in [:ui :timeline-editor show-id])))
 
 (defn timeline-prefs
   "Timeline editor preferences: {:snap {:enabled? :value} :add-panel {...} :inspector-open?
@@ -275,10 +291,11 @@
   (fx/sub-val context get-in [:ui :timeline-prefs]))
 
 (defn timeline-transport
-  "Transport status of the cue at [col row]: :stopped, :playing or :paused.
-   Changes only when that does, not on every timing tick."
-  [context col row]
-  (let [t (get (fx/sub-val context ex/active-cues) [col row])]
+  "Transport status of show show-id, playing under (shows/play-key
+   show-id): :stopped, :playing or :paused. Changes only when that does,
+   not on every timing tick."
+  [context show-id]
+  (let [t (get (fx/sub-val context ex/active-cues) (shows/play-key show-id))]
     (cond
       (nil? t) :stopped
       (:paused? t) :paused
@@ -363,19 +380,24 @@
     (assoc (cue-chains/grid-content cue) :name (:name cue))))
 
 (defn active-cue-cells
-  "The cells with an intent ([:playback :active-cues]), as a set. A pause,
+  "The playback keys with an intent ([:playback :active-cues]): grid cells
+   and shows' keys (timeline.shows), as a set. A pause,
    a seek or a new run inside an intent leaves it equal."
   [context]
   (set (keys (fx/sub-val context ex/active-cues))))
 
 (defn- cue-cells-in-grid-order
-  "The cells with an intent (active-cue-cells), row by row as the grid
-   reads: A1, A2 … B1 … Sorted again only when that set changes."
+  "The grid cells with an intent (active-cue-cells, without shows' keys),
+   row by row as the grid reads: A1, A2 … B1 … Sorted again only when that
+   set changes."
   [context]
-  (vec (sort-by (fn [[col row]] [row col]) (fx/sub-ctx context active-cue-cells))))
+  (->> (fx/sub-ctx context active-cue-cells)
+       (filter shows/grid-cell?)
+       (sort-by (fn [[col row]] [row col]))
+       vec))
 
 (defn playing-cues
-  "The cues that play, in grid order, each as what its cell's label is made
+  "The grid cues that play (not shows), in grid order, each as what its cell's label is made
    from (cue-label-data): {:col :row :name :first-preset-id :preset-count
    :timeline?}. None while Stop holds them (output-held?): nothing is drawn
    then."
@@ -625,19 +647,25 @@
         (:preset-id item) (or (get-in presets/presets-by-id [(:preset-id item) :name]) (name (:preset-id item)))
         :else "Group"))))
 
-(defn cue-warning
-  "The warning of the cue at col, row while it is too heavy for a laser (the
-   show clock's [:backend :streaming :cue-warnings], zones plan Z3): {:projector
+(defn key-cue-warning
+  "The warning of the cue playing under playback key k (a grid cell's [col
+   row] or a show's [:show id]) while it is too heavy for a laser (the show
+   clock's [:backend :streaming :cue-warnings], zones plan Z3): {:projector
    :points :fps :min-fps :scan-rate :item {:id :points} :decimate} with :laser,
    its name, and while its editor is open :item-name, the name of its item
    with the most points; nil when it has none. :decimate is there when the
    laser's Decimate keeps the cue's count (routing.compose/cue-warnings)."
-  [context col row]
-  (when-let [w (fx/sub-val context get-in [:backend :streaming :cue-warnings [col row]])]
-    (let [chain (fx/sub-val context get-in [:chains :cue-chains [col row]])
+  [context k]
+  (when-let [w (fx/sub-val context get-in [:backend :streaming :cue-warnings k])]
+    (let [chain (fx/sub-val context get-in (shows/cue-path k))
           item (when-let [id (get-in w [:item :id])] (item-name chain id))]
       (cond-> (assoc w :laser (rig/projector-name {:projectors (fx/sub-val context :projectors)} (:projector w)))
         item (assoc :item-name item)))))
+
+(defn cue-warning
+  "The warning of the grid cue at col, row (key-cue-warning)."
+  [context col row]
+  (fx/sub-ctx context key-cue-warning [col row]))
 
 (defn connection-status
   "Streaming status for the toolbar, from one published status.
@@ -1237,6 +1265,14 @@
     (when (map? cue)
       (into #{} (filter targets/zone-ref?) (refs/cue-refs cue)))))
 
+(defn- show-zone-refs
+  "The zones show id names (routing.refs/cue-refs), nil for none: that
+   show's part of zones-in-use, as cue-zone-refs is a cue's."
+  [context id]
+  (let [show (fx/sub-ctx context show-cue id)]
+    (when (map? show)
+      (into #{} (filter targets/zone-ref?) (refs/cue-refs show)))))
+
 (defn- effect-cell-zone-refs
   "The zones the zone patterns of the effects cell at [col row] name, on or
    off (routing.refs/chain-ref-usage of that cell alone): its part of
@@ -1248,8 +1284,8 @@
       (into #{} (filter targets/zone-ref?) (keys (refs/chain-ref-usage nil {[col row] {:items items}}))))))
 
 (defn zones-in-use
-  "Every zone the show names (Z4-Q1): in a cue (routing.refs/cue-refs, its
-   zone patterns too), in an effect cell's zone patterns (a place, a source
+  "Every zone the show names (Z4-Q1): in a cue or a library show
+   (routing.refs/cue-refs, its zone patterns too), in an effect cell's zone patterns (a place, a source
    or a lit step, a keyframe's too, the pattern on or off), a column's
    default and the show's, sorted. Not a zone a label, a map's override or
    the preview alone names. Each cue's and cell's part is its own
@@ -1258,6 +1294,7 @@
    again (follow-up N9)."
   [context]
   (let [refs (concat (mapcat (fn [[col row]] (fx/sub-ctx context cue-zone-refs col row)) (fx/sub-ctx context cue-cells))
+                     (mapcat #(fx/sub-ctx context show-zone-refs %) (fx/sub-ctx context show-ids))
                      (mapcat (fn [[col row]] (fx/sub-ctx context effect-cell-zone-refs col row)) (fx/sub-ctx context effect-cells))
                      (mapcat targets/target-refs (vals (fx/sub-val context get-in [:grid :column-targets])))
                      (targets/target-refs (fx/sub-ctx context default-target)))]
@@ -1360,18 +1397,34 @@
   (when-let [cue (fx/sub-ctx context cue-cell-chain col row)]
     (targets/cue-refs cue (fx/sub-ctx context column-target col) (fx/sub-ctx context default-target))))
 
+(defn- show-draw-refs
+  "Every ref show id can draw to (routing.targets/cue-refs, the show's
+   default included; a show has no column), nil for none: its part of
+   cue-ref-sets."
+  [context id]
+  (let [show (fx/sub-ctx context show-cue id)]
+    (when (map? show)
+      (targets/cue-refs show nil (fx/sub-ctx context default-target)))))
+
 (defn- cue-ref-sets
-  "Each cue's refs (routing.targets/cue-refs), its column's default and the
-   show's included: each cue's part its own (cue-draw-refs), so an edit
+  "Each grid cue's refs (routing.targets/cue-refs), its column's default and
+   the show's included: each one's part its own (cue-draw-refs), so an edit
    that changes none of them runs it not again (follow-up N9)."
   [context]
   (into [] (keep (fn [[col row]] (fx/sub-ctx context cue-draw-refs col row))) (fx/sub-ctx context cue-cells)))
 
+(defn- show-ref-sets
+  "Each library show's refs (show-draw-refs; a show has no column)."
+  [context]
+  (into [] (keep #(fx/sub-ctx context show-draw-refs %)) (fx/sub-ctx context show-ids)))
+
 (defn ref-usage
   "Who uses ref, through the map in use (06 §8.7): {:direct :through
-   :zones} (routing.zone-maps/usage)."
+   :zones}, cues and shows, and :shows {:direct :through} when any of them
+   is a show (routing.zone-maps/usage)."
   [context ref]
-  (zone-maps/usage (fx/sub-ctx context active-zone-map) (fx/sub-ctx context cue-ref-sets) ref))
+  (zone-maps/usage (fx/sub-ctx context active-zone-map) (fx/sub-ctx context cue-ref-sets)
+                   (fx/sub-ctx context show-ref-sets) ref))
 
 (defn map-zones
   "The zones the Zone Groups tab lists, for their labels and in the map
@@ -1416,23 +1469,34 @@
                        (fx/sub-ctx context default-target)
                        col))
 
+(defn show-target-explain
+  "How each level of show show-id resolves (routing.targets/explain-cue),
+   the show default included. A show has no grid column, so no column
+   level."
+  [context show-id]
+  (targets/explain-cue (fx/sub-ctx context show-cue show-id)
+                       nil
+                       (fx/sub-ctx context default-target)))
+
 
 ;; Level 2: Zone patterns (zones plan Z5)
 
 
 (defn cue-zone-pattern
-  "The zone pattern of the cue at [col row]: the first of its
-   :zone-patterns (v1 edits one), or nil."
-  [context col row]
-  (first (fx/sub-val context get-in [:chains :cue-chains [col row] :zone-patterns])))
+  "The zone pattern of the cue playing under playback key k (a grid cell's
+   [col row] or a show's [:show id]): the first of its :zone-patterns (v1
+   edits one), or nil."
+  [context k]
+  (first (fx/sub-val context get-in (conj (shows/cue-path k) :zone-patterns))))
 
 (defn zone-pattern-at
   "The effect at effect-path of domain's entity (:cue-zone-patterns, a
-   cue's patterns; :effect-chains, a cell's items), or nil."
+   cue's patterns, entity-key a playback key; :effect-chains, a cell's
+   items), or nil."
   [context domain entity-key effect-path]
   (when (sequential? effect-path)
     (case domain
-      :cue-zone-patterns (fx/sub-val context get-in (into [:chains :cue-chains entity-key :zone-patterns] effect-path))
+      :cue-zone-patterns (fx/sub-val context get-in (into (conj (shows/cue-path entity-key) :zone-patterns) effect-path))
       :effect-chains (fx/sub-val context get-in (into [:chains :effect-chains entity-key :items] effect-path))
       nil)))
 
@@ -1502,15 +1566,22 @@
   [context col row]
   (boolean (seq (fx/sub-val context get-in [:chains :cue-chains [col row] :zone-patterns]))))
 
+(defn- show-has-zone-patterns?
+  "Does library show id have a zone pattern, on or off?"
+  [context id]
+  (boolean (seq (fx/sub-val context get-in [:chains :shows id :zone-patterns]))))
+
 (defn zone-patterns-in-use?
-  "Does the show have a zone pattern anywhere, on or off: on a cue, or in
-   an effects cell (07 §7.3)? The pattern pads show then. Each cue's and
-   each cell's part is its own (cue-has-zone-patterns?, effect-cell-stores):
-   a cue renamed or a cell switched on or off runs it not again."
+  "Does the show have a zone pattern anywhere, on or off: on a cue or a
+   library show, or in an effects cell (07 §7.3)? The pattern pads show
+   then. Each cue's, show's and cell's part is its own
+   (cue-has-zone-patterns?, show-has-zone-patterns?, effect-cell-stores): a
+   cue renamed or a cell switched on or off runs it not again."
   [context]
   (boolean
    (or (some (fn [[col row]] (fx/sub-ctx context cue-has-zone-patterns? col row))
              (fx/sub-ctx context cue-cells))
+       (some #(fx/sub-ctx context show-has-zone-patterns? %) (fx/sub-ctx context show-ids))
        (some-effect-cell? context :zone-pattern?))))
 
 (defn- map-cycles?
@@ -2698,3 +2769,197 @@
   [context]
   (let [n (count (filter #(= :error (:level %)) (fx/sub-ctx context vibe-lint)))]
     (if (pos? n) (str "Vibes ⚠ " n) "Vibes")))
+
+
+;; The Shows tab (plans/2026-11-25-timeline-shows 01 §7)
+
+(defn- show-title
+  "Show id's title, its :name, or nil while it has none (blank is none)."
+  [context id]
+  (let [title (fx/sub-val context get-in [:chains :shows id :name])]
+    (when-not (str/blank? title) title)))
+
+(defn show-list-rows
+  "The Shows tab's list, [{:id :title}], one row per show in the library:
+   by title, case-insensitive, the untitled ones (:title nil) last, ties by
+   the id's string. An edit inside a show doesn't change it."
+  [context]
+  (->> (fx/sub-ctx context show-ids)
+       (map (fn [id] {:id id :title (fx/sub-ctx context show-title id)}))
+       (sort-by (fn [{:keys [id title]}] [(nil? title) (some-> title str/lower-case) (str id)]))
+       vec))
+
+
+
+;; The Shows table (plans/2026-11-25-timeline-shows 06 §4.4)
+
+(defn show-rows
+  "Every show's table row (timeline.shows/rows), in library order. No
+   global BPM in them, so a tempo change keeps them."
+  [context]
+  (shows/rows (fx/sub-val context get-in [:chains :shows])))
+
+(defn show-table-ui
+  "The Shows tab header's values: {:query :scope :sort}."
+  [context]
+  {:query (or (fx/sub-val context get-in [:ui :shows :query]) "")
+   :scope (or (fx/sub-val context get-in [:ui :shows :scope]) :all)
+   :sort (or (fx/sub-val context get-in [:ui :shows :sort]) {:column :title :dir :asc})})
+
+(defn show-selection
+  "The ids of the selected shows, as a set (some may be filtered out)."
+  [context]
+  (or (fx/sub-val context get-in [:ui :shows :selected]) #{}))
+
+(defn visible-show-rows
+  "The rows the Shows table shows, filtered and in its order (timeline.shows
+   filter-rows, sort-rows). It reads the global BPM only while sorting or
+   searching by duration, where an unlocked show's duration follows it, so
+   a tempo change re-runs nothing otherwise."
+  [context]
+  (let [{:keys [query scope] sort-spec :sort} (fx/sub-ctx context show-table-ui)
+        global-bpm (when (or (= :duration scope) (= :duration-s (:column sort-spec)))
+                     (fx/sub-ctx context bpm))]
+    (-> (fx/sub-ctx context show-rows)
+        (shows/filter-rows query scope global-bpm)
+        (shows/sort-rows sort-spec global-bpm))))
+
+(defn show-table-status
+  "The Shows tab's counts: {:total :visible :on-tc :selected-visible
+   :query-problem}. :on-tc counts the whole library, :selected-visible only
+   the selected shows the filter keeps; :query-problem is
+   timeline.shows/query-problem's (nil or :unparsed)."
+  [context]
+  (let [rows (fx/sub-ctx context show-rows)
+        visible (fx/sub-ctx context visible-show-rows)
+        selected (fx/sub-ctx context show-selection)
+        {:keys [query scope]} (fx/sub-ctx context show-table-ui)]
+    {:total (count rows)
+     :visible (count visible)
+     :on-tc (count (filter :timecode? rows))
+     :selected-visible (count (filter #(contains? selected (:id %)) visible))
+     :query-problem (shows/query-problem query scope)}))
+
+
+;; Shows table: editing and row status (S3)
+
+(defn show-editing
+  "The Shows table's cell being edited: {:show-id :column :invalid?
+   (:select? for a new show's title)}, without its draft, or nil. A
+   keystroke leaves it as it was, so the table doesn't run again."
+  [context]
+  (some-> (fx/sub-val context get-in [:ui :shows :editing]) (dissoc :draft)))
+
+(defn show-edit-draft
+  "The edit field's text: what has been typed into the cell being edited."
+  [context]
+  (str (fx/sub-val context get-in [:ui :shows :editing :draft])))
+
+(defn show-row-status
+  "{show-id status} for the shows that play: :timecode while timecode
+   drives one, else :manual (by hand, or a trigger's). Each ▶ cell reads
+   it, not the rows, so playback never changes the table's items."
+  [context]
+  (reduce-kv (fn [acc k intent]
+               (if-let [id (shows/key-show-id k)]
+                 (assoc acc id (if (:chasing? intent) :timecode :manual))
+                 acc))
+             {}
+             (fx/sub-val context ex/active-cues)))
+;; Shows: timecode (S4)
+
+(defn show-timecode-problem
+  "Why show show-id can't follow timecode yet (timeline.shows/
+   timecode-problem: {:reason :no-bpm}, {:reason :empty} or {:reason
+   :overlap :with :range}), for the TC column's ⚠ and the inspector; nil
+   when it can, when it already follows (TS-6 holds for it), or when there
+   is no such show."
+  [context show-id]
+  (let [library (fx/sub-val context get-in [:chains :shows])]
+    (when-not (= :mtc (get-in library [show-id :timeline/chase]))
+      (shows/timecode-problem library show-id))))
+
+
+
+;; Shows: now playing (S5)
+;; The now-playing bar and the status bar's Playing line (plans/2026-11-25-
+;; timeline-shows 07 §4.7). No positions: the bar draws those from the show
+;; clock's tick itself (views/components/now_playing.clj).
+
+(defn- show-play-state
+  "How show id plays, from its intent: nil (none), :chasing (timecode
+   drives it), :paused or :playing. A seek or a new run leaves it equal."
+  [state id]
+  (when-let [intent (get (ex/active-cues state) (shows/play-key id))]
+    (cond (:chasing? intent) :chasing
+          (:paused? intent) :paused
+          :else :playing)))
+
+(defn- first-chased-show
+  "The first show (in shows/key-order) timecode drives, by its id, or nil."
+  [state]
+  (->> (ex/active-cues state)
+       (keep (fn [[k intent]] (when (and (shows/play-key? k) (:chasing? intent)) k)))
+       (sort shows/key-order)
+       first
+       shows/key-show-id))
+
+(defn- now-playing-show
+  "What the bar shows of show id: its title (\"Untitled\" without one),
+   artist, length in beats, tempo (locked, else the global BPM, :approx?),
+   timecode start and rate, and whether it loops. nil when it isn't there."
+  [context id]
+  (when-let [show (fx/sub-ctx context show-cue id)]
+    (let [locked (:timeline/tempo-bpm show)
+          locked (when (and (number? locked) (pos? locked)) (double locked))
+          global (fx/sub-ctx context bpm)
+          artist (get-in show [:show/info :artist])
+          start (:timeline/tc-start show)]
+      {:show-id id
+       :title (or (fx/sub-ctx context show-title id) "Untitled")
+       :artist (when (and (string? artist) (not (str/blank? artist))) artist)
+       :length (max 0.0 (double (or (model/effective-length show) 0.0)))
+       :bpm (or locked (if (and (number? global) (pos? global)) (double global) 120.0))
+       :approx? (nil? locked)
+       :tc-start (if (number? start) (double start) 0.0)
+       :fps (tc/cue-fps show)
+       :loop? (boolean (get-in show [:loop :enabled?]))})))
+
+(defn now-playing
+  "The show the now-playing bar shows, in this order of choice: the show
+   played by hand ([:ui :shows :manual]) while it has an intent (:source
+   :manual); else the first show timecode drives (:source :timecode); else
+   the one played by hand, stopped or ended (:source :manual :state
+   :stopped); else nil. As now-playing-show's map, with :source, :state
+   (:playing, :paused or :stopped) and :held? (it has an intent while Stop
+   holds the output). It changes when a show starts, pauses or stops, a
+   chase marker comes or goes, the show is edited, or Stop holds or Play
+   resumes; never with its position."
+  [context]
+  (let [manual (fx/sub-val context get-in [:ui :shows :manual])
+        manual-state (when (some? manual) (fx/sub-val context show-play-state manual))
+        chased (fx/sub-val context first-chased-show)
+        held? (not (fx/sub-ctx context playing?))
+        with (fn [id source state]
+               (when-let [show (fx/sub-ctx context now-playing-show id)]
+                 (assoc show :source source :state state
+                        :held? (and held? (not= :stopped state)))))]
+    (or (when (#{:playing :paused} manual-state) (with manual :manual manual-state))
+        (when (some? chased) (with chased :timecode :playing))
+        (when (some? manual) (with manual :manual :stopped)))))
+
+(defn playing-shows
+  "The shows that play, [{:show-id :title}] (\"Untitled\" without one), in
+   shows/key-order: by hand, by a trigger or by timecode. None while Stop
+   holds them, as playing-cues."
+  [context]
+  (if (fx/sub-ctx context playing?)
+    (->> (fx/sub-ctx context active-cue-cells)
+         (filter shows/play-key?)
+         (sort shows/key-order)
+         (keep (fn [k]
+                 (let [id (shows/key-show-id k)]
+                   (when (some? (fx/sub-ctx context show-cue id))
+                     {:show-id id :title (or (fx/sub-ctx context show-title id) "Untitled")}))))
+         vec)
+    []))

@@ -127,30 +127,39 @@
     (if next-event (recur state next-event) state)))
 
 (deftest open-dialog-clears-editing-name-test
-  ;; A2 is already a timeline, so opening any of these editors is UI-only.
-  (let [clean (-> base-state
-                  (assoc-in [:chains :cue-chains [1 0]] {:editor-type :timeline :tracks [] :items []})
+  ;; Opening any of these editors is UI-only
+  (let [u #uuid "00000000-0000-0000-0000-0000000005c1"
+        u2 #uuid "00000000-0000-0000-0000-0000000005c2"
+        clean (-> base-state
+                  (assoc-in [:chains :shows] {u {:editor-type :timeline :tracks [] :items []}
+                                              u2 {:editor-type :timeline :tracks [] :items []}})
                   history/mark-clean)
-        modes {[0] :numeric}]
+        modes {[0] :numeric}
+        check (fn [id after addr modes-at modes-kept?]
+                (let [dialog (get-in after [:ui :dialogs id])]
+                  (is (= (assoc addr :open? true :editing-name? false)
+                         (select-keys dialog (into [:open? :editing-name?] (keys addr)))))
+                  (if modes-kept?
+                    (is (= modes (get-in dialog modes-at)) "per-effect UI modes survive")
+                    (is (nil? (get-in dialog modes-at)) "another show's effect UI goes (shows/open-editor)"))
+                  (is (= (:chains clean) (:chains after)))
+                  (is (empty? (get-in after [:history :undo-stack])))
+                  (is (false? (get-in after [:project :dirty?])))))]
     (doseq [[id event modes-at] [[:cue-chain-editor :cue-chain/open-editor [:ui-modes]]
-                                 [:effect-chain-editor :effect-chain/open-editor [:ui-modes]]
-                                 [:timeline-cue-editor :timeline-cue-editor/open [:effect-ui :items :ui-modes]]]
+                                 [:effect-chain-editor :effect-chain/open-editor [:ui-modes]]]
             [open? col row] [[false 1 0] [true 5 3]]]
       (testing (str id (if open? " switching cells mid-rename" " reopening after a mid-rename close"))
         (let [path [:ui :dialogs id]
               prior (assoc-in {:open? open? :col col :row row :editing-name? true} modes-at modes)
-              after (run-turn (assoc-in clean path prior) {:event/type event :col 1 :row 0})
-              dialog (get-in after path)]
-          (is (= {:open? true :col 1 :row 0 :editing-name? false}
-                 (select-keys dialog [:open? :col :row :editing-name?])))
-          (is (= modes (get-in dialog modes-at)) "per-effect UI modes survive")
-          (is (= (:chains clean) (:chains after)))
-          (is (empty? (get-in after [:history :undo-stack])))
-          (is (false? (get-in after [:project :dirty?]))))))))
-
-
-;; handle-ui-close-dialog Tests
-
+              after (run-turn (assoc-in clean path prior) {:event/type event :col 1 :row 0})]
+          (check id after {:col 1 :row 0} modes-at true))))
+    (doseq [[open? from] [[false u] [true u2]]]
+      (testing (str ":timeline-cue-editor" (if open? " switching shows mid-rename" " reopening after a mid-rename close"))
+        (let [modes-at [:effect-ui :items :ui-modes]
+              path [:ui :dialogs :timeline-cue-editor]
+              prior (assoc-in {:open? open? :show-id from :editing-name? true} modes-at modes)
+              after (run-turn (assoc-in clean path prior) {:event/type :shows/open-editor :show-id u})]
+          (check :timeline-cue-editor after {:show-id u} modes-at (= from u)))))))
 
 (deftest handle-close-dialog-basic
   (testing "Closing a dialog sets :open? to false"

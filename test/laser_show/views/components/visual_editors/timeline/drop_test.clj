@@ -22,7 +22,9 @@
 
 (def ^:private view {:zoom 50.0 :scroll-beat 0.0 :scroll-y 0.0 :width 1000 :height 400})
 
-(def ^:private opts {:col 0 :row 0 :tracks (:tracks cue) :snap {:enabled? true :value 0.25}})
+(def ^:private show-id #uuid "6f1c0000-0000-4000-8000-000000000001")
+
+(def ^:private opts {:show-id show-id :tracks (:tracks cue) :snap {:enabled? true :value 0.25}})
 
 (def ^:private square {:laser-show/drag :bank-item :kind :preset :id :square :category :geometric})
 (def ^:private scale {:laser-show/drag :bank-item :kind :effect :id :scale :category :shape})
@@ -35,8 +37,8 @@
 
 (defn- drop-at [payload x y] (drop/drop-target payload (hit x y) opts))
 
-(def ^:private add-clip {:event/type :timeline/add-preset-to-track :col 0 :row 0 :item-id :square})
-(def ^:private add-fx {:event/type :timeline/add-effect-to-item :col 0 :row 0 :item-id :scale})
+(def ^:private add-clip {:event/type :timeline/add-preset-to-track :show-id show-id :item-id :square})
+(def ^:private add-fx {:event/type :timeline/add-effect-to-item :show-id show-id :item-id :scale})
 
 (deftest preset-on-lane-snaps-start-test
   (is (= {:event (assoc add-clip :track-id :t2 :start 8.25)

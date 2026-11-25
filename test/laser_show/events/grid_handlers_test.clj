@@ -1,9 +1,12 @@
 (ns laser-show.events.grid-handlers-test
   "Tests for grid event handlers focusing on complex state transitions."
   (:require
+   [cljfx.api :as fx]
    [clojure.test :refer [deftest is testing use-fixtures]]
+   [laser-show.state.clipboard :as clipboard]
    [laser-show.state.history :as history]
    [laser-show.state.core :as state]
+   [laser-show.subs :as subs]
    [laser-show.events.handlers.grid :as grid]
    [laser-show.state.domains :refer [build-initial-state]]))
 
@@ -148,6 +151,65 @@
       (is (= "Nothing to paste here" (get-in result [:state :ui :notice :text])))
       (is (false? (get-in result [:state :project :dirty?]))))))
 
+(defn- can-paste-cue?
+  "Is Paste Cue on in s (subs/can-paste? :cue-chain)?"
+  [s]
+  (fx/sub-ctx (fx/create-context s state/cache-factory) subs/can-paste? :cue-chain))
+
+(deftest paste-refuses-timeline-clip-test
+  ;; timeline-shows plan 04 §7.4, rows 1-3: the grid never holds a timeline (TS-3)
+  (let [notice "Timeline shows live in the Shows tab. Paste it there with New Show from Cue."
+        cell [1 1]
+        start (assoc-in sample-state-with-content [:chains :cue-chains cell] {:items [{:preset-id :wave}]})
+        refused? (fn [why before result clip]
+                   (let [after (:state result)]
+                     (is (= {:items [{:preset-id :wave}]} (get-in after [:chains :cue-chains cell])) (str why ": the cell is unchanged"))
+                     (is (identical? (:chains before) (:chains after)) (str why ": no chain changes"))
+                     (is (= clip (get-in after [:ui :clipboard])) (str why ": the slot holds the clip"))
+                     (is (= notice (get-in after [:ui :notice :text])) why)
+                     (is (= :info (get-in after [:ui :notice :level])) why)
+                     (is (some? (:dispatch-later result)) (str why ": the notice clears itself"))
+                     (is (not (history/undoable-changed? (history/extract-document-state before)
+                                                         (history/extract-document-state after)))
+                         (str why ": no undo step"))
+                     (is (not (history/derive-dirty before after)) (str why ": not unsaved"))
+                     (is (false? (can-paste-cue? after)) (str why ": Paste Cue is off"))))]
+    (testing "row 1: an empty slot, and OS text from an older build holding a timeline"
+      (let [clip (clipboard/<-system-text
+                  (pr-str {:type :cue-chain
+                           :data {:editor-type :timeline
+                                  :tracks [{:id :t1 :type :track}]
+                                  :items [{:id #uuid "00000000-0000-0000-0000-0000000000c1"
+                                           :type :preset :preset-id :circle :track-id :t1
+                                           :timeline/start 0.0 :timeline/duration 4.0}]}
+                           :copied-at 1}))
+            event {:event/type :grid/paste-cell :col 1 :row 1 :state start}]
+        (is (some? clip) "the OS text reads as a clip")
+        (is (contains? (grid/handle event) :clipboard/read) "the paste asks the OS clipboard first")
+        (refused? "row 1" start (grid/handle (assoc event :clipboard/system clip)) clip)))
+    (testing "row 2: the slot holds an inferred timeline (timing keys, no :editor-type)"
+      (let [clip {:type :cue-chain
+                  :data {:items [{:type :preset :preset-id :circle :timeline/start 0.0}]}
+                  :copied-at 1}
+            before (assoc-in start [:ui :clipboard] clip)]
+        (refused? "row 2" before (grid/handle {:event/type :grid/paste-cell :col 1 :row 1 :state before}) clip)))
+    (testing "row 3: a plain cue pastes as today, with fresh ids and cue-z4"
+      (let [i-id #uuid "00000000-0000-0000-0000-0000000000c2"
+            clip {:type :cue-chain
+                  :data {:destination-zone {:zone-group-id :graphics}
+                         :items [{:id i-id :type :preset :preset-id :circle}]}
+                  :copied-at 1}
+            before (assoc-in start [:ui :clipboard] clip)
+            result (grid/handle {:event/type :grid/paste-cell :col 1 :row 1 :state before})
+            pasted (get-in result [:state :chains :cue-chains cell])]
+        (is (= :circle (get-in pasted [:items 0 :preset-id])))
+        (is (not= i-id (get-in pasted [:items 0 :id])) "fresh ids")
+        (is (= :graphics (:target pasted)) "an older build's destination zone, converted (cue-z4)")
+        (is (not (contains? pasted :destination-zone)))
+        (is (nil? (get-in result [:state :ui :notice])))
+        (is (history/derive-dirty before (:state result)))
+        (is (true? (can-paste-cue? (:state result))))))))
+
 (deftest handle-grid-paste-cell-overwrite
   (testing "Pasting over existing cell replaces content"
     (let [clipboard-data {:items [{:preset-id :wave}]}
@@ -232,29 +294,17 @@
 
 
 (deftest handle-grid-open-cell-editor-test
-  (testing "Dispatches to timeline editor for timeline cues"
-    (let [state-with-timeline (assoc-in sample-state-empty
-                                        [:chains :cue-chains [1 1]]
-                                        {:editor-type :timeline :items []})
-          event {:event/type :grid/open-cell-editor
-                 :col 1
-                 :row 1
-                 :state state-with-timeline}
-          result (grid/handle event)]
-      (is (= {:event/type :timeline-cue-editor/open :col 1 :row 1}
-             (:dispatch result)))))
-
-  (testing "Dispatches to timeline editor for cues with tracks"
-    (let [state-with-tracks (assoc-in sample-state-empty
-                                      [:chains :cue-chains [1 1]]
-                                      {:tracks [{:id "t1"}] :items []})
-          event {:event/type :grid/open-cell-editor
-                 :col 1
-                 :row 1
-                 :state state-with-tracks}
-          result (grid/handle event)]
-      (is (= {:event/type :timeline-cue-editor/open :col 1 :row 1}
-             (:dispatch result)))))
+  (testing "Opens the cue chain editor, even for a stray timeline cell (TS-3: timelines open from the Shows tab)"
+    (doseq [cell [{:editor-type :timeline :items []}
+                  {:tracks [{:id "t1"}] :items []}]]
+      (let [event {:event/type :grid/open-cell-editor
+                   :col 1
+                   :row 1
+                   :state (assoc-in sample-state-empty [:chains :cue-chains [1 1]] cell)}
+            result (grid/handle event)]
+        (is (= {:event/type :cue-chain/open-editor :col 1 :row 1}
+               (:dispatch result))
+            (pr-str cell)))))
 
   (testing "Dispatches to cue chain editor for standard cues"
     (let [event {:event/type :grid/open-cell-editor

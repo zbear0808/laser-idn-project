@@ -409,8 +409,7 @@
 
                 ;; While the cue is too heavy for a laser (zones plan Z3)
                 {:fx/type load-warning/cue-load-warning
-                 :col col
-                 :row row}
+                 :cue-key [col row]}
 
                 ;; Footer with the cue's Target, its zone pattern, trigger mode, and close button;
                 ;; nothing in it shrinks below its text
@@ -430,8 +429,7 @@
                             ;; The cue's zone pattern (zones plan Z5)
                             {:fx/type zone-pattern-editor/pattern-field
                              :id "pattern-chip-cue"
-                             :col col
-                             :row row}
+                             :cue-key [col row]}
                             {:fx/type common/trigger-mode-dropdown
                              :col col
                              :row row
@@ -450,15 +448,16 @@
                             {:fx/type :region
                              :h-box/hgrow :always}
                             {:fx/type :button
-                             :text "Open in Timeline Editor"
+                             :text "New Show from Cue"
                              :min-width :use-pref-size
                              :style-class "button-secondary"
                              :tooltip {:fx/type :tooltip
-                                       :text "Make this a timeline cue, its presets clips on tracks (Undo turns it back)"}
+                                       :text "Copy this cue into a new timeline show (the cue stays here)"}
+                             ;; The Shows tab and the new show's timeline editor open in its place
                              :on-action (fn [_]
                                           (events/dispatch! {:event/type :ui/close-dialog
                                                              :dialog-id :cue-chain-editor})
-                                          (events/dispatch! {:event/type :timeline-cue-editor/open
+                                          (events/dispatch! {:event/type :shows/new-from-cue
                                                              :col col
                                                              :row row}))}
                             {:fx/type :button

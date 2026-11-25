@@ -86,6 +86,46 @@
      :dispatch-later {:event {:event/type :ui/clear-notice :id id}
                       :delay-ms notice-ms}}))
 
+(def ^:private level-rank {:info 0 :warning 1 :error 2})
+
+(defn merge-notice
+  "effects, a handler's (with :state), with a notice of text at level added
+   safely: for a middleware that adds a notice to effects it didn't write
+   (plans/2026-11-25-timeline-shows/07 §4.1). before is the event's own
+   :state co-effect.
+   - A notice the handler set in this event (its id differs from before's
+     [:ui :notice :id]) is fresh: the two become one notice, the texts
+     joined by a space, at the more severe level (:error > :warning >
+     :info). Otherwise the new notice replaces the one on screen.
+   - Either way the notice gets a new id, and :dispatch-later its clear
+     timer. A fresh notice's own timer goes, and every other timer stays:
+     one map when one is left, else a vector of them.
+   - No other effect changes.
+
+   Example:
+   (merge-notice {:state s :dispatch-later {:event {:event/type :projectors/identify-ended} :delay-ms 3000}}
+                 s \"Timecode off for 'A'\" :warning)
+   => {:state (assoc-in s [:ui :notice] {:id n :text \"Timecode off for 'A'\" :level :warning})
+       :dispatch-later [{:event {:event/type :projectors/identify-ended} :delay-ms 3000}
+                        {:event {:event/type :ui/clear-notice :id n} :delay-ms 6000}]}"
+  [effects before text level]
+  (let [state (:state effects)
+        prior (get-in state [:ui :notice])
+        fresh? (and (some? (:id prior)) (not= (:id prior) (get-in before [:ui :notice :id])))
+        id (random-uuid)
+        notice (if fresh?
+                 {:id id
+                  :text (str (:text prior) " " text)
+                  :level (if (> (level-rank level 0) (level-rank (:level prior) 0)) level (:level prior))}
+                 {:id id :text text :level level})
+        later (let [v (:dispatch-later effects)] (cond (nil? v) [] (map? v) [v] :else (vec v)))
+        prior-clear {:event/type :ui/clear-notice :id (:id prior)}
+        later (conj (if fresh? (filterv #(not= prior-clear (:event %)) later) later)
+                    {:event {:event/type :ui/clear-notice :id id} :delay-ms notice-ms})]
+    (assoc effects
+           :state (assoc-in state [:ui :notice] notice)
+           :dispatch-later (if (= 1 (count later)) (first later) later))))
+
 
 (defn parked
   "event as plain data, to continue later (after a confirm, or the OS

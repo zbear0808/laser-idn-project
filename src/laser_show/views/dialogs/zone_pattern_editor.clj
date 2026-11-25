@@ -1,6 +1,8 @@
 (ns laser-show.views.dialogs.zone-pattern-editor
   "The pattern window (zones plan Z5, 07 §7.1): \"Zone Pattern — Cue A1
-   \\\"Beams\\\"\", opened from a cue's Pattern chip (Edit pattern…). It is
+   \\\"Beams\\\"\", or \"Zone Pattern — Show \\\"Intro\\\"\", opened from a cue's
+   or a show's Pattern chip (Edit pattern…), with the dialog data {:cue-key
+   k} (its playback key, [col row] or [:show id]). It is
    the shared effect parameter editor on the cue's pattern, the
    :cue-zone-patterns domain (the cue's :zone-patterns, a chain of one in
    v1), so its parameters take modulators and keyframes as any effect's do,
@@ -9,21 +11,26 @@
   (:require [cljfx.api :as fx]
             [laser-show.events.core :as events]
             [laser-show.subs :as subs]
+            [laser-show.timeline.shows :as shows]
             [laser-show.views.components.effect-parameter-editor :as effect-param-editor]
             [laser-show.views.dialogs.common :as common]))
 
 (defn window-title
   "\"Zone Pattern — Cue A1 \\\"Beams\\\"\": the cell, and the cue's name when
-   it has one."
-  [col row cue-name]
-  (str "Zone Pattern — Cue " (common/cell-label col row)
-       (when (seq cue-name) (str " \"" cue-name "\""))))
+   it has one. A show's key gives \"Zone Pattern — Show \\\"Intro\\\"\", its
+   name Untitled when it has none."
+  [cue-key cue-name]
+  (if (shows/play-key? cue-key)
+    (str "Zone Pattern — Show \"" (if (seq cue-name) cue-name "Untitled") "\"")
+    (let [[col row] cue-key]
+      (str "Zone Pattern — Cue " (common/cell-label col row)
+           (when (seq cue-name) (str " \"" cue-name "\""))))))
 
 (defn- content
   [{:keys [fx/context]}]
   (let [dialog-data (fx/sub-ctx context subs/dialog-data :zone-pattern-editor)
-        {:keys [col row]} dialog-data
-        pattern (fx/sub-ctx context subs/cue-zone-pattern col row)
+        cue-key (:cue-key dialog-data)
+        pattern (fx/sub-ctx context subs/cue-zone-pattern cue-key)
         close {:event/type :ui/close-dialog :dialog-id :zone-pattern-editor}]
     {:fx/type :v-box
      :spacing 0
@@ -35,7 +42,7 @@
         {:fx/type effect-param-editor/effect-parameter-editor
          :v-box/vgrow :always
          :domain :cue-zone-patterns
-         :entity-key [col row]
+         :entity-key cue-key
          :effect-path [0]
          :effect pattern
          :effect-def (fx/sub-ctx context subs/effect-descriptor (:effect-id pattern))
@@ -60,7 +67,7 @@
                    :style-class "button-secondary"
                    :tooltip {:fx/type :tooltip :text "Take the pattern off this cue: its pictures stay in the zones they're drawn into"}
                    :on-action (fn [_]
-                                (events/dispatch! {:event/type :zone-patterns/set-cue-pattern :col col :row row :style nil})
+                                (events/dispatch! {:event/type :zone-patterns/set-cue-pattern :cue-key cue-key :style nil})
                                 (events/dispatch! close))}
                   {:fx/type :button
                    :id "zone-pattern-close"
@@ -72,11 +79,11 @@
 (defn zone-pattern-editor-dialog
   "The pattern window."
   [{:keys [fx/context]}]
-  (let [{:keys [col row]} (fx/sub-ctx context subs/dialog-data :zone-pattern-editor)
-        cue-name (:name (fx/sub-ctx context subs/cue-cell-chain col row))]
+  (let [cue-key (:cue-key (fx/sub-ctx context subs/dialog-data :zone-pattern-editor))
+        cue-name (when (some? cue-key) (fx/sub-val context get-in (conj (shows/cue-path cue-key) :name)))]
     {:fx/type common/dialog-stage
      :dialog-id :zone-pattern-editor
-     :title (window-title col row cue-name)
+     :title (window-title cue-key cue-name)
      :min-width 640
      :min-height 480
      :content {:fx/type content}}))

@@ -73,9 +73,9 @@
 
 (deftest vibes-tab-shows-the-vibes-and-edits-the-first-test
   (let [robot (ui/robot)]
-    (is (= ["Grid" "Vibes" "Perform" "Effects" "Projectors" "Zone Groups" "Settings"]
+    (is (= ["Grid" "Vibes" "Perform" "Shows" "Effects" "Projectors" "Zone Groups" "Settings"]
            (mapv #(.getText ^Labeled %) (ui/children ".tab-header")))
-        "Grid, Vibes, Perform, then the rest")
+        "Grid, Vibes, Perform, Shows, then the rest")
     (open-vibes! robot)
     (is (= ["#vibe-card-vibe-1" "#vibe-card-vibe-2"] (mapv #(str "#" (.getId ^Node %)) (ui/query-all ".vibe-card"))))
     (is (ui/has-style-class? "#vibe-card-vibe-1" "vibe-card-selected") "nothing selected yet: the first")

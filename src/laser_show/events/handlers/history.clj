@@ -28,6 +28,7 @@
             [laser-show.events.helpers :as h]
             [laser-show.events.safety-guard :as guard]
             [laser-show.state.history :as history]
+            [laser-show.timeline.shows :as shows]
             [laser-show.vibes.refs :as refs]))
 
 (defn- settle
@@ -121,13 +122,13 @@
    :selected-cell (get-in state [:grid :selected-cell])})
 
 (defn- prune-active-cues
-  "Stop the cues whose cell has no cue now (the restore took it away), as
-   any cue stops (cue-timing/deactivate-cue): the last one stops the
-   transport, others leave it as it is."
+  "Stop the cues whose key has no cue now (the restore took its grid cell's
+   cue or its show away, timeline.shows/cue-at), as any cue stops
+   (cue-timing/deactivate-cue): the last one stops the transport, others
+   leave it as it is."
   [state]
-  (let [cue-chains (get-in state [:chains :cue-chains] {})
-        active (get-in state [:playback :active-cues])
-        gone (when (map? active) (remove #(contains? cue-chains %) (keys active)))]
+  (let [active (get-in state [:playback :active-cues])
+        gone (when (map? active) (remove #(some? (shows/cue-at state %)) (keys active)))]
     (if (seq gone)
       (update state :playback #(reduce cue-timing/deactivate-cue % gone))
       state)))
@@ -263,6 +264,16 @@
    :timeline/add-preset-to-track "Add Content to Track"
    :timeline/delete-selection "Delete Clip(s)"
    :timeline/nudge-selection "Nudge Clip(s)"
+   :timeline/set-name "Rename Show"
+   :shows/set-info "Edit Show Info"
+   :shows/set-bpm "Set Timeline Tempo"
+   :shows/set-tc-start "Set Timecode"
+   :shows/commit-edit "Edit Show Info"
+   :shows/duplicate "Duplicate Show"
+   :shows/request-delete "Delete Show"
+   :shows/delete "Delete Show"
+   :shows/create "New Show"
+   :shows/new-from-cue "New Show from Cue"
    :projectors/add-manual "Add Projector"
    :projectors/submit-manual-form "Add Projector"
    :projectors/remove "Remove Projector"

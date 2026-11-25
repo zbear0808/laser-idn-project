@@ -9,14 +9,16 @@
    show time reads it here, so it needn't require the clock thread, which
    itself needs frame-service and events.core.
 
-   App state keeps what events decide (state/domains :playback):
-   - [:playback :active-cues cell]: an intent, with no position:
+   App state keeps what events decide (state/domains :playback), each by
+   playback key: a grid cell [col row] or a show [:show id]
+   (laser-show.timeline.shows, whose cue-at finds the cue a key plays):
+   - [:playback :active-cues key]: an intent, with no position:
      {:run id :timeline? :start-beat :paused? :seek {:id :beat} :decay-beats :hold?},
      or {:chasing? true :timeline? true :chase-id k} for a timeline following
      MIDI timecode, k the episode it was installed for;
    - [:playback :chase-sources]: the version of each cue following timecode,
      which an episode belongs to (timeline.playback/source-version);
-   - [:playback :chase-stopped]: {cell chase-id}, a follower a grid press
+   - [:playback :chase-stopped]: {key chase-id}, a follower a press
      stopped for that episode, which the clock goes on chasing unseen
      (chase's :stopped?) until a new one begins there;
    - [:playback :requests]: {:restart {:id} :align {:id} :shift {:id :offset}},
@@ -27,7 +29,7 @@
    step reads them once per tick. What the clock learns goes back to app state
    as events: a run's end (a timeline's, or a vibe cue's decay, with the
    restart and seek ids of the position that ended) and timecode taking a
-   cell over or letting go of it, naming the show, the cue's version and the
+   key over or letting go of it, naming the show, the cue's version and the
    owner it found there (:show-clock/cue-ended, :show-clock/chase),
    auto-advance's arm and advance and a stuck key's release
    (laser-show.vibes.rotation and .watchdog, with their own memory,
@@ -41,7 +43,8 @@
             [laser-show.common.util :as u]
             [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.state.extractors :as ex]
-            [laser-show.timeline.playback :as playback])
+            [laser-show.timeline.playback :as playback]
+            [laser-show.timeline.shows :as shows])
   (:import [java.util.concurrent.atomic AtomicLong]))
 
 
@@ -65,7 +68,7 @@
    :vibe-sent {}})
 
 (defonce ^{:doc "Show time ({:tick :t0-ns :global :pulse-clock :pulses {source stamp}
-                 :runs {run-id timing} :chase {cell timing, with its :chase-id and
+                 :runs {run-id timing} :chase {key timing, with its :chase-id and
                  :start} :applied {kind request-id}
                  :sent {report now-ms} :vibe-sent {report now-ms} :status {…}
                  :routing-cache {:inputs :routing}}, the last routing and what it
@@ -148,20 +151,20 @@
 ;; Runs: one per intent, keyed by run id
 
 (defn- chased?
-  "Is the cell's cue driven by timecode rather than its own run?"
-  [intent chain]
-  (or (:chasing? intent) (playback/chases-mtc? chain)))
+  "Is the key's cue driven by timecode rather than its own run?"
+  [intent cue]
+  (or (:chasing? intent) (playback/chases-mtc? cue)))
 
 (defn- run-for
   "The run the intent names (started now if the runtime doesn't have it yet),
-   at the intent's cell, with its pause, decay and seek applied."
-  [runs global cell intent now-ms]
+   at the intent's key, with its pause, decay and seek applied."
+  [runs global k intent now-ms]
   (let [run (or (get runs (:run intent))
                 (cue-timing/start-timing now-ms (effective-beats global)
                                          {:timeline? (:timeline? intent)
                                           :start-beat (:start-beat intent)}))
         run (cond-> (assoc run
-                           :cell cell
+                           :cell k
                            :paused? (boolean (:paused? intent)))
               (and (:timeline? intent) (not (:timeline? run)))
               (assoc :timeline? true :phase-offset 0.0 :phase-offset-target 0.0)
@@ -178,13 +181,12 @@
   "Runs for exactly the intents in app state: new ones start, moved ones keep
    their position, the rest go. Cues driven by timecode are the chase's."
   [runtime state now-ms]
-  (let [chains (get-in state [:chains :cue-chains])
-        {:keys [runs global]} runtime]
+  (let [{:keys [runs global]} runtime]
     (assoc runtime :runs
-           (reduce-kv (fn [acc cell intent]
-                        (if (or (nil? (:run intent)) (chased? intent (get chains cell)))
+           (reduce-kv (fn [acc k intent]
+                        (if (or (nil? (:run intent)) (chased? intent (shows/cue-at state k)))
                           acc
-                          (assoc acc (:run intent) (run-for runs global cell intent now-ms))))
+                          (assoc acc (:run intent) (run-for runs global k intent now-ms))))
                       {}
                       (or (get-in state [:playback :active-cues]) {})))))
 
@@ -194,14 +196,13 @@
   "Every clock to now-ms: the global clock and the pulse clock at the global
    BPM, each run at its cue's tempo, loop and timeline length."
   [runtime state bpm now-ms]
-  (let [resync-rate (ex/resync-rate state)
-        chains (get-in state [:chains :cue-chains])]
+  (let [resync-rate (ex/resync-rate state)]
     (-> runtime
         (update :global cue-timing/update-global-clock now-ms bpm resync-rate)
         (update :pulse-clock cue-timing/update-global-clock now-ms bpm resync-rate)
         (update :runs update-vals
                 (fn [run]
-                  (let [chain (get chains (:cell run))]
+                  (let [chain (shows/cue-at state (:cell run))]
                     (cue-timing/update-cue-timing run now-ms (playback/cue-bpm chain bpm) resync-rate
                                                   (get chain :loop no-loop)
                                                   (when (and (:timeline? run) chain)
@@ -220,45 +221,46 @@
       (empty? (get-in state [:playback :active-cues]))))
 
 (defn- current-episode?
-  "Is the chase of timing at cell still the cue at cell in state: the same
+  "Is the chase of timing at key k still the cue k plays in state: the same
    show, and the cue's current version (playback/source-version, nil once
    it doesn't follow)?"
-  [state cell timing]
+  [state k timing]
   (let [[doc at version] (:chase-id timing)]
     (and (some? version)
-         (= at cell)
+         (= at k)
          (= doc (document-id state))
-         (= version (playback/source-version state cell)))))
+         (= version (playback/source-version state k)))))
 
 (defn- chase
   "The chased cues one tick on (playback/apply-chase): from the episodes
    still of their cue (current-episode?: none of another show's, of a cue
    replaced or no longer following), every following timeline inside its
-   window at the timecode's beat. An episode keeps its timing and :chase-id
-   while timecode runs, freewheels or locates inside the window; a cue
-   entering it, again or for the first time, starts a new one at the
-   timecode's beat, with :chase-id [document-id cell version origin-ns
-   tick] (the clock's :t0-ns and this tick's number) and :start, what may
-   start the transport for it, as it was then: {:restart (the restart
-   request's id) :allowed? (free-to-start?)}. One a grid press stopped
+   window at the timecode's beat: a show's or, until the grid holds no
+   timelines, a grid cell's (shows/playable-shows). An episode keeps its
+   timing and :chase-id while timecode runs, freewheels or locates inside
+   the window; a cue entering it, again or for the first time, starts a new
+   one at the timecode's beat, with :chase-id [document-id key version
+   origin-ns tick] (the clock's :t0-ns and this tick's number) and :start,
+   what may start the transport for it, as it was then: {:restart (the
+   restart request's id) :allowed? (free-to-start?)}. One a press stopped
    ([:playback :chase-stopped], follow-up B7) goes on as the same episode,
    :stopped? true: it is neither drawn, positioned nor reported."
   [runtime state mtc-pos bpm now-ms]
-  (let [seed (into {} (filter (fn [[cell timing]] (current-episode? state cell timing))) (:chase runtime))
+  (let [seed (into {} (filter (fn [[k timing]] (current-episode? state k timing))) (:chase runtime))
         stopped (get-in state [:playback :chase-stopped])
         chased (:active-cues (playback/apply-chase {:active-cues seed}
-                                                   (get-in state [:chains :cue-chains])
+                                                   (shows/playable-shows state)
                                                    mtc-pos bpm now-ms))
-        entry (fn [cell]
-                {:chase-id [(document-id state) cell (playback/source-version state cell)
+        entry (fn [k]
+                {:chase-id [(document-id state) k (playback/source-version state k)
                             (:t0-ns runtime) (inc (long (:tick runtime 0)))]
                  :start {:restart (get-in state [:playback :requests :restart :id])
                          :allowed? (free-to-start? state)}})]
     (assoc runtime :chase
-           (reduce-kv (fn [acc cell timing]
-                        (let [timing (if (:chase-id timing) timing (merge timing (entry cell)))
-                              stopped? (= (:chase-id timing) (get stopped cell))]
-                          (assoc acc cell (if stopped? (assoc timing :stopped? true) (dissoc timing :stopped?)))))
+           (reduce-kv (fn [acc k timing]
+                        (let [timing (if (:chase-id timing) timing (merge timing (entry k)))
+                              stopped? (= (:chase-id timing) (get stopped k))]
+                          (assoc acc k (if stopped? (assoc timing :stopped? true) (dissoc timing :stopped?)))))
                       chased
                       chased))))
 
@@ -266,47 +268,48 @@
 ;; Reports back to app state
 
 (defn- chase-reports
-  "One decision for each cell timecode or app state says timecode is at:
-   every chased cell, every chase marker (one whose cue went too) and every
-   run at a cue that follows timecode. On (:active? true) when an episode's
-   marker isn't in app state yet: the marker to install, :chase-id, in place
-   of the owner there, :expected-owner (playback/intent-owner); with the
-   episode's :start authority. Off (:active? false) when no episode is
-   there and app state still has a marker, or a run the following cue takes
-   over. None for an ordinary cue's run or an empty cell, nor for an episode
-   a grid press stopped (:stopped?). Each names the
+  "One decision for each key timecode or app state says timecode is at:
+   every chased key, every chase marker (one whose cue went too) and every
+   run at a cue that follows timecode, in shows/key-order. On (:active?
+   true) when an episode's marker isn't in app state yet: the marker to
+   install, :chase-id, in place of the owner there, :expected-owner
+   (playback/intent-owner); with the episode's :start authority. Off
+   (:active? false) when no episode is there and app state still has a
+   marker, or a run the following cue takes over. None for an ordinary
+   cue's run or a key with no cue, nor for an episode a press stopped
+   (:stopped?). Each names the
    show (:document-id) and the cue's version (:source-version, nil when it
    doesn't follow) it was decided for, never a beat or a time, so a retry
    is the same report and a changed owner a new one."
   [runtime state]
-  (let [chains (get-in state [:chains :cue-chains])
-        intents (or (get-in state [:playback :active-cues]) {})
+  (let [intents (or (get-in state [:playback :active-cues]) {})
         chase (:chase runtime)
-        cells (sort (distinct (concat (keys chase)
-                                      (keep (fn [[cell intent]]
-                                              (when (or (:chasing? intent) (playback/chases-mtc? (get chains cell)))
-                                                cell))
-                                            intents))))]
-    (keep (fn [cell]
-            (let [{:keys [chase-id start stopped?]} (get chase cell)
-                  intent (get intents cell)
+        ks (sort shows/key-order
+                 (distinct (concat (keys chase)
+                                   (keep (fn [[k intent]]
+                                           (when (or (:chasing? intent) (playback/chases-mtc? (shows/cue-at state k)))
+                                             k))
+                                         intents))))]
+    (keep (fn [k]
+            (let [{:keys [chase-id start stopped?]} (get chase k)
+                  intent (get intents k)
                   owner (playback/intent-owner intent)
-                  version (playback/source-version state cell)
-                  report {:event/type :show-clock/chase :cell cell :document-id (document-id state)
+                  version (playback/source-version state k)
+                  report {:event/type :show-clock/chase :cell k :document-id (document-id state)
                           :source-version version :expected-owner owner}]
               (cond
                 chase-id (when (and (not stopped?) (not= owner [:chase chase-id]))
                            (assoc report :active? true :chase-id chase-id :start start))
                 (:chasing? intent) (assoc report :active? false)
                 (and (some? version) (some? (:run intent))) (assoc report :active? false))))
-          cells)))
+          ks)))
 
 (defn- pending-reports
   "What app state needs to hear now: runs that ended (a timeline at its end,
    a decay after its beats) while their intent is still there, each with the
    ids of the restart and seek that put it where it ended
    (cue-timing/position-ids of state, the snapshot this step applied),
-   where timecode takes a cell over or lets go of it (chase-reports), and a
+   where timecode takes a key over or lets go of it (chase-reports), and a
    zone map switch whose beat the global clock has reached (zones plan Z4:
    the tick routes by it already, and the report lands it in app state),
    and a pattern pads' switch likewise (zones plan Z5)."
@@ -388,37 +391,37 @@
   (pulses/view (:pulses runtime) (:pulse-clock runtime)))
 
 (defn positions
-  "{cell beats} of every run and chased cue in runtime, but an episode a
-   grid press stopped (:stopped?, chase)."
+  "{key beats} of every run and chased cue in runtime, but an episode a
+   press stopped (:stopped?, chase)."
   [runtime]
   (into {}
         (concat (map (fn [run] [(:cell run) (:accumulated-beats run)]) (vals (:runs runtime)))
-                (keep (fn [[cell timing]] (when-not (:stopped? timing) [cell (:accumulated-beats timing)])) (:chase runtime)))))
+                (keep (fn [[k timing]] (when-not (:stopped? timing) [k (:accumulated-beats timing)])) (:chase runtime)))))
 
 (defn active-runs
-  "The cues to render: [{:cell :run :cue-chain :cue-timing} …], in the order
+  "The cues to render: [{:cell :run :cue-chain :cue-timing} …], :cell the
+   playback key and :cue-chain the cue it plays (shows/cue-at), in the order
    of app state's intents. Runs the clock hasn't started yet, ended runs and
    chains without items are left out. A chased cue takes its intent's place,
-   or goes last (by cell) while app state has no chasing intent for it yet,
-   unless a grid press stopped its episode (:stopped?, chase)."
+   or goes last (in shows/key-order) while app state has no chasing intent
+   for it yet, unless a press stopped its episode (:stopped?, chase)."
   ([state] (active-runs state @!runtime))
   ([state {:keys [runs chase]}]
-   (let [chains (get-in state [:chains :cue-chains])
-         intents (or (get-in state [:playback :active-cues]) {})
-         entry (fn [cell run-id timing]
-                 (let [chain (get chains cell)]
+   (let [intents (or (get-in state [:playback :active-cues]) {})
+         entry (fn [k run-id timing]
+                 (let [chain (shows/cue-at state k)]
                    (when (and timing (not (:ended? timing)) (seq (:items chain)))
-                     {:cell cell :run run-id :cue-chain chain :cue-timing timing})))
-         from-intents (u/keepv (fn [[cell intent]]
+                     {:cell k :run run-id :cue-chain chain :cue-timing timing})))
+         from-intents (u/keepv (fn [[k intent]]
                                  (cond
-                                   (:chasing? intent) (entry cell nil (get chase cell))
-                                   (playback/chases-mtc? (get chains cell)) nil
-                                   :else (entry cell (:run intent) (get runs (:run intent)))))
+                                   (:chasing? intent) (entry k nil (get chase k))
+                                   (playback/chases-mtc? (shows/cue-at state k)) nil
+                                   :else (entry k (:run intent) (get runs (:run intent)))))
                                intents)
-         chased-later (keep (fn [cell]
-                              (when-not (or (:chasing? (get intents cell)) (:stopped? (get chase cell)))
-                                (entry cell nil (get chase cell))))
-                            (sort (keys chase)))]
+         chased-later (keep (fn [k]
+                              (when-not (or (:chasing? (get intents k)) (:stopped? (get chase k)))
+                                (entry k nil (get chase k))))
+                            (sort shows/key-order (keys chase)))]
      (into from-intents chased-later))))
 
 (defn global-clock
@@ -432,16 +435,16 @@
   (^double [runtime] (effective-beats (:global runtime))))
 
 (defn cue-beats
-  "Where snapshot (latest) has the cue at cell, in beats, or nil when it isn't
+  "Where snapshot (latest) has the cue at key k, in beats, or nil when it isn't
    playing."
-  [snapshot cell]
-  (get (:positions snapshot) cell))
+  [snapshot k]
+  (get (:positions snapshot) k))
 
 (defn chase-id
   "The :chase-id of the timecode episode runtime (default: !runtime, one
-   read) chases at cell, or nil when it chases nothing there."
-  ([cell] (chase-id @!runtime cell))
-  ([runtime cell] (get-in runtime [:chase cell :chase-id])))
+   read) chases at key k, or nil when it chases nothing there."
+  ([k] (chase-id @!runtime k))
+  ([runtime k] (get-in runtime [:chase k :chase-id])))
 
 
 ;; The newest tick, and the signal the engines wait on
@@ -455,7 +458,7 @@
 
 (defonce ^{:private true
            :doc "The newest tick's snapshot, nil before the first: {:tick :at-ns :playing? :cues
-                 [{:cell :run :zone-frames}] :positions {cell beats} :pulses (pulse-view)
+                 [{:cell :run :zone-frames}] :positions {key beats} :pulses (pulse-view)
                  :faders {slot value} (vibes.faders/fader-values) :routing (routing.rig/routing:
                  every ref's lasers and each laser's halves, scan rate and fit, which the
                  engines compose from) :engine-inputs (multi-engine/engine-inputs: each

@@ -538,3 +538,48 @@
         (let [edit (assoc-in clean [:config :pattern-pads :random :bar?] true)]
           (is (true? (history/undoable-changed? (doc clean) (doc edit))))
           (is (true? (history/derive-dirty clean edit))))))))
+
+
+;; Timeline shows (plans/2026-11-25-timeline-shows/04 §4.1): [:chains :shows]
+;; is one more chain domain, so it is undoable, unsaved show content with no
+;; change to history, and a track's :muted? stays live
+
+(def ^:private show-id #uuid "00000000-0000-0000-0000-000000000001")
+(def ^:private track-id #uuid "00000000-0000-0000-0000-0000000000f1")
+(def ^:private clip-id #uuid "00000000-0000-0000-0000-0000000000c1")
+
+(def ^:private with-show
+  (assoc-in sample-state [:chains :shows]
+            {show-id {:name "One More Time" :editor-type :timeline
+                      :show/info {:artist "Daft Punk"}
+                      :tracks [{:id track-id :type :track :name "Track 1" :muted? false}]
+                      :items [{:id clip-id :type :preset :preset-id :circle :track-id track-id
+                               :timeline/start 0.0 :timeline/duration 16.0}]}}))
+
+(deftest shows-are-undoable-show-content-test
+  (doseq [[label edit expected] [["its :show/info" #(assoc-in % [:chains :shows show-id :show/info :album] "Discovery")
+                                  [true false true]]
+                                 ["a track's :muted?" #(assoc-in % [:chains :shows show-id :tracks 0 :muted?] true)
+                                  [false false false]]]]
+    (testing label
+      (let [[a b] [(doc with-show) (doc (edit with-show))]]
+        (is (not= a b) "the documents differ")
+        (is (= expected [(history/show-content-changed? a b)
+                         (history/rig-content-changed? a b)
+                         (history/persisted-changed? a b)])
+            "show content?, rig content?, unsaved?"))))
+  (testing "a new show, and one removed: show content"
+    (is (true? (history/undoable-changed? (doc sample-state) (doc with-show))))
+    (is (true? (history/derive-dirty (history/mark-clean sample-state) with-show)))
+    (is (true? (history/persisted-changed? (doc with-show) (doc (update-in with-show [:chains :shows] dissoc show-id)))))))
+
+(deftest restore-grafts-show-track-mute-test
+  (let [snapshot-doc (doc with-show)
+        ;; Since the snapshot: the track was muted, then the clip moved
+        current (-> with-show
+                    (assoc-in [:chains :shows show-id :tracks 0 :muted?] true)
+                    (assoc-in [:chains :shows show-id :items 0 :timeline/start] 8.0))
+        restored (history/restore-document current snapshot-doc)]
+    (is (= 0.0 (get-in restored [:chains :shows show-id :items 0 :timeline/start])) "the move is undone")
+    (is (true? (get-in restored [:chains :shows show-id :tracks 0 :muted?])) "the mute stays on")
+    (is (= (get-in current [:chains :shows show-id :show/info]) (get-in restored [:chains :shows show-id :show/info])))))

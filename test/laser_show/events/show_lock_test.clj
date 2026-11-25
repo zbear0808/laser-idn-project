@@ -70,6 +70,10 @@
    A1: an item's Target names it (follow-up R2)."
   #uuid "00000000-0000-0000-0000-0000000000a1")
 
+(def ^:private timeline-u
+  "The timeline show locked-blocks-structure-edits-test edits."
+  #uuid "00000000-0000-0000-0000-0000000005b1")
+
 (def ^:private structure-edits
   "One real edit of each kind the lock refuses, on starter."
   [{:event/type :grid/move-cell :from-col 0 :from-row 0 :to-col 5 :to-row 2}
@@ -127,12 +131,13 @@
    ;; column's default, they re-route it, and can make it reach the audience
    {:event/type :cue-chain/set-target :col 0 :row 0 :target :zone/a}
    {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-id a1-item :target :zone/b}
-   {:event/type :timeline/set-track-target :col 6 :row 3 :track-id :t1 :target :zone/a}
-   {:event/type :timeline/set-clip-target :col 6 :row 3 :item-id :c1 :target :graphics}
+   {:event/type :timeline/set-track-target :show-id timeline-u :track-id :t1 :target :zone/a}
+   {:event/type :timeline/set-clip-target :show-id timeline-u :item-id :c1 :target :graphics}
+   {:event/type :timeline/set-cue-target :show-id timeline-u :target :zone/a}
    ;; A cue's zone pattern and a new pattern cell move pictures between
    ;; places, as a target does; a pattern pad's setting and its key, as a
    ;; map pad's (zones plan Z5)
-   {:event/type :zone-patterns/set-cue-pattern :col 0 :row 0 :style :chase}
+   {:event/type :zone-patterns/set-cue-pattern :cue-key [0 0] :style :chase}
    {:event/type :zone-patterns/new-cell :col 5 :row 2 :style :alternate}
    {:event/type :pattern-pads/set-pad-bar :pad :chase :bar? true}
    {:event/type :pattern-pads/clear-control :pad :chase}
@@ -164,9 +169,9 @@
                (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 51}] {:type :pattern-pad :target :chase})
                ;; a step grid on the cue at B1, in its open window (zones plan Z6)
                (with-b1-grid)
-               ;; a map of yours, and a timeline cue (zones plan Z4)
+               ;; a map of yours, and a timeline show (zones plan Z4)
                (assoc-in [:zone-maps :map/custom-1] {:name "Sweep" :lanes [:auto/left :graphics] :overrides {:zone/c :auto/center}})
-               (assoc-in [:chains :cue-chains [6 3]] {:editor-type :timeline
+               (assoc-in [:chains :shows timeline-u] {:editor-type :timeline
                                                       :tracks [{:id :t1 :type :track :name "T"}]
                                                       :items [{:type :preset :id :c1 :preset-id :circle :track-id :t1
                                                                :timeline/start 0.0 :timeline/duration 4.0}]})
@@ -952,3 +957,50 @@
           (is (not= (circle s0) (circle s)) "a real edit")
           (is (= (history/extract-document-state (run s0 event)) (history/extract-document-state s))
               "as it does unlocked"))))))
+
+(deftest locked-shows-table-keeps-timing-and-the-library-test
+  (let [id #uuid "00000000-0000-0000-0000-0000000000a1"
+        show {:name "Strobe" :editor-type :timeline :timeline/tempo-bpm 120.0 :tracks [] :items []}
+        s (lock (assoc-in (starter) [:chains :shows id] show))
+        edit (fn [column text]
+               (-> s
+                   (run {:event/type :shows/start-edit :show-id id :column column})
+                   (run {:event/type :shows/edit-draft :show-id id :column column :text text})
+                   (run {:event/type :shows/commit-edit :show-id id :column column})))]
+    (testing "tempo and TC start edits are refused, the edit stays open"
+      (let [s1 (edit :bpm "128")]
+        (is (= 120.0 (get-in s1 [:chains :shows id :timeline/tempo-bpm])))
+        (is (= :bpm (get-in s1 [:ui :shows :editing :column])))
+        (is (= "Show tempo or TC start edit refused" (get-in s1 [:ui :show-lock-notice :text]))))
+      (is (= 0.0 (double (or (get-in (edit :tc-start "01:00:00:00") [:chains :shows id :timeline/tc-start]) 0.0)))))
+    (testing "metadata edits, search and sort go through"
+      (is (= "deadmau5" (get-in (edit :artist "deadmau5") [:chains :shows id :show/info :artist])))
+      (is (= "x" (get-in (run s {:event/type :shows/set-query :text "x"}) [:ui :shows :query]))))
+    (testing "set-bpm, set-tc-start, request-delete and delete are refused"
+      (doseq [event [{:event/type :shows/set-bpm :show-id id :text "128"}
+                     {:event/type :shows/set-tc-start :show-id id :text "01:00:00:00"}
+                     {:event/type :shows/request-delete :show-ids [id]}
+                     {:event/type :shows/delete :show-ids [id]}]]
+        (let [s1 (run s event)]
+          (is (= show (get-in s1 [:chains :shows id])) (str (:event/type event)))
+          (is (not (get-in s1 [:ui :dialogs :confirm :open?])) (str (:event/type event))))))))
+
+;; Timeline shows (plans/2026-11-25-timeline-shows 00 Show lock, S4)
+
+(deftest locked-refuses-set-timecode-test
+  (let [id #uuid "00000000-0000-0000-0000-0000000005c1"
+        s0 (-> (starter)
+               (assoc-in [:chains :shows id] {:name "A" :editor-type :timeline :timeline/tempo-bpm 120.0
+                                              :tracks [{:id :t :type :track}]
+                                              :items [{:id :c :type :preset :preset-id :circle :track-id :t
+                                                       :enabled? true :effects []
+                                                       :timeline/start 0.0 :timeline/duration 8.0}]})
+               (history/mark-clean))
+        event {:event/type :shows/set-timecode :show-ids #{id} :enabled? true}]
+    (is (contains? show-lock/blocked-events :shows/set-timecode))
+    (testing "locked: refused, the document as it was, a notice"
+      (let [s (run (lock s0) event)]
+        (is (= (history/extract-document-state s0) (history/extract-document-state s)))
+        (is (some? (get-in s [:ui :show-lock-notice])))))
+    (testing "unlocked: it goes on"
+      (is (= :mtc (get-in (run s0 event) [:chains :shows id :timeline/chase]))))))

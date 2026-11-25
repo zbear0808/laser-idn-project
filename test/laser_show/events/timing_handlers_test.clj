@@ -5,6 +5,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.events.handlers.timing :as timing]
+            [laser-show.timeline.shows :as shows]
             [laser-show.triggers.tap-tempo :as tap-tempo]))
 
 
@@ -313,6 +314,30 @@
                ["a duplicate Off: the cell empty" state off]
                ["an Off with no owner named" (assoc-in state [:playback :active-cues c] marker) (dissoc off :expected-owner)]]]
         (is (= {} (handle st event)) why)))))
+
+
+(deftest show-key-end-and-chase-guards-test
+  (let [u #uuid "00000000-0000-0000-0000-0000000000f1"
+        sk (shows/play-key u)
+        r #uuid "00000000-0000-0000-0000-000000000001"
+        k #uuid "00000000-0000-0000-0000-00000000000a"
+        state {:chains {:cue-chains {} :shows {u {:editor-type :timeline :items []}}}
+               :playback {:playing? true
+                          :active-cell sk
+                          :active-cues {sk {:run r :timeline? true :start-beat 0.0}}
+                          :requests {:restart {:id k}}}}
+        end {:event/type :show-clock/cue-ended :cell sk :run r :position-ids {:restart k :seek nil}}
+        handle (fn [state event] (timing/handle (assoc event :state state)))]
+    (testing "a show's run that ended where it is now stops, as a cell's does"
+      (is (= [false {} nil] ((juxt :playing? :active-cues :active-cell)
+                             (get-in (handle state end) [:state :playback])))))
+    (testing "while the show follows timecode now, its end is the chase's to stop"
+      (let [st (assoc-in state [:chains :shows u :timeline/chase] :mtc)
+            result (handle st end)]
+        (is (identical? st (:state result)))))
+    (testing "the guard reads the show, never a cue-chains entry under its key"
+      (let [st (assoc-in state [:chains :cue-chains sk] {:editor-type :timeline :timeline/chase :mtc :items []})]
+        (is (= {} (get-in (handle st end) [:state :playback :active-cues])))))))
 
 
 (deftest timing-tap-tempo-phase-alignment-test

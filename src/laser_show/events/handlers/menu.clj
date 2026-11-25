@@ -11,6 +11,7 @@
             [laser-show.routing.zone-effects :as ze]
             [laser-show.state.persistent :as persistent]
             [laser-show.state.rig-file :as rig-file]
+            [laser-show.timeline.shows :as shows]
             [laser-show.events.helpers :as h]
             [laser-show.events.handlers.grid :as grid]
             [laser-show.events.handlers.effects :as effects]
@@ -461,12 +462,13 @@
 (defn- handle-edit-copy
   "Copy selected cell to clipboard.
    Delegates to grid or effects handler depending on active tab.
-   Falls back to active playing cue on grid tab if no cell is explicitly selected."
+   Falls back to an active playing grid cue on grid tab if no cell is
+   explicitly selected (never a show's key, timeline.shows)."
   [{:keys [state time]}]
   (let [active-tab (get-in state [:ui :active-tab])
         selected-cell (case active-tab
                         :grid (or (get-in state [:grid :selected-cell])
-                                  (first (keys (get-in state [:playback :active-cues]))))
+                                  (first (filter shows/grid-cell? (keys (get-in state [:playback :active-cues])))))
                         :effects (get-in state [:effects :selected-cell])
                         nil)]
     (if selected-cell

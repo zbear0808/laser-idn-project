@@ -299,25 +299,34 @@
 
 
 (defn cue-usage-text
-  "\"Used by 3 cues\", \"Used by 1 cue\" or \"Used by no cues\"."
-  [n]
-  (case (long n)
-    0 "Used by no cues"
-    1 "Used by 1 cue"
-    (str "Used by " n " cues")))
+  "\"Used by 3 cues\", \"Used by 1 cue\" or \"Used by no cues\"; with
+   shows, \"Used by 3 cues and 1 show\" or \"Used by 2 shows\"."
+  ([n] (cue-usage-text n 0))
+  ([n shows]
+   (let [n (long n) shows (long shows)
+         cues (case n 1 "1 cue" (str n " cues"))
+         shows-text (if (= 1 shows) "1 show" (str shows " shows"))]
+     (cond
+       (and (zero? n) (zero? shows)) "Used by no cues"
+       (zero? shows) (str "Used by " cues)
+       (zero? n) (str "Used by " shows-text)
+       :else (str "Used by " cues " and " shows-text)))))
 
 (defn usage-text
   "A group's details line (zones plan Z4, 06 §7.5, §8.7): \"Used by 3
    cues\", \"Used by 3 cues · 9 more through Zone A\", \"Used by 9 cues
-   through Zones A, C\", \"Used by no cues\"; usage is subs/ref-usage."
-  [{:keys [direct through zones]}]
+   through Zones A, C\", \"Used by no cues\", \"Used by 3 cues and 1 show\";
+   usage is subs/ref-usage, whose :shows says how many are shows."
+  [{:keys [direct through zones shows]}]
   (let [direct (long (or direct 0))
         through (long (or through 0))
+        direct-shows (long (or (:direct shows) 0))
+        through-shows (long (or (:through shows) 0))
         via (str (if (next zones) "Zones " "Zone ") (str/join ", " (map targets/zone-letter zones)))]
     (cond
-      (zero? through) (cue-usage-text direct)
-      (zero? direct) (str (cue-usage-text through) " through " via)
-      :else (str (cue-usage-text direct) " · " through " more through " via))))
+      (zero? through) (cue-usage-text (- direct direct-shows) direct-shows)
+      (zero? direct) (str (cue-usage-text (- through through-shows) through-shows) " through " via)
+      :else (str (cue-usage-text (- direct direct-shows) direct-shows) " · " through " more through " via))))
 
 (def ^:private kind-texts
   {:all "built in" :auto "automatic" :laser "one laser" :custom "your group"})

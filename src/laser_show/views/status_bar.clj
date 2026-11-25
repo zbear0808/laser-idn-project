@@ -90,21 +90,27 @@
 (def ^:private max-named-cues 2)
 
 (defn playing-list
-  "\"A1 circle · A2 square · +2\": the first max-named-cues of the cues
-   that play (subs/playing-cues, in grid order) by cell and by the name on
-   their cell, then how many more. nil when nothing plays."
-  [cues]
-  (when (seq cues)
-    (let [named (for [{:keys [col row] :as cue} (take max-named-cues cues)]
-                  (str/trim (str (common/cell-label col row) " " (grid-cell/cell-label cue))))
-          more (- (count cues) max-named-cues)]
-      (str/join " · " (cond-> (vec named)
-                        (pos? more) (conj (str "+" more)))))))
+  "\"A1 circle · A2 square · ♪ One More Time · +2\": the first
+   max-named-cues of what plays, the grid cues (subs/playing-cues, in grid
+   order) by cell and by the name on their cell, then the shows
+   (subs/playing-shows) as \"♪ \" and their title, then how many more. nil
+   when nothing plays."
+  ([cues] (playing-list cues nil))
+  ([cues shows]
+   (let [names (concat (for [{:keys [col row] :as cue} cues]
+                         (str/trim (str (common/cell-label col row) " " (grid-cell/cell-label cue))))
+                       (for [{:keys [title]} shows]
+                         (str "♪ " title)))]
+     (when (seq names)
+       (let [more (- (count names) max-named-cues)]
+         (str/join " · " (cond-> (vec (take max-named-cues names))
+                           (pos? more) (conj (str "+" more)))))))))
 
 (defn playing-status
   "What plays (playing-list). Held cues don't play: nothing draws them."
   [{:keys [fx/context]}]
-  (if-let [text (playing-list (fx/sub-ctx context subs/playing-cues))]
+  (if-let [text (playing-list (fx/sub-ctx context subs/playing-cues)
+                              (fx/sub-ctx context subs/playing-shows))]
     {:fx/type status-item
      :id "status-playing"
      :label "Playing"

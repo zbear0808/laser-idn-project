@@ -35,10 +35,6 @@
       (let [[_ proj-id] component-id]
         [:chains :projector-effects proj-id :items])
 
-      :timeline-cue-chain
-      (let [[_ col row] component-id]
-        [:chains :cue-chains [col row] :items])
-
       nil)
 
     :else nil))
@@ -115,8 +111,8 @@
   (:playing? (playback state)))
 
 (defn active-cues
-  "Get the map of active cues.
-   Returns {[col row] {:trigger-time :accumulated-beats ...} ...}"
+  "Get the map of active cues: {key intent}, a key a grid cell [col row] or
+   a show [:show id] (timeline.shows/play-key)."
   [state]
   (or (:active-cues (playback state)) {}))
 

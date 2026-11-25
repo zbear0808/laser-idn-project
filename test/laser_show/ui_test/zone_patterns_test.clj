@@ -14,7 +14,9 @@
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
             [laser-show.state.history :as history]
+            [laser-show.timeline.shows :as shows]
             [laser-show.ui-test.fixtures :as fixtures]
+            [laser-show.ui-test.show-editor :as show-editor]
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.css PseudoClass]
            [javafx.event Event]
@@ -103,14 +105,16 @@
     (fire-item! "#pattern-chip-cue" "None")
     (ui/wait-for! #(nil? (cue-pattern)))
     (ui/assert-text! "#pattern-chip-cue" "None"))
-  (testing "the timeline editor's footer has it too"
+  (testing "the timeline editor's footer has it too: a show's own pattern"
     (events/dispatch! {:event/type :ui/close-dialog :dialog-id :cue-chain-editor})
     (ui/wait-for! #(nil? (ui/query "#pattern-chip-cue")))
-    (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
-    (ui/wait-for! #(some? (ui/query "#pattern-chip-cue")))
-    (fire-item! "#pattern-chip-cue" "Swap   A ⇄ B (what's in them)")
-    (ui/wait-for! #(= :swap (get-in (cue-pattern) [:params :style])))
-    (ui/assert-text! "#pattern-chip-cue" "Swap · A ⇄ B")))
+    (let [id (show-editor/new-show-from-cue! 0 0)
+          show-pattern #(first (get-in (app-state) (conj (shows/show-path id) :zone-patterns)))]
+      (ui/wait-for! #(some? (ui/query "#pattern-chip-cue")))
+      (fire-item! "#pattern-chip-cue" "Swap   A ⇄ B (what's in them)")
+      (ui/wait-for! #(= :swap (get-in (show-pattern) [:params :style])))
+      (ui/assert-text! "#pattern-chip-cue" "Swap · A ⇄ B")
+      (is (nil? (cue-pattern)) "the cue it was copied from keeps its own"))))
 
 (deftest pattern-window-shows-the-fold-test
   (lasers! 3)
@@ -162,7 +166,7 @@
                               (assoc-in [:chains :cue-chains [0 0] :name] "Beams")
                               (assoc-in [:chains :cue-chains [0 0] :zone-patterns]
                                         [(assoc (zone-patterns/preset-instance :chase :cue) :id #uuid "00000000-0000-0000-0000-0000000000c1")])))
-    (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
+    (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:cue-key [0 0]}})
     (ui/wait-for! window-open?)
     (ui/wait-for! #(some? (ui/query "#zone-pattern-row-offset .modulator-toggle")))
     (ui/click! robot "#zone-pattern-row-offset .modulator-toggle")
@@ -229,7 +233,7 @@
     (is (not-any? #{"Zone pattern" "Map cycle"} (texts ".bank-item-btn"))))
   (testing "nor the timeline's browser"
     (events/dispatch! {:event/type :ui/close-dialog :dialog-id :cue-chain-editor})
-    (events/dispatch! {:event/type :timeline-cue-editor/open :col 1 :row 0})
+    (show-editor/new-show-from-cue! 1 0)
     (ui/wait-for! #(some? (ui/query "#timeline-track-target-0")))
     (events/write-state! assoc-in [:ui :timeline-prefs :add-panel :open?] true)
     (ui/wait-for! #(seq (ui/query-all "#timeline-browser-effects #shape-tab")))
@@ -522,7 +526,7 @@
                               (assoc-in [:chains :cue-chains [0 0] :zone-patterns]
                                         [(assoc (zone-patterns/preset-instance :alternate :cue) :id pattern-id)])))
     (cycle-on!)
-    (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
+    (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:cue-key [0 0]}})
     (ui/wait-for! window-open?)
     (ui/wait-for! #(true? (ticked "#zone-pattern-source-auto")))
     (events/dispatch! {:event/type :vibe/set-show-lock :locked? true})
@@ -622,7 +626,7 @@
   (events/write-state! #(-> %
                             (assoc-in [:chains :cue-chains [0 0] :name] "Beams")
                             (assoc-in [:chains :cue-chains [0 0] :zone-patterns] [(assoc pattern :id pattern-id)])))
-  (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
+  (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:cue-key [0 0]}})
   (ui/wait-for! window-open?)
   ;; What its Numeric button sends: the pattern by its id (follow-up N15)
   (events/dispatch! {:event/type :chain/set-ui-mode :domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]

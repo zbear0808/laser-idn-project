@@ -57,7 +57,9 @@
 (defn cell-label
   "Display text for a cue cell.
    Shows custom name if set, otherwise first preset name, or preset count if multiple.
-   Shows 'Timeline' for timeline cues that do not yet have presets."
+   Shows 'Timeline' for a timeline cue without presets: none is made on the
+   grid any more (timelines are shows), but a cell an Open couldn't move
+   still says what it holds."
   [{:keys [name first-preset-id preset-count timeline?]}]
   (cond
     ;; Custom name takes priority
@@ -285,7 +287,7 @@
    
    Behavior:
    - Left-click: Trigger the cell (if has content) or select (if empty)
-   - Double-click: Open appropriate editor (timeline or cue chain)
+   - Double-click: Open the cue chain editor (the grid holds no timelines)
    - Right-click: Context menu with Copy/Paste/Edit/Clear and Trigger actions
    - Drag from cell: Start dragging cell content
    - Drop on cell: Move cell content"
@@ -294,7 +296,6 @@
         ;; The show a Learn starts in (reactivity plan 24)
         document-id (fx/sub-ctx context subs/document-id)
         has-content? (:has-content? display-data)
-        timeline? (:timeline? display-data)
         has-trigger? (fx/sub-ctx context subs/cell-has-trigger? :trigger-cue col row)
         learning? (fx/sub-ctx context subs/cell-learning? :trigger-cue col row)
         ;; In play while Stop blacks the output out: held, not playing
@@ -305,7 +306,7 @@
         ;; map in use, for its tooltip
         badge (fx/sub-ctx context subs/cell-target-badge col row)
         ;; Its zone pattern (zones plan Z5): ⇄ on the badge, a line in the tooltip
-        pattern (fx/sub-ctx context subs/cue-zone-pattern col row)
+        pattern (fx/sub-ctx context subs/cue-zone-pattern [col row])
         pattern? (and pattern (not (false? (:enabled? pattern))))
         cell-display-data (assoc display-data
                                  :active? (and (:active? display-data) (not held?))
@@ -317,9 +318,7 @@
                                  :pattern-line (when pattern?
                                                  (str "Zone pattern: "
                                                       (zone-pattern-editor/chip-text pattern (fx/sub-ctx context subs/names-ctx)))))
-        open-editor-event (if timeline?
-                            {:event/type :timeline-cue-editor/open}
-                            {:event/type :cue-chain/open-editor})
+        open-editor-event {:event/type :cue-chain/open-editor}
         paste-off? (not (fx/sub-ctx context subs/can-paste? :cue-chain))
         base-menu-items (if has-content?
                           [{:fx/type :menu-item
@@ -339,9 +338,6 @@
                           [{:fx/type :menu-item
                             :text "Create Cue"
                             :on-action {:event/type :cue-chain/open-editor :col col :row row}}
-                           {:fx/type :menu-item
-                            :text "Create Timeline Cue"
-                            :on-action {:event/type :timeline-cue-editor/open :col col :row row}}
                            {:fx/type :menu-item
                             :text (str "Paste Cue (" (shortcuts/shortcut-text :v) ")")
                             :disable paste-off?

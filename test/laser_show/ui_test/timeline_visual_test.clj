@@ -38,7 +38,19 @@
     @done
     (ui/sync-fx!)))
 
-(defn- cue [] (get-in (state/get-raw-state) [:chains :cue-chains [2 2]]))
+(def ^:private !show (atom nil))
+
+(defn- cue [] (get-in (state/get-raw-state) [:chains :shows @!show]))
+
+(defn- open-new-show!
+  "A new, empty show (:shows/create), its editor open."
+  []
+  (let [ids #(set (keys (get-in (state/get-raw-state) [:chains :shows])))
+        before (ids)]
+    (events/dispatch! {:event/type :shows/create})
+    (ui/wait-for! #(seq (remove before (ids))))
+    (reset! !show (first (remove before (ids))))
+    (events/dispatch! {:event/type :shows/open-editor :show-id @!show})))
 
 (defn- leaf-ids []
   (->> (tree-seq #(= :group (:type %)) :items {:type :group :items (:tracks (cue))})
@@ -54,47 +66,47 @@
   (if-not (enabled?)
     (is true "skipped: set LASER_SHOW_VISUAL=1 to take the screenshots")
     (do
-      (events/dispatch! {:event/type :timeline-cue-editor/open :col 2 :row 2})
+      (open-new-show!)
       (ui/wait-for! #(some (fn [t] (and t (.startsWith ^String t "Timeline Editor"))) (ui/window-titles)))
       (resize-editor! 1400 820)
       (shot! "01-empty")
-      (dotimes [_ 2] (events/dispatch! {:event/type :timeline/add-track :col 2 :row 2}))
+      (dotimes [_ 2] (events/dispatch! {:event/type :timeline/add-track :show-id @!show}))
       (ui/wait-for! #(= 3 (count (leaf-ids))))
       (let [[t1 t2 t3] (leaf-ids)]
         (doseq [[track preset start] [[t1 :circle 0.0] [t1 :star 2.0] [t1 :square 8.0]
                                       [t2 :line 4.0] [t2 :spiral 12.0]
                                       [t3 :triangle 0.0] [t3 :wave 6.0]]]
-          (events/dispatch! {:event/type :timeline/add-preset-to-track :col 2 :row 2
+          (events/dispatch! {:event/type :timeline/add-preset-to-track :show-id @!show
                              :item-id preset :track-id track :start start}))
         (ui/wait-for! #(= 7 (count (:items (cue)))))
-        (events/dispatch! {:event/type :timeline/set-track-muted :col 2 :row 2 :track-id t3 :muted? true})
-        (events/dispatch! {:event/type :timeline/set-cursor-beat :col 2 :row 2 :beat 10.0})
-        (events/dispatch! {:event/type :timeline/toggle-loop :col 2 :row 2})
-        (events/dispatch! {:event/type :timeline/select-track :col 2 :row 2 :track-id t2})
+        (events/dispatch! {:event/type :timeline/set-track-muted :show-id @!show :track-id t3 :muted? true})
+        (events/dispatch! {:event/type :timeline/set-cursor-beat :show-id @!show :beat 10.0})
+        (events/dispatch! {:event/type :timeline/toggle-loop :show-id @!show})
+        (events/dispatch! {:event/type :timeline/select-track :show-id @!show :track-id t2})
         (ui/wait-for! #(true? (get-in (cue) [:loop :enabled?])))
         (shot! "02-content")
         ;; Playing at beat 6.0: app state has the intent, the show clock's tick the position
-        (events/write-state! assoc-in [:playback :active-cues [2 2]] {:run (random-uuid) :timeline? true})
-        (show-time/publish! {:at-ns (System/nanoTime) :playing? true :cues [] :positions {[2 2] 6.0}})
+        (events/write-state! assoc-in [:playback :active-cues [:show @!show]] {:run (random-uuid) :timeline? true})
+        (show-time/publish! {:at-ns (System/nanoTime) :playing? true :cues [] :positions {[:show @!show] 6.0}})
         (ui/wait-for! #(= "2.3.1" (ui/node-text "#timeline-readout")))
         (shot! "03-playing")
-        (events/write-state! update-in [:playback :active-cues] dissoc [2 2])
+        (events/write-state! update-in [:playback :active-cues] dissoc [:show @!show])
         (show-time/publish! {:at-ns (System/nanoTime) :playing? false :cues [] :positions {}})
         ;; The browser opened with the empty timeline; open it if it was closed since
         (when-not (get-in (state/get-raw-state) [:ui :timeline-prefs :add-panel :open?])
           (ui/click! (ui/robot) "#timeline-add-content"))
         (shot! "04-drawer")
         ;; No loop: the timeline stops at its end, shown by the end marker
-        (events/dispatch! {:event/type :timeline/toggle-loop :col 2 :row 2})
-        (events/dispatch! {:event/type :timeline/apply-op :col 2 :row 2 :op {:op :set-tempo :bpm 120.0}})
+        (events/dispatch! {:event/type :timeline/toggle-loop :show-id @!show})
+        (events/dispatch! {:event/type :timeline/apply-op :show-id @!show :op {:op :set-tempo :bpm 120.0}})
         (ui/wait-for! #(false? (get-in (cue) [:loop :enabled?])))
         (shot! "05-end-marker")
         (events/dispatch! {:event/type :timeline/set-ruler-mode :mode :time})
         (shot! "06-time-ruler")
         ;; Following MIDI timecode: 00:00:01:00 at 25 fps
-        (events/dispatch! {:event/type :timeline/clear-selection :col 2 :row 2})
-        (events/dispatch! {:event/type :timeline/select-track :col 2 :row 2 :track-id nil})
-        (events/dispatch! {:event/type :timeline/apply-op :col 2 :row 2 :op {:op :set-chase :source :mtc}})
+        (events/dispatch! {:event/type :timeline/clear-selection :show-id @!show})
+        (events/dispatch! {:event/type :timeline/select-track :show-id @!show :track-id nil})
+        (events/dispatch! {:event/type :timeline/apply-op :show-id @!show :op {:op :set-chase :source :mtc}})
         (ui/wait-for! #(= :mtc (:timeline/chase (cue))))
         (mtc/reset-decoder!)
         (doseq [b [0x00 0x10 0x21 0x30 0x40 0x50 0x60 0x72]]
@@ -103,19 +115,19 @@
         (ui/wait-for! #(ui/visible? "#timeline-mtc-rate-warning"))
         (shot! "07-mtc-chase")
         (mtc/reset-decoder!)
-        (events/dispatch! {:event/type :timeline/apply-op :col 2 :row 2 :op {:op :set-chase :source nil}})
+        (events/dispatch! {:event/type :timeline/apply-op :show-id @!show :op {:op :set-chase :source nil}})
         ;; Effects: two on a clip, one on a track, shown in the bottom panel
         (let [circle (:id (first (:items (cue))))
               fx-def effects/get-effect]
-          (events/dispatch! {:event/type :timeline/select-items :col 2 :row 2 :ids #{circle}})
+          (events/dispatch! {:event/type :timeline/select-items :show-id @!show :ids #{circle}})
           (doseq [e [:scale :rotation]]
-            (events/dispatch! {:event/type :timeline/add-effect-to-item :col 2 :row 2
+            (events/dispatch! {:event/type :timeline/add-effect-to-item :show-id @!show
                                :item-id e :item (fx-def e) :target-item-id circle}))
           (ui/wait-for! #(= 2 (count (:effects (first (:items (cue)))))))
           (shot! "08-clip-effects")
-          (events/dispatch! {:event/type :timeline/clear-selection :col 2 :row 2})
-          (events/dispatch! {:event/type :timeline/select-track :col 2 :row 2 :track-id t1})
-          (events/dispatch! {:event/type :timeline/add-effect-to-item :col 2 :row 2
+          (events/dispatch! {:event/type :timeline/clear-selection :show-id @!show})
+          (events/dispatch! {:event/type :timeline/select-track :show-id @!show :track-id t1})
+          (events/dispatch! {:event/type :timeline/add-effect-to-item :show-id @!show
                              :item-id :scale :item (fx-def :scale) :target-track-id t1})
           (ui/wait-for! #(ui/visible? ".tl-device"))
           (shot! "09-track-effects")))

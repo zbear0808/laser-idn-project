@@ -129,7 +129,7 @@
   (testing "the pattern window: its parameter editor"
     (let [steps (before-and-after
                  (-> (domains/build-initial-state)
-                     (assoc-in [:ui :dialogs :zone-pattern-editor] {:open? true :col 0 :row 0})
+                     (assoc-in [:ui :dialogs :zone-pattern-editor] {:open? true :cue-key [0 0]})
                      (assoc-in [:chains :cue-chains [0 0]]
                                {:items [{:id (random-uuid) :type :preset :preset-id :circle :enabled? true :params {}}]
                                 :zone-patterns [(assoc (zone-patterns/preset-instance :alternate :cue) :id (random-uuid))]}))
@@ -140,14 +140,15 @@
 
   (testing "the Timeline Editor: the selected clip's effect card"
     (let [clip (random-uuid)
+          show-id (random-uuid)
           steps (before-and-after
                  (-> (domains/build-initial-state)
-                     (assoc-in [:ui :dialogs :timeline-cue-editor] {:open? true :col 0 :row 0})
-                     (assoc-in [:chains :cue-chains [0 0]]
+                     (assoc-in [:ui :dialogs :timeline-cue-editor] {:open? true :show-id show-id})
+                     (assoc-in [:chains :shows show-id]
                                (model/convert-to-timeline {:items [{:id clip :type :preset :preset-id :circle :enabled? true
                                                                     :effects [(scale (random-uuid))]}]}
                                                           {}))
-                     (assoc-in [:ui :timeline-editor [0 0] :selection] #{clip}))
+                     (assoc-in [:ui :timeline-editor show-id :selection] #{clip}))
                  {:fx/type @#'timeline-cue-editor/timeline-cue-editor-content}
                  :scale "Size")]
       (is (= ["Scale" "Size"] (map #(get-in % [:by-id "timeline-device-name-0"]) steps)) "the card's name")

@@ -166,7 +166,7 @@
                          [(-> (zone-patterns/preset-instance :alternate :cue)
                               (assoc :id #uuid "00000000-0000-0000-0000-00000000a6a2")
                               (assoc-in [:params :zones] [A B C :zone/d]))])
-    (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
+    (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:cue-key [0 0]}})
     (ui/wait-for! #(some? (ui/query "#zone-pattern-step-grid")))
     (ui/click! (ui/robot) "#zone-pattern-step-grid")
     (ui/wait-for! #(window-open? cue-title))
@@ -610,7 +610,7 @@
         (ui/assert-text! "#step-row-0" "A → Left")
         (ui/assert-text! "#step-row-1" "B → Right")
         (ui/assert-text! "#step-row-2" "C → Left")
-        (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
+        (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:cue-key [0 0]}})
         (ui/wait-for! #(= pattern-fold (text-anywhere "#zone-pattern-fold")))
         (doseq [[rate words] [[0.5 "1 step every 2 beats"] [0.25 "1 step every 4 beats"] [2.0 "2 steps a beat"]]]
           (events/write-state! assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :params :rate] rate)
@@ -673,7 +673,7 @@
 
 (deftest pattern-window-shows-a-small-grid-test
   (grid-on-a1! {:zones [A B C] :steps [[A] [] [B C] []]})
-  (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
+  (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:cue-key [0 0]}})
   (ui/wait-for! #(some? (ui/query "#zone-pattern-mini-grid")))
   (testing "a small read-only grid in place of Zones, with Edit grid…"
     (is (nil? (ui/query "#zone-pattern-row-zones")) "the rows are the grid's")

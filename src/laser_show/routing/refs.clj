@@ -3,7 +3,8 @@
    group, and re-pointing or clearing every reference at once.
 
    The places (ref-places):
-   - a cue's :target (zones plan Z4);
+   - a cue's :target (zones plan Z4), and a show's ([:chains :shows], a
+     timeline cue map, rewritten as a cue);
    - the :target of every item and group, recursively (cue chain items,
      timeline clips and group clips), and of every timeline track and folder,
      a ref inside a union too;
@@ -327,22 +328,40 @@
                 (when (and (map? chain) (contains? (pattern-refs (:items chain)) ref)) cell)))
         effect-chains))
 
+(defn- ref-usage
+  "chain-ref-usage, each entry starting as owners."
+  [owners cue-chains effect-chains shows]
+  (let [add (fn [usage k cell refs]
+              (reduce (fn [usage ref] (update usage ref #(update (or % owners) k conj cell))) usage refs))
+        cue-owners (fn [k]
+                     (fn [usage id cue] (if (map? cue) (add usage k id (cue-refs cue)) usage)))
+        usage (reduce-kv (cue-owners :cues) {} (or cue-chains {}))
+        usage (reduce-kv (cue-owners :shows) usage (or shows {}))]
+    (reduce-kv (fn [usage cell chain] (if (map? chain) (add usage :effect-cells cell (pattern-refs (:items chain))) usage))
+               usage
+               (or effect-chains {}))))
+
+(defn shows-using
+  "The sorted set of show ids whose show names ref, from shows ([:chains
+   :shows] {id show}): cues-using's show library."
+  [shows ref]
+  (into (sorted-set)
+        (keep (fn [[id show]]
+                (when (and (map? show) (contains? (cue-refs show) ref)) id)))
+        shows))
+
 (defn chain-ref-usage
   "Who stores each ref in the show's two grids: {ref {:cues #{[col row] …}
    :effect-cells #{[col row] …}}}, sorted sets, both there for every ref
    named; a cue's refs are cue-refs' (its implicit All too), an effect
    cell's its zone patterns'. Every literal reference, whether or not
-   anything draws there now: the zone catalogue and the rig report read it."
-  [cue-chains effect-chains]
-  (let [owners {:cues (sorted-set) :effect-cells (sorted-set)}
-        add (fn [usage k cell refs]
-              (reduce (fn [usage ref] (update usage ref #(update (or % owners) k conj cell))) usage refs))
-        usage (reduce-kv (fn [usage cell cue] (if (map? cue) (add usage :cues cell (cue-refs cue)) usage))
-                         {}
-                         (or cue-chains {}))]
-    (reduce-kv (fn [usage cell chain] (if (map? chain) (add usage :effect-cells cell (pattern-refs (:items chain))) usage))
-               usage
-               (or effect-chains {}))))
+   anything draws there now: the zone catalogue and the rig report read it.
+   Given shows ([:chains :shows]) too, each entry has :shows #{id …} as
+   well, a show's refs as a cue's."
+  ([cue-chains effect-chains]
+   (ref-usage {:cues (sorted-set) :effect-cells (sorted-set)} cue-chains effect-chains nil))
+  ([cue-chains effect-chains shows]
+   (ref-usage {:cues (sorted-set) :effect-cells (sorted-set) :shows (sorted-set)} cue-chains effect-chains shows)))
 
 (defn- rewrite-cue [cue smap]
   (-> cue
@@ -372,11 +391,16 @@
   "Every place a zone-group id is stored: {:kind :replace}, where :replace
    is (fn [state smap] state') and keeps state identical? when nothing
    changes. Later phases add their places here. A cue's zone patterns are
-   the cue's (:cue-chains), an effect cell's its cell's (:effect-chains)."
+   the cue's (:cue-chains), an effect cell's its cell's (:effect-chains);
+   a show (a timeline cue map, [:chains :shows]) is rewritten as a cue."
   [{:kind :cue-chains
     :replace (fn [state smap]
                (update-in-same state [:chains :cue-chains]
                                #(update-vals-same % (fn [cue] (when cue (rewrite-cue cue smap))))))}
+   {:kind :shows
+    :replace (fn [state smap]
+               (update-in-same state [:chains :shows]
+                               #(update-vals-same % (fn [show] (when show (rewrite-cue show smap))))))}
    {:kind :effect-chains
     :replace (fn [state smap]
                (update-in-same state [:chains :effect-chains]
