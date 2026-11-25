@@ -26,6 +26,7 @@
    ;; together and writes both :x-scale and :y-scale. Applying it in scale-xf
    ;; (forcing y = x) would break uniform mirroring (e.g. x -1.2, y 1.2).
    [:scale :uniform?] "UI aspect-lock flag, scale-xf reads :x-scale/:y-scale only"
+   [:smart-size :uniform?] "UI aspect-lock flag, as Scale's"
    ;; The 6-point test frame is under every budget the limits allow (1 kpps at
    ;; 120 fps is 8 points), so Decimate leaves it whole; points-test varies them.
    [:decimate :kpps] "the test frame is under every budget"
@@ -56,7 +57,7 @@
 
 (def ^:private expected-effect-ids
   "Guard so this test fails loudly if an effect namespace stops loading."
-  #{:scale :translate :rotation :corner-pin :lens-distortion
+  #{:scale :smart-size :translate :rotation :corner-pin :lens-distortion
     :hue-shift :saturation :color-filter :set-hue :set-color :oklab-hue-shift
     :intensity :blackout :threshold :trace-fade
     :rgb-curves :axis-transform

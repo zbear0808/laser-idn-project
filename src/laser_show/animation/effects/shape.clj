@@ -47,6 +47,87 @@
              :default-mode :visual}
   :apply-transducer scale-xf})
 
+(defn content-center
+  "[cx cy], the centre of the bounding box of frame's lit points, or of all
+   its points when none is lit; [0.0 0.0] for an empty frame."
+  [frame]
+  (let [lit (filterv (complement t/blanked?) frame)
+        pts (if (seq lit) lit frame)]
+    (if (empty? pts)
+      [0.0 0.0]
+      (loop [i 1
+             min-x (double ((nth pts 0) t/X)) max-x min-x
+             min-y (double ((nth pts 0) t/Y)) max-y min-y]
+        (if (< i (count pts))
+          (let [pt (nth pts i)
+                x (double (pt t/X))
+                y (double (pt t/Y))]
+            (recur (inc i)
+                   (Math/min min-x x) (Math/max max-x x)
+                   (Math/min min-y y) (Math/max max-y y)))
+          [(* 0.5 (+ min-x max-x)) (* 0.5 (+ min-y max-y))])))))
+
+(defn- smart-size-xf
+  "Scale around the frame's content (content-center) instead of the origin.
+   The centre needs the whole frame, so each pass buffers its points and
+   emits them scaled when it completes, as Decimate does."
+  [time-ms bpm params ctx]
+  (let [clamp? (:clamp-after? ctx true)
+        get-x-scale (effects/make-param-resolver :x-scale params time-ms bpm ctx)
+        get-y-scale (effects/make-param-resolver :y-scale params time-ms bpm ctx)]
+    (fn [rf]
+      (let [points (volatile! (transient []))]
+        (fn
+          ([] (rf))
+          ([result]
+           (let [frame (persistent! @points)
+                 [cx cy] (content-center frame)
+                 cx (double cx)
+                 cy (double cy)]
+             (vreset! points (transient []))
+             (rf (reduce-kv
+                  (fn [acc idx pt]
+                    (let [px (double (pt t/X))
+                          py (double (pt t/Y))
+                          x-scale (double (get-x-scale px py idx))
+                          y-scale (double (get-y-scale px py idx))]
+                      (rf acc (t/update-point-xy pt
+                                                 (+ cx (* (- px cx) x-scale))
+                                                 (+ cy (* (- py cy) y-scale))
+                                                 clamp?))))
+                  result
+                  frame))))
+          ([result point]
+           (vswap! points conj! point)
+           result))))))
+
+(effects/register-effect!
+ {:id :smart-size
+  :transforms-xy? true
+  :name "Smart Size"
+  :category :shape
+  :timing :static
+  :parameters [{:key :x-scale
+                :label "X Scale"
+                :type :float
+                :default 1.0
+                :min -5.0
+                :max 5.0}
+               {:key :y-scale
+                :label "Y Scale"
+                :type :float
+                :default 1.0
+                :min -5.0
+                :max 5.0}
+               {:key :uniform?
+                :label "Uniform Scale"
+                :type :boolean
+                :default false}]
+  :ui-hints {:renderer :scale-2d
+             :params [:x-scale :y-scale :uniform?]
+             :default-mode :visual}
+  :apply-transducer smart-size-xf})
+
 (defn- translate-xf [time-ms bpm params ctx]
   (let [clamp? (:clamp-after? ctx true)
         get-x (effects/make-param-resolver :x params time-ms bpm ctx)
