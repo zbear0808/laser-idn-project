@@ -3,6 +3,7 @@
    indicator and the streaming status."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.input.fixtures :as input-fixtures]
             [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
@@ -112,6 +113,40 @@
       (finally
         (events/dispatch! {:event/type :timing/carabiner-connected :connected? false})
         (events/flush!)))))
+
+(deftest a-dropped-carabiner-connection-shows-disconnected-test
+  ;; Follow-up N5: Carabiner quits while Link is followed; the Link owner
+  ;; hears it (beat-carabiner's disconnection listener) and says so. Carabiner
+  ;; is stood in for: nothing reaches a daemon
+  (input-fixtures/with-carabiner {:status {:link-bpm 128.0 :link-peers 1}}
+    (fn [carabiner]
+      (let [robot (ui/robot)
+            link #(get-in (state/get-raw-state) [:backend :link])]
+        ;; As app/start! asks for it
+        (events/dispatch! {:event/type :timing/carabiner-auto-connect})
+        (ui/assert-enabled! "#link-sync-btn")
+        (click-then-rest! robot "#link-sync-btn")
+        (ui/wait-for! #(true? (:link-enabled? (link))))
+        (click-then-rest! robot "#link-sync-btn")
+        (ui/assert-text! "#bpm-input" "128.0")
+        (is (ui/has-style-class? "#link-sync-btn" "transport-btn-active"))
+        (input-fixtures/drop-carabiner! carabiner)
+        (ui/assert-disabled! "#link-sync-btn")
+        (is (= "Carabiner not connected" (tooltip-text "#link-sync-btn")))
+        (is (not (ui/has-style-class? "#link-sync-btn" "transport-btn-active")) "no longer shown following Link")
+        (is (= {:carabiner-connected? false :link-enabled? false :link-bpm nil :link-peers 0}
+               (select-keys (link) [:carabiner-connected? :link-enabled? :link-bpm :link-peers])))
+        (ui/assert-text! "#bpm-input" "128.0")
+        (ui/click! robot "#settings-tab")
+        (ui/assert-text! "#carabiner-status" "Disconnected")
+        (testing "connected again (start-up's request, sent again): Link can be enabled again and follows the tempo"
+          (swap! carabiner assoc-in [:status :link-bpm] 131.0)
+          (events/dispatch! {:event/type :timing/carabiner-auto-connect})
+          (ui/assert-text! "#carabiner-status" "Connected")
+          (ui/assert-enabled! "#link-sync-btn")
+          (click-then-rest! robot "#link-sync-btn")
+          (ui/assert-text! "#bpm-input" "131.0")
+          (is (= 2 (input-fixtures/carabiner-calls carabiner :connect))))))))
 
 (deftest bpm-commits-on-focus-loss-test
   (let [robot (ui/robot)

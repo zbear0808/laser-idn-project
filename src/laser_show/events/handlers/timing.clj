@@ -345,11 +345,17 @@
 
 (defn- handle-timing-carabiner-connected
   "Update Carabiner connection status: whether the Link owner
-   (input.link) is connected, its answer to :link/connect. The other link
-   keys are kept. The connection and its status listener are the owner's,
-   never app state."
+   (input.link) is connected, its answer to :link/connect, and its word
+   when the connection closes. Disconnected, Link can't stay enabled (it
+   needs Carabiner, link/enable-link!): it is off, and Link's tempo and
+   peers are forgotten; following its tempo stays selected for when Link is
+   enabled again. The other link keys are kept. The connection and its
+   listeners are the owner's, never app state."
   [{:keys [state connected?]}]
-  {:state (assoc-in state [:backend :link :carabiner-connected?] (boolean connected?))})
+  {:state (if connected?
+            (assoc-in state [:backend :link :carabiner-connected?] true)
+            (update-in state [:backend :link] assoc
+                       :carabiner-connected? false :link-enabled? false :link-bpm nil :link-peers 0))})
 
 (defn- handle-timing-link-enabled
   "Update Link enabled status (internal event from link service)."
