@@ -503,14 +503,20 @@
                                       frames))]
       (nth sends k nil))))
 
+(defn- woken-signal
+  "show-time/frame-signal that also keeps in woken the tick each wake is
+   for: the engine reads the newest tick once per wake, before it asks
+   :ready?. A driver whose :ready? looks at woken is slow for one wake,
+   whatever tick is newest when it is asked (a wake before the first tick
+   is for none)."
+  [woken]
+  (assoc show-time/frame-signal :tick #(reset! woken ((:tick show-time/frame-signal)))))
+
 (deftest device-paced-driver-waits-for-ready-test
   (testing "01 §1.3 case B: not ready twice, then ready: that tick's frame goes out then"
     (let [woken-for (atom nil)
           slow-tick (atom nil)
           polls (atom 0)
-          ;; The engine reads the newest tick once per wake, before it asks :ready?, so the
-          ;; driver is slow for the wake that readies b, whatever is newest when asked
-          signal (assoc show-time/frame-signal :tick #(reset! woken-for ((:tick show-time/frame-signal))))
           rec (rd/recording-driver {:ready (fn []
                                              (if (and @slow-tick (= @slow-tick @woken-for))
                                                (< 2 (swap! polls inc))
@@ -518,7 +524,7 @@
       ;; At 1 fps no keepalive of a (3 s on) is under way when b is published, and a
       ;; stalled JVM can't stretch b's polls (about 1 ms) past one interval into a skip
       ;; (case C)
-      (with-paced-driver-engine rec {:frame-signal signal :fps 1}
+      (with-paced-driver-engine rec {:frame-signal (woken-signal woken-for) :fps 1}
         (fn [engine]
           (let [a (publish!)]
             (is (dac/wait-for! #(some #{(mod a 1000)} (sent-ticks rec)) 1000) "a ready driver gets the tick at once")
@@ -537,14 +543,18 @@
 (deftest device-paced-driver-skips-a-tick-test
   (testing "01 §1.3 case C: not ready for a whole interval: nothing is sent for that tick, it
             counts as skipped and as seen, so the engine waits for the next one"
-    (let [blocked-tick (atom nil)
-          rec (rd/recording-driver {:ready #(not= @blocked-tick (:tick (show-time/latest)))})]
-      (with-paced-driver-engine rec
+    (let [woken-for (atom nil)
+          blocked-tick (atom nil)
+          rec (rd/recording-driver {:ready #(not (and @blocked-tick (= @blocked-tick @woken-for)))})]
+      ;; At 10 fps it asks for 100 ms before it skips b, and no keepalive (300 ms on) wakes
+      ;; it for b again while the test looks for a poll
+      (with-paced-driver-engine rec {:frame-signal (woken-signal woken-for) :fps 10}
         (fn [engine]
           (let [a (publish!)]
             (is (dac/wait-for! #(some #{(mod a 1000)} (sent-ticks rec)) 1000))
             (reset! blocked-tick (inc a))
             (let [b (publish!)]
+              (is (= (inc a) b))
               (is (dac/wait-for! #(= 1 (:frames-skipped (se/get-stats engine))) 1000))
               (let [polls (count (calls-of :ready? @(:calls rec)))]
                 (Thread/sleep 20)
