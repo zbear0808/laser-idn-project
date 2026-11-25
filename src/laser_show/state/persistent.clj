@@ -365,10 +365,9 @@
    first (checked-project-files): contents that aren't a show throw, and
    replace nothing.
    An old show is converted (state.migration: Z2's rows, its groups judged by
-   its own hardware, then Z4's, its routing as :target, then its timeline
-   cues moved into the show library: migration/timeline-shows) before the
-   saved baseline is taken, so it isn't \"unsaved\" right after loading.
-   The show opened has a new identity (reset-session)."
+   its own hardware, then Z4's, its routing as :target) before the saved
+   baseline is taken, so it isn't \"unsaved\" right after loading. The show
+   opened has a new identity (reset-session)."
   [state zip-contents zip-path]
   (let [initial (domains/build-initial-state)
         zip-contents (checked-project-files zip-contents)
@@ -382,9 +381,6 @@
         (update-in [:chains :shows] model/normalize-timeline-cues)
         (migration/zones-z2-show hardware)
         (migration/zones-z4)
-        ;; After Z4, so the cues it moves are in Z4's form; before
-        ;; rename-pins, so a moved show's pins follow this rig
-        (migration/timeline-shows)
         (rig-file/rename-pins hardware)
         (rig-file/with-group-copy outgoing-copy)
         history/mark-clean

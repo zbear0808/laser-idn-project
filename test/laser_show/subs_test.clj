@@ -2950,7 +2950,3 @@
     (let [ctx' (fx/swap-context ctx assoc-in [:chains :shows a :name] "Aardvark")]
       (is (= [a c d e b] (mapv :id (fx/sub-ctx ctx' subs/show-list-rows))) "a rename re-sorts"))))
 
-(deftest show-migration-test
-  (is (nil? (fx/sub-ctx (context base-state) subs/show-migration)))
-  (let [migrated {:moved 2 :timecode-off ["Timeline A2"] :vibe-refs-removed 0 :triggers-rewritten 0}]
-    (is (= migrated (fx/sub-ctx (context (assoc-in base-state [:ui :shows :migrated] migrated)) subs/show-migration)))))

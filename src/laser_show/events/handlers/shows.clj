@@ -12,7 +12,7 @@
    State paths:
    - Shows: [:chains :shows show-id] (shows/show-path)
    - Their playback: [:playback :active-cues [:show show-id]] (shows/play-key)
-   - Tab state: [:ui :shows] (:selected, :manual, :migrated)
+   - Tab state: [:ui :shows] (:selected, :manual)
 
    A handler that names no show, or a show that isn't there, returns
    {:state state}: nothing changes."
@@ -214,15 +214,6 @@
       {:state (stop-show state (shows/play-key manual))})))
 
 
-;; Tab
-
-
-(defn- handle-dismiss-migration
-  "Close the banner that says what Open moved out of the grid."
-  [{:keys [state]}]
-  {:state (assoc-in state [:ui :shows :migrated] nil)})
-
-
 ;; Public API
 
 
@@ -236,7 +227,6 @@
     :shows/toggle-run (handle-toggle-run event)
     :shows/play (handle-play event)
     :shows/stop (handle-stop event)
-    :shows/dismiss-migration (handle-dismiss-migration event)
     (do
       (log/warn "Unknown shows event:" type)
       {})))

@@ -2771,9 +2771,3 @@
        (sort-by (fn [{:keys [id title]}] [(nil? title) (some-> title str/lower-case) (str id)]))
        vec))
 
-(defn show-migration
-  "What Open moved from the grid into the library, for the Shows tab's
-   banner: {:moved :timecode-off :vibe-refs-removed :triggers-rewritten},
-   or nil (none, or dismissed)."
-  [context]
-  (fx/sub-val context get-in [:ui :shows :migrated]))

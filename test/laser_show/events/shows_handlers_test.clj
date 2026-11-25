@@ -316,17 +316,9 @@
       (let [s (play-state)]
         (is (= {:state s} (handle s {:event/type :shows/stop})))))))
 
-
-;; Tab
-
-(deftest dismiss-migration-test
-  (let [s (assoc-in (base) [:ui :shows :migrated] {:moved 3})]
-    (is (nil? (get-in (handle s {:event/type :shows/dismiss-migration}) [:state :ui :shows :migrated])))))
-
-
 (deftest bare-events-return-state-test
   (doseq [type [:shows/create :shows/open-editor :shows/new-from-cue :shows/toggle-run
-                :shows/play :shows/stop :shows/dismiss-migration]]
+                :shows/play :shows/stop]]
     (let [s (base)
           result (shows-handlers/handle {:event/type type :state s})]
       (is (contains? result :state) (str type))

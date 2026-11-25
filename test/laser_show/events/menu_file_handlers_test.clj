@@ -202,40 +202,6 @@
                                                                        :contents (zip-contents-of loaded-doc)
                                                                        :state current})))))))
 
-(def ^:private old-timeline-doc
-  "A show from before the show library: a timeline cue in grid cell [2 0]."
-  (assoc-in (domains/build-initial-state) [:chains :cue-chains [2 0]]
-            {:name "Intro" :editor-type :timeline
-             :tracks [{:id #uuid "33333333-3333-3333-3333-333333333333" :type :track :name "T"}]
-             :items [{:id #uuid "44444444-4444-4444-4444-444444444444" :type :preset :preset-id :circle
-                      :track-id #uuid "33333333-3333-3333-3333-333333333333"
-                      :timeline/start 0.0 :timeline/duration 8.0}]}))
-
-(deftest project-loaded-moves-timelines-and-shows-the-library-test
-  (let [result (menu/handle {:event/type :file/project-loaded
-                             :file-path test-file
-                             :contents (zip-contents-of old-timeline-doc)
-                             :state document-state})
-        new-state (:state result)]
-    (testing "the timeline cell left the grid for the show library (timeline shows plan 04 §4.3)"
-      (is (nil? (get-in new-state [:chains :cue-chains [2 0]])))
-      (is (= ["Intro"] (map :name (vals (get-in new-state [:chains :shows]))))))
-    (testing "the Shows tab opens once, with the banner's facts"
-      (is (= :shows (get-in new-state [:ui :active-tab])))
-      (is (= 1 (get-in new-state [:ui :shows :migrated :moved]))))
-    (testing "the opened show is clean"
-      (is (false? (get-in new-state [:project :dirty?]))))))
-
-(deftest save-dry-run-ignores-migration-test
-  (let [current (-> old-timeline-doc
-                    (assoc-in [:ui :active-tab] :grid)
-                    (assoc-in [:project :current-file] test-file))
-        result (menu/handle {:event/type :file/save :state current})]
-    (testing "Save writes what the show holds: the dry Open's migration is discarded"
-      (is (some? (get-in result [:project/save :files "content.edn" :chains :cue-chains [2 0]])))
-      (is (= current (:state result)))
-      (is (= :grid (get-in result [:state :ui :active-tab]))))))
-
 (deftest project-loaded-fills-missing-config-defaults-test
   (let [contents {"project-metadata.edn" {:config {:cue {:trigger-mode :toggle}}}
                   "content.edn" {:chains {:cue-chains {} :effect-chains {}}}}

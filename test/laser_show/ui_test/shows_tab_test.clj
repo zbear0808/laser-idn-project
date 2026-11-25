@@ -9,8 +9,7 @@
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
-  (:import [javafx.scene Node]
-           [javafx.scene.control Button]))
+  (:import [javafx.scene Node]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -57,8 +56,7 @@
     (is (ui/visible? "#preview-panel") "the preview stays, as on Grid")
     (testing "an empty library"
       (ui/assert-text! "#shows-empty" "No shows yet. + New Show, or New Show from Cue in the cue editor.")
-      (ui/assert-text! "#shows-count" "0 shows")
-      (is (not (ui/visible? "#shows-migration-banner")) "nothing moved, no banner"))
+      (ui/assert-text! "#shows-count" "0 shows"))
     (events/write-state! assoc-in [:chains :shows] {zebra (show "Zebra") alpha (show "alpha") untitled (show nil)})
     (testing "a row per show, by title, untitled last"
       (ui/wait-for! #(= 3 (count (top-to-bottom ".list-item" "shows-row-"))))
@@ -80,23 +78,3 @@
               {:event/type :shows/create}
               {:event/type :shows/open-editor :show-id alpha}]
              @sent)))))
-
-(deftest migration-banner-shows-what-moved-until-dismissed-test
-  (let [robot (ui/robot)
-        sent (atom [])
-        pipeline events/ordered-pipeline]
-    (open-shows! robot)
-    (is (not (ui/visible? "#shows-migration-banner")))
-    (events/write-state! assoc-in [:ui :shows :migrated] {:moved 2 :timecode-off ["Timeline A2"]
-                                                          :vibe-refs-removed 0 :triggers-rewritten 0})
-    (ui/assert-visible! "#shows-migration-banner")
-    (ui/assert-text! "#shows-migration-text"
-                     "Moved 2 timeline cues from the grid into Shows. Timecode turned off for 'Timeline A2' (it overlapped). Saving writes the new layout; older versions won't see these shows.")
-    (is (= ["shows-banner-dismiss"] (keep #(when (instance? Button %) (.getId ^Node %)) (ui/children "#shows-migration-banner")))
-        "only the ✕: no Show me")
-    (with-redefs [events/ordered-pipeline (recording pipeline sent)]
-      (ui/click! robot "#shows-banner-dismiss")
-      (ui/wait-for! #(= [{:event/type :shows/dismiss-migration}] @sent)))
-    (events/write-state! assoc-in [:ui :shows :migrated] nil)
-    (ui/wait-for! #(not (ui/visible? "#shows-migration-banner")))
-    (is (not (ui/visible? "#shows-migration-banner")) "cleared, it goes")))
