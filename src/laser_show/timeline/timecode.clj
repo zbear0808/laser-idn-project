@@ -58,6 +58,14 @@
   [seconds fps]
   (frames->tc (long (Math/floor (+ 1e-9 (* (max 0.0 (double seconds)) (double fps))))) fps))
 
+(defn seconds->tc-ceil
+  "Timecode {:h :m :s :f :drop?} of the first frame boundary at or after
+   `seconds`, less 1 µs (the overlap rule's slack): a range's end, so a
+   start typed as the end shown never overlaps it
+   (plans/2026-11-25-timeline-shows/07 §4.3)."
+  [seconds fps]
+  (frames->tc (long (Math/ceil (* (max 0.0 (- (double seconds) 1e-6)) (double fps)))) fps))
+
 (defn tc->seconds
   "Seconds at the start of the frame for timecode tc."
   [tc fps]
