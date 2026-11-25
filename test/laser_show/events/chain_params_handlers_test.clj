@@ -56,25 +56,26 @@
 (deftest update-color-param-takes-a-plain-colour-test
   ;; Follow-up B4: the colour picker reads its colour on the FX thread and
   ;; sends it as :color [red green blue]; the handler never reads a node
-  (let [cell {:chains {:effect-chains {[0 0] {:items [{:effect-id :set-color :params {:red 1.0 :green 1.0 :blue 1.0}}]}}}}
+  (let [id #uuid "ffffffff-0000-0000-0000-0000000000b4"
+        cell {:chains {:effect-chains {[0 0] {:items [{:id id :effect-id :set-color :params {:red 1.0 :green 1.0 :blue 1.0}}]}}}}
         rgb #(select-keys (get-in % [:chains :effect-chains [0 0] :items 0 :params]) [:red :green :blue])
-        commit #(params/handle-update-color-param cell config (merge {:effect-path [0]} %))]
+        commit #(params/handle-update-color-param cell config (merge {:domain :effect-chains :entity-key [0 0] :effect-instance-id id} %))]
     (is (= {:red 0.2 :green 0.4 :blue 0.6} (rgb (commit {:color [0.2 0.4 0.6]}))))
     (is (= {:red 1.0 :green 0.0 :blue 0.5} (rgb (commit {:color [3 -1.0 0.5]}))) "clamped to 0.0-1.0")
     (testing "anything else changes nothing"
       (doseq [payload [{:fx/event (ActionEvent.)} {:color nil} {:color [0.1 0.2]} {:color [0.1 ##NaN 0.3]}
                        {:color "#ff0000"} {:color {:red 0.1 :green 0.2 :blue 0.3}} {}]]
         (is (identical? cell (commit payload)) (pr-str payload))))
-    (testing "no effect at its path: nothing, not a new item"
-      (is (identical? cell (commit {:effect-path [1] :color [0.1 0.2 0.3]})))
-      (is (identical? cell (commit {:effect-path nil :color [0.1 0.2 0.3]}))))))
+    (testing "no such effect: nothing, not a new item"
+      (is (identical? cell (commit {:effect-instance-id #uuid "ffffffff-0000-0000-0000-0000000000b5" :color [0.1 0.2 0.3]})))
+      (is (identical? cell (commit {:effect-instance-id nil :color [0.1 0.2 0.3]}))))))
 
 (deftest update-color-param-follows-the-instance-test
   ;; Follow-up N2: an effect's colour edit names its effect by its instance
   ;; (and owner), like the modulator's (reactivity plan 07, B6): queued
   ;; behind a reorder, it lands on that effect where it is now, or nowhere
-  ;; once it is gone. One that names no instance (the preset editor's, a
-  ;; cue item's own colour) still goes by its :effect-path
+  ;; once it is gone. One that names no instance does nothing: a cue item's
+  ;; own colour is the preset editor's, :cue-chain/update-preset-color (N10)
   (let [a #uuid "aaaaaaaa-0000-0000-0000-0000000000c2"
         b #uuid "bbbbbbbb-0000-0000-0000-0000000000c2"
         p #uuid "cccccccc-0000-0000-0000-0000000000c2"
@@ -108,12 +109,10 @@
                                      {:id p :type :preset :preset-id :circle :effects [(set-color b) (set-color a)]}])]
         (lands-on moved event (conj root 1 :effects 1))
         (is (identical? moved (commit moved (dissoc event :owner-id))) "no owner named: nothing")))
-    (testing "one that names no instance: a cue item's own colour, at its :effect-path"
+    (testing "one that names no instance, only a place: nothing"
       (let [root [:chains :cue-chains [0 0] :items]
             items (assoc-in {} root [{:id p :type :preset :preset-id :circle :params (assoc white :radius 0.5)}])]
-        (is (= {:red 0.0 :green 0.5 :blue 1.0}
-               (colour-of (commit items {:domain :cue-chains :entity-key [0 0] :effect-path [0] :color [0.0 0.5 1.0]})
-                          (conj root 0))))))))
+        (is (identical? items (commit items {:domain :cue-chains :entity-key [0 0] :effect-path [0] :color [0.0 0.5 1.0]})))))))
 
 (deftest update-param-rounds-an-int-param-test
   ;; Follow-up N1: a number for an :int parameter (Decimate's scan rate and

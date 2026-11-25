@@ -846,3 +846,24 @@
           (is (nil? (get-in s [:ui :show-lock-notice])) "goes through")
           (is (= {:red 0.0 :green 0.5 :blue 1.0} (read s)) "on the Set Color, where it is now")
           (is (= pattern (get-in s [:chains :effect-chains [4 2] :items 0])) "the pattern is untouched"))))))
+
+(deftest locked-preset-edits-go-through-test
+  ;; Follow-up N10: the preset editor's edits name the item by its id
+  ;; (:cue-chain/update-preset-*). Like the :chain/* edits they replace, they
+  ;; change no structure: the lock lets them through, as unlocked
+  (let [circle-id #uuid "0000000a-0000-0000-0000-0000000000d1"
+        s0 (-> (starter)
+               (assoc-in [:chains :cue-chains [0 0] :items 0 :id] circle-id)
+               (history/mark-clean))
+        circle #(select-keys (get-in % [:chains :cue-chains [0 0] :items 0 :params]) [:radius :red :green :blue])
+        item {:col 0 :row 0 :item-id circle-id}]
+    (doseq [event [(assoc item :event/type :cue-chain/update-preset-param :param-key :radius :fx/event 0.3)
+                   (assoc item :event/type :cue-chain/update-preset-param-from-text :param-key :radius
+                          :min 0.1 :max 1.0 :is-int? false :text "0.3")
+                   (assoc item :event/type :cue-chain/update-preset-color :color [0.0 0.5 1.0])]]
+      (testing (str (:event/type event))
+        (let [s (run (lock s0) event)]
+          (is (nil? (get-in s [:ui :show-lock-notice])) "goes through")
+          (is (not= (circle s0) (circle s)) "a real edit")
+          (is (= (history/extract-document-state (run s0 event)) (history/extract-document-state s))
+              "as it does unlocked"))))))
