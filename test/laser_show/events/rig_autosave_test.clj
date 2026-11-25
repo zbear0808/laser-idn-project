@@ -254,7 +254,8 @@
     (is (= [{} [1 0]] [(copy (:state asked)) (stacks (:state asked))]) "and neither installs A nor takes the step")
     (is (nil? (write asked)) "nor asks for a write")
     (testing "Allow: the step, its membership and A"
-      (let [allowed (run (:state asked) {:event/type :ui/confirm})]
+      (let [allowed (run (:state asked) {:event/type :ui/confirm
+                                         :review-id (get-in asked [:state :ui :dialogs :confirm :safety-review :id])})]
         (is (= [:group-balcony] (get-in allowed [:state :projectors :p :zone-groups])))
         (is (= [{:group-balcony balcony} [0 1]] [(copy (:state allowed)) (stacks (:state allowed))]))
         (is (= {:group-balcony balcony} (get-in (write allowed) [:doc :zone-groups])))))))

@@ -132,16 +132,18 @@
 
 (def safety-edits
   "The safety zone edits (zones plan Z1). The lock refuses one only when it
-   would make a zone larger: a coordinate edit or Reset by the change it
-   proposes (reviewed-widening), the others by a dry run (widens-a-zone?)."
-  #{:projectors/set-safety :projectors/set-safety-coordinate :projectors/reset-safety
+   would make a zone larger: a coordinate edit, Reset, a drag, a blocked
+   area's removal or a Copy by the change it proposes (reviewed-widening),
+   the others by a dry run (widens-a-zone?)."
+  #{:projectors/set-safety :projectors/set-safety-coordinate :projectors/reset-safety :projectors/drag-safety
     :projectors/add-blocked-area :projectors/remove-blocked-area :projectors/copy-safety})
 
 (def ^:private reviewed-edits
   "The safety edits whose handler trusts no :confirmed? on the event, only an
    answer to their own question (safety-guard/review-answer): a dry run
    with :confirmed? true would only ask."
-  #{:projectors/set-safety-coordinate :projectors/reset-safety})
+  #{:projectors/set-safety-coordinate :projectors/reset-safety :projectors/drag-safety
+    :projectors/remove-blocked-area :projectors/copy-safety})
 
 (def ^:private larger-zone-refused "Larger safety zone refused")
 
@@ -173,20 +175,25 @@
                    (keys (:projectors after))))))
 
 (defn- reviewed-widening
-  "The state to refuse a coordinate edit or Reset from when the change it
-   proposes now (guard/zone-edit-proposal) makes its zone larger, outputting
-   or not; else nil. An answer to its own open question is judged by the
-   intent the question asked about, and refused from the state with that
-   question closed, so the dialog doesn't stay open. A stale answer goes on
-   to its handler, which writes nothing."
+  "The state to refuse a reviewed edit from (a coordinate edit, Reset, a
+   drag, a blocked area's removal, a Copy) when the change it proposes now
+   (guard/proposal-widens?) makes a zone larger, outputting or not; else
+   nil. An answer to its own open question is judged by the intent the
+   question asked about, and refused from the state with that question
+   closed, so the dialog doesn't stay open. A stale answer goes on to its
+   handler, which writes nothing."
   [{:keys [state review-id] :as event}]
-  (let [widens? (fn [intent]
-                  (let [{:keys [before after same?] :as proposal} (guard/zone-edit-proposal state intent)]
-                    (and proposal (not same?) (safety/widens? before after))))]
-    (if (some? review-id)
-      (when-let [{:keys [intent closed stale?]} (guard/review-answer state event)]
-        (when (and (not stale?) (widens? intent)) closed))
-      (when (widens? event) state))))
+  (if (some? review-id)
+    (when-let [{:keys [intent closed stale?]} (guard/review-answer state event)]
+      (when (and (not stale?) (guard/proposal-widens? state intent)) closed))
+    (when (guard/proposal-widens? state event) state)))
+
+(defn- answered
+  "state with the question event answers closed when it is the Allow of its
+   own open safety question (guard/review-answer: an Undo's or a Redo's), so
+   a refused answer leaves no dialog open; else state."
+  [state event]
+  (or (:closed (guard/review-answer state event)) state))
 
 (defn- refuse
   "state with the notice that the lock refused an event of type: under the
@@ -203,7 +210,7 @@
   (fn [{:keys [state event/type] :as event}]
     (cond
       (not (locked? state)) (handler event)
-      (contains? blocked-events type) (refuse state type (refused-text type))
+      (contains? blocked-events type) (refuse (answered state event) type (refused-text type))
       (pattern-edit? event) (refuse state type pattern-edit-refused)
       (contains? reviewed-edits type) (if-let [from (reviewed-widening event)]
                                         (refuse from type larger-zone-refused)

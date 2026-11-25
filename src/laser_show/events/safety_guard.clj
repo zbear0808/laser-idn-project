@@ -7,13 +7,16 @@
    for it (enabled, with a host: output-runtime/wanted): the operator's
    intent, not the engine's status, which lags and can recover.
 
-   A coordinate field's edit and Reset (plans/2026-11-23-cljfx-reactivity/08)
-   are judged by the change they make to the zone stored when they are
-   handled (zone-edit-proposal), the same for their handler and the show
-   lock. Their question is one of their own (ask-review): only its own answer
+   A coordinate field's edit and Reset (plans/2026-11-23-cljfx-reactivity/08),
+   a drag on the canvas and a blocked area's removal are judged by the change
+   they make to the zone stored when they are handled (zone-edit-proposal),
+   a Copy by copy-proposal's, the same for their handler and the show lock.
+   Their question is one of their own (ask-review): only its own answer
    continues it (review-answer), and only while the zone is still the one it
-   asked about. The versions that tell, moved on by wrap-safety-versions,
-   are in [:projector-ui :safety-versions]."
+   asked about; so are a Copy's, Undo's and Redo's, about the larger areas
+   they would give several projectors (growth). The versions that tell,
+   moved on by wrap-safety-versions, are in [:projector-ui
+   :safety-versions]."
   (:require [clojure.string :as str]
             [laser-show.animation.safety :as safety]
             [laser-show.backend.output-runtime :as output-runtime]
@@ -67,6 +70,13 @@
        (sort-by str)
        vec))
 
+(defn growth
+  "{projector-id zone} of growing's projectors, each with its zone in after:
+   the larger areas a question about several projectors asks about (a Copy,
+   Undo, Redo), and its Allow gives only while they are the same."
+  [before after]
+  (into {} (map (fn [id] [id (get-in after [:projectors id :safety])])) (growing before after)))
+
 
 ;; The safety versions
 
@@ -102,10 +112,10 @@
 
 (defn- restamp
   "new-state with the versions of the projectors whose zone changed from
-   state moved on, by event type: a coordinate edit keeps the rows, as does a
-   change that leaves the blocked areas as they were; any other change to
-   them moves them on, and so does a projector that wasn't there. One that is
-   gone loses its entry."
+   state moved on, by event type: a coordinate edit or a drag keeps the
+   rows, as does a change that leaves the blocked areas as they were; any
+   other change to them moves them on, and so does a projector that wasn't
+   there. One that is gone loses its entry."
   [state new-state type]
   (let [old (:projectors state)
         new (:projectors new-state)]
@@ -124,7 +134,7 @@
 
                   (= (:safety o) (:safety n)) s
 
-                  (or (= :projectors/set-safety-coordinate type)
+                  (or (contains? #{:projectors/set-safety-coordinate :projectors/drag-safety} type)
                       (= (:blocked (:safety o)) (:blocked (:safety n))))
                   (stamp s id false)
 
@@ -151,8 +161,14 @@
         (assoc effects :state (restamp state new-state type))))))
 
 
-;; A coordinate field's edit and Reset (plans/2026-11-23-cljfx-reactivity/08)
+;; A coordinate field's edit and Reset (plans/2026-11-23-cljfx-reactivity/08),
+;; a drag on the canvas, a blocked area's removal and a Copy (follow-up B3)
 
+
+(def zone-changed-text
+  "What the Allow of a safety question whose zones changed since it asked
+   says: it wrote nothing."
+  "Safety zone changed; review the edit again")
 
 (defn- readable
   "zone normalized, or nil when it can't be read."
@@ -184,6 +200,32 @@
         (and (= :blocked what) (= 3 (count path)) (integer? i) (< -1 i (count (:blocked zone))) (corner? k))
         (assoc-in zone [:blocked i k] v)))))
 
+(defn- rect-path?
+  "Is path exactly [:limit], or [:blocked i] with i one of zone's rows?"
+  [zone path]
+  (and (vector? path)
+       (or (= [:limit] path)
+           (let [[what i] path]
+             (and (= :blocked what) (= 2 (count path)) (integer? i) (< -1 i (count (:blocked zone))))))))
+
+(defn zone-with-coordinates
+  "zone (normalized) with some numbers of one of its rectangles set: path
+   exactly [:limit] or [:blocked i] (i one of zone's rows), coordinates
+   {k v} the numbers a canvas drag moves (k 0..3: x0 y0 x1 y1; v finite, in
+   -1..1). nil for any other path or map, and when the result isn't a zone
+   as it is stored (an edge past its opposite one, a limit with no width or
+   height): no other number moves. What the canvas previews, and
+   :projectors/drag-safety sets."
+  [zone path coordinates]
+  (when (and (rect-path? zone path)
+             (map? coordinates)
+             (seq coordinates)
+             (every? corner? (keys coordinates))
+             (every? coordinate-value? (vals coordinates)))
+    (let [candidate (reduce-kv (fn [z k v] (assoc-in z (conj path k) (double v))) zone coordinates)]
+      (when (= candidate (readable candidate))
+        candidate))))
+
 (defn zone-edit-proposal
   "What intent would do to its projector's safety zone, judged against the
    zone stored in state now: {:projector-id :before (the stored value as it
@@ -197,15 +239,23 @@
      (rows-version); :value a finite number in -1..1. nil for anything else,
      and when the number would cross its rectangle's other edge or leave the
      limit no width or height: no other number moves
+   - {:event/type :projectors/drag-safety :projector-id :path :coordinates}:
+     the numbers a drag on the canvas moved of one rectangle of a zone that
+     can be read (zone-with-coordinates), a blocked area's with the
+     :row-version it was grabbed in, still its layout's
+   - {:event/type :projectors/remove-blocked-area :projector-id :index}: the
+     zone, which can be read, without that blocked area, one of its rows;
+     with :row-version (its button's) only while that is its layout's
    - {:event/type :projectors/reset-safety :projector-id}: the whole range,
      nothing blocked, even for a zone that can't be read
    It names a projector, never the selection: nil once it is gone."
-  [state {:keys [event/type projector-id path value row-version]}]
+  [state {:keys [event/type projector-id path value coordinates index row-version]}]
   (when (contains? (:projectors state) projector-id)
     (let [before (get-in state [:projectors projector-id :safety])
           current (readable before)
           proposal (fn [after]
-                     {:projector-id projector-id :before before :after after :same? (= after current)})]
+                     {:projector-id projector-id :before before :after after :same? (= after current)})
+          rows? (fn [] (= row-version (rows-version state projector-id)))]
       (case type
         :projectors/reset-safety
         (proposal safety/default-safety)
@@ -213,40 +263,95 @@
         :projectors/set-safety-coordinate
         (when (and current
                    (coordinate-value? value)
-                   (or (not (blocked-path? path))
-                       (= row-version (rows-version state projector-id))))
+                   (or (not (blocked-path? path)) (rows?)))
           (when-let [candidate (with-coordinate current path (double value))]
             (when (= candidate (readable candidate))
               (proposal candidate))))
 
+        :projectors/drag-safety
+        (when (and current (or (not (blocked-path? path)) (rows?)))
+          (some-> (zone-with-coordinates current path coordinates) proposal))
+
+        :projectors/remove-blocked-area
+        (when (and current
+                   (integer? index)
+                   (< -1 index (count (:blocked current)))
+                   (or (nil? row-version) (rows?)))
+          (proposal (update current :blocked #(into (subvec % 0 index) (subvec % (inc index))))))
+
         nil))))
 
+(defn copy-proposal
+  "What a Copy (or Mirror) intent {:from :to :mirror?} would do, judged
+   against the zones stored in state now: {:zone (from's, normalized, and
+   mirrored left to right with :mirror?) :after (state with that zone on
+   each target: every projector in :to that is there, but from)}. nil when
+   from isn't there, its zone can't be read, or there is no target."
+  [state {:keys [from to mirror?]}]
+  (let [projectors (:projectors state)
+        zone (when (contains? projectors from) (readable (get-in projectors [from :safety])))
+        targets (filterv #(and (contains? projectors %) (not= from %)) (when (sequential? to) to))]
+    (when (and zone (seq targets))
+      (let [zone (if mirror? (safety/mirror-x zone) zone)]
+        {:zone zone
+         :after (reduce #(assoc-in %1 [:projectors %2 :safety] zone) state targets)}))))
+
+(defn proposal-widens?
+  "Would intent, judged against the zones stored in state now, let light
+   reach somewhere new on any projector, outputting or not: a Copy by what
+   copy-proposal gives, any other by zone-edit-proposal's change? What the
+   show lock refuses (events/show_lock.clj)."
+  [state intent]
+  (if (= :projectors/copy-safety (:event/type intent))
+    (boolean (when-let [{:keys [after]} (copy-proposal state intent)]
+               (some #(safety/widens? (get-in state [:projectors % :safety]) (get-in after [:projectors % :safety]))
+                     (keys (:projectors after)))))
+    (let [{:keys [before after same?] :as proposal} (zone-edit-proposal state intent)]
+      (boolean (and proposal (not same?) (safety/widens? before after))))))
+
+(defn- versions
+  "{projector-id geometry-version} of ids in state."
+  [state ids]
+  (into {} (map (fn [id] [id (geometry-version state id)])) ids))
+
 (defn ask-review
-  "state with the shared confirm dialog asking about a larger area (ask) for
-   intent, the plain data of a coordinate edit or Reset, as a question of its
-   own: a fresh id from the versions' serial, and :safety-review {:id :geometry
-   (its projector's geometry-version now) :intent}. Allow continues with
-   {:event/type (intent's) :review-id id :confirmed? true}, which
-   review-answer matches to this question only."
-  [state {:keys [message intent]}]
+  "state with the shared confirm dialog asking about a larger area (ask:
+   :title, :message, :confirm-label) for intent, the plain data of what
+   asks, as a question of its own: a fresh id from the versions' serial,
+   and :safety-review {:id :intent …} with the zones it asks about. For an
+   edit of one projector's zone (a coordinate edit, Reset, a drag, a blocked
+   area's removal) :geometry, that projector's geometry-version now; for a
+   change to several (a Copy, Undo, Redo), :zones, the growth it would give
+   ({projector-id zone}, growth's), and their :geometries {projector-id
+   version}. Allow continues with {:event/type (intent's) :review-id id
+   :confirmed? true}, which review-answer matches to this question only."
+  [state {:keys [title message confirm-label intent zones]}]
   (let [id (next-serial state)]
     (-> state
         (assoc-in (conj versions-path :serial) id)
-        (ask {:message message :event {:event/type (:event/type intent) :review-id id}})
+        (ask {:title title :message message :confirm-label confirm-label
+              :event {:event/type (:event/type intent) :review-id id}})
         (assoc-in [:ui :dialogs :confirm :safety-review]
-                  {:id id :geometry (geometry-version state (:projector-id intent)) :intent intent}))))
+                  (if zones
+                    {:id id :intent intent :zones zones :geometries (versions state (keys zones))}
+                    {:id id :geometry (geometry-version state (:projector-id intent)) :intent intent})))))
 
 (defn review-answer
   "What event answers when it carries the :review-id of the open question
    of its own operation (ask-review): {:intent (the plain intent it asked
-   about) :closed (state with that question closed) :stale? (the zone changed
-   since it asked: its geometry version moved on)}. nil for no :review-id, a
+   about) :zones (for a question about several projectors, the growth it
+   asked about: its handler gives it only while the change gives the same)
+   :closed (state with that question closed) :stale? (a zone it asked about
+   changed since: a geometry version moved on)}. nil for no :review-id, a
    duplicate, an answer after Cancel or another question's id: no
    permission."
   [state {:keys [event/type review-id]}]
   (let [{:keys [open? safety-review]} (get-in state [:ui :dialogs :confirm])
-        {:keys [id geometry intent]} safety-review]
+        {:keys [id geometry geometries intent zones]} safety-review]
     (when (and open? (some? review-id) (= review-id id) (= type (:event/type intent)))
       {:intent intent
+       :zones zones
        :closed (assoc-in state [:ui :dialogs :confirm] {:open? false})
-       :stale? (not= geometry (geometry-version state (:projector-id intent)))})))
+       :stale? (if geometries
+                 (not= geometries (versions state (keys geometries)))
+                 (not= geometry (geometry-version state (:projector-id intent))))})))

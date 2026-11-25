@@ -4,18 +4,22 @@
    numbers to type, and buttons to add, remove, copy, mirror and reset.
 
    The canvas shows the projector's output coordinates (-1..1, after its
-   calibration), Y up. A drag dispatches :projectors/set-safety as it moves
+   calibration), Y up. A drag dispatches :projectors/drag-safety as it moves
    while that can't let light anywhere new (or the projector isn't
-   outputting), inside one undo transaction; a drag that would widen a live
-   projector's area shows a dashed preview and dispatches once on release,
-   which asks. Escape puts back the zone from before the drag.
+   outputting), inside one undo transaction: the numbers it moves of the
+   rectangle it grabbed, which the handler sets in the zone stored then, so
+   an edit that landed since the editor last drew stays (follow-up B3). A
+   drag that would widen a live projector's area shows a dashed preview and
+   dispatches once on release, which asks in a question of its own. Escape
+   puts back the zone from before the drag.
 
    A number field sends its own coordinate only
    (:projectors/set-safety-coordinate), which the handler sets in the zone
    stored then, so fields committed from one render all apply
-   (plans/2026-11-23-cljfx-reactivity/08). A zone that can't be read is drawn
-   as the whole range, but nothing edits it except Reset
-   (:projectors/reset-safety)."
+   (plans/2026-11-23-cljfx-reactivity/08); a blocked area's field and its ✕
+   send the layout their row is in, so they never edit or remove another
+   row. A zone that can't be read is drawn as the whole range, but nothing
+   edits it except Reset (:projectors/reset-safety)."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.animation.safety :as safety]
@@ -106,6 +110,26 @@
                               (move-rect r (- x sx) (- y sy))
                               (move-edges r what x y min-blocked)))))
     zone))
+
+(def ^:private edge-index {:x0 0 :y0 1 :x1 2 :y1 3})
+
+(defn- drag-intent
+  "What a drag of grabbed that left its rectangle as in moved (dragged's)
+   sends: :projectors/drag-safety with the numbers of that rectangle it
+   moves (the grabbed edges, or all four for a blocked area's :move),
+   clamped to -1..1, and a blocked area's row-version, the layout it was
+   grabbed in. Never the zone: the handler sets them in the zone stored
+   then."
+  [projector-id grabbed moved row-version]
+  (let [[what a b] grabbed
+        [path edges] (if (= :limit what) [[:limit] a] [[:blocked a] b])
+        rect (get-in moved path)
+        ks (if (= :move edges) [0 1 2 3] (map edge-index edges))]
+    (cond-> {:event/type :projectors/drag-safety
+             :projector-id projector-id
+             :path path
+             :coordinates (into {} (map (fn [k] [k (clamp1 (nth rect k))])) ks)}
+      (= :blocked what) (assoc :row-version row-version))))
 
 
 ;; Drawing
@@ -228,7 +252,8 @@
                         :tooltip {:fx/type :tooltip :text "Remove this blocked area"}
                         :on-action {:event/type :projectors/remove-blocked-area
                                     :projector-id projector-id
-                                    :index removable-index}}))}))
+                                    :index removable-index
+                                    :row-version row-version}}))}))
 
 (defn- copy-menu
   [{:keys [id text projector-id others mirror?]}]
@@ -297,22 +322,21 @@
                               {:drag-start true
                                :drag-id grabbed
                                :transaction-label "Change Safety Zone"
-                               :drag-updates {:grabbed grabbed :start [(<-px x) (<-py y)] :from value}}))
-                :on-drag (fn [x y _ {:keys [grabbed start from]}]
-                           (let [new (dragged from grabbed start [(<-px x) (<-py y)])
-                                 widening? (and live? (safety/widens? zone new))]
+                               :drag-updates {:grabbed grabbed :start [(<-px x) (<-py y)] :from value :rows rows}}))
+                :on-drag (fn [x y value {:keys [grabbed start from rows]}]
+                           (let [moved (dragged from grabbed start [(<-px x) (<-py y)])
+                                 intent (drag-intent projector-id grabbed moved rows)
+                                 ;; what the handler makes of it: the zone shown
+                                 ;; now with the numbers the drag moves
+                                 new (or (guard/zone-with-coordinates value (:path intent) (:coordinates intent)) moved)
+                                 widening? (and live? (safety/widens? value new))]
                              {:preview-value new
-                              :drag-updates {:widening? widening? :last new}
-                              :dispatch (when-not widening?
-                                          {:event/type :projectors/set-safety
-                                           :projector-id projector-id
-                                           :safety new})}))
+                              :drag-updates {:widening? widening? :last intent}
+                              :dispatch (when-not widening? intent)}))
                 :on-release (fn [_ {:keys [widening? last]}]
                               ;; A widening was only previewed: send it once, and it asks
                               (when (and widening? last)
-                                {:dispatch {:event/type :projectors/set-safety
-                                            :projector-id projector-id
-                                            :safety last}}))
+                                {:dispatch last}))
                 :on-key (fn [^KeyCode key-code _ _ drag]
                           (when (and (= KeyCode/ESCAPE key-code) (:dragging? drag))
                             {:cancel-drag? true :consumed? true :drag-updates {:widening? false}}))}

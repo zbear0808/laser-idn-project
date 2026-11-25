@@ -3,6 +3,7 @@
    
    Contains:
    - Configuration factory (chain-config)
+   - Whether a chain's owner is gone (missing-owner?)
    - The vector a step grid looks its zone pattern up in (zone-pattern-items-path)
    - Where an effect instance is now (resolve-effect-instance-path)
    
@@ -51,6 +52,16 @@
                 :cue-zone-patterns [:ui :dialogs :zone-pattern-editor])
      :domain domain
      :entity-key entity-key}))
+
+(defn missing-owner?
+  "Is the owner of domain's entity-key gone: a :projector-effects chain
+   (calibration) whose projector isn't in state? A write to it would make a
+   chain for no projector, an orphan in the rig (reactivity plan 14,
+   follow-up B11), so a chain event for it does nothing ({}). Any other
+   domain's chain is its cell's or cue's own, made by its first write."
+  [state domain entity-key]
+  (and (= :projector-effects domain)
+       (not (contains? (:projectors state) entity-key))))
 
 (defn zone-pattern-items-path
   "The one vector a step grid looks its zone pattern up in (zones plan Z6),

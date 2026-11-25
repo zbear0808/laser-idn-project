@@ -773,13 +773,79 @@
              (get-in asked [:state :ui :dialogs :confirm :message])))
       (is (= "Undo" (get-in asked [:state :ui :dialogs :confirm :confirm-label])))
       (testing "a confirmed Undo restores"
-        (let [undone (run (:state asked) {:event/type :ui/confirm})]
+        (let [undone (run (:state asked) {:event/type :ui/confirm
+                                          :review-id (get-in asked [:state :ui :dialogs :confirm :safety-review :id])})]
           (is (= [-0.5 -0.5 0.5 0.5] (zone undone)))
           (testing "and Redo, which shrinks it again, doesn't ask"
             (is (= [-0.3 -0.5 0.5 0.5] (zone (run undone {:event/type :edit/redo}))))))))
     (testing "a laser that isn't outputting just restores"
       (let [off (assoc-in shrunk [:backend :streaming :running?] false)]
         (is (= [-0.5 -0.5 0.5 0.5] (zone (run off {:event/type :edit/undo}))))))))
+
+(deftest undo-allow-gives-only-what-it-asked-test
+  ;; Follow-up B3: the question an Undo or Redo asks is its own, and its
+  ;; Allow restores only the larger areas it asked about
+  (let [live (-> (test-state)
+                 (assoc-in [:projectors :p1] {:name "Laser L" :host "10.0.0.5" :port 7255 :enabled? true
+                                              :zone-groups [:all] :safety {:limit [-0.5 -0.5 0.5 0.5] :blocked []}})
+                 (assoc-in [:backend :streaming :running?] true))
+        shrunk (run live {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-0.3 -0.5 0.5 0.5]}})
+        asked (run shrunk {:event/type :edit/undo})
+        id (get-in asked [:ui :dialogs :confirm :safety-review :id])
+        allow {:event/type :ui/confirm :review-id id}
+        zone #(get-in % [:projectors :p1 :safety :limit])
+        question #(get-in % [:ui :dialogs :confirm])
+        changed "Safety zone changed; review the edit again"]
+    (is (= {:id id :intent {:event/type :edit/undo}
+            :zones {:p1 {:limit [-0.5 -0.5 0.5 0.5] :blocked []}}
+            :geometries {:p1 (get-in shrunk [:projector-ui :safety-versions :by-id :p1 :geometry])}}
+           (:safety-review (question asked))))
+    (is (= {:event/type :edit/undo :review-id id :confirmed? true} (:confirm-event (question asked))))
+    (testing "a tighter zone while it asks, then the Allow: nothing is undone, and it says so"
+      (let [tightened (run asked {:event/type :projectors/set-safety-coordinate :projector-id :p1 :path [:limit 0] :value -0.2})
+            stale (run tightened allow)]
+        (is (= [-0.2 -0.5 0.5 0.5] (zone tightened)) "the tighter zone applies while it asks")
+        (is (= [-0.2 -0.5 0.5 0.5] (zone stale)))
+        (is (= (undo-count tightened) (undo-count stale)) "no step taken back")
+        (is (= {:open? false} (question stale)))
+        (is (= changed (get-in stale [:ui :notice :text])))))
+    (testing "another edit while it asks: the Allow would take back that one instead, so it takes back none"
+      (let [renamed (run asked {:event/type :projectors/update-settings :projector-id :p1 :updates {:name "Stage L"}})
+            stale (run renamed allow)]
+        (is (= ["Stage L" [-0.3 -0.5 0.5 0.5]] [(get-in stale [:projectors :p1 :name]) (zone stale)]))
+        (is (= {:open? false} (question stale)))
+        (is (= changed (get-in stale [:ui :notice :text])))))
+    (testing "a bare :confirmed? is no permission: it asks"
+      (let [s (run shrunk {:event/type :edit/undo :confirmed? true})]
+        (is (= [-0.3 -0.5 0.5 0.5] (zone s)))
+        (is (true? (:open? (question s))))))
+    (testing "Cancel, or the old answer again, takes back nothing"
+      (let [cancelled (run asked {:event/type :ui/close-dialog :dialog-id :confirm :review-id id})]
+        (is (= {:open? false} (question cancelled)))
+        (is (= cancelled (run cancelled allow)))
+        (is (= cancelled (run cancelled {:event/type :edit/undo :review-id id :confirmed? true})))))
+    (testing "the lock on between the question and the Allow: refused, and the question closed"
+      (let [locked (run (assoc-in asked [:ui :show-lock?] true) allow)]
+        (is (= [-0.3 -0.5 0.5 0.5] (zone locked)))
+        (is (= {:open? false} (question locked)))
+        (is (= "Undo refused" (get-in locked [:ui :show-lock-notice :text])))))
+    (testing "nothing changed: its Allow restores"
+      (let [undone (run asked allow)]
+        (is (= [-0.5 -0.5 0.5 0.5] (zone undone)))
+        (is (= {:open? false} (question undone)))))
+    (testing "Redo asks the same way"
+      (let [widened (run (assoc-in live [:backend :streaming :running?] false)
+                         {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-0.8 -0.5 0.5 0.5]}})
+            undone (run widened {:event/type :edit/undo})
+            asked-redo (run (assoc-in undone [:backend :streaming :running?] true) {:event/type :edit/redo})
+            redo-id (get-in asked-redo [:ui :dialogs :confirm :safety-review :id])
+            tightened (run asked-redo {:event/type :projectors/set-safety-coordinate :projector-id :p1
+                                       :path [:limit 1] :value -0.4})]
+        (is (= [-0.5 -0.5 0.5 0.5] (zone asked-redo)) "it asks first")
+        (is (= {:event/type :edit/redo} (get-in asked-redo [:ui :dialogs :confirm :safety-review :intent])))
+        (is (= [-0.8 -0.5 0.5 0.5] (zone (run asked-redo {:event/type :ui/confirm :review-id redo-id}))) "its Allow redoes")
+        (is (= [-0.5 -0.4 0.5 0.5] (zone (run tightened {:event/type :ui/confirm :review-id redo-id})))
+            "after a change to the zone, nothing")))))
 
 (deftest safety-events-have-undo-labels-test
   (doseq [[event-type label] [[:projectors/set-safety "Change Safety Zone"]
