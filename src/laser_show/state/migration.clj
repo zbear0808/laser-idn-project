@@ -13,11 +13,22 @@
 
    Z4's rows (zones-z4, cue-z4; 06 §8.3) run after them, so a reference to a
    removed built-in already names the automatic group: every way an old show
-   routed becomes a :target, and the Zone Selector goes."
-  (:require [laser-show.animation.chains :as chains]
+   routed becomes a :target, and the Zone Selector goes.
+
+   timeline-shows runs after Z4's rows: an old show's timeline cues leave
+   the grid for the show library, [:chains :shows]
+   (plans/2026-11-25-timeline-shows/04 §4.3), and what named their cells
+   follows them or lets go."
+  (:require [clojure.string :as str]
+            [clojure.tools.logging :as log]
+            [laser-show.animation.chains :as chains]
+            [laser-show.animation.cue-chains :as cue-chains]
+            [laser-show.common.util :as u]
             [laser-show.routing.refs :as refs]
             [laser-show.routing.rig :as rig]
-            [laser-show.routing.targets :as targets]))
+            [laser-show.routing.targets :as targets]
+            [laser-show.timeline.shows :as shows]
+            [laser-show.vibes.refs :as vibe-refs]))
 
 
 ;; Identity-keeping updates
@@ -310,3 +321,173 @@
                      (update-same config :preview
                                   (fn [preview]
                                     (update-same preview :grid-cells #(if (vector? %) (mapv-same cell-z4 %) %))))))))
+
+
+;; Timeline shows leave the grid (plans/2026-11-25-timeline-shows/04 §4.3)
+
+(def ^:private show-trigger-types
+  "A moved cell's bindings, by type, and the type each becomes: a pad that
+   played the cell toggles its show, as a press did."
+  {:trigger-cue :toggle-show :start-timeline :start-timeline :stop-timeline :stop-timeline})
+
+(defn- timeline-at?
+  "Is the cue at cell a timeline that moves: a grid cell's, and
+   timeline-cue? (explicit or inferred)? false, logged, for a cue
+   timeline-cue? can't read: it stays where it is."
+  [cell cue]
+  (and (shows/grid-cell? cell)
+       (try (cue-chains/timeline-cue? cue)
+            (catch Exception e
+              (log/warn "Timeline shows: left the cue at" (pr-str cell) "in the grid, it can't be read:" (ex-message e))
+              false))))
+
+(defn- follows-mtc? [show]
+  (= :mtc (:timeline/chase show)))
+
+(defn- cell-show
+  "The show the timeline cue at cell [c r] becomes: :editor-type :timeline,
+   no :id or :trigger-mode, its column's default target when it has none of
+   its own, \"Timeline A3\" when it has no name, and the file's BPM as its
+   tempo when it follows timecode without one."
+  [state [c r] cue]
+  (let [column-target (get-in state [:grid :column-targets c])
+        bpm (get-in state [:timing :bpm])
+        name (:name cue)]
+    (cond-> (-> cue
+                (assoc :editor-type :timeline)
+                (dissoc :id :trigger-mode))
+      (and (nil? (targets/normalize-target (:target cue)))
+           (some? (targets/normalize-target column-target)))
+      (assoc :target column-target)
+
+      (not (and (string? name) (not (str/blank? name))))
+      (assoc :name (str "Timeline " (u/cell-label c r)))
+
+      (and (follows-mtc? cue) (nil? (:timeline/tempo-bpm cue)) (number? bpm) (pos? bpm))
+      (assoc :timeline/tempo-bpm (double bpm)))))
+
+(defn- fresh-id
+  "An id from id-fn that names no show in taken, or nil after 100 tries."
+  [id-fn taken]
+  (loop [n 0]
+    (when (< n 100)
+      (let [id (id-fn)]
+        (if (or (nil? id) (contains? taken id)) (recur (inc n)) id)))))
+
+(defn- timeline-moves
+  "[{:cell :id :show}] for the timeline cells of cues, in reading order
+   ([row col]). A cell whose show can't be built stays, logged."
+  [state cues library id-fn]
+  (let [cells (->> cues
+                   (keep (fn [[cell cue]] (when (timeline-at? cell cue) cell)))
+                   (sort-by (fn [[c r]] [r c])))]
+    (:moves
+     (reduce (fn [{:keys [taken] :as acc} cell]
+               (if-let [m (try
+                            (let [show (cell-show state cell (get cues cell))]
+                              (when-let [id (fresh-id id-fn taken)]
+                                {:cell cell :id id :show show}))
+                            (catch Exception e
+                              (log/warn "Timeline shows: left the cue at" (pr-str cell) "in the grid, it can't be moved:" (ex-message e))
+                              nil))]
+                 (-> acc (update :moves conj m) (update :taken conj (:id m)))
+                 acc))
+             {:moves [] :taken (set (keys library))}
+             cells))))
+
+(defn- safe-range
+  "shows/tc-range, nil for a show it can't read."
+  [show]
+  (try (shows/tc-range show) (catch Exception _ nil)))
+
+(defn- check-timecode
+  "moves with :timeline/chase gone from each follower that is empty or
+   overlaps an enabled show before it: the library's own, in (str id)
+   order, then the moved ones that kept it, in order. And :timecode-off,
+   the names of those that lost it."
+  [library moves]
+  (let [enabled (->> library
+                     (filter (fn [[_ show]] (and (map? show) (follows-mtc? show))))
+                     (sort-by (comp str key))
+                     (keep (comp safe-range val))
+                     vec)]
+    (reduce (fn [{:keys [enabled] :as acc} {:keys [show] :as m}]
+              (if (follows-mtc? show)
+                (let [r (safe-range show)]
+                  (if (and r (not-any? #(shows/tc-overlap? r %) enabled))
+                    (-> acc (update :moves conj m) (update :enabled conj r))
+                    (-> acc
+                        (update :moves conj (update m :show dissoc :timeline/chase))
+                        (update :timecode-off conj (:name show)))))
+                (update acc :moves conj m)))
+            {:moves [] :enabled enabled :timecode-off []}
+            moves)))
+
+(defn- rehomed-count
+  "How many bindings of trigger-map rehome-trigger-targets moves off cell."
+  [trigger-map cell]
+  (if (map? trigger-map)
+    (count (filter (fn [v] (and (map? v) (= cell (:target v)) (contains? show-trigger-types (:type v))))
+                   (vals trigger-map)))
+    0))
+
+(defn- move-cell
+  "state with the move's show in the library, its cell gone from the grid,
+   its bindings re-pointed at the show and the vibes letting go of the cell;
+   the counts in :triggers-rewritten and :vibe-refs-removed of tally."
+  [[state tally] {:keys [cell id show]}]
+  (let [tm (get-in state [:config :input :trigger-map])
+        rewritten (rehomed-count tm cell)
+        vibe-refs (vibe-refs/cue-ref-count state cell)]
+    [(cond-> (-> state
+                 (assoc-in [:chains :shows id] show)
+                 (update-in [:chains :cue-chains] dissoc cell))
+       (pos? rewritten)
+       (assoc-in [:config :input :trigger-map]
+                 (vibe-refs/rehome-trigger-targets tm cell (shows/play-key id) show-trigger-types))
+
+       (pos? vibe-refs)
+       (vibe-refs/remove-cue cell))
+     (-> tally
+         (update :triggers-rewritten + rewritten)
+         (update :vibe-refs-removed + vibe-refs))]))
+
+(defn timeline-shows
+  "state with every timeline cue of the grid moved into the show library
+   (04 §4.3), the cells in reading order, each under a new id (id-fn,
+   random-uuid by default):
+   - the show keeps the cue, as :editor-type :timeline, with no :id or
+     :trigger-mode, its column's default target when it has no :target, a
+     name (\"Timeline A3\") when it has none, and the file's BPM ([:timing
+     :bpm], read only) as its tempo when it follows timecode without one;
+   - a follower that is empty, or overlaps an enabled show (the library's
+     first, then the moved ones before it), stops following;
+   - its :trigger-cue bindings toggle the show, its :start-timeline and
+     :stop-timeline ones name it ([:show id]), :behavior kept; no vibe
+     names its cell;
+   - [:ui :shows :migrated] says what moved.
+   state itself (identical?) when no cue is a timeline, so it is safe to
+   run twice. It never throws: Save runs it in its dry Open. A cue it can't
+   read stays where it is, and is logged."
+  ([state] (timeline-shows state nil))
+  ([state {:keys [id-fn] :or {id-fn random-uuid}}]
+   (try
+     (let [cues (get-in state [:chains :cue-chains])
+           library (get-in state [:chains :shows])]
+       (if-not (and (map? cues) (or (nil? library) (map? library)))
+         state
+         (let [found (timeline-moves state cues library id-fn)]
+           (if (empty? found)
+             state
+             (let [{:keys [moves timecode-off]} (check-timecode library found)
+                   [state' tally] (reduce move-cell
+                                          [state {:triggers-rewritten 0 :vibe-refs-removed 0}]
+                                          moves)]
+               (assoc-in state' [:ui :shows :migrated]
+                         {:moved (count moves)
+                          :timecode-off timecode-off
+                          :vibe-refs-removed (:vibe-refs-removed tally)
+                          :triggers-rewritten (:triggers-rewritten tally)}))))))
+     (catch Exception e
+       (log/error e "Timeline shows: the migration failed; the grid is left as it was")
+       state))))

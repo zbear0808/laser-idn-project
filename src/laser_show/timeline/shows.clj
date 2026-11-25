@@ -11,7 +11,9 @@
    cue-at is the one place that says where a playback key's cue lives, and
    key-order the one order over playback keys: plain compare throws on a
    mix of the two shapes (it compares :show with a number)."
-  (:require [laser-show.animation.cue-chains :as cue-chains]))
+  (:require [laser-show.animation.cue-chains :as cue-chains]
+            [laser-show.timeline.model :as model]
+            [laser-show.timeline.timecode :as tc]))
 
 
 ;; The playback key
@@ -93,3 +95,33 @@
     (reduce-kv (fn [acc id show] (if (follows-mtc? show) (assoc acc (play-key id) show) acc))
                grid
                (or (get-in state [:chains :shows]) {}))))
+
+
+;; Timecode ranges (plans/2026-11-25-timeline-shows/07 §4.4)
+
+(def ^:private tc-eps
+  "Seconds two ranges may share and still not overlap: float slack."
+  1e-6)
+
+(defn tc-range
+  "The timecode a show plays over when it follows MTC: {:start :end :fps},
+   in plain seconds, [start, end). start is :timeline/tc-start (0.0 when
+   missing), end start plus its length (model/effective-length) at its
+   locked tempo. nil without a locked tempo, or when its length is 0. The
+   :loop is ignored: a chased show never loops."
+  [show]
+  (let [bpm (:timeline/tempo-bpm show)
+        len (model/effective-length show)
+        start (or (:timeline/tc-start show) 0.0)]
+    (when (and (number? bpm) (pos? bpm) (number? len) (pos? len) (number? start))
+      (let [s (double start)]
+        {:start s
+         :end (+ s (tc/beats->seconds len bpm))
+         :fps (tc/cue-fps show)}))))
+
+(defn tc-overlap?
+  "Do ranges a and b ({:start :end}, half-open seconds) overlap by more
+   than 1 µs? Ends that touch don't. No frame snapping, no 24 h wrap."
+  [a b]
+  (and (< (double (:start a)) (- (double (:end b)) tc-eps))
+       (< (double (:start b)) (- (double (:end a)) tc-eps))))

@@ -13,7 +13,9 @@
      put cells back (reactivity plan 22), and the owner a cell a move had
      replaced had then (fx-owners, kept with each undo step; follow-up B8).
    - move-trigger-targets, remove-trigger-targets: the trigger map, for
-     either grid.
+     either grid. rehome-trigger-targets: a cell's bindings re-pointed at
+     something else, a show (plans/2026-11-25-timeline-shows 04 §4.4).
+   - cue-ref-count: how many vibe slots name a cue cell.
 
    Cue cells and effect cells are separate grids: [0 0] in one is not [0 0]
    in the other.")
@@ -116,6 +118,22 @@
                           (update-some [:flash :cue] #(when (not= cell %) %))
                           (update-some [:bed] #(when (not= cell %) %)))))
       (update-runtime #(update-some % [:duck] update-cells (fn [c] (when (not= cell c) c))))))
+
+(defn cue-ref-count
+  "How many slots of the vibe library name the cue cell: one for each pool
+   membership (:hit, :accent), one for a :flash :cue and one for a :bed
+   that is it."
+  [state cell]
+  (reduce-kv (fn [n _ vibe]
+               (if (map? vibe)
+                 (+ n
+                    (count (filter #(= cell %) (get-in vibe [:hit :cells])))
+                    (count (filter #(= cell %) (get-in vibe [:accent :cells])))
+                    (if (= cell (get-in vibe [:flash :cue])) 1 0)
+                    (if (= cell (:bed vibe)) 1 0))
+                 n))
+             0
+             (or (get-in state [:config :vibes :library]) {})))
 
 
 ;; Effect cells
@@ -311,4 +329,18 @@
                     (and (= (:type v) target-type)
                          (= (:target v) pos))))
           trigger-map)
+    trigger-map))
+
+(defn rehome-trigger-targets
+  "trigger-map with every binding to from-pos whose :type is a key of
+   type-map bound to to-pos instead, its :type (type-map type); its other
+   keys (:behavior) stay. trigger-map itself when none matches."
+  [trigger-map from-pos to-pos type-map]
+  (if (map? trigger-map)
+    (reduce-kv (fn [m k v]
+                 (if (and (map? v) (= from-pos (:target v)) (contains? type-map (:type v)))
+                   (assoc m k (assoc v :type (type-map (:type v)) :target to-pos))
+                   m))
+               trigger-map
+               trigger-map)
     trigger-map))
