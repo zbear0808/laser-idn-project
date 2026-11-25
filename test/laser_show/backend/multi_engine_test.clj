@@ -344,11 +344,11 @@
     (let [[engine direct] (tick-and-compare :p)]
       (is (= 2 (count (show-time/active-runs (state/get-raw-state)))))
       (is (= direct engine))))
-  (testing "a timeline with a track effect, to a projector with an RGB curve"
+  (testing "a timeline show with a track effect, to a projector with an RGB curve"
     (show-time/reset-runtime!)
     (state/swap-state! #(-> %
                             (assoc-in [:playback :active-cues] {})
-                            (assoc-in [:chains :cue-chains [2 0]]
+                            (assoc-in [:chains :shows #uuid "00000000-0000-0000-0000-0000000000a0"]
                                       {:editor-type :timeline
                                        :destination-zone {:zone-group-id :all}
                                        :tracks [{:id track-id :type :track
@@ -362,7 +362,7 @@
                                                  :g-curve-points [[0.0 0.0] [1.0 0.5]]
                                                  :b-curve-points [[0.0 0.0] [1.0 1.0]]}}])
                             (assoc-in [:projectors :p] {:zone-groups [:all]})))
-    (events/event-handler {:event/type :timeline/play :col 2 :row 0 :from 1.5})
+    (events/event-handler {:event/type :timeline/play :show-id #uuid "00000000-0000-0000-0000-0000000000a0" :from 1.5})
     (let [[engine direct] (tick-and-compare :p)]
       (is (seq engine))
       (is (= direct engine)))))

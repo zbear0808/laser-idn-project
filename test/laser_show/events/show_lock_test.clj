@@ -70,6 +70,10 @@
    A1: an item's Target names it (follow-up R2)."
   #uuid "00000000-0000-0000-0000-0000000000a1")
 
+(def ^:private timeline-u
+  "The timeline show locked-blocks-structure-edits-test edits."
+  #uuid "00000000-0000-0000-0000-0000000005b1")
+
 (def ^:private structure-edits
   "One real edit of each kind the lock refuses, on starter."
   [{:event/type :grid/move-cell :from-col 0 :from-row 0 :to-col 5 :to-row 2}
@@ -127,8 +131,9 @@
    ;; column's default, they re-route it, and can make it reach the audience
    {:event/type :cue-chain/set-target :col 0 :row 0 :target :zone/a}
    {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-id a1-item :target :zone/b}
-   {:event/type :timeline/set-track-target :col 6 :row 3 :track-id :t1 :target :zone/a}
-   {:event/type :timeline/set-clip-target :col 6 :row 3 :item-id :c1 :target :graphics}
+   {:event/type :timeline/set-track-target :show-id timeline-u :track-id :t1 :target :zone/a}
+   {:event/type :timeline/set-clip-target :show-id timeline-u :item-id :c1 :target :graphics}
+   {:event/type :timeline/set-cue-target :show-id timeline-u :target :zone/a}
    ;; A cue's zone pattern and a new pattern cell move pictures between
    ;; places, as a target does; a pattern pad's setting and its key, as a
    ;; map pad's (zones plan Z5)
@@ -164,9 +169,9 @@
                (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 51}] {:type :pattern-pad :target :chase})
                ;; a step grid on the cue at B1, in its open window (zones plan Z6)
                (with-b1-grid)
-               ;; a map of yours, and a timeline cue (zones plan Z4)
+               ;; a map of yours, and a timeline show (zones plan Z4)
                (assoc-in [:zone-maps :map/custom-1] {:name "Sweep" :lanes [:auto/left :graphics] :overrides {:zone/c :auto/center}})
-               (assoc-in [:chains :cue-chains [6 3]] {:editor-type :timeline
+               (assoc-in [:chains :shows timeline-u] {:editor-type :timeline
                                                       :tracks [{:id :t1 :type :track :name "T"}]
                                                       :items [{:type :preset :id :c1 :preset-id :circle :track-id :t1
                                                                :timeline/start 0.0 :timeline/duration 4.0}]})

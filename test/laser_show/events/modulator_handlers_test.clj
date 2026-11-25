@@ -260,6 +260,7 @@
         b #uuid "bbbbbbbb-0000-0000-0000-000000000002"
         p #uuid "cccccccc-0000-0000-0000-000000000003"
         other #uuid "dddddddd-0000-0000-0000-000000000004"
+        show-u #uuid "eeeeeeee-0000-0000-0000-000000000005"
         fx-a (intensity a 0.2)
         fx-b (intensity b 0.1)
         ;; A's Min, from a render where A was first in its chain (and its owner P first in the cell)
@@ -283,12 +284,12 @@
         (is (= {} (modulator/handle (assoc event :state (assoc-in {} [:chains :effect-chains [1 0] :items] [fx-a]))))
             "never another cell's")))
     (testing "an effect an owner has: the owner, then the effect among its own"
-      (doseq [[what domain root owner] [["a cue item" :cue-chains [:chains :cue-chains [0 0] :items]
-                                         {:id p :type :preset :preset-id :circle}]
-                                        ["a timeline clip" :timeline-items [:chains :cue-chains [0 0] :items]
-                                         {:id p :type :preset :preset-id :circle :track-id :t1}]]]
+      (doseq [[what domain k root owner] [["a cue item" :cue-chains [0 0] [:chains :cue-chains [0 0] :items]
+                                           {:id p :type :preset :preset-id :circle}]
+                                          ["a timeline clip" :timeline-items [:show show-u] [:chains :shows show-u :items]
+                                           {:id p :type :preset :preset-id :circle :track-id :t1}]]]
         (testing what
-          (let [event (patch domain [0 0] :owner-id p)
+          (let [event (patch domain k :owner-id p)
                 ;; rendered P at [0] with [A B]; now P is at [1], with [B A], behind
                 ;; an owner with an effect of A's id (a copy that kept it)
                 moved (assoc-in {} root [{:id other :type :preset :preset-id :circle :effects [(intensity a 0.5)]}
@@ -303,8 +304,8 @@
                 "P gone")
             (is (= {} (modulator/handle (assoc (dissoc event :owner-id) :state moved))) "no owner named")))))
     (testing "a track inside a folder, moved with its effects"
-      (let [root [:chains :cue-chains [0 0] :tracks]
-            event (patch :timeline-tracks [0 0] :owner-id p)
+      (let [root [:chains :shows show-u :tracks]
+            event (patch :timeline-tracks [:show show-u] :owner-id p)
             tracks [{:id other :type :group :name "Folder" :items [{:id :t1 :type :track :name "T1"}
                                                                     {:id p :type :track :name "T2" :effects [fx-b fx-a]}]}]]
         (changes-only (assoc-in {} root tracks) event (conj root 0 :items 1 :effects 1))

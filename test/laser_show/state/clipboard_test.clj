@@ -75,7 +75,7 @@
     (is (= :item-effects (clipboard/list-type [:effect-chain 0 3])))
     (is (= :item-effects (clipboard/list-type [:projector-effects :p1]))))
   (testing "any other list has none"
-    (doseq [id [[:timeline-tracks 0 0] :timeline-tracks [:something 0 0] nil []]]
+    (doseq [id [[:timeline-tracks #uuid "00000000-0000-0000-0000-0000000005b1"] :timeline-tracks [:something 0 0] nil []]]
       (is (nil? (clipboard/list-type id)) (pr-str id)))))
 
 (deftest accepts-strict-types-and-conversions-test

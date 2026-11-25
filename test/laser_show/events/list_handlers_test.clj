@@ -451,11 +451,12 @@
   ;; 4b: a list's type comes from its component id (clipboard/list-type),
   ;; and the timeline's track sidebar has none: an event's :clipboard-type
   ;; is ignored
-  (let [state {:chains {:cue-chains {[0 0] {:tracks [{:id :t1 :type :track :name "T1"}]}}}
-               :list-ui {[:timeline-tracks 0 0] {:selected-ids #{:t1}}}}
+  (let [u #uuid "00000000-0000-0000-0000-0000000005b1"
+        state {:chains {:shows {u {:tracks [{:id :t1 :type :track :name "T1"}]}}}
+               :list-ui {[:timeline-tracks u] {:selected-ids #{:t1}}}}
         result (list-handlers/handle {:event/type :list/copy-selected
-                                      :component-id [:timeline-tracks 0 0]
-                                      :items-path [:chains :cue-chains [0 0] :tracks]
+                                      :component-id [:timeline-tracks u]
+                                      :items-path [:chains :shows u :tracks]
                                       :clipboard-type :timeline-tracks
                                       :state state})]
     (is (= {:state state} result) "no clip, no OS write")))
@@ -751,8 +752,8 @@
   (let [state (assoc-in (cue-state triangle-clip) [:list-ui [:cue-chain 0 0] :selected-ids] #{})]
     (is (= {:state state} (list-handlers/handle (cut-event state))) "nothing selected"))
   (let [state (-> (cue-state triangle-clip)
-                  (assoc-in [:list-ui [:timeline-tracks 0 0]] {:selected-ids #{id-a}}))]
-    (is (= {:state state} (list-handlers/handle (assoc (cut-event state) :component-id [:timeline-tracks 0 0])))
+                  (assoc-in [:list-ui [:timeline-tracks #uuid "00000000-0000-0000-0000-0000000005b1"]] {:selected-ids #{id-a}}))]
+    (is (= {:state state} (list-handlers/handle (assoc (cut-event state) :component-id [:timeline-tracks #uuid "00000000-0000-0000-0000-0000000005b1"])))
         "a list without a type: nothing copied, so nothing deleted")))
 
 (deftest cut-selected-is-one-undo-step-test

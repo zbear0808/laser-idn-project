@@ -265,6 +265,12 @@
 
 (def ^:private show-u #uuid "00000000-0000-0000-0000-0000000005a1")
 
+(def ^:private timeline-u
+  "The show the timeline editor's events edit (timeline-state)."
+  #uuid "00000000-0000-0000-0000-0000000005b1")
+
+(declare timeline-state)
+
 (def ^:private a-show
   {:editor-type :timeline :tracks [] :items []})
 
@@ -305,10 +311,10 @@
                                          :devices [{:address "10.0.0.5" :host-name "dac" :unit-id "u1"
                                                     :port 7255 :services []}]
                                          :state (clean-state)})]
-           ["timeline convert (description)" (pipeline {:event/type :timeline-cue-editor/open
-                                                        :col 0 :row 0 :state (clean-state)})]
-           ["nudge (coalesce)" (pipeline {:event/type :timeline/nudge-selection :col 0 :row 0
-                                          :delta-beats 1.0 :state (test-state)})]]]
+           ["new show from cue (description)" (pipeline {:event/type :shows/new-from-cue
+                                                         :col 0 :row 0 :state (clean-state)})]
+           ["nudge (coalesce)" (pipeline {:event/type :timeline/nudge-selection :show-id timeline-u
+                                          :delta-beats 1.0 :state (timeline-state)})]]]
     (is (not-any? #{:history/skip? :history/coalesce-key :history/backfill :history/description}
                   (keys effects))
         label)))
@@ -458,33 +464,41 @@
       (is (false? (get-in redone [:project :dirty?])) "redo returns to the saved version"))))
 
 (deftest timeline-editor-open-classification-test
-  (testing "converting a cue to a timeline cue is an undoable edit"
-    (let [s (run (clean-state) {:event/type :timeline-cue-editor/open :col 0 :row 0})]
-      (is (= :timeline (get-in s [:chains :cue-chains [0 0] :editor-type])))
+  (testing "a new show from a cue is an undoable edit; the cue stays"
+    (let [s (run (clean-state) {:event/type :shows/new-from-cue :col 0 :row 0})
+          [id show] (first (get-in s [:chains :shows]))]
+      (is (= :timeline (:editor-type show)))
+      (is (= (get-in (clean-state) [:chains :cue-chains]) (get-in s [:chains :cue-chains])))
+      (is (= [true id] ((juxt :open? :show-id) (get-in s [:ui :dialogs :timeline-cue-editor]))))
       (is (= 1 (undo-count s)))
-      (is (= "Convert to Timeline Cue" (history/undo-label (:history s))))
+      (is (= "New Show from Cue" (history/undo-label (:history s))))
       (is (true? (get-in s [:project :dirty?])))))
-  (testing "opening a normalized timeline cue doesn't touch the document"
-    (let [s0 (run (clean-state) {:event/type :timeline-cue-editor/open :col 0 :row 0})
-          s1 (run s0 {:event/type :timeline-cue-editor/open :col 0 :row 0})]
-      (is (identical? (get-in s0 [:chains :cue-chains]) (get-in s1 [:chains :cue-chains])))
+  (testing "opening a normalized show doesn't touch the document"
+    (let [s0 (run (clean-state) {:event/type :shows/new-from-cue :col 0 :row 0})
+          id (first (keys (get-in s0 [:chains :shows])))
+          s1 (run s0 {:event/type :shows/open-editor :show-id id})]
+      (is (identical? (get-in s0 [:chains :shows]) (get-in s1 [:chains :shows])))
       (is (= (undo-count s0) (undo-count s1)))))
-  (testing "a timeline cue that skipped normalization is normalized on open as a backfill"
-    (let [timeline-cue (-> (clean-state)
-                           (assoc-in [:chains :cue-chains [0 0] :editor-type] :timeline)
-                           history/mark-clean)
-          other-edit {:event/type :timeline/add-track :col 1 :row 0}
-          s0 (run timeline-cue other-edit)
-          s1 (run s0 {:event/type :timeline-cue-editor/open :col 0 :row 0})
+  (testing "a show that skipped normalization is normalized on open as a backfill"
+    (let [raw (-> (clean-state)
+                  (assoc-in [:chains :shows timeline-u] {:editor-type :timeline
+                                                          :items (get-in (clean-state) [:chains :cue-chains [0 0] :items])})
+                  history/mark-clean)
+          s0 (run raw edit-size)
+          s1 (run s0 {:event/type :shows/open-editor :show-id timeline-u})
           s2 (run s1 {:event/type :edit/undo})]
       (is (= (undo-count s0) (undo-count s1)) "opening adds no step")
-      (is (some? (get-in s2 [:chains :cue-chains [0 0] :items 0 :timeline/start]))
+      (is (some? (get-in s2 [:chains :shows timeline-u :items 0 :timeline/start]))
           "undoing an earlier edit keeps the filled-in fields")
-      (is (seq (get-in s2 [:chains :cue-chains [0 0] :tracks])))
+      (is (seq (get-in s2 [:chains :shows timeline-u :tracks])))
       (is (false? (get-in s2 [:project :dirty?]))))))
 
 (deftest pipeline-normalizes-items-added-by-cue-chain-editor-test
-  (let [s0 (run (clean-state) {:event/type :timeline-cue-editor/open :col 0 :row 0})
+  ;; A grid timeline: an older file's timeline cell, which the cue chain
+  ;; editor still edits
+  (let [s0 (-> (clean-state)
+               (update-in [:chains :cue-chains [0 0]] model/convert-to-timeline {})
+               history/mark-clean)
         steps (undo-count s0)
         s1 (run s0 {:event/type :cue-chain/add-preset :col 0 :row 0 :preset-id :circle})
         items (get-in s1 [:chains :cue-chains [0 0] :items])
@@ -666,12 +680,14 @@
             (is (= 2 (undo-count s)))))))))
 
 (deftest timeline-nudge-coalesces-test
-  (let [base (-> (test-state)
-                 (assoc-in [:chains :cue-chains [0 0] :items 0 :timeline/start] 0.0)
-                 (assoc-in [:ui :timeline-editor [0 0] :selection] #{item-id}))
-        nudge {:event/type :timeline/nudge-selection :col 0 :row 0 :delta-beats 1.0}
+  (let [base (assoc-in (timeline-state) [:ui :timeline-editor timeline-u :selection] #{item-id})
+        nudge {:event/type :timeline/nudge-selection :show-id timeline-u :delta-beats 1.0}
+        nudged (pipeline (assoc nudge :state base :time 1000))
         s (-> base (run (assoc nudge :time 1000)) (run (assoc nudge :time 1300)) (run (assoc nudge :time 1600)))]
-    (is (= 3.0 (get-in s [:chains :cue-chains [0 0] :items 0 :timeline/start])))
+    (is (= [:timeline/nudge-selection timeline-u]
+           (:coalesce-key (peek (get-in nudged [:state :history :undo-stack]))))
+        "coalesced by show")
+    (is (= 3.0 (get-in s [:chains :shows timeline-u :items 0 :timeline/start])))
     (is (= 1 (undo-count s)))))
 
 (deftest learned-binding-is-undoable-and-unsaved-test
@@ -731,9 +747,11 @@
         (is (= [0 0] (get-in pressed [:grid :selected-cell])))
         (is (= (:playback cleared) (:playback pressed)))
         (kept cleared pressed)))))
-(defn- timeline-state []
+(defn- timeline-state
+  "test-state with show timeline-u, clean."
+  []
   (-> (test-state)
-      (assoc-in [:chains :cue-chains [0 0]]
+      (assoc-in [:chains :shows timeline-u]
                 {:editor-type :timeline
                  :tracks [{:id :f :type :group :collapsed? false
                            :items [{:id :t1 :type :track :name "T1"}]}]
@@ -743,45 +761,45 @@
 
 (deftest track-mute-is-not-undoable-test
   (let [s0 (timeline-state)
-        s1 (run s0 {:event/type :timeline/set-track-muted :col 0 :row 0 :track-id :t1 :muted? true})]
-    (is (true? (get-in s1 [:chains :cue-chains [0 0] :tracks 0 :items 0 :muted?])))
+        s1 (run s0 {:event/type :timeline/set-track-muted :show-id timeline-u :track-id :t1 :muted? true})]
+    (is (true? (get-in s1 [:chains :shows timeline-u :tracks 0 :items 0 :muted?])))
     (is (= (undo-count s0) (undo-count s1)))
     (is (false? (get-in s1 [:project :dirty?])))))
 
 (deftest folder-collapse-is-not-undoable-test
   (let [s0 (timeline-state)
-        tracks (get-in s0 [:chains :cue-chains [0 0] :tracks])
-        s1 (run s0 {:event/type :timeline/update-tracks :col 0 :row 0
+        tracks (get-in s0 [:chains :shows timeline-u :tracks])
+        s1 (run s0 {:event/type :timeline/update-tracks :show-id timeline-u
                     :items (assoc-in tracks [0 :collapsed?] true)})]
-    (is (true? (get-in s1 [:chains :cue-chains [0 0] :tracks 0 :collapsed?])))
+    (is (true? (get-in s1 [:chains :shows timeline-u :tracks 0 :collapsed?])))
     (is (= (undo-count s0) (undo-count s1)))
     (is (false? (get-in s1 [:project :dirty?])))))
 
 (deftest undo-does-not-unmute-test
   (let [s0 (timeline-state)
-        s1 (run s0 {:event/type :timeline/set-track-muted :col 0 :row 0 :track-id :t1 :muted? true})
-        s2 (run s1 {:event/type :timeline/apply-op :col 0 :row 0
+        s1 (run s0 {:event/type :timeline/set-track-muted :show-id timeline-u :track-id :t1 :muted? true})
+        s2 (run s1 {:event/type :timeline/apply-op :show-id timeline-u
                     :op {:op :move-clips :clip-ids #{item-id} :delta 8.0}})
         s3 (run s2 {:event/type :edit/undo})]
-    (is (== 8.0 (get-in s2 [:chains :cue-chains [0 0] :items 0 :timeline/start])))
-    (is (== 0.0 (get-in s3 [:chains :cue-chains [0 0] :items 0 :timeline/start])) "the move is undone")
-    (is (true? (get-in s3 [:chains :cue-chains [0 0] :tracks 0 :items 0 :muted?])) "the mute stays")))
+    (is (== 8.0 (get-in s2 [:chains :shows timeline-u :items 0 :timeline/start])))
+    (is (== 0.0 (get-in s3 [:chains :shows timeline-u :items 0 :timeline/start])) "the move is undone")
+    (is (true? (get-in s3 [:chains :shows timeline-u :tracks 0 :items 0 :muted?])) "the mute stays")))
 
 (deftest apply-op-single-undo-entry-test
   (let [s0 (timeline-state)
-        s1 (run s0 {:event/type :timeline/apply-op :col 0 :row 0
+        s1 (run s0 {:event/type :timeline/apply-op :show-id timeline-u
                     :op {:op :move-clips :clip-ids #{item-id} :delta 2.0}})]
-    (is (== 2.0 (get-in s1 [:chains :cue-chains [0 0] :items 0 :timeline/start])))
+    (is (== 2.0 (get-in s1 [:chains :shows timeline-u :items 0 :timeline/start])))
     (is (= (inc (undo-count s0)) (undo-count s1)))
     (is (= "Move Clip" (history/undo-label (:history s1))))
-    (is (== 0.0 (get-in (run s1 {:event/type :edit/undo}) [:chains :cue-chains [0 0] :items 0 :timeline/start])))))
+    (is (== 0.0 (get-in (run s1 {:event/type :edit/undo}) [:chains :shows timeline-u :items 0 :timeline/start])))))
 
 (deftest transport-events-create-no-undo-test
   (let [s0 (timeline-state)
-        s (reduce run s0 [{:event/type :timeline/play :col 0 :row 0}
-                          {:event/type :timeline/seek :col 0 :row 0 :beat 2.0}
-                          {:event/type :timeline/pause :col 0 :row 0}
-                          {:event/type :timeline/stop :col 0 :row 0}
+        s (reduce run s0 [{:event/type :timeline/play :show-id timeline-u}
+                          {:event/type :timeline/seek :show-id timeline-u :beat 2.0}
+                          {:event/type :timeline/pause :show-id timeline-u}
+                          {:event/type :timeline/stop :show-id timeline-u}
                           {:event/type :timeline/set-ruler-mode :mode :time}])]
     (is (= (undo-count s0) (undo-count s)))
     (is (false? (get-in s [:project :dirty?])))))
@@ -797,7 +815,7 @@
         (is (= (undo-count s0) (undo-count s)))
         (is (false? (get-in s [:project :dirty?])))))
     (testing "a dirty project stays dirty"
-      (let [s0 (run (timeline-state) {:event/type :timeline/apply-op :col 0 :row 0
+      (let [s0 (run (timeline-state) {:event/type :timeline/apply-op :show-id timeline-u
                                       :op {:op :move-clips :clip-ids #{item-id} :delta 2.0}})
             s (reduce run s0 pref-events)]
         (is (true? (get-in s0 [:project :dirty?])))
