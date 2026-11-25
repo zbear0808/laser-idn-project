@@ -4,7 +4,10 @@
    Contains:
    - Configuration factory (chain-config)
    - The vector a step grid looks its zone pattern up in (zone-pattern-items-path)
-   - Where an effect instance is now (resolve-effect-instance-path)
+   - Where an effect instance is now (resolve-effect-instance-path), and an
+     owner's effects (owner-effects-path)
+   - The pipeline step that finds an edit's effect by its instance
+     (wrap-effect-instance-target)
    
    This module has NO dependencies on other chain sub-modules to avoid cycles.
    
@@ -103,3 +106,48 @@
                 (when (sequential? effects)
                   (when-let [effect-path (chains/find-path-by-id (vec effects) effect-instance-id)]
                     (into (conj owner-path :effects) effect-path)))))))))))
+
+(defn owner-effects-path
+  "Where the effects of the owner an address names are in app state now:
+   the path to the :effects of {:domain :entity-key :owner-id}, a cue item
+   or group (:cue-chains), a clip (:timeline-items), or a track or folder
+   (:timeline-tracks), found by its id (chains/find-path-by-id, groups
+   searched). nil for another domain, a missing key, or an owner that isn't
+   there now. The cue chain editor's item effects list names its item this
+   way (follow-up N14).
+   
+   Example:
+   (owner-effects-path state {:domain :cue-chains :entity-key [0 0] :owner-id p})
+   => [:chains :cue-chains [0 0] :items 1 :effects]"
+  [state {:keys [domain entity-key owner-id]}]
+  (when (and (contains? owned-domains domain) (some? entity-key) (some? owner-id))
+    (let [items-path (:items-path (chain-config domain entity-key))
+          items (get-in state items-path)]
+      (when (sequential? items)
+        (when-let [owner-path (chains/find-path-by-id (vec items) owner-id)]
+          (-> items-path (into owner-path) (conj :effects)))))))
+
+(def ^:private instance-namespaces
+  "The events an editor can name their effect by its instance in: an
+   effect's parameters (:chain/*) and its keyframes (:keyframe/*)."
+  #{"chain" "keyframe"})
+
+(defn wrap-effect-instance-target
+  "Pipeline step just outside the show lock (events/core.clj). A :chain/*
+   or :keyframe/* event that names its effect by its instance
+   (:effect-instance-id, and :owner-id for an effect a cue item, a clip or
+   a track owns: the effect parameter editor's) goes on with :effect-path
+   where that effect is now (resolve-effect-instance-path), so the lock
+   classifies the effect itself and its handler edits it, wherever a
+   reorder, an insert or a delete queued ahead of it moved it. Once it is
+   gone, the event does nothing ({}). An event that names no instance goes
+   through as it is (follow-up N14)."
+  [handler]
+  (fn [{:keys [event/type effect-instance-id state] :as event}]
+    (if (and (some? effect-instance-id)
+             (keyword? type)
+             (contains? instance-namespaces (namespace type)))
+      (if-let [path (resolve-effect-instance-path state event)]
+        (handler (assoc event :effect-path path))
+        {})
+      (handler event))))

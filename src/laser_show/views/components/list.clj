@@ -895,7 +895,10 @@
    Event dispatch:
    - :on-change-event - Event type for items changed
    - :on-change-params - Base params for change event
-   - :items-path - Direct path to items in state
+   - :items-path - Direct path to items in state, or for an item's effects
+     its owner, {:domain :entity-key :owner-id}: the item by its id, which
+     the handlers find where it is when an input is handled
+     (handlers.list/with-items-path)
    
    UI customization:
    - :header-label - Header text (default 'LIST')

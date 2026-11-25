@@ -35,19 +35,21 @@
 
 
 (defn- effect-bank-tabs
-  "Tabbed effect bank using data-driven effect-bank component."
-  [{:keys [col row item-path active-effect-tab]}]
-  (let [effects-parent-path (vec (concat item-path [:effects]))]
-    {:fx/type effect-bank/effect-bank
-     :active-tab (or active-effect-tab :shape)
-     :on-tab-change {:event/type :cue-chain/set-effect-tab}
-     ;; Data-driven event template - the handler receives :item-id, the effect's id
-     :item-event-template {:event/type :cue-chain/add-effect-from-bank
-                           :col col
-                           :row row
-                           :parent-path effects-parent-path}
-     ;; An item's effects: no zone pattern (a cue has its own, zones plan Z5)
-     :scope :item}))
+  "Tabbed effect bank using data-driven effect-bank component, adding to
+   the item :item-id: its click names the item by its id, never its place
+   (follow-up N14)."
+  [{:keys [col row item-id active-effect-tab]}]
+  {:fx/type effect-bank/effect-bank
+   :active-tab (or active-effect-tab :shape)
+   :on-tab-change {:event/type :cue-chain/set-effect-tab}
+   ;; Data-driven event template - the handler receives :item-id, the
+   ;; effect's id, and finds the item it adds to by :owner-id
+   :item-event-template {:event/type :cue-chain/add-effect-from-bank
+                         :col col
+                         :row row
+                         :owner-id item-id}
+   ;; An item's effects: no zone pattern (a cue has its own, zones plan Z5)
+   :scope :item})
 
 
 ;; Parameter Editor for Effects (using shared component)
@@ -69,12 +71,14 @@
         effect-def (when selected-effect
                      (fx/sub-ctx context subs/effect-descriptor (:effect-id selected-effect)))]
     (if selected-effect
-      ;; Use shared effect parameter editor component with item-path for cue chains
+      ;; Use shared effect parameter editor component: its edits name the
+      ;; effect and the item by their ids (follow-up N14); item-path is
+      ;; where it shows the effect, for what it keeps by place (UI modes)
       {:fx/type effect-param-editor/effect-parameter-editor
        :domain :cue-chains
        :entity-key [col row]
        :effect-path effect-path
-       :item-path item-path  ;; Important: pass item-path for cue chains domain
+       :item-path item-path
        :owner-id (:id item)
        :effect selected-effect
        :effect-def effect-def
@@ -351,17 +355,18 @@
                                                      [{:fx/type list/list-editor
                                                        :v-box/vgrow :always
                                                        :items item-effects
-                                                       ;; Use stable component-id without the path to avoid state fragmentation
-                                                       ;; The item-path is passed via event params instead
+                                                       ;; Use stable component-id without the item to avoid state fragmentation
                                                        :component-id [:item-effects col row]
                                                        :item-id-key :effect-id
                                                        :item-registry-fn [get effect-descriptors]
                                                        :fallback-label "Unknown Effect"
+                                                       ;; The item by its id, never its place: a change made before
+                                                       ;; a reorder or a delete lands on its own item, or on none
+                                                       ;; (follow-up N14)
                                                        :on-change-event :cue-chain/set-item-effects
-                                                       :on-change-params {:col col :row row :item-path first-selected-path}
-                                                       ;; Direct path to items in state for async drag-drop
-                                                       ;; Path: [:chains :cue-chains [col row] :items <first-selected-path...> :effects]
-                                                       :items-path (vec (concat [:chains :cue-chains [col row] :items] first-selected-path [:effects]))
+                                                       :on-change-params {:col col :row row :item-id first-selected-id}
+                                                       ;; Its effects, found where the item is when an input is handled
+                                                       :items-path {:domain :cue-chains :entity-key [col row] :owner-id first-selected-id}
                                                        :header-label "ITEM EFFECTS"
                                                        :empty-text "No effects\nAdd from bank →"
                                                        :allow-groups? true}]
@@ -389,7 +394,7 @@
                                                  (when has-item?
                                                    {:fx/type effect-bank-tabs
                                                     :col col :row row
-                                                    :item-path first-selected-path
+                                                    :item-id first-selected-id
                                                     :active-effect-tab active-effect-tab})
 
                                                  ;; Effect parameter editor (when effect selected)

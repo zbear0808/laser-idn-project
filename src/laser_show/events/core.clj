@@ -83,6 +83,7 @@
             [laser-show.state.persistent :as persistent]
             [laser-show.state.rig-store :as rig-store]
             [laser-show.events.handlers :as handlers]
+            [laser-show.events.handlers.chain.helpers :as chain-helpers]
             [laser-show.events.handlers.history :as history-handlers]
             [laser-show.events.handlers.input :as input-handlers]
             [laser-show.events.handlers.rig-autosave :as rig-autosave]
@@ -839,10 +840,13 @@
 
 (def handle-event-pipeline
   "Event handler pipeline: the show lock (innermost: while it is on, the
-   events it refuses change [:ui] only, events/show_lock.clj), the step
-   grid window's control target (just outside the lock: the window's
-   parameter controls name its pattern, found where it is now before the
-   lock classifies it, handlers/step_grid.clj), timeline
+   events it refuses change [:ui] only, events/show_lock.clj), an effect
+   edit's target (just outside the lock: an edit that names its effect by
+   its instance is found where it is now before the lock classifies it,
+   chain-helpers/wrap-effect-instance-target), the step grid window's
+   control target (the window's parameter controls name its pattern,
+   found where it is now before the lock classifies it,
+   handlers/step_grid.clj), timeline
    invariants enforced on changed cue chains (so history sees normalized
    state), undo history for undoable document edits, then the
    unsaved-changes flag derived for every event
@@ -865,6 +869,7 @@
    co-effects and effects, so it runs on the cljfx agent."
   (-> handlers/handle-event
       show-lock/wrap-show-lock
+      chain-helpers/wrap-effect-instance-target
       step-grid-handlers/wrap-step-grid-control-target
       timeline-handlers/wrap-normalize-timelines
       history-handlers/wrap-history

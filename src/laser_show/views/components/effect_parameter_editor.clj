@@ -57,14 +57,14 @@
   "Internal custom param renderer with keyframe-aware event routing.
    
    Props:
-   - :entity-key - [col row]
-   - :full-effect-path - Full computed path to effect
+   - :base-event-params - The effect its events edit: {:domain :entity-key
+     :effect-path :effect-instance-id}, and :owner-id for an owned effect
+     (effect-parameter-editor)
    - :effect-def - Effect definition with :ui-hints
    - :current-params - Current parameter values (may be from keyframe)
    - :ui-mode - Current UI mode (:visual or :numeric)
    - :params-map - Parameter specifications map
    - :dialog-data - Dialog state data
-   - :domain - :effect-chains or :cue-chains
    - :keyframe-enabled? - Whether keyframe mode is active
    - :selected-kf-idx - Selected keyframe index (used for canvas key when keyframe mode active)
    - :on-change-event - Event for parameter changes
@@ -72,8 +72,8 @@
    - :spatial-event-template - Event for spatial editor updates
    - :modulator-event-base - Base of the modulator events, nil while
      keyframe mode is active"
-  [{:keys [entity-key full-effect-path effect-def current-params
-           ui-mode params-map dialog-data domain keyframe-enabled? selected-kf-idx
+  [{:keys [base-event-params effect-def current-params
+           ui-mode params-map dialog-data keyframe-enabled? selected-kf-idx
            on-change-event on-text-event spatial-event-template on-color-change-event
            modulator-event-base]}]
   {:fx/type effect-param-ui/custom-param-renderer
@@ -86,29 +86,18 @@
    ;; Disable modulators when keyframe mode is active
    :enable-modulators? (not keyframe-enabled?)
 
-   ;; Event templates for spatial editors (translate, corner-pin)
+   ;; Event templates for spatial editors (translate, corner-pin), and the
+   ;; effect the visual editors' other events name (effect-param-ui)
    ;; Include keyframe-idx when keyframe mode is enabled so canvas is recreated on keyframe change
    :spatial-event-template spatial-event-template
-   :spatial-event-keys {:domain domain
-                        :entity-key entity-key
-                        :effect-path full-effect-path
-                        :effect-instance-id (:effect-instance-id on-change-event)
-                        :keyframe-idx (when keyframe-enabled? selected-kf-idx)}
+   :spatial-event-keys (assoc base-event-params :keyframe-idx (when keyframe-enabled? selected-kf-idx))
 
    ;; Event templates for param controls
    :on-change-event on-change-event
    :on-text-event on-text-event
-   :on-mode-change-event {:event/type :chain/set-ui-mode
-                          :domain domain
-                          :entity-key entity-key
-                          :effect-path full-effect-path}
+   :on-mode-change-event (assoc base-event-params :event/type :chain/set-ui-mode)
    ;; Modulator event base (disabled when keyframe mode active)
    :modulator-event-base modulator-event-base
-
-   ;; RGB curves props
-   :rgb-domain domain
-   :rgb-entity-key entity-key
-   :rgb-effect-path full-effect-path
    :on-color-change-event on-color-change-event})
 
 
@@ -129,7 +118,8 @@
    - :item-path - Path to parent item (required for cue chains only)
    - :owner-id - The :id of the item, clip, track or folder that owns the
      effect (cue chains and the timeline's): with the effect's own :id, how
-     the modulator's edits (reactivity plan 07) and its colour edits find it
+     each of its edits finds it where it is when it's handled (the
+     modulator's, reactivity plan 07; the colour's, N2; all, N14)
    - :effect - The effect instance map (required)
    - :effect-def - Effect definition from registry (required)
    - :dialog-data - Dialog state data for UI modes, etc. (required)
@@ -160,36 +150,31 @@
         ;; Get UI mode from dialog data - stored by full effect path
         ui-mode (get-in dialog-data [:ui-modes full-effect-path])
 
-        ;; Build base event params
-        base-event-params {:domain domain
-                           :entity-key entity-key
-                           :effect-path full-effect-path}
+        ;; The effect its events edit: by its instance and its owner's id
+        ;; (a cue item's, a clip's, a track's), found where it is when they
+        ;; are handled (chain-helpers/wrap-effect-instance-target), so a
+        ;; reorder or a delete queued ahead of an edit can't move it onto
+        ;; another effect (follow-up N14). :effect-path is where it shows
+        ;; now, for what it keeps by place (its UI mode, its canvases)
+        base-event-params (cond-> {:domain domain
+                                   :entity-key entity-key
+                                   :effect-path full-effect-path
+                                   :effect-instance-id (:id effect)}
+                            (some? owner-id) (assoc :owner-id owner-id))
 
-        ;; Choose event types based on keyframe mode; both name the instance
-        ;; (the step grid window opens on it, from Edit grid…)
+        ;; Choose event types based on keyframe mode (the step grid window
+        ;; opens on the instance they name, from Edit grid…)
         on-change-event (if keyframe-enabled?
-                          {:event/type :keyframe/update-param
-                           :domain domain
-                           :entity-key entity-key
-                           :effect-path full-effect-path
-                           :effect-instance-id (:id effect)
-                           :keyframe-idx selected-kf-idx}
-                          {:event/type :chain/update-param
-                           :domain domain
-                           :entity-key entity-key
-                           :effect-path full-effect-path
-                           :effect-instance-id (:id effect)})
+                          (assoc base-event-params
+                                 :event/type :keyframe/update-param
+                                 :keyframe-idx selected-kf-idx)
+                          (assoc base-event-params :event/type :chain/update-param))
 
         on-text-event (if keyframe-enabled?
-                        {:event/type :keyframe/update-param
-                         :domain domain
-                         :entity-key entity-key
-                         :effect-path full-effect-path
-                         :keyframe-idx selected-kf-idx}
-                        {:event/type :chain/update-param-from-text
-                         :domain domain
-                         :entity-key entity-key
-                         :effect-path full-effect-path})
+                        (assoc base-event-params
+                               :event/type :keyframe/update-param
+                               :keyframe-idx selected-kf-idx)
+                        (assoc base-event-params :event/type :chain/update-param-from-text))
 
         ;; Color change event (depends on keyframe mode): names the effect by
         ;; its id and its owner's, not its place, so a pick queued behind a
@@ -210,22 +195,15 @@
         ;; Note: Using :keyframe/update-spatial-params which converts point-id/x/y
         ;; to proper params using param-map (same as :chain/update-spatial-params)
         spatial-event-template (if keyframe-enabled?
-                                 {:event/type :keyframe/update-spatial-params
-                                  :domain domain
-                                  :entity-key entity-key
-                                  :effect-path full-effect-path
-                                  :keyframe-idx selected-kf-idx}
-                                 {:event/type :chain/update-spatial-params
-                                  :domain domain
-                                  :entity-key entity-key
-                                  :effect-path full-effect-path})
+                                 (assoc base-event-params
+                                        :event/type :keyframe/update-spatial-params
+                                        :keyframe-idx selected-kf-idx)
+                                 (assoc base-event-params :event/type :chain/update-spatial-params))
 
         ;; Modulator event base, none while keyframes are on: the toggle and
         ;; the modulator's field edits find the effect by its id and its
         ;; owner's, wherever it is when they arrive (reactivity plan 07)
-        modulator-event-base (when-not keyframe-enabled?
-                               (cond-> (assoc base-event-params :effect-instance-id (:id effect))
-                                 (some? owner-id) (assoc :owner-id owner-id)))]
+        modulator-event-base (when-not keyframe-enabled? base-event-params)]
 
     {:fx/type :v-box
      :spacing 8
@@ -236,9 +214,7 @@
                          (when effect-def
                            {:fx/type keyframe-panel/keyframe-modulator-panel
                             :keyframe-modulator keyframe-mod
-                            :domain domain
-                            :entity-key entity-key
-                            :effect-path full-effect-path
+                            :effect-keys base-event-params
                             :current-phase current-phase
                             :effect-def effect-def})
 
@@ -265,14 +241,12 @@
                                 :style-class "scroll-pane-base"
                                 :v-box/vgrow :always
                                 :content {:fx/type custom-param-renderer-internal
-                                          :entity-key entity-key
-                                          :full-effect-path full-effect-path
+                                          :base-event-params base-event-params
                                           :effect-def effect-def
                                           :current-params current-params
                                           :ui-mode ui-mode
                                           :params-map params-map
                                           :dialog-data dialog-data
-                                          :domain domain
                                           :keyframe-enabled? keyframe-enabled?
                                           :selected-kf-idx selected-kf-idx
                                           :on-change-event on-change-event

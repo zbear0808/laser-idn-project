@@ -568,12 +568,13 @@
    
    Props:
    - :keyframe-modulator - The keyframe modulator config map (or nil if not initialized)
-   - :domain - :effect-chains or :cue-chains
-   - :entity-key - [col row] or projector-id
-   - :effect-path - Path to effect within chain
+   - :effect-keys - The effect its events edit, {:domain :entity-key
+     :effect-path :effect-instance-id}, and :owner-id for an owned effect:
+     they find it by its instance, where it is when they're handled
+     (follow-up N14)
    - :param-key - Parameter key (e.g. :hue)
    - :current-phase - Current playback position for preview (optional, time-based only)"
-  [{:keys [fx/context effect-def keyframe-modulator domain entity-key effect-path param-key current-phase]}]
+  [{:keys [fx/context effect-def keyframe-modulator effect-keys param-key current-phase]}]
   (let [driver (or (:driver keyframe-modulator) :time)
         spatial? (spatial-driver? driver)
         enabled? (:enabled? keyframe-modulator false)
@@ -593,10 +594,8 @@
         param-type (:type param-spec)
         
         ;; Base event params
-        base-event {:domain domain
-                    :entity-key entity-key
-                    :effect-path effect-path
-                    :param-key param-key}]
+        base-event (assoc (select-keys effect-keys [:domain :entity-key :effect-path :effect-instance-id :owner-id])
+                          :param-key param-key)]
     
     {:fx/type :v-box
      :spacing 8
