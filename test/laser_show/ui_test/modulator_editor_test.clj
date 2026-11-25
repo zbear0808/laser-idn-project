@@ -11,10 +11,12 @@
    show in them. And a modulator's fields: two edits from one render both
    stay, and what is typed into one is stored in it alone (reactivity plan
    07). And the sliders' drags, each one press, one undo step (reactivity
-   plan 16)."
+   plan 16). And ∿, queued behind a reorder, turns on the effect it was
+   clicked for (follow-up B6)."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.animation.modulator-registry :as reg]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.keyframe :as keyframe]
             [laser-show.routing.zone-patterns :as zone-patterns]
@@ -94,6 +96,30 @@
     (is (ui/wait-for! #(and (not (ui/selected? enable-keyframes)) (ui/selected? ".modulator-toggle-active")
                             (= "△ Triangle" (shown "#modulator-type-amount")) (= config (amount))))
         "Redo restores the stored modulator and its controls")))
+
+(deftest modulate-queued-behind-a-reorder-turns-on-its-own-effect-test
+  ;; Follow-up B6: the ∿ toggle names its effect by its instance. Clicked for
+  ;; A, and queued behind a reorder that puts B in A's place, it turns on
+  ;; A's modulation where A is now, and leaves B as it was
+  (let [a (random-uuid)
+        b (random-uuid)
+        intensity (fn [id] {:id id :effect-id :intensity :enabled? true :params {:amount 1.0}})
+        cell-items #(get-in (state/get-raw-state) [:chains :effect-chains [0 0] :items])
+        amount-of (fn [id] (some #(when (= id (:id %)) (get-in % [:params :amount])) (cell-items)))]
+    (events/write-state! #(-> %
+                              (assoc-in [:chains :effect-chains [0 0]] {:active? false :items [(intensity a) (intensity b)]})
+                              (assoc-in [:list-ui [:effect-chain 0 0]] {:selected-ids #{a} :last-selected-id a})))
+    (events/dispatch! {:event/type :effect-chain/open-editor :col 0 :row 0})
+    (ui/wait-for! #(some? (node "#modulate-amount")))
+    ;; The reorder the chain list sends, then a click on A's ∿, in one FX
+    ;; turn: the click's event is the one rendered while A was first
+    (ui/on-fx-thread #(do (events/dispatch! {:event/type :chain/set-items :domain :effect-chains :entity-key [0 0]
+                                             :items [(intensity b) (intensity a)]})
+                          (.fire ^ToggleButton (node "#modulate-amount"))))
+    (is (ui/wait-for! #(reg/active-modulator? (amount-of a))) "A's Amount is modulated, A now second")
+    (is (= [b a] (mapv :id (cell-items))))
+    (is (= 1.0 (amount-of b)) "B's, in A's old place, stays")
+    (is (ui/wait-for! #(ui/selected? "#modulate-amount")) "and A's editor shows it on")))
 
 (deftest pulse-types-are-in-the-dropdown-test
   (open-amount-editor! {:type :sine :active? true :min 0.0 :max 1.0 :period 1.0})

@@ -17,14 +17,15 @@
    - :entity-key - The entity key within the domain
    - :param-key - The parameter being modulated
    
-   The toggle finds its effect at :effect-path. The three field edits
-   (set-type, update-param, update-static-value) name it by its instance
-   instead: :effect-instance-id, and :owner-id for an effect a cue item, a
+   The toggle and the three field edits (set-type, update-param,
+   update-static-value) name their effect by its instance, not by its
+   place: :effect-instance-id, and :owner-id for an effect a cue item, a
    clip, a track or a folder owns (chain-helpers/resolve-effect-instance-path).
    Each reads the parameter as it is stored now where that effect is now, and
-   changes its own field only, so two edits from one render both stay
-   (reactivity plan 07). An effect that is gone, keyframes on, a stored value
-   of another kind or mode, invalid input or no change does nothing ({})."
+   the field edits change their own field only, so two edits from one render
+   both stay (reactivity plan 07). An effect that is gone, or no change, does
+   nothing ({}); nor, for a field edit, do keyframes on, a stored value of
+   another kind or mode, or invalid input."
   (:require
    [clojure.edn :as edn]
    [clojure.string :as str]
@@ -42,25 +43,34 @@
 
 
 (defn- handle-toggle
-  "Disable active keyframes before enabling per-parameter modulation, in one edit.
-   Use the effect's stored settings; the editor may be showing a keyframe's value."
-  [{:keys [state domain entity-key effect-path param-key param-spec] enabled? :fx/event}]
-  (let [config (chain-helpers/chain-config domain entity-key)
-        effect (get-in state (into (:items-path config) effect-path))
-        value (get-in effect [:params param-key])
-        configured? (mod/modulator-config? value)
-        new-value (cond
-                    (and enabled? configured?) (assoc value :active? true)
-                    enabled? (mod-defs/build-default-modulator :sine param-spec)
-                    configured? (assoc value :active? false
-                                       :value (or (:value value)
-                                                  (/ (+ (double (:min value 0.0)) (double (:max value 1.0))) 2.0)))
-                    :else value)]
-    {:state (cond-> state
-              (and enabled? (get-in effect [:keyframe-modulator :enabled?]))
-              (keyframe/handle-toggle-enabled config effect-path false)
-              (and effect (not= value new-value))
-              (params/handle-update-param config {:effect-path effect-path :param-key param-key :value new-value}))}))
+  "Turn modulation of the event's parameter on or off (its :fx/event), for
+   the effect it names by its instance, where that effect is now
+   (chain-helpers/resolve-effect-instance-path). Turning it on disables
+   the effect's active keyframes too, in one edit. Use the effect's stored
+   settings; the editor may be showing a keyframe's value. Once the effect
+   is gone (another may hold its place now), or when nothing would change,
+   it does nothing ({})."
+  [{:keys [state domain entity-key param-key param-spec] enabled? :fx/event :as event}]
+  (if-let [effect-path (chain-helpers/resolve-effect-instance-path state event)]
+    (let [config (chain-helpers/chain-config domain entity-key)
+          effect (get-in state (into (:items-path config) effect-path))
+          value (get-in effect [:params param-key])
+          configured? (mod/modulator-config? value)
+          new-value (cond
+                      (and enabled? configured?) (assoc value :active? true)
+                      enabled? (mod-defs/build-default-modulator :sine param-spec)
+                      configured? (assoc value :active? false
+                                         :value (or (:value value)
+                                                    (/ (+ (double (:min value 0.0)) (double (:max value 1.0))) 2.0)))
+                      :else value)
+          keyframes-off? (boolean (and enabled? (get-in effect [:keyframe-modulator :enabled?])))
+          param-changed? (not= value new-value)]
+      (if (or keyframes-off? param-changed?)
+        {:state (cond-> state
+                  keyframes-off? (keyframe/handle-toggle-enabled config effect-path false)
+                  param-changed? (params/handle-update-param config {:effect-path effect-path :param-key param-key :value new-value}))}
+        {}))
+    {}))
 
 
 ;; A modulator's field edits (reactivity plan 07)

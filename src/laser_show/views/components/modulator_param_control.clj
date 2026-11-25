@@ -23,13 +23,14 @@
    Also provides visual-editor-modulator-header for embedding modulator controls
    directly in single-parameter visual editors (rotation dial, hue slider, etc).
    
-   A control that edits one field of a parameter's modulator (its type, a
-   field, or the static value while it is off) sends that field only, for
-   the effect named by its instance (field-event): the handler edits what is
-   stored now, so two edits from one render both stay (reactivity plan 07).
-   :current-value is what the controls show. After a change the app refused
-   (the show lock) or that changed nothing, each control shows the value
-   that applies again (applied-value; the text fields, commit-field)."
+   The ∿ toggle, and a control that edits one field of a parameter's
+   modulator (its type, a field, or the static value while it is off),
+   name the effect by its instance (field-event), and a field's control
+   sends that field only: the handler edits what is stored now, where that
+   effect is now, so two edits from one render both stay (reactivity plan
+   07). :current-value is what the controls show. After a change the app
+   refused (the show lock) or that changed nothing, each control shows the
+   value that applies again (applied-value; the text fields, commit-field)."
   (:require [clj-font-awesome.core :as fa]
             [clojure.string :as str]
             [laser-show.animation.modulator-registry :as reg]
@@ -43,14 +44,14 @@
 
 
 (defn- field-event
-  "What a control that edits one field of a parameter's modulator sends
-   (event-type :modulator/set-type, :modulator/update-param or
-   :modulator/update-static-value) for param-key: base's address of the
-   effect, its :domain, :entity-key and instance (:effect-instance-id, and
-   :owner-id for an effect an item, a clip or a track owns), and :dialog-id
-   when the controls are a window's. Never the modulator as rendered, nor
-   the effect's place: another edit may change either before this one is
-   handled."
+  "What a control that edits a parameter's modulator sends (event-type
+   :modulator/toggle, or for one of its fields :modulator/set-type,
+   :modulator/update-param or :modulator/update-static-value) for
+   param-key: base's address of the effect, its :domain, :entity-key and
+   instance (:effect-instance-id, and :owner-id for an effect an item, a
+   clip or a track owns), and :dialog-id when the controls are a window's.
+   Never the modulator as rendered, nor the effect's place: another edit
+   may change either before this one is handled."
   [base event-type param-key]
   (assoc (select-keys base [:domain :entity-key :effect-instance-id :owner-id :dialog-id])
          :event/type event-type
@@ -397,15 +398,13 @@
   - :param-spec - Parameter specification map with :min, :max, :default, :label
   - :current-value - Current param value (number or modulator config map)
   - :modulator-event-base - Base event template for modulator operations
-                            (must have :domain, :entity-key, :effect-path, and
-                            the effect's :effect-instance-id for the type)"
+                            (must have :domain, :entity-key and the
+                            effect's :effect-instance-id: field-event)"
   [{:keys [param-key param-spec current-value modulator-event-base]}]
   (let [is-modulated? (reg/active-modulator? current-value)
         display-label (or (:label param-spec) (name param-key))
         ;; Build modulator event templates
-        toggle-event (assoc modulator-event-base
-                            :event/type :modulator/toggle
-                            :param-key param-key
+        toggle-event (assoc (field-event modulator-event-base :modulator/toggle param-key)
                             :param-spec param-spec)
         set-type-event (assoc (field-event modulator-event-base :modulator/set-type param-key)
                               :param-spec param-spec)]
@@ -470,9 +469,8 @@
      (param-controls/number-field). While a modulator is off, the slider and
      the field set its static value instead (:modulator/update-static-value)
    - :modulator-event-base - Base event template for modulator events
-     (contains :domain, :entity-key, :effect-path for the toggle, and the
-     effect's :effect-instance-id, with :owner-id for an owned effect, for
-     its fields: field-event)
+     (contains :domain, :entity-key and the effect's :effect-instance-id,
+     with :owner-id for an owned effect: field-event)
    - :label-width - Optional label width (default 80)"
   [{:keys [param-key param-spec current-value on-change-event on-text-event modulator-event-base label-width]}]
   (let [{:keys [min max label]} param-spec
@@ -485,9 +483,7 @@
         label-w (or label-width 80)
         is-int? (= :int (:type param-spec))
         ;; Build modulator event templates with full context
-        toggle-event (assoc modulator-event-base
-                            :event/type :modulator/toggle
-                            :param-key param-key
+        toggle-event (assoc (field-event modulator-event-base :modulator/toggle param-key)
                             :param-spec param-spec)
         set-type-event (assoc (field-event modulator-event-base :modulator/set-type param-key)
                               :param-spec param-spec)
@@ -624,7 +620,8 @@
                                                        :style-class [(if modulated? "modulator-toggle-active" "modulator-toggle")]
                                                        :tooltip {:fx/type :tooltip :text (if modulated? "Stop modulating" "Follow a modulator")}}
                                                       modulator-event-base param-key modulated?
-                                                      (event :modulator/toggle :param-spec spec))
+                                                      (assoc (field-event modulator-event-base :modulator/toggle param-key)
+                                                             :param-spec spec))
                                      (if modulated?
                                        {:fx/type modulator-type-selector
                                         :current-type (:type current-value)

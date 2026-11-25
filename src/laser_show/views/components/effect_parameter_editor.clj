@@ -217,8 +217,8 @@
                                   :entity-key entity-key
                                   :effect-path full-effect-path})
 
-        ;; Modulator event base, none while keyframes are on: the toggle finds
-        ;; the effect at its path, the modulator's field edits by its id and
+        ;; Modulator event base, none while keyframes are on: the toggle and
+        ;; the modulator's field edits find the effect by its id and its
         ;; owner's, wherever it is when they arrive (reactivity plan 07)
         modulator-event-base (when-not keyframe-enabled?
                                (cond-> (assoc base-event-params :effect-instance-id (:id effect))
