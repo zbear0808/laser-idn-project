@@ -206,6 +206,8 @@ These results are already folded into `00` (TS-7, TS-8) and into `01` §3 and §
   - `row-menu-acts-on-selection-test`.
 - **Cache:** after S3, re-run `laser-show.ui-test.cache-working-set-test` with 1000 shows.
 
+- **Zones tab wording** (found in S2): `subs/ref-usage` now counts shows in `:direct` and `:through`, so the Zones tab's "Used by N cues" line (`views/tabs/zones.clj:301-319`) counts shows too. Split the counts in `routing.zone-maps/usage` and say "Used by 3 cues and 1 show", as the rig report already does. Update `T/views/tabs/zones_test.clj:6-39`.
+
 **Done when** the targeted tests pass, then the full suites, and a 1000-show library on the REPL (`app-repl` skill) filters as you type with no visible lag.
 
 ## S4 · Timecode column and rules (~2 d, `07`)
