@@ -27,8 +27,6 @@
             [cljfx.prop :as prop]
             [clojure.string :as str]
             [laser-show.events.core :as events]
-            [laser-show.state.core :as state]
-            [laser-show.state.extractors :as ex]
             [laser-show.subs :as subs]
             [laser-show.timeline.timecode :as tc]
             [laser-show.views.keys :as keys])
@@ -504,15 +502,16 @@
 
 (defn- table-key-event
   "The event key press e asks for while the table has the focus and nobody
-   types, or nil. Space plays and stops as everywhere (the TableView would
-   swallow it); Delete is the table's, not Edit > Clear Cell's."
+   types, or nil. Space is the now-playing bar's ⏯, not the transport (07
+   §4.9; the TableView would swallow it); Delete is the table's, not Edit >
+   Clear Cell's."
   [^KeyEvent e]
   (let [code (.getCode e)
         shortcut? (.isShortcutDown e)
         plain? (not (or shortcut? (.isAltDown e) (.isControlDown e) (.isMetaDown e)))]
     (cond
       (and plain? (= KeyCode/SPACE code))
-      {:event/type (if (ex/playing? (state/get-raw-state)) :transport/stop :transport/play)}
+      {:event/type :shows/toggle-play}
 
       (and plain? (= KeyCode/ENTER code)) {:event/type :shows/play :from-selection true}
       (and plain? (#{KeyCode/DELETE KeyCode/BACK_SPACE} code)) {:event/type :shows/request-delete :from-selection true}

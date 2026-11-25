@@ -255,7 +255,7 @@
     (is (true? (get-in (st) [:playback :playing?])) "Escape didn't stop the transport")
     (is (= "shows-table" (focus-owner-id)))))
 
-(deftest keys-in-table-test
+(deftest keys-in-table-test ; also 07 §8's space-in-table-toggles-show-not-transport-test
   (let [robot (ui/robot)
         grid-before (get-in (st) [:chains :cue-chains])]
     (with-four-shows! robot)
@@ -275,12 +275,14 @@
       (ui/press! robot KeyCode/ENTER)
       (ui/wait-for! #(some? (get-in (st) [:playback :active-cues (shows/play-key one-more)])))
       (ui/wait-for! #(= "▶" (ui/node-text (str "#shows-status-" one-more)))))
-    (testing "Space plays and stops the transport"
+    (testing "Space pauses and resumes the show, not the transport (07 §4.9)"
       (ui/wait-for! #(true? (get-in (st) [:playback :playing?])))
       (ui/press! robot KeyCode/SPACE)
-      (ui/wait-for! #(false? (boolean (get-in (st) [:playback :playing?]))))
+      (ui/wait-for! #(true? (get-in (st) [:playback :active-cues (shows/play-key one-more) :paused?])))
+      (is (true? (get-in (st) [:playback :playing?])) "the transport keeps running")
       (ui/press! robot KeyCode/SPACE)
-      (ui/wait-for! #(true? (get-in (st) [:playback :playing?]))))
+      (ui/wait-for! #(not (get-in (st) [:playback :active-cues (shows/play-key one-more) :paused?])))
+      (is (true? (get-in (st) [:playback :playing?]))))
     (testing "⌘F goes to the search"
       (.press robot (into-array KeyCode [(ui/shortcut-key-code)]))
       (.press robot (into-array KeyCode [KeyCode/F]))
