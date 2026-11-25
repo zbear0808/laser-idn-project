@@ -964,3 +964,123 @@
     (is (false? (saved-on undone cell-a)))
     (is (= #{} (switched-on (run undone {:event/type :vibe/release :role :flash :input-time 2000})))
         "FLASH let go of switches it off")))
+
+;; Follow-up B8: a move onto a cell that had its own. Restore took the
+;; replaced cell's on/off and owner from the cell at its key, which held
+;; the moved one: after Undo both were the vibe's, and the replaced cell
+;; came back on or off as the moved one was
+
+(def ^:private rotation-cell {:items [{:id #uuid "22000000-0000-0000-0000-0000000000c1" :effect-id :rotation}] :active? false})
+
+(defn- items-at [state cell] (get-in state [:chains :effect-chains cell :items]))
+
+(deftest undo-of-a-move-onto-a-cell-gives-that-cell-its-own-switch-test
+  (doseq [[label b-on?] [["off" false] ["on by hand" true]]]
+    (testing (str "B " label)
+      (let [s0 (-> (lines-owns-a)
+                   (assoc-in [:chains :effect-chains cell-b] (assoc rotation-cell :active? b-on?))
+                   (history/mark-clean))
+            moved (run s0 (move cell-a cell-b))
+            undone (run moved {:event/type :edit/undo})
+            redone (run undone {:event/type :edit/redo})]
+        (is (= [cell-b] (rt moved :fx-on)) "the move: the vibe's switch at B, in place of B's own cell")
+        (is (= (:items rotation-cell) (items-at undone cell-b)) "Undo: B's own cell is back")
+        (is (= [cell-a] (rt undone :fx-on)) "A is the vibe's again, B isn't")
+        (is (= b-on? (get-in undone [:chains :effect-chains cell-b :active?])) "B on or off as it was")
+        (is (= [false b-on?] [(saved-on undone cell-a) (saved-on undone cell-b)])
+            "Save: the vibe's switch off, B's as it was")
+        (is (= (cond-> #{[1 3]} b-on? (conj cell-b)) (switched-on (next-vibe undone)))
+            "the next vibe switches A off and leaves B")
+        (testing "; Redo moves it again"
+          (is (= (:items scale-cell) (items-at redone cell-b)))
+          (is (= [cell-b] (rt redone :fx-on)))
+          (is (= #{cell-b [1 3]} (switched-on redone))))))))
+
+(deftest undo-of-a-move-onto-the-vibe-s-cell-gives-it-back-to-the-vibe-test
+  (let [s0 (-> (starter)
+               (assoc-in [:chains :effect-chains cell-a] (assoc scale-cell :active? true))
+               (assoc-in [:chains :effect-chains cell-b] rotation-cell)
+               (assoc-in [:config :vibes :library :vibe-2 :fx] [cell-b])
+               (history/mark-clean)
+               (run {:event/type :vibe/select :vibe :vibe-2 :input-time 1000}))
+        moved (run s0 (move cell-a cell-b))
+        undone (run moved {:event/type :edit/undo})]
+    (is (= [[cell-b] #{cell-a cell-b}] [(rt s0 :fx-on) (switched-on s0)]) "Lines switched B on; A is on by hand")
+    (is (= [[] #{cell-b}] [(rt moved :fx-on) (switched-on moved)]) "A, on by hand, took B's place")
+    (is (= [cell-b] (rt undone :fx-on)) "Undo: B is the vibe's again")
+    (is (= #{cell-a cell-b} (switched-on undone)))
+    (is (= [true false] [(saved-on undone cell-a) (saved-on undone cell-b)]) "Save: A's on, the vibe's off")
+    (is (= #{cell-a} (switched-on (next-vibe undone))) "the next vibe switches B off and leaves A on")
+    (testing "; Redo and Undo again"
+      (let [again (-> undone (run {:event/type :edit/redo}) (run {:event/type :edit/undo}))]
+        (is (= [cell-b] (rt again :fx-on)))
+        (is (= #{cell-a cell-b} (switched-on again)))))
+    (testing "; the look that switched B on has gone by the Undo: B comes back off, nobody's"
+      (let [undone (-> moved (next-vibe) (run {:event/type :edit/undo}))]
+        (is (= [] (rt undone :fx-on)))
+        (is (= #{cell-a} (switched-on undone)))))))
+
+(deftest undo-of-a-move-onto-the-held-flash-s-cell-gives-it-back-to-the-flash-test
+  (let [held (-> (starter)
+                 (assoc-in [:chains :effect-chains cell-a] (assoc scale-cell :active? true))
+                 (assoc-in [:chains :effect-chains cell-b] rotation-cell)
+                 (assoc-in [:config :vibes :library :vibe-1 :flash :fx] [cell-b])
+                 (run {:event/type :vibe/press :role :flash :input-time 1000}))
+        moved (run held (move cell-a cell-b))
+        undone (run moved {:event/type :edit/undo})]
+    (is (= [cell-b] (rt held :voices :flash :fx-on)) "FLASH held: B on, the flash's")
+    (is (= [] (rt moved :voices :flash :fx-on)))
+    (is (= [cell-b] (rt undone :voices :flash :fx-on)) "Undo: the held flash's again")
+    (is (= #{cell-a cell-b} (switched-on undone)))
+    (is (= #{cell-a} (switched-on (run undone {:event/type :vibe/release :role :flash :input-time 2000})))
+        "FLASH let go of switches B off, and leaves A on")
+    (testing "; FLASH let go of before the Undo: B comes back off"
+      (let [undone (-> moved
+                       (run {:event/type :vibe/release :role :flash :input-time 2000})
+                       (run {:event/type :edit/undo}))]
+        (is (= #{cell-a} (switched-on undone)))))))
+
+(deftest the-vibe-s-refusal-names-the-cell-its-content-is-in-test
+  (let [s0 (-> (playing (assoc three-lasers :p5 {:name "Scanner" :host "10.0.0.5" :zone-groups [:crowd] :enabled? true
+                                                 :tags #{:crowd-scanning} :exclude-from-all? true}))
+               (assoc-in [:zone-maps :map/sweep] {:name "Crowd sweep" :lanes [:auto/left :crowd] :overrides {}})
+               (run {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :zone-swap})
+               (run {:event/type :vibe/select :vibe :vibe-2 :input-time 2000})
+               (run {:event/type :vibe/select :vibe :vibe-1 :input-time 3000}))
+        moved (run s0 (move [1 3] [5 3]))]
+    (is (= {:why :audience-fx :cell [1 3]} (rt s0 :problem)) "Shapes left the reaction at [1 3] off")
+    (is (= {:why :audience-fx :cell [5 3]} (rt moved :problem)) "moved, the refusal names where it went")
+    (is (= {:why :audience-fx :cell [1 3]} (rt (run moved {:event/type :edit/undo}) :problem)) "and so does Undo")
+    (is (nil? (rt (run s0 {:event/type :effects/clear-cell :col 1 :row 3}) :problem)) "cleared, it goes")
+    (is (nil? (rt (run s0 (move [0 3] [1 3])) :problem)) "and so it does when another cell takes its place")))
+
+(deftest a-key-holding-an-effect-cell-lets-go-of-it-where-it-went-test
+  (let [k {:source :midi :channel 0 :note 40}
+        key (fn [type t] {:event/type :trigger/input
+                          :input-event (assoc k :type type :velocity (if (= :note-on type) 1.0 0.0) :timestamp t)})
+        s0 (-> (starter)
+               (assoc-in [:chains :effect-chains cell-a] scale-cell)
+               (assoc-in [:config :input :trigger-map k] {:type :trigger-effect :target cell-a :behavior :momentary})
+               (history/mark-clean))
+        held (run s0 (key :note-on 1000))
+        moved (run held (move cell-a cell-b))
+        let-go (fn [s] (switched-on (run s (key :note-off 2000))))]
+    (is (= [#{cell-a} #{cell-b}] [(switched-on held) (switched-on moved)]) "the key holds A on, then B")
+    (is (= #{} (let-go moved)) "its release switches it off where it went")
+    (testing "; moved back by Undo"
+      (let [undone (run moved {:event/type :edit/undo})]
+        (is (= #{cell-a} (switched-on undone)))
+        (is (= #{} (let-go undone)))))
+    (testing "; cleared, and a cell on by hand put there since: its release leaves that one"
+      (let [refilled (-> held
+                         (run {:event/type :effects/clear-cell :col 0 :row 3})
+                         (assoc-in [:chains :effect-chains cell-a] (assoc hue-cell :active? true)))]
+        (is (= #{cell-a} (let-go refilled)))))
+    (testing "; the key held B when A's cell took its place, and still holds it at the Undo"
+      (let [s0 (-> s0
+                   (assoc-in [:chains :effect-chains cell-b] rotation-cell)
+                   (assoc-in [:config :input :trigger-map k :target] cell-b)
+                   (history/mark-clean))
+            undone (-> s0 (run (key :note-on 1000)) (run (move cell-a cell-b)) (run {:event/type :edit/undo}))]
+        (is (= #{cell-b} (switched-on undone)) "B back on, the key's")
+        (is (= #{} (let-go undone)) "its release switches B off")))))
