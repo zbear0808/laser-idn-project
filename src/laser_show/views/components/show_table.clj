@@ -36,7 +36,7 @@
            [javafx.application Platform]
            [javafx.beans.value ChangeListener]
            [javafx.event EventHandler]
-           [javafx.scene Node Parent]
+           [javafx.scene Node]
            [javafx.scene.control SortEvent TableCell TableColumn TableColumn$SortType TableRow TableView
             TextField TextInputControl]
            [javafx.scene.input KeyCode KeyEvent MouseButton MouseEvent]
