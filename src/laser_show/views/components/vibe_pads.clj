@@ -36,7 +36,9 @@
     (.setOpacity node (if beats (max 0.0 (- 1.0 (/ (double beats) pulse-beats))) 0.0))))
 
 (defn- now-text
-  "What the pad says under its role."
+  "What the pad says under its role: for a cue, its label
+   (subs/cue-label-data: not whether it is selected, nor its presets'
+   parameters)."
   [context {:keys [role playing problem next on? effects-only?]}]
   (cond
     (= :stuck-key problem) "Stuck key released"
@@ -45,7 +47,7 @@
     (= :vibe role) (if next (str "→ " next) "–")
     (= :blackout role) (if on? "ON" "")
     playing (let [[col row] playing]
-              (grid-cell/cell-label (fx/sub-ctx context subs/cell-display-data col row)))
+              (grid-cell/cell-label (fx/sub-ctx context subs/cue-label-data col row)))
     :else "–"))
 
 (defn- badge-text [{:keys [role learning? locked?]}]

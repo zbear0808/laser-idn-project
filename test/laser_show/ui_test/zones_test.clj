@@ -211,6 +211,29 @@
     (is (nil? (:target (first (:items (cue 0 0))))) "the square, moved before it, as it was")
     (ui/wait-for! #(some #{"Circle [B → Right]"} (texts ".chain-item-name")))))
 
+(deftest a-target-choice-behind-a-reorder-sets-its-own-item-test
+  ;; Follow-up R2: a row's menu sent its item's path, so a choice made
+  ;; before a reorder was handled, and handled after it, set the item now
+  ;; at that place. The drop and the choice here are queued in one FX turn,
+  ;; before the editor renders the reorder
+  (open-editor! 0 0)
+  (events/dispatch! {:event/type :cue-chain/add-preset :col 0 :row 0 :item-id :square})
+  (ui/wait-for! #(= 2 (count (:items (cue 0 0)))))
+  (let [[circle square] (:items (cue 0 0))
+        item (some (fn [i] (when (= "   B → Right" (ui/on-fx-thread (fn [] (.getText ^MenuItem i)))) i))
+                   (row-target-items "Circle"))]
+    (is (some? item) "Circle's Target menu offers B → Right")
+    (ui/on-fx-thread #(do (events/dispatch! {:event/type :list/perform-drop :component-id [:cue-chain 0 0]
+                                             :dragging-ids #{(:id square)} :target-id (:id circle) :drop-position :before
+                                             :items-path [:chains :cue-chains [0 0] :items]
+                                             :on-change-event :chain/set-items
+                                             :on-change-params {:domain :cue-chains :entity-key [0 0]}})
+                          (.fire ^MenuItem item)))
+    (ui/wait-for! #(= (mapv :id [square circle]) (mapv :id (:items (cue 0 0)))))
+    (is (events/flush!))
+    (is (= [[(:id square) nil] [(:id circle) :zone/b]] (mapv (juxt :id :target) (:items (cue 0 0))))
+        "the circle has it, now second; the square nothing")))
+
 
 ;; The timeline (06 §7.2)
 

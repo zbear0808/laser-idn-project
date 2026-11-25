@@ -20,6 +20,7 @@
    for cue-chain item operations and effect parameter editing."
   (:require [clojure.tools.logging :as log]
             [laser-show.events.helpers :as h]
+            [laser-show.animation.chains :as chains]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.effects :as effects]
             [laser-show.routing.targets :as targets]))
@@ -169,14 +170,19 @@
     {:state state}))
 
 (defn- handle-cue-chain-set-item-target
-  "Set or clear the target of the preset or group at :item-path (a path
-   into :items), from :target or a picker's :fx/event, in normal form;
-   none (nil, [], :inherit) removes it, so the item inherits."
-  [{:keys [col row item-path state] :as event}]
-  (let [path (into [:chains :cue-chains [col row] :items] item-path)]
-    (if (and (some? col) (seq item-path) (map? (get-in state path)))
-      {:state (update-in state path with-target (chosen-target event))}
-      {:state state})))
+  "Set or clear the target of the preset or group :item-id of the cue at
+   [col row], from :target or a picker's :fx/event, in normal form; none
+   (nil, [], :inherit) removes it, so the item inherits. The item is found
+   where it is when the event is handled (follow-up R2: a choice made
+   before a reorder sets its own item). One that isn't there changes
+   nothing ({})."
+  [{:keys [col row item-id state] :as event}]
+  (let [items-path (cue-chain-path col row)
+        item-path (when (some? item-id)
+                    (chains/find-path-by-id (get-in state items-path) item-id))]
+    (if item-path
+      {:state (update-in state (into items-path item-path) with-target (chosen-target event))}
+      {})))
 
 
 ;; Name Operations

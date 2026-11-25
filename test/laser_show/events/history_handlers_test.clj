@@ -292,7 +292,9 @@
      :step-grid/paint (assoc press :state pressed :row 0 :step 2)}))
 
 (deftest history-labels-name-real-events-test
-  (let [valid (grid-press-events)]
+  (let [valid (assoc (grid-press-events)
+                     ;; It does nothing ({}) for an item that isn't there
+                     :cue-chain/set-item-target {:state (test-state) :col 0 :row 0 :item-id item-id :target :zone/a})]
     (doseq [event-type (keys history-handlers/event-descriptions)]
       (let [event (get valid event-type {:state (test-state)})
             result (try (handlers/handle-event (assoc event :event/type event-type))

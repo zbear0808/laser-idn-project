@@ -15,7 +15,6 @@
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [laser-show.animation.presets :as presets]
-            [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
             [laser-show.events.core :as events]
             [laser-show.views.components.list :as list]
@@ -56,8 +55,9 @@
 
 (defn- item-effect-parameter-editor
   "Parameter editor for the selected effect within an item.
-   Uses the shared effect-parameter-editor component with keyframe support."
-  [{:keys [col row item-path item selected-effect-ids dialog-data]}]
+   Uses the shared effect-parameter-editor component with keyframe support,
+   with the effect's definition as published (subs/effect-descriptor)."
+  [{:keys [fx/context col row item-path item selected-effect-ids dialog-data]}]
   (let [item-effects (:effects item [])
         first-selected-id (first selected-effect-ids)
         ;; Use hierarchical path finding for nested effects
@@ -67,7 +67,7 @@
         selected-effect (when effect-path
                           (chains/get-item-at-path item-effects effect-path))
         effect-def (when selected-effect
-                     (effects/get-effect (:effect-id selected-effect)))]
+                     (fx/sub-ctx context subs/effect-descriptor (:effect-id selected-effect)))]
     (if selected-effect
       ;; Use shared effect parameter editor component with item-path for cue chains
       {:fx/type effect-param-editor/effect-parameter-editor
@@ -125,13 +125,14 @@
 
 (defn- item-menu-target
   "What the Target menu of item-id in the cue at [col row] reads of the
-   item: {:item-path :own (its own target) :group?}, nil once it is gone.
-   The menu renders again when this does, not for each change to the cue."
+   item: {:own (its own target) :group?}, nil once it is gone. The menu
+   renders again when this does, not for each change to the cue, nor when
+   the item moves: its choice names the item (follow-up R2)."
   [context col row item-id]
   (let [items (:items (fx/sub-ctx context subs/cue-cell-chain col row))]
     (when-let [item-path (chains/find-path-by-id items item-id)]
       (let [item (get-in items item-path)]
-        {:item-path item-path :own (:target item) :group? (chains/group? item)}))))
+        {:own (:target item) :group? (chains/group? item)}))))
 
 (defn- item-target-menu
   "The menu of the item or group item-id of the cue at [col row]: Target ▸,
@@ -139,7 +140,7 @@
    what only the menu reads (the zones the show uses, the groups) renders
    it again, not the list's rows."
   [{:keys [fx/context col row item-id]}]
-  (let [{:keys [item-path own group?] :as target} (fx/sub-ctx context item-menu-target col row item-id)
+  (let [{:keys [own group?] :as target} (fx/sub-ctx context item-menu-target col row item-id)
         explain (fx/sub-ctx context subs/cue-target-explain col row)]
     {:fx/type :context-menu
      :items (if target
@@ -152,7 +153,7 @@
                   :items (target-control/menu-items rows {:event/type :cue-chain/set-item-target
                                                           :col col
                                                           :row row
-                                                          :item-path item-path})}])
+                                                          :item-id item-id})}])
               [])}))
 
 (defn- cue-chain-context-menu
@@ -180,7 +181,7 @@
                        :scope scope
                        :own (:target selected-item)
                        :inherited (get-in explain [:item-inherits (:id selected-item)])
-                       :on-set {:event/type :cue-chain/set-item-target :col col :row row :item-path selected-item-path}
+                       :on-set {:event/type :cue-chain/set-item-target :col col :row row :item-id (:id selected-item)}
                        :tooltip (if (= :group scope)
                                   "Where the group's content goes, unless an item in it sets its own"
                                   "Where this preset goes")})]
@@ -288,6 +289,8 @@
         label-ctx {:names (fx/sub-ctx context subs/names-ctx)
                    :zone-map (fx/sub-ctx context subs/active-zone-map)
                    :explain (fx/sub-ctx context subs/cue-target-explain col row)}
+        ;; The item effects' names, as published (data for that list)
+        effect-descriptors (fx/sub-ctx context subs/effect-descriptors)
 
         ;; Get chain name for header
         chain-name (:name cue-chain)
@@ -353,7 +356,7 @@
                                                        ;; The item-path is passed via event params instead
                                                        :component-id [:item-effects col row]
                                                        :item-id-key :effect-id
-                                                       :item-registry-fn effects/get-effect
+                                                       :item-registry-fn [get effect-descriptors]
                                                        :fallback-label "Unknown Effect"
                                                        :on-change-event :cue-chain/set-item-effects
                                                        :on-change-params {:col col :row row :item-path first-selected-path}

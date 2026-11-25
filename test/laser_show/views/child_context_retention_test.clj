@@ -20,6 +20,7 @@
             [laser-show.animation.effects.calibration]
             [laser-show.animation.effects.intensity]
             [laser-show.animation.effects.zone]
+            [laser-show.animation.registries :as registries]
             [laser-show.animation.safety :as safety]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.domains :as domains]
@@ -106,6 +107,13 @@
 ;; The Effects editor
 
 
+(defn- initial-state
+  "A new app state with the registries published, as app/start! publishes
+   them: the editors show an effect's definition as published (follow-up
+   R1)."
+  []
+  (assoc-in (domains/build-initial-state) [:backend :registries] (registries/descriptors)))
+
 (def ^:private effects-editor
   "The Effects editor's content, as its window shows it."
   {:fx/type @#'effect-editor/effect-chain-editor-content})
@@ -116,7 +124,7 @@
 (defn- effects-editor-state
   "The Effects editor open at [0 0], whose chain is items."
   [items]
-  (-> (domains/build-initial-state)
+  (-> (initial-state)
       (assoc-in [:ui :dialogs :effect-chain-editor] {:open? true :col 0 :row 0 :active-bank-tab :shape :editing-name? false})
       (assoc-in [:chains :effect-chains [0 0]] {:items items})))
 
@@ -146,7 +154,7 @@
   "The Cue Chain Editor open at [0 0]: an open group g holding preset p,
    p selected and being renamed, and its effect e selected."
   [g p e]
-  (-> (domains/build-initial-state)
+  (-> (initial-state)
       (assoc-in [:ui :dialogs :cue-chain-editor] {:open? true :col 0 :row 0 :editing-name? false})
       (assoc-in [:chains :cue-chains [0 0]]
                 {:items [{:id g :type :group :name "Group" :collapsed? false :enabled? true
@@ -172,7 +180,7 @@
   "Projector :p1 selected, in memory (and :p2, to copy its zone to), its
    calibration chain one Axis Transform c, selected."
   [c]
-  (-> (domains/build-initial-state)
+  (-> (initial-state)
       (assoc :projectors {:p1 (projector 1) :p2 (projector 2)})
       (assoc-in [:projector-ui :active-projector] :p1)
       (assoc-in [:chains :projector-effects :p1 :items]
@@ -184,7 +192,7 @@
   "The Timeline Editor open at [0 0]: its one clip, selected, has an
    Intensity effect."
   [clip effect]
-  (-> (domains/build-initial-state)
+  (-> (initial-state)
       (assoc-in [:ui :dialogs :timeline-cue-editor] {:open? true :col 0 :row 0})
       (assoc-in [:chains :cue-chains [0 0]]
                 (model/convert-to-timeline {:items [{:id clip :type :preset :preset-id :circle :enabled? true
