@@ -1405,20 +1405,24 @@
       (targets/cue-refs show nil (fx/sub-ctx context default-target)))))
 
 (defn- cue-ref-sets
-  "Each cue's refs (routing.targets/cue-refs), its column's default and the
-   show's included, then each library show's (no column): each one's part
-   its own (cue-draw-refs, show-draw-refs), so an edit that changes none of
-   them runs it not again (follow-up N9)."
+  "Each grid cue's refs (routing.targets/cue-refs), its column's default and
+   the show's included: each one's part its own (cue-draw-refs), so an edit
+   that changes none of them runs it not again (follow-up N9)."
   [context]
-  (-> []
-      (into (keep (fn [[col row]] (fx/sub-ctx context cue-draw-refs col row))) (fx/sub-ctx context cue-cells))
-      (into (keep #(fx/sub-ctx context show-draw-refs %)) (fx/sub-ctx context show-ids))))
+  (into [] (keep (fn [[col row]] (fx/sub-ctx context cue-draw-refs col row))) (fx/sub-ctx context cue-cells)))
+
+(defn- show-ref-sets
+  "Each library show's refs (show-draw-refs; a show has no column)."
+  [context]
+  (into [] (keep #(fx/sub-ctx context show-draw-refs %)) (fx/sub-ctx context show-ids)))
 
 (defn ref-usage
   "Who uses ref, through the map in use (06 §8.7): {:direct :through
-   :zones} (routing.zone-maps/usage)."
+   :zones}, cues and shows, and :shows {:direct :through} when any of them
+   is a show (routing.zone-maps/usage)."
   [context ref]
-  (zone-maps/usage (fx/sub-ctx context active-zone-map) (fx/sub-ctx context cue-ref-sets) ref))
+  (zone-maps/usage (fx/sub-ctx context active-zone-map) (fx/sub-ctx context cue-ref-sets)
+                   (fx/sub-ctx context show-ref-sets) ref))
 
 (defn map-zones
   "The zones the Zone Groups tab lists, for their labels and in the map
@@ -2833,3 +2837,30 @@
      :on-tc (count (filter :timecode? rows))
      :selected-visible (count (filter #(contains? selected (:id %)) visible))
      :query-problem (shows/query-problem query scope)}))
+
+
+;; Shows table: editing and row status (S3)
+
+(defn show-editing
+  "The Shows table's cell being edited: {:show-id :column :invalid?
+   (:select? for a new show's title)}, without its draft, or nil. A
+   keystroke leaves it as it was, so the table doesn't run again."
+  [context]
+  (some-> (fx/sub-val context get-in [:ui :shows :editing]) (dissoc :draft)))
+
+(defn show-edit-draft
+  "The edit field's text: what has been typed into the cell being edited."
+  [context]
+  (str (fx/sub-val context get-in [:ui :shows :editing :draft])))
+
+(defn show-row-status
+  "{show-id status} for the shows that play: :timecode while timecode
+   drives one, else :manual (by hand, or a trigger's). Each ▶ cell reads
+   it, not the rows, so playback never changes the table's items."
+  [context]
+  (reduce-kv (fn [acc k intent]
+               (if-let [id (shows/key-show-id k)]
+                 (assoc acc id (if (:chasing? intent) :timecode :manual))
+                 acc))
+             {}
+             (fx/sub-val context ex/active-cues)))

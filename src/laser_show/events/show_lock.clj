@@ -77,6 +77,10 @@
     :zones/set-label :zone-maps/create :zone-maps/duplicate :zone-maps/rename :zone-maps/set-lane
     :zone-maps/add-lane :zone-maps/remove-lane :zone-maps/set-override :zone-maps/request-delete
     :zone-maps/delete
+    ;; A show's tempo and TC start move what lights when, and deleting one
+    ;; can stop it mid-show (plans/2026-11-25-timeline-shows 00 §6); the
+    ;; table's edit of either is refused by commit-edit-refused?
+    :shows/set-bpm :shows/set-tc-start :shows/request-delete :shows/delete
     ;; Where a cue, an item, a track or a clip goes (zones plan Z4): as a
     ;; column's default, it re-routes the cue and can make it reach the
     ;; audience
@@ -133,6 +137,15 @@
           false))))
 
 (def ^:private pattern-edit-refused "Zone pattern edit refused")
+
+(defn commit-edit-refused?
+  "Is event the Shows table's commit of a BPM or TC start edit? Those move
+   what lights when, as :shows/set-bpm and :shows/set-tc-start do; its
+   metadata edits go through."
+  [{:keys [event/type column]}]
+  (and (= :shows/commit-edit type) (contains? #{:bpm :tc-start} column)))
+
+(def ^:private show-timing-refused "Show tempo or TC start edit refused")
 
 (def safety-edits
   "The safety zone edits (zones plan Z1). The lock refuses one only when it
@@ -219,6 +232,7 @@
       (h/stale-paste? state event) {}
       (contains? blocked-events type) (refuse (answered state event) type (refused-text type))
       (pattern-edit? event) (refuse state type pattern-edit-refused)
+      (commit-edit-refused? event) (refuse state type show-timing-refused)
       (contains? reviewed-edits type) (if-let [from (reviewed-widening event)]
                                         (refuse from type larger-zone-refused)
                                         (handler event))

@@ -3064,3 +3064,58 @@
           "the unlocked show has no BPM"))
     (is (= {:total 0 :visible 0 :on-tc 0 :selected-visible 0 :query-problem nil}
            (status (context (assoc-in base-state [:chains :shows] {})))))))
+
+
+;; Shows table: editing and row status (S3, plans/2026-11-25-timeline-shows 06 §4.4, §8)
+
+(defn- through-handler
+  "ctx after event, run by its handler on ctx's state, as a commit swaps
+   the context."
+  [ctx event]
+  (let [s (fx/sub-val ctx identity)]
+    (fx/swap-context ctx (constantly (or (:state (handlers/handle-event (assoc event :state s))) s)))))
+
+(deftest visible-show-rows-ignores-status-and-editing-test
+  (let [[_ b] table-ids
+        ctx (context (table-state))
+        before (fx/sub-ctx ctx subs/visible-show-rows)
+        editing (through-handler ctx {:event/type :shows/start-edit :show-id b :column :artist})]
+    (testing "sorted by title"
+      (is (identical? before (fx/sub-ctx (through-handler ctx {:event/type :shows/play :show-id b}) subs/visible-show-rows))
+          "a show starts")
+      (is (= {:show-id b :column :artist :invalid? false} (fx/sub-ctx editing subs/show-editing)))
+      (let [typed (through-handler editing {:event/type :shows/edit-draft :show-id b :column :artist :text "deadmau5Z"})]
+        (is (identical? before (fx/sub-ctx typed subs/visible-show-rows)) "a keystroke")
+        (is (= (fx/sub-ctx editing subs/show-editing) (fx/sub-ctx typed subs/show-editing)) "show-editing keeps its value")
+        (is (= "deadmau5Z" (fx/sub-ctx typed subs/show-edit-draft))))
+      (is (identical? before (fx/sub-ctx (through-handler ctx {:event/type :timing/set-bpm :bpm 140.0}) subs/visible-show-rows))
+          "the tempo"))
+    (testing "sorted by duration, the tempo moves the unlocked show"
+      (let [by-dur (through-handler ctx {:event/type :shows/set-sort :column :duration-s :dir :asc})
+            rows (fx/sub-ctx by-dur subs/visible-show-rows)]
+        (is (not (identical? rows (fx/sub-ctx (through-handler by-dur {:event/type :timing/set-bpm :bpm 480.0})
+                                              subs/visible-show-rows))))))))
+
+(deftest show-row-status-test
+  (let [[a b c] table-ids
+        ctx (context (-> (table-state)
+                         (assoc-in [:playback :active-cues (shows/play-key a)] {:run (random-uuid) :timeline? true})
+                         (assoc-in [:playback :active-cues (shows/play-key c)] {:chasing? true :timeline? true})))]
+    (is (= {a :manual c :timecode} (fx/sub-ctx ctx subs/show-row-status)) "grid cues aren't in it")
+    (is (nil? (get (fx/sub-ctx ctx subs/show-row-status) b)))
+    (is (nil? (fx/sub-ctx ctx subs/show-editing)))
+    (is (= "" (fx/sub-ctx ctx subs/show-edit-draft)))))
+
+(deftest ref-usage-counts-shows-apart-test
+  (let [id #uuid "00000000-0000-0000-0000-0000000000ab"
+        s (-> (domains/build-initial-state)
+              (assoc-in [:chains :cue-chains] {[0 0] {:items [{:type :preset :preset-id :circle :target :zone/k}]}})
+              (assoc-in [:chains :shows id] {:editor-type :timeline
+                                             :tracks [{:id "t1" :type :track :target :zone/k}]
+                                             :items [{:type :preset :id "c1" :preset-id :circle :track-id "t1"
+                                                      :timeline/start 0.0 :timeline/duration 4.0}]}))]
+    (is (= {:direct 2 :through 0 :zones [] :shows {:direct 1 :through 0}}
+           (fx/sub-ctx (context s) subs/ref-usage :zone/k)))
+    (is (= {:direct 1 :through 0 :zones []}
+           (fx/sub-ctx (context (assoc-in s [:chains :shows] {})) subs/ref-usage :zone/k))
+        "no show: no :shows")))
