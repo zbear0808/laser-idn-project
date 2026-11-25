@@ -290,24 +290,38 @@
 
 ;; Who uses a group (06 §8.7)
 
+(defn- tally
+  "usage's counts over ref-sets: {:direct :through :zones (a set)}."
+  [m ref-sets ref]
+  (let [sends? #(and (targets/zone-ref? %) (= ref (zone-lane m %)))]
+    (reduce (fn [acc refs]
+              (if (contains? refs ref)
+                (update acc :direct inc)
+                (if-let [zs (seq (filter sends? refs))]
+                  (-> acc (update :through inc) (update :zones into zs))
+                  acc)))
+            {:direct 0 :through 0 :zones #{}}
+            ref-sets)))
+
 (defn usage
   "Who draws to ref (06 §8.7, Q-Z5 A), from ref-sets (each cue's refs,
    targets/cue-refs: its column's and the show's defaults included) and m,
    the map in use: {:direct (the cues with ref among their refs) :through
    (the others, with a zone m sends to ref) :zones (those zones, in order)}.
    A cue that does both counts once, as direct, so the two add up to every
-   cue that reaches ref."
-  [m ref-sets ref]
-  (let [sends? #(and (targets/zone-ref? %) (= ref (zone-lane m %)))]
-    (update (reduce (fn [acc refs]
-                      (if (contains? refs ref)
-                        (update acc :direct inc)
-                        (if-let [zs (seq (filter sends? refs))]
-                          (-> acc (update :through inc) (update :zones into zs))
-                          acc)))
-                    {:direct 0 :through 0 :zones #{}}
-                    ref-sets)
-            :zones #(vec (sort-by targets/zone-index %)))))
+   cue that reaches ref. Given show-ref-sets too (the library's shows'),
+   they count among :direct and :through, and :shows {:direct :through}
+   says how many of those are shows, when any is."
+  ([m ref-sets ref]
+   (update (tally m ref-sets ref) :zones #(vec (sort-by targets/zone-index %))))
+  ([m ref-sets show-ref-sets ref]
+   (let [cues (tally m ref-sets ref)
+         shows (tally m show-ref-sets ref)]
+     (cond-> {:direct (+ (:direct cues) (:direct shows))
+              :through (+ (:through cues) (:through shows))
+              :zones (vec (sort-by targets/zone-index (into (:zones cues) (:zones shows))))}
+       (pos? (+ (:direct shows) (:through shows)))
+       (assoc :shows (select-keys shows [:direct :through]))))))
 
 (defn next-custom-id
   "A new custom map's id: :map/custom-1, or the first unused one."
