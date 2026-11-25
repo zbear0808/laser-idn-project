@@ -448,7 +448,7 @@
     (cond
       get-item-label (call-spec get-item-label item)
       (and item-id-key item-registry-fn) (or (:name item)
-                                             (:name (item-registry-fn (get item item-id-key)))
+                                             (:name (call-spec item-registry-fn (get item item-id-key)))
                                              fallback-label)
       :else (or (:name item) fallback-label))))
 
@@ -886,10 +886,11 @@
    - :item-id-key + :item-registry-fn - For registry lookup (always uses :name)
    
    Each label and menu function here (:get-item-label, :get-group-label,
-   :get-context-menu, :get-group-context-menu) is a top-level function, or
-   [f & args], called (f args... item): plain data with it, never a closure
-   made in the caller's render, so the list's description stays equal while
-   its inputs do and its rows don't render again.
+   :item-registry-fn, :get-context-menu, :get-group-context-menu) is a
+   top-level function, or [f & args], called (f args... item) (the
+   registry's with the item's :item-id-key value): plain data with it, never
+   a closure made in the caller's render, so the list's description stays
+   equal while its inputs do and its rows don't render again.
    
    Event dispatch:
    - :on-change-event - Event type for items changed

@@ -15,7 +15,6 @@
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [laser-show.animation.presets :as presets]
-            [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
             [laser-show.events.core :as events]
             [laser-show.views.components.list :as list]
@@ -56,8 +55,9 @@
 
 (defn- item-effect-parameter-editor
   "Parameter editor for the selected effect within an item.
-   Uses the shared effect-parameter-editor component with keyframe support."
-  [{:keys [col row item-path item selected-effect-ids dialog-data]}]
+   Uses the shared effect-parameter-editor component with keyframe support,
+   with the effect's definition as published (subs/effect-descriptor)."
+  [{:keys [fx/context col row item-path item selected-effect-ids dialog-data]}]
   (let [item-effects (:effects item [])
         first-selected-id (first selected-effect-ids)
         ;; Use hierarchical path finding for nested effects
@@ -67,7 +67,7 @@
         selected-effect (when effect-path
                           (chains/get-item-at-path item-effects effect-path))
         effect-def (when selected-effect
-                     (effects/get-effect (:effect-id selected-effect)))]
+                     (fx/sub-ctx context subs/effect-descriptor (:effect-id selected-effect)))]
     (if selected-effect
       ;; Use shared effect parameter editor component with item-path for cue chains
       {:fx/type effect-param-editor/effect-parameter-editor
@@ -288,6 +288,8 @@
         label-ctx {:names (fx/sub-ctx context subs/names-ctx)
                    :zone-map (fx/sub-ctx context subs/active-zone-map)
                    :explain (fx/sub-ctx context subs/cue-target-explain col row)}
+        ;; The item effects' names, as published (data for that list)
+        effect-descriptors (fx/sub-ctx context subs/effect-descriptors)
 
         ;; Get chain name for header
         chain-name (:name cue-chain)
@@ -353,7 +355,7 @@
                                                        ;; The item-path is passed via event params instead
                                                        :component-id [:item-effects col row]
                                                        :item-id-key :effect-id
-                                                       :item-registry-fn effects/get-effect
+                                                       :item-registry-fn [get effect-descriptors]
                                                        :fallback-label "Unknown Effect"
                                                        :on-change-event :cue-chain/set-item-effects
                                                        :on-change-params {:col col :row row :item-path first-selected-path}

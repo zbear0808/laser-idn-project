@@ -471,6 +471,23 @@
   [context]
   (fx/sub-val context get-in [:backend :registries :modulators] {}))
 
+(defn effect-descriptor
+  "effect-id's descriptor in effect-descriptors, nil for an id no effect
+   has: what a view shows of an effect's definition (its name, parameters,
+   hints), so the view renders again once a re-registered effect is
+   published, and not for another effect's."
+  [context effect-id]
+  (get (fx/sub-ctx context effect-descriptors) effect-id))
+
+(defn calibration-effects
+  "The descriptors of the calibration effects (category :calibration, alone
+   or with others), in effect-descriptors' order: what a projector's chain
+   offers."
+  [context]
+  (filterv #(let [cat (:category %)]
+              (if (set? cat) (contains? cat :calibration) (= :calibration cat)))
+           (vals (fx/sub-ctx context effect-descriptors))))
+
 (defn- offered?
   "Does a bank of scope (:item or :global) offer the effect described by d:
    one without a :scope is offered in both, a zone-stage effect (:scope

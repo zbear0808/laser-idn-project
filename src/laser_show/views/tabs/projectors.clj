@@ -407,19 +407,9 @@
 ;; Calibration effect helpers
 
 
-(defn- get-calibration-effects
-  "Get all registered calibration effects from the effect registry."
-  []
-  (effects/list-effects-by-category :calibration))
-
-(defn- calibration-effect-labels
-  "Dynamically build map of calibration effect IDs to display labels."
-  []
-  (u/map-into :id :name (get-calibration-effects)))
-
 (defn- calibration-effect-label
-  "A projector chain item's label, from labels (calibration-effect-labels):
-   its effect's name, or \"Unknown Effect\"."
+  "A projector chain item's label, from labels ({effect-id name} of the
+   calibration effects): its effect's name, or \"Unknown Effect\"."
   [labels item]
   (get labels (:effect-id item) "Unknown Effect"))
 
@@ -461,15 +451,16 @@
 (defn- effect-parameter-editor
   "Renders the appropriate editor for a selected effect.
    Checks for custom ui-hints renderer, falls back to generic params editor.
+   Its definition as published (subs/effect-descriptor).
    
    Props:
    - :projector-id - ID of the projector
    - :effect-path - The effect's full path in the chain ([1], or [2 :items 0] inside a group)
    - :effect - The effect map
    - :ui-state - UI state for this projector (from projector-effect-ui-state sub)"
-  [{:keys [projector-id effect-path effect ui-state]}]
+  [{:keys [fx/context projector-id effect-path effect ui-state]}]
   (let [{:keys [effect-id params]} effect
-        effect-def (when effect-id (effects/get-effect effect-id))
+        effect-def (when effect-id (fx/sub-ctx context subs/effect-descriptor effect-id))
         effect-name (or (:name effect-def)
                         (when effect-id (name effect-id))
                         "Unknown Effect")
@@ -546,9 +537,9 @@
      :items (or effects [])
      :component-id [:projector-effects projector-id]
      :items-path [:chains :projector-effects projector-id :items]
-     ;; Each effect's name from calibration-effect-labels, as data with a
-     ;; top-level function: equal from render to render
-     :get-item-label [calibration-effect-label (calibration-effect-labels)]
+     ;; Each effect's name, as the calibration effects were published, as
+     ;; data with a top-level function: equal from render to render
+     :get-item-label [calibration-effect-label (u/map-into :id :name (fx/sub-ctx context subs/calibration-effects))]
      :on-change-event :chain/set-items
      ;; Copied and pasted as effects, from its component id
      ;; (state.clipboard/list-type): its Paste button and ⌘V agree
@@ -557,14 +548,15 @@
      :empty-text "No calibration effects\nAdd from menu above"}))
 
 (defn- projector-add-effect-menu
-  "Menu button for adding calibration effects to a projector.
-   Dynamically builds menu from registered calibration effects."
-  [{:keys [projector-id]}]
-  (let [calibration-effects (get-calibration-effects)
+  "Menu button for adding calibration effects to a projector, each with its
+   defaults, as the calibration effects were published
+   (subs/calibration-effects)."
+  [{:keys [fx/context projector-id]}]
+  (let [calibration-effects (fx/sub-ctx context subs/calibration-effects)
         menu-items (vec (for [effect-def calibration-effects]
                           (let [effect-id (:id effect-def)
                                 effect-name (:name effect-def)
-                                default-params (effects/get-default-params effect-id)]
+                                default-params (effects/default-params effect-def)]
                             {:fx/type :menu-item
                              :id (str "projector-add-effect-" (name effect-id))
                              :text effect-name
