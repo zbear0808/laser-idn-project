@@ -98,7 +98,6 @@
                        :disable (boolean disable)
                        :focus-traversable false
                        :max-width Double/MAX_VALUE
-                       :h-box/hgrow :always
                        :user-data {:show-id show-id}}
                       {:on-created install-seek!}))
 
@@ -107,14 +106,15 @@
   [{:keys [show-id length tc?] :as np}]
   {:fx/type clock-view/ext-clock-redraw
    :redraw! #'redraw-now-playing!
+   :h-box/hgrow :always
    :desc {:fx/type :h-box
           :alignment :center-left
           :spacing 6
           :max-width Double/MAX_VALUE
-          :h-box/hgrow :always
           :user-data (select-keys np [:show-id :length :bpm :approx? :tc-start :fps :loop?])
           :children [{:fx/type :label :id "now-playing-elapsed" :style-class "tl-readout"}
-                     (seek-slider {:show-id show-id :length length :disable tc?})
+                     (assoc (seek-slider {:show-id show-id :length length :disable tc?})
+                            :h-box/hgrow :always)
                      {:fx/type :label :id "now-playing-remaining" :style-class "tl-readout"}
                      {:fx/type :label :id "now-playing-tc" :style-class ["tl-readout" "tl-readout-tc"]}]}})
 
