@@ -174,7 +174,18 @@
       (is (events/flush!))
       (is (= 1 (rt :started)) "one cue picked"))))
 
-(deftest vibe-pad-tap-switches-and-long-press-locks-test
+;; ^:flaky-mac: CI's macOS runner skips this (build-and-test.yml); it failed
+;; there in 3 of 5 runs (2026-11-22 to 11-24) and passes on Windows, Linux and
+;; locally. The VIBE pad's tap is ui/mouse-click!: the release comes after
+;; two ui/sync-fx! (5 trips to the FX thread and 10 ms sleeps each), and the
+;; engine times the press on the event thread: held :lock-hold-ms (600) or
+;; longer, it locks the rotation instead of switching
+;; (vibes.engine/release-vibe). That gap is 140-310 ms on an M1, and the
+;; runner runs these tests about 4x slower, so there it is often over 600 ms:
+;; the tap locks and the wait for :vibe-2 after it times out. With the JVM
+;; at background priority (`taskpolicy -b`) the gap is 1.8-2.0 s and the
+;; test fails the same way locally.
+(deftest ^:flaky-mac vibe-pad-tap-switches-and-long-press-locks-test
   (let [robot (ui/robot)]
     (open-perform! robot)
     (ui/mouse-click! robot "#vibe-pad-vibe")
@@ -356,7 +367,13 @@
 
 (defn- pulse [role] (get-in (app-state) [:playback :pulses role]))
 
-(deftest pad-pulse-bar-flashes-on-a-press-test
+;; ^:flaky-mac: CI's macOS runner skips this (build-and-test.yml); it failed
+;; there in the last 2 of 5 runs (2026-11-22 to 11-24) and passes on Windows,
+;; Linux and locally. Same cause as vibe-pad-tap-switches-and-long-press-
+;; locks-test: on the slow runner the VIBE tap is held longer than
+;; :lock-hold-ms, so it locks instead of changing the vibe, and the wait for
+;; its pulse times out.
+(deftest ^:flaky-mac pad-pulse-bar-flashes-on-a-press-test
   (let [robot (ui/robot)
         t0 (System/nanoTime)
         tick! #(show-clock/tick! (+ t0 (* % 1000000)))]

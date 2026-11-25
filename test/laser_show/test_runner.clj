@@ -7,6 +7,8 @@
    - name patterns: positional args select the tests whose ns/name contains
      any of them, ignoring case, e.g. `clj -M:test-ui:win tap-tempo`
    - --list: print the selected tests instead of running them
+   - --shard K/N: of the selected tests, run only part K of N (see shard),
+     so CI can run one suite as N jobs at the same time
    - --skip-dir: never load the namespaces in a directory. The unit aliases
      skip test/laser_show/ui_test, which needs the :test-ui classpath (TestFX).
    - selecting no tests is an error instead of a silent \"Ran 0 tests\"
@@ -29,9 +31,16 @@
 (defn- accumulate [m k v]
   (update m k (fnil conj #{}) v))
 
+(defn- parse-shard [s]
+  (when-let [[_ k n] (re-matches #"(\d+)/(\d+)" s)]
+    [(parse-long k) (parse-long n)]))
+
 (def ^:private cli-options
   (conj runner/cli-options
         ["-l" "--list" "List the selected tests instead of running them."]
+        [nil "--shard K/N" "Run only part K of N of the selected tests, e.g. 2/4."
+         :parse-fn parse-shard
+         :validate [(fn [[k n]] (and k n (<= 1 k n))) "Must be K/N with 1 <= K <= N, e.g. 2/4."]]
         [nil "--skip-dir DIRNAME" "Directory whose namespaces are never loaded."
          :parse-fn str
          :assoc-fn accumulate]))
@@ -80,13 +89,23 @@
               (some #(str/includes? full-name %) patterns)))))
     (constantly true)))
 
-(defn- describe [selected eligible patterns]
-  (let [n (count eligible)]
-    (str (when (< (count selected) n)
+(defn shard
+  "Part k of n (1-based) of tests: every nth test, from the kth. The tests
+   come sorted by namespace and line, so each part takes some of every
+   namespace and the parts take about as long as each other, however slow
+   one namespace is. Their sizes differ by one test at most."
+  [tests k n]
+  (into [] (comp (drop (dec k)) (take-nth n)) tests))
+
+(defn- describe [selected eligible patterns [k n]]
+  (let [total (count eligible)]
+    (str (when (< (count selected) total)
            (str (count selected) " of "))
-         n (if (= 1 n) " test" " tests")
+         total (if (= 1 total) " test" " tests")
          (when (seq patterns)
-           (str " matching " (str/join ", " (map pr-str patterns)))))))
+           (str " matching " (str/join ", " (map pr-str patterns))))
+         (when k
+           (str ", shard " k "/" n)))))
 
 (defn- print-tests
   "Prints tests grouped by namespace. Expects them sorted by namespace."
@@ -104,7 +123,9 @@
         _ (run! require nses)
         unresolved (remove resolve (:var options))
         eligible (filterv (tag-filter options) (test-vars nses))
-        selected (filterv (name-filter options patterns) eligible)]
+        matched (filterv (name-filter options patterns) eligible)
+        [k n :as part] (:shard options)
+        selected (if part (shard matched k n) matched)]
     (cond
       (seq unresolved)
       (do (println "Could not resolve test var(s):" (str/join ", " unresolved))
@@ -112,21 +133,28 @@
                    "To match part of a name, pass it without -v.")
           1)
 
-      (empty? selected)
+      (empty? matched)
       (do (println (str "No tests selected"
                         (when (seq patterns)
                           (str " by " (str/join ", " (map pr-str patterns))))
                         ". Use --list without a pattern to see all tests."))
           1)
 
+      ;; Only when fewer tests are selected than there are shards: the
+      ;; other shards run them.
+      (empty? selected)
+      (do (println (str "Shard " k "/" n " has no tests: "
+                        (describe matched eligible patterns nil) " in all."))
+          0)
+
       (:list options)
-      (do (println (str (describe selected eligible patterns) ":"))
+      (do (println (str (describe selected eligible patterns part) ":"))
           (print-tests selected)
           0)
 
       :else
-      (do (when (or (seq (:var options)) (seq patterns))
-            (println (str "Selected " (describe selected eligible patterns) ":"))
+      (do (when (or (seq (:var options)) (seq patterns) part)
+            (println (str "Selected " (describe selected eligible patterns part) ":"))
             (print-tests selected))
           (let [{:keys [fail error]}
                 (runner/test {:dir dirs
@@ -141,6 +169,7 @@
   (println "ignoring case. For example:\n")
   (println "  clj -M:test-ui:win tap-tempo    UI tests with \"tap-tempo\" in the name")
   (println "  clj -M:test-ui:win --list       list the UI tests without running them")
+  (println "  clj -M:test-ui:win --shard 2/4  the second of 4 parts of the UI tests")
   (println "  clj -M:win:test history         unit tests with \"history\" in the name\n")
   (println summary)
   (println "\nAll options may be repeated for a logical OR effect.")

@@ -129,6 +129,7 @@ clj -M:win:test-timing        # timing-precision tests (OS/load sensitive)
 Every test alias takes name patterns: only tests whose `namespace/name`
 contains one of them (ignoring case) run. `--list` shows what would run.
 A pattern that matches nothing fails instead of running 0 tests.
+`--shard K/N` runs only part K of N of the selected tests.
 
 ```bash
 clj -M:win:test history          # unit tests with "history" in the name
@@ -146,7 +147,17 @@ clj -M:test-ui:win:test-ui-headless --list        # list every UI test
 clj -M:test-ui:win:test-ui-headless tap-tempo     # one test, by part of its name
 clj -M:test-ui:win:test-ui-headless -n laser-show.ui-test.toolbar-test   # one feature area
 clj -M:test-ui:win:test-ui-headless               # whole UI suite
+clj -M:test-ui:win:test-ui-headless --shard 2/4   # the 2nd of 4 parts of it
 ```
+
+CI runs the UI suite on macOS, Windows and Linux, each as 4 jobs at the same
+time (`--shard 1/4` to `--shard 4/4`). Each part gets every 4th test, so it
+has some of every namespace and the parts take about as long as each other.
+
+Tests tagged `^:flaky-mac`, `^:flaky-windows` or `^:flaky-linux` fail on
+that OS's CI runner, for the reason in the note above each one, so CI skips
+them there for now. They still run on the other OSes and locally. To list
+them: `clj -M:test-ui:win:test-ui-headless --list -i :flaky-mac`.
 
 Drop `:test-ui-headless` to watch the tests run in real windows (this moves
 your mouse). On macOS, visible runs need Accessibility permission for your

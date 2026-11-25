@@ -125,7 +125,7 @@
   ;; e.g. clj -M:win:test. They skip test/laser_show/ui_test (TestFX, run via
   ;; :test-ui). Wall-clock timing tests tagged ^:timing / ^:performance are
   ;; excluded (run them via :test-timing).
-  ;; Every test alias takes name patterns and --list, see
+  ;; Every test alias takes name patterns, --list and --shard, see
   ;; test/laser_show/test_runner.clj:
   ;;   clj -M:win:test history         ; tests with "history" in the name
   ;;   clj -M:win:test --list history  ; show them without running
@@ -201,6 +201,7 @@
   ;;   clj -M:test-ui:win:test-ui-headless --list     ; list the UI tests
   ;;   clj -M:test-ui:win:test-ui-headless tap-tempo  ; tests matching "tap-tempo"
   ;;   clj -M:test-ui:win:test-ui-headless            ; whole suite
+  ;;   clj -M:test-ui:win:test-ui-headless --shard 2/4  ; 2nd of 4 parts (CI runs all 4 at once)
   ;; The LLM vision helpers (ui_test/cases) also need a .env file (see .env.example).
   :test-ui
   {:extra-paths ["test"]

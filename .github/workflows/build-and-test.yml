@@ -3,8 +3,18 @@ name: Build and Test
 on:
   push:
     branches: [ master ]
+    # A push or PR that only changes notes, docs or agent files runs
+    # nothing: no test, the build or the app reads them.
+    paths-ignore: &docs-only
+      - 'plans/**'
+      - 'docs/**'
+      - 'prompts/**'
+      - '.agents/**'
+      - '.opencode/**'
+      - '**.md'
   pull_request:
     branches: [ master ]
+    paths-ignore: *docs-only
 
 permissions:
   contents: read
@@ -49,26 +59,50 @@ jobs:
     - name: Lint (clj-kondo)
       run: clojure -M:kondo --lint src test --parallel --fail-level error
 
-  # Same headless UI suite on macOS and Windows, so platform-specific input
-  # (Cmd vs Ctrl shortcuts) and native JavaFX libraries are covered.
-  # Timeouts, measured at 296 UI tests (run 45001123968, 2026-11-22): the
-  # suite takes about 15 min on Windows (and on an M-series Mac), but every
-  # namespace runs 3.5-4.6x slower on the macOS runner, about 60 min. No
-  # test waits out a timeout; the runner is slow. Each limit is about 1.5x
-  # that, so a slow day passes and a hang still stops.
+  # The headless UI suite on macOS, Windows and Linux, so platform-specific
+  # input (Cmd vs Ctrl shortcuts) and native JavaFX libraries are covered.
+  # Each OS runs it as 4 jobs at once, each with a quarter of the tests
+  # (laser-show.test-runner --shard: every 4th test, so each quarter has
+  # some of every namespace and they take about as long as each other).
+  # Measured at 355 UI tests (run 45254112881, 2026-11-23), the whole suite
+  # takes about 72 min on macOS, 17 on Windows and 14 on Linux: every test
+  # runs about 5x slower on the macOS runner than on Linux. No test waits out
+  # a timeout; the runner is slow. So a quarter takes about 18, 4.5 and 3.5
+  # min. The limits leave room for a slow day and a growing suite, and still
+  # stop a hang.
+  # More shards: add to `shard` and change `shards` to match. GitHub's free
+  # plan runs at most 5 macOS jobs at once, across all of an account's repos.
+  # `skip`: tests tagged with it fail on this OS's runner for a reason the
+  # note above each gives, so they're skipped here for now. They still run
+  # on the other OSes and locally. List them with
+  #   clj -M:test-ui:<platform>:test-ui-headless --list -i :flaky-mac
   ui-tests:
+    name: UI tests (${{ matrix.label }} ${{ matrix.shard }}/${{ matrix.shards }})
     strategy:
       fail-fast: false
       matrix:
+        platform: [mac-arm, win, linux]
+        shard: [1, 2, 3, 4]
+        shards: [4]
         include:
-          - os: macos-latest
-            platform: mac-arm
+          - platform: mac-arm
+            label: macOS
+            os: macos-latest
             shell: bash
-            timeout: 90
-          - os: windows-latest
-            platform: win
+            timeout: 40
+            skip: ':flaky-mac'
+          - platform: win
+            label: Windows
+            os: windows-latest
             shell: pwsh
-            timeout: 30
+            timeout: 15
+            skip: ':flaky-windows'
+          - platform: linux
+            label: Linux
+            os: ubuntu-latest
+            shell: bash
+            timeout: 15
+            skip: ':flaky-linux'
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.timeout }}
 
@@ -104,32 +138,32 @@ jobs:
           ${{ runner.os }}-clojure-
 
     - name: Run headless UI tests
-      run: clojure '-M:${{ matrix.platform }}:test-ui:test-ui-headless'
+      run: clojure '-M:${{ matrix.platform }}:test-ui:test-ui-headless' --shard '${{ matrix.shard }}/${{ matrix.shards }}' -e '${{ matrix.skip }}'
 
     # The add-on loader's tests (output drivers D3) on macOS and Windows too,
     # where jars get locked, paths have drive letters and folders have their
-    # own hidden files; the rest of the unit suite runs on Ubuntu only.
-    # -n loads just that namespace. :test-ui-headless keeps JavaFX headless
-    # in case anything it loads pulls in cljfx. Runs even when the UI tests
-    # failed. The same quoting works in bash and pwsh (clojure.exe on Windows).
+    # own hidden files; the rest of the unit suite runs on Ubuntu only (and
+    # these with it). Once per OS, in its first shard. -n loads just that
+    # namespace. :test-ui-headless keeps JavaFX headless in case anything it
+    # loads pulls in cljfx. Runs even when the UI tests failed. The same
+    # quoting works in bash and pwsh (clojure.exe on Windows).
     - name: Run add-on loader tests
-      if: ${{ !cancelled() }}
+      if: ${{ !cancelled() && matrix.shard == 1 && matrix.platform != 'linux' }}
       run: clojure '-M:${{ matrix.platform }}:test:test-ui-headless' -n laser-show.output.addons-test
 
     - name: Upload UI test results and screenshots
       if: failure()
       uses: actions/upload-artifact@v7
       with:
-        name: ui-test-results-${{ matrix.platform }}
+        name: ui-test-results-${{ matrix.platform }}-${{ matrix.shard }}
         path: test-results/
         if-no-files-found: ignore
         retention-days: 14
 
-  # Unit, integration and UI tests in turn, then the JAR: about 18 min at
-  # 296 UI tests (the UI suite runs about as fast here as on Windows).
+  # Unit and integration tests, then the JAR: about 3 min.
   build-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 15
 
     steps:
     # Checkout repository
@@ -162,29 +196,14 @@ jobs:
     
     # Run tests (need :linux for JavaFX deps on ubuntu). cljfx starts JavaFX as
     # soon as it loads and the runner has no display, so every test step uses
-    # JavaFX's headless platform (the :test-ui-headless alias).
+    # JavaFX's headless platform (the :test-ui-headless alias). The UI tests
+    # run in the ui-tests jobs.
     - name: Run unit tests
       run: clojure -M:linux:test:test-ui-headless
     
     - name: Run integration tests
       run: clojure -M:linux:test-integration:test-ui-headless
 
-    # TestFX UI tests on JavaFX's built-in headless platform: no display or
-    # Xvfb needed. About 15 min at 296 tests.
-    - name: Run headless UI tests
-      timeout-minutes: 25
-      run: clojure -M:linux:test-ui:test-ui-headless
-
-    # UI tests write screenshots and other artifacts to test-results/.
-    - name: Upload UI test results and screenshots
-      if: failure()
-      uses: actions/upload-artifact@v7
-      with:
-        name: ui-test-results
-        path: test-results/
-        if-no-files-found: ignore
-        retention-days: 14
-    
     # Build application (platform-specific JAR). AOT-compiling laser-show.app
     # loads JavaFX classes, so run under Xvfb like the release workflow does.
     - name: Build JAR
