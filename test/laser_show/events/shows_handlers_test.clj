@@ -327,3 +327,181 @@
           (str type " is routed to the shows handler"))))
   (testing "an unknown shows event does nothing"
     (is (= {} (shows-handlers/handle {:event/type :shows/nope :state (base)})))))
+
+
+;; Transport (S5): plans/2026-11-25-timeline-shows 01 §5, 07 §4.5, §8
+
+(def sa #uuid "00000000-0000-0000-0000-0000000005a3")
+(def sb #uuid "00000000-0000-0000-0000-0000000005a1")
+(def sc #uuid "00000000-0000-0000-0000-0000000005a2")
+
+(defn- abc-state
+  "Shows A, B and C (ids not in title order), the table sorted by title:
+   visible [sa sb sc]. Nothing plays."
+  []
+  (-> (play-state)
+      (with-shows {sa (assoc a-show :name "A") sb (assoc a-show :name "B") sc (assoc a-show :name "C")})))
+
+(defn- send-event [state event] (:state (handle state event)))
+(defn- manual [state] (get-in state [:ui :shows :manual]))
+(defn- playing-shows-of [state]
+  (set (keep shows/key-show-id (keys (get-in state [:playback :active-cues])))))
+
+(deftest play-replaces-previous-manual-show-test
+  (let [ku (shows/play-key u)
+        kv (shows/play-key v)
+        grid-intent {:run (random-uuid)}]
+    (testing ":manual nil, grid [0 0] playing: :shows/play u → [0 0] and [:show u] play; :manual u"
+      (let [s (-> (play-state)
+                  (assoc-in [:playback :active-cues [0 0]] grid-intent)
+                  (assoc-in [:playback :playing?] true))
+            s' (send-event s {:event/type :shows/play :show-id u})]
+        (is (= #{[0 0] ku} (set (keys (get-in s' [:playback :active-cues])))))
+        (is (= grid-intent (intent s' [0 0])))
+        (is (= u (manual s')))))
+    (testing ":manual u playing: :shows/play v → [:show u] gone, [:show v] from beat 0; :manual v"
+      (let [s (-> (play-state)
+                  (assoc-in [:playback :active-cues [0 0]] grid-intent)
+                  (send-event {:event/type :shows/play :show-id u})
+                  (send-event {:event/type :shows/play :show-id v}))]
+        (is (nil? (intent s ku)))
+        (is (= {:timeline? true :start-beat 0.0} (dissoc (intent s kv) :run)))
+        (is (= grid-intent (intent s [0 0])) "grid cues keep playing")
+        (is (= v (manual s)))))
+    (testing "a show a pad started stays when another is played by hand"
+      (let [s (-> (play-state)
+                  (send-event {:event/type :shows/toggle-run :show-id u})
+                  (send-event {:event/type :shows/play :show-id v}))]
+        (is (= #{u v} (playing-shows-of s)))))))
+
+(deftest play-refused-while-following-timecode-test
+  (let [ku (shows/play-key u)
+        kv (shows/play-key v)]
+    (testing "v enabled: :shows/play v → unchanged, with the notice"
+      (let [s (-> (with-shows (play-state) {u a-show v follower})
+                  (send-event {:event/type :shows/play :show-id u}))
+            result (handle s {:event/type :shows/play :show-id v})]
+        (is (= "Follows timecode. Untick TC to play it by hand." (get-in result [:state :ui :notice :text])))
+        (is (= (:playback s) (get-in result [:state :playback])))
+        (is (= u (manual (:state result))))))
+    (testing ":manual follows timecode now: ⏯, ⏹, seek, ⏭ and ⏮ do nothing"
+      (let [marker {:chasing? true :timeline? true :chase-id [:d ku 0 nil 1]}
+            s (-> (with-shows (play-state) {u follower v a-show})
+                  (assoc-in [:ui :shows :manual] u)
+                  (assoc-in [:playback :active-cues ku] marker)
+                  (assoc-in [:playback :playing?] true))]
+        (doseq [event [{:event/type :shows/toggle-play}
+                       {:event/type :shows/stop}
+                       {:event/type :shows/seek :show-id u :beat 4.0}
+                       {:event/type :shows/next}
+                       {:event/type :shows/previous}]]
+          (is (= {:state s} (handle s event)) (str (:event/type event))))))
+    (testing "and without a marker too"
+      (let [s (-> (with-shows (play-state) {u follower v a-show})
+                  (assoc-in [:ui :shows :manual] u))]
+        (is (= {:state s} (handle s {:event/type :shows/toggle-play})))
+        (is (nil? (intent (send-event s {:event/type :shows/next}) kv)))))))
+
+(deftest next-previous-follow-visible-order-test
+  (let [s (abc-state)
+        with-manual #(assoc-in s [:ui :shows :manual] %)
+        step (fn [state type] (send-event state {:event/type type}))]
+    (testing "visible [A B C], :manual B: next plays C, previous plays A"
+      (let [n (step (with-manual sb) :shows/next)
+            p (step (with-manual sb) :shows/previous)]
+        (is (= sc (manual n)))
+        (is (= #{sc} (playing-shows-of n)))
+        (is (= sa (manual p)))
+        (is (= #{sa} (playing-shows-of p)))))
+    (testing "B playing: next stops it and plays C from beat 0"
+      (let [s' (-> s (send-event {:event/type :shows/play :show-id sb}) (step :shows/next))]
+        (is (= #{sc} (playing-shows-of s')))
+        (is (= 0.0 (:start-beat (intent s' (shows/play-key sc)))))))
+    (testing "at either end: unchanged"
+      (is (= {:state (with-manual sc)} (handle (with-manual sc) {:event/type :shows/next})))
+      (is (= {:state (with-manual sa)} (handle (with-manual sa) {:event/type :shows/previous}))))
+    (testing "the table's order, not the library's: sorted by title descending"
+      (let [desc (assoc-in (with-manual sb) [:ui :shows :sort] {:column :title :dir :desc})]
+        (is (= sa (manual (step desc :shows/next))))
+        (is (= sc (manual (step desc :shows/previous))))))
+    (testing ":manual filtered out, or none: next plays the first visible row, previous the last"
+      (let [filtered (-> (with-manual sb) (assoc-in [:ui :shows :query] "a"))]
+        (is (= [sa] (shows/visible-ids filtered)))
+        (is (= sa (manual (step filtered :shows/next))))
+        (is (= sa (manual (step filtered :shows/previous)))))
+      (is (= sa (manual (step s :shows/next))))
+      (is (= sc (manual (step s :shows/previous)))))
+    (testing "a show that follows timecode is passed over"
+      (let [s' (-> (with-manual sa) (assoc-in (conj (shows/show-path sb) :timeline/chase) :mtc))]
+        (is (= sc (manual (step s' :shows/next))))))
+    (testing "no shows: nothing"
+      (let [empty (with-shows (play-state) {})]
+        (is (= {:state empty} (handle empty {:event/type :shows/next})))
+        (is (= {:state empty} (handle empty {:event/type :shows/previous})))))))
+
+(deftest play-resumes-held-transport-test
+  (let [ku (shows/play-key u)
+        s (-> (play-state)
+              (assoc-in [:chains :cue-chains [0 0]] {:items [{:type :preset :preset-id :circle :id (random-uuid)}]})
+              (run {:event/type :grid/trigger-cell :col 0 :row 0}))
+        _ (is (some? (intent s [0 0])) "[0 0] plays")
+        held (run s {:event/type :transport/stop})
+        _ (is (false? (get-in held [:playback :playing?])) "Stop holds it")
+        _ (is (some? (intent held [0 0])))
+        played (run held {:event/type :shows/play :show-id u})]
+    (is (true? (get-in played [:playback :playing?])))
+    (is (= #{[0 0] ku} (set (keys (get-in played [:playback :active-cues])))) "both intents")))
+
+(deftest toggle-play-test
+  (let [ku (shows/play-key u)
+        toggle #(send-event % {:event/type :shows/toggle-play})]
+    (testing "playing: pauses; paused: resumes, the same run"
+      (let [s (send-event (play-state) {:event/type :shows/play :show-id u})
+            paused (toggle s)
+            resumed (toggle paused)]
+        (is (true? (:paused? (intent paused ku))))
+        (is (false? (:paused? (intent resumed ku))))
+        (is (= (:run (intent s ku)) (:run (intent resumed ku))))))
+    (testing "stopped or ended: plays it again from beat 0"
+      (let [s (-> (play-state)
+                  (send-event {:event/type :shows/play :show-id u})
+                  (send-event {:event/type :shows/stop}))
+            s' (toggle s)]
+        (is (nil? (intent s ku)))
+        (is (= {:timeline? true :start-beat 0.0} (dissoc (intent s' ku) :run)))
+        (is (= u (manual s')))))
+    (testing ":manual nil: the first selected visible show, else the first visible"
+      (let [s (abc-state)]
+        (is (= sa (manual (toggle s))))
+        (is (= sb (manual (toggle (assoc-in s [:ui :shows :selected] #{sb sc})))) "in the table's order")
+        (is (= sa (manual (toggle (-> s
+                                      (assoc-in [:ui :shows :selected] #{sb})
+                                      (assoc-in [:ui :shows :query] "a")))))
+            "a selected show filtered out doesn't count")))
+    (testing "no shows: nothing"
+      (let [s (with-shows (play-state) {})]
+        (is (= {:state s} (handle s {:event/type :shows/toggle-play})))))))
+
+(deftest seek-test
+  (let [ku (shows/play-key u)
+        s (send-event (play-state) {:event/type :shows/play :show-id u})]
+    (testing "the show played by hand gets a seek request"
+      (let [s' (send-event s {:event/type :shows/seek :show-id u :beat 4.0})]
+        (is (= 4.0 (get-in (intent s' ku) [:seek :beat])))
+        (is (uuid? (get-in (intent s' ku) [:seek :id])))
+        (is (= (:run (intent s ku)) (:run (intent s' ku))) "the same run")))
+    (testing "paused: it seeks too"
+      (let [s' (-> s (send-event {:event/type :shows/toggle-play}) (send-event {:event/type :shows/seek :beat 2.0}))]
+        (is (= 2.0 (get-in (intent s' ku) [:seek :beat])))))
+    (testing "a release for a show no longer played by hand, stopped, or no beat: nothing"
+      (is (= {:state s} (handle s {:event/type :shows/seek :show-id v :beat 4.0})))
+      (let [stopped (send-event s {:event/type :shows/stop})]
+        (is (= {:state stopped} (handle stopped {:event/type :shows/seek :show-id u :beat 4.0}))))
+      (is (= {:state s} (handle s {:event/type :shows/seek :show-id u}))))))
+
+(deftest transport-events-are-routed-test
+  (doseq [type [:shows/toggle-play :shows/seek :shows/next :shows/previous]]
+    (let [s (base)]
+      (is (contains? (shows-handlers/handle {:event/type type :state s}) :state) (str type))
+      (is (contains? (handlers/handle-event {:event/type type :state s}) :state)
+          (str type " is routed to the shows handler")))))

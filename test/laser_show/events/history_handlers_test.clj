@@ -978,3 +978,16 @@
         (is (false? (get-in reset [:project :dirty?])))
         (is (= (zone s2) (zone (run reset {:event/type :edit/undo}))))))))
 
+
+(deftest shows-transport-creates-no-undo-test
+  (let [s0 (timeline-state)
+        s (reduce run s0 [{:event/type :shows/play :show-id timeline-u}
+                          {:event/type :shows/seek :show-id timeline-u :beat 2.0}
+                          {:event/type :shows/toggle-play}
+                          {:event/type :shows/toggle-play}
+                          {:event/type :shows/next}
+                          {:event/type :shows/previous}
+                          {:event/type :shows/stop}])]
+    (is (= timeline-u (get-in s [:ui :shows :manual])))
+    (is (= (undo-count s0) (undo-count s)))
+    (is (false? (get-in s [:project :dirty?])))))
