@@ -310,6 +310,34 @@
     (is (not-any? #(str/includes? % (if mac? "Ctrl+" "⌘"))
                   (concat (menu-texts "#effects-cell-0-0") (menu-texts "#effects-cell-1-1"))))))
 
+(defn- paste-cue-disabled?
+  "Is the Paste Cue item of the menu a cell's right-click opens disabled?"
+  [selector]
+  (let [cell (node selector)]
+    (ui/on-fx-thread #(let [^Labeled holder (.getParent cell)]
+                        (some (fn [^MenuItem item]
+                                (when (str/starts-with? (str (.getText item)) "Paste Cue")
+                                  (.isDisable item)))
+                              (.getItems (.getContextMenu holder)))))))
+
+(deftest empty-cell-menu-has-no-timeline-item-test
+  ;; timeline-shows plan TS-3: the grid only holds cues
+  (ui/assert-visible! "#grid-cell-0-1")
+  (testing "an empty cell offers a cue, never a timeline"
+    (let [texts (menu-texts "#grid-cell-0-1")]
+      (is (some #{"Create Cue"} texts))
+      (is (not-any? #(str/includes? % "Timeline") texts) (pr-str texts))))
+  (testing "a cue cell neither"
+    (is (not-any? #(str/includes? % "Timeline") (menu-texts "#grid-cell-0-0"))))
+  (testing "a timeline in the slot greys Paste Cue out"
+    (events/write-state! assoc-in [:ui :clipboard]
+                         {:type :cue-chain :copied-at 1
+                          :data {:items [{:type :preset :preset-id :circle :timeline/start 0.0}]}})
+    (ui/sync-fx!)
+    (ui/wait-for! #(true? (paste-cue-disabled? "#grid-cell-0-1")))
+    (is (true? (paste-cue-disabled? "#grid-cell-0-1")))
+    (is (true? (paste-cue-disabled? "#grid-cell-0-0")))))
+
 
 ;; Pads that grow with the window: the Grid tab is the performer's screen
 
