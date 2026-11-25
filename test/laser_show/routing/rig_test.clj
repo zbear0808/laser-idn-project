@@ -251,6 +251,37 @@
   (is (= :projector-10-0-0-5-1-3 (rig/unique-projector-id {:projector-10-0-0-5-1 {} :projector-10-0-0-5-1-2 {}}
                                                           "10.0.0.5" 1))))
 
+(deftest projector-ids-read-back-for-any-host-test
+  ;; Follow-up B2: an IPv6 host's colons made a keyword the EDN reader can't
+  ;; read, so a show or rig file with that projector couldn't be read back
+  (testing "IPv4 hosts and names keep the ids they had"
+    (is (= [:projector-10-0-0-5-1 :projector-192-168-1-100-0 :projector-a-1-2]
+           [(rig/projector-id "10.0.0.5" 1) (rig/projector-id "192.168.1.100" nil) (rig/projector-id "a-1" 2)])))
+  (testing "every other character of a host is made -"
+    (is (= [:projector-fe80--1-0 :projector-2001-db8--5-2 :projector-fe80--1-en0-1 :projector-FE80-0-0-0-1-2-3-4-0]
+           [(rig/projector-id "fe80::1" nil) (rig/projector-id "2001:db8::5" 2) (rig/projector-id "fe80::1%en0" 1)
+            (rig/projector-id "FE80:0:0:0:1:2:3:4" 0)])))
+  (testing "they read back, the old ones didn't"
+    (doseq [host ["fe80::1" "2001:db8::5" "fe80::1%en0" "10.0.0.5" "laser one"]]
+      (is (rig/readable-id? (rig/projector-id host 0)) host))
+    (is (not (rig/readable-id? (keyword "projector-fe80::1-0"))))
+    (is (not (rig/readable-id? (keyword "projector-laser one-0"))) "it reads back as :projector-laser"))
+  (testing "made unique as before"
+    (is (= :projector-fe80--1-0-2 (rig/unique-projector-id #{:projector-fe80--1-0} "fe80::1" 0)))))
+
+(deftest readable-renames-test
+  (is (= {} (rig/readable-renames {:projector-10-0-0-5-1 {} :p1 {}})) "every id reads back: nothing to rename")
+  (is (= {(keyword "projector-fe80::1-0") :projector-fe80--1-0
+          (keyword "projector-2001:db8::5-2") :projector-2001-db8--5-2}
+         (rig/readable-renames {(keyword "projector-fe80::1-0") {} (keyword "projector-2001:db8::5-2") {} :p1 {}}))
+      "each as projector-id makes its id now")
+  (is (= {(keyword "projector-fe80::1-0") :projector-fe80--1-0-2}
+         (rig/readable-renames {(keyword "projector-fe80::1-0") {} :projector-fe80--1-0 {}}))
+      "never another projector's id")
+  (is (= {(keyword "projector-fe80::1-0") :projector-fe80--1-0 (keyword "projector-fe80;;1-0") :projector-fe80--1-0-2}
+         (rig/readable-renames #{(keyword "projector-fe80::1-0") (keyword "projector-fe80;;1-0")}))
+      "nor one another's"))
+
 (deftest match-discovered-test
   (testing "a move: the same unit and output at a new address"
     (let [projectors {:projector-10-0-0-5-1 {:name "Laser L" :host "10.0.0.5" :port 7255 :service-id 1
@@ -309,6 +340,23 @@
       (is (= {:projector-10-0-0-5-1 [:unit unit-l 1] :projector-10-0-0-6-1 [:host "10.0.0.6" 1]}
              (rig/settled-ids (assoc-in projectors [:projector-10-0-0-6-1 :enabled?] false)))
           "neither on: the smaller id keeps it"))))
+
+(deftest match-discovered-ipv6-test
+  ;; Follow-up B2
+  (testing "a new laser at an IPv6 address gets an id that reads back"
+    (let [{:keys [new]} (rig/match-discovered {} [(device "fe80::1" unit-l 1) (device "2001:db8::5" nil 0)])]
+      (is (= [:projector-fe80--1-1 :projector-2001-db8--5-0] (mapv :id new)))
+      (is (every? rig/readable-id? (map :id new)))))
+  (testing "a known unit that moves to another IPv6 address keeps its projector"
+    (let [projectors {:projector-fe80--1-1 {:name "Laser L" :host "fe80::1" :service-id 1 :stable-id [:unit unit-l 1]}}]
+      (is (= {:moves {:projector-fe80--1-1 {:host "fe80::2" :port 7255}} :upgrades {} :new []
+              :notices ["Laser L moved to fe80::2 (same unit)."]}
+             (rig/match-discovered projectors [(device "fe80::2" unit-l 1)])))))
+  (testing "one known by its IPv6 address is found there, whatever its id"
+    (let [old (keyword "projector-fe80::1-0")]
+      (is (= {:moves {} :upgrades {} :new [] :notices []}
+             (rig/match-discovered {old {:name "Laser L" :host "fe80::1" :stable-id [:host "fe80::1" 0]}}
+                                   [(device "fe80::1" nil)]))))))
 
 (defn- driver-device [driver key & outputs]
   {:driver driver :device-key key :name (str "Nova " key)

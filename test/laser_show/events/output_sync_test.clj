@@ -97,22 +97,27 @@
                          ["content" {:event/type :timing/set-bpm :bpm 128.0}]
                          ["a fit setting (zones plan Z3)" {:event/type :projectors/set-fit :projector-id :a
                                                            :key :min-fps :value 30}]
-                         ["the safety limit" {:event/type :projectors/set-safety :projector-id :a
-                                              :safety {:limit [-0.5 -0.5 0.5 0.5]}}]
+                         ["the safety limit" {:event/type :projectors/set-safety-coordinate :projector-id :a
+                                              :path [:limit 0] :value -0.5}]
                          ["exclude from All" {:event/type :projectors/set-exclude-from-all :projector-id :a
                                               :exclude? true}]]]
     (testing label
       (is (nil? (refresh (run (streaming-state) event)))))))
 
 (deftest safety-change-requests-no-refresh-test
-  (doseq [[label event] [["a smaller zone" {:event/type :projectors/set-safety :projector-id :a
-                                           :safety {:limit [-0.5 -0.5 0.5 0.5]}}]
-                         ["a confirmed larger zone" {:event/type :projectors/set-safety :projector-id :a
-                                                     :safety {:limit [-1 -1 1 1]} :confirmed? true}]
-                         ["a blocked area" {:event/type :projectors/add-blocked-area :projector-id :a}]]]
-    (testing label
-      (is (nil? (refresh (run (streaming-state) event)))
-          "safety is read live by the frame provider; no engine restarts"))))
+  (let [smaller (run (streaming-state) {:event/type :projectors/set-safety-coordinate :projector-id :a
+                                        :path [:limit 0] :value -0.5})
+        asked (:state (run (:state smaller) {:event/type :projectors/drag-safety :projector-id :a
+                                             :path [:limit] :coordinates {0 -1.0}}))
+        allowed (run asked {:event/type :ui/confirm :review-id (get-in asked [:ui :dialogs :confirm :safety-review :id])})]
+    (is (= [-0.5 -1.0] (mapv #(get-in % [:projectors :a :safety :limit 0]) [(:state smaller) (:state allowed)]))
+        "the smaller zone applied, and the larger one once allowed")
+    (doseq [[label effects] [["a smaller zone" smaller]
+                             ["an allowed larger zone" allowed]
+                             ["a blocked area" (run (streaming-state) {:event/type :projectors/add-blocked-area :projector-id :a})]]]
+      (testing label
+        (is (nil? (refresh effects))
+            "safety is read live by the frame provider; no engine restarts")))))
 
 (deftest undo-of-a-host-edit-requests-a-sync-test
   (let [edited (:state (run (streaming-state) {:event/type :projectors/update-settings

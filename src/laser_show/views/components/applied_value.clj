@@ -10,9 +10,10 @@
 
    applied-control sends each change once, as the event its :on-change
    makes of the new value; a control that sends its own (a gesture/slider,
-   whose drag is one press) has no :on-change. settle-ms after the newest
-   change (one timer per control, started again by each, and again while a
-   press holds the control), if the control is still bound to the same
+   whose drag is one press; a colour picker, its pick) has no :on-change.
+   settle-ms after the newest change (one timer per control, started again
+   by each, and again while a press holds the control or a colour picker's
+   popup is open), if the control is still bound to the same
    :address, still shows that change and what applies (:value, from the
    view's subscription) isn't it, it shows what applies. The timer is no
    answer: a value that applies later is rendered when it comes, and wins.
@@ -36,7 +37,7 @@
            [javafx.collections ObservableMap]
            [javafx.event EventHandler]
            [javafx.scene Node]
-           [javafx.scene.control CheckBox CheckMenuItem ChoiceBox ComboBoxBase MenuItem RadioMenuItem Slider
+           [javafx.scene.control CheckBox CheckMenuItem ChoiceBox ColorPicker ComboBoxBase MenuItem RadioMenuItem Slider
             Spinner SpinnerValueFactory SpinnerValueFactory$DoubleSpinnerValueFactory
             SpinnerValueFactory$IntegerSpinnerValueFactory TextInputControl ToggleButton]
            [javafx.util Duration]))
@@ -122,10 +123,13 @@
 ;; Showing what applies
 
 (defn- pressed?
-  "Is a pointer press on owner, a gesture's (gesture/capture)? Its value is
-   the press's until it ends."
+  "Is the user still choosing owner's value: a pointer press on it, a
+   gesture's (gesture/capture), or a colour picker's palette or custom
+   colour dialog open, whose colours are previews until its action? Its
+   value is theirs until that ends."
   [owner]
-  (and (instance? Node owner) (some? (gesture/capture owner))))
+  (or (and (instance? Node owner) (some? (gesture/capture owner)))
+      (and (instance? ColorPicker owner) (.isShowing ^ColorPicker owner))))
 
 (defn- show-applied!
   "Set owner to what applies (its :user-data :value), unless it shows it or
@@ -230,7 +234,9 @@
      event to send, or nil when the change is no edit (it then shows what
      applies at once). Leave it out for a control that sends its own edits
      (gesture/slider: :desc {:fx/type gesture/slider …}, whose :value is the
-     model's): applied-control then only shows what applies after them
+     model's; a colour picker, which sends its pick on its action:
+     parameter-controls/color-picker): applied-control then only shows what
+     applies after them
 
    Layout props (:grid-pane/row, :h-box/hgrow …) and :fx/key go with it,
    as with any component."

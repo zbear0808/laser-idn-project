@@ -5,6 +5,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.animation.safety :as safety]
             [laser-show.state.domains :as domains]
+            [laser-show.state.history :as history]
             [laser-show.state.persistent :as persistent]
             [laser-show.state.rig-file :as rig-file]))
 
@@ -170,6 +171,45 @@
     (testing "nothing to rename: the same state"
       (is (identical? here (rig-file/rename-pins here {:projectors {}})))
       (is (identical? here (rig-file/rename-pins here nil))))))
+
+(deftest rename-projectors-test
+  ;; Follow-up B2: a projector an earlier build named after an IPv6 host, at
+  ;; an id that reads back, everywhere it is named
+  (let [old (keyword "projector-fe80::1-1")
+        new :projector-fe80--1-1
+        pin (keyword "auto.laser" (name old))
+        state (-> (domains/build-initial-state)
+                  (assoc :projectors {old (assoc laser-l :host "fe80::1")
+                                      :hand {:name "LSPS 1" :driver :lsps :stable-id [:manual :lsps :hand]}})
+                  (assoc :virtual-projectors {:vp-1 {:name "VP" :parent-projector-id old :zone-groups []}})
+                  (assoc :rig {:order [:hand old] :middle :split :split-width 0.75})
+                  (assoc-in [:chains :projector-effects old] {:items [{:effect-id :rgb-curves}]})
+                  (assoc-in [:chains :cue-chains [0 0]] (pinned pin))
+                  (assoc-in [:chains :cue-chains [1 0]] (pinned :graphics))
+                  (assoc-in [:grid :column-targets 2] pin)
+                  (assoc-in [:config :preview :grid-cells 1 :target] pin))
+        renamed (rig-file/rename-projectors state {old new})]
+    (is (= #{new :hand} (set (keys (:projectors renamed)))))
+    (is (= (get-in state [:projectors old]) (get-in renamed [:projectors new])) "its settings")
+    (is (= {new {:items [{:effect-id :rgb-curves}]}} (get-in renamed [:chains :projector-effects])) "its calibration")
+    (is (= [:hand new] (get-in renamed [:rig :order])) "its place")
+    (is (= new (get-in renamed [:virtual-projectors :vp-1 :parent-projector-id])) "its virtual projector")
+    (is (= [:auto.laser/projector-fe80--1-1 :auto.laser/projector-fe80--1-1 :auto.laser/projector-fe80--1-1 :graphics]
+           [(get-in renamed [:chains :cue-chains [0 0] :target]) (get-in renamed [:grid :column-targets 2])
+            (get-in renamed [:config :preview :grid-cells 1 :target]) (get-in renamed [:chains :cue-chains [1 0] :target])])
+        "every pin to it, and nothing else")
+    (is (= (dissoc renamed :projectors :virtual-projectors :rig :chains :grid :config)
+           (dissoc state :projectors :virtual-projectors :rig :chains :grid :config))
+        "nothing else changes")
+    (is (= (history/extract-document-state renamed)
+           (rig-file/rename-projectors (history/extract-document-state state) {old new}))
+        "a document as undo keeps it is renamed the same way")
+    (testing "another driver's own stable id follows its id"
+      (is (= [:manual :lsps :lsps-1] (get-in (rig-file/rename-projectors state {:hand :lsps-1}) [:projectors :lsps-1 :stable-id]))))
+    (testing "nothing to rename, a projector that isn't there, or an id that is taken: the same state"
+      (is (identical? state (rig-file/rename-projectors state {})))
+      (is (identical? state (rig-file/rename-projectors state {:nope :other})))
+      (is (identical? state (rig-file/rename-projectors state {old :hand}))))))
 
 ;; Setting the rig up from a show (09 §7)
 

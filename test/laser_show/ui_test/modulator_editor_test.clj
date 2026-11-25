@@ -11,10 +11,15 @@
    show in them. And a modulator's fields: two edits from one render both
    stay, and what is typed into one is stored in it alone (reactivity plan
    07). And the sliders' drags, each one press, one undo step (reactivity
-   plan 16)."
+   plan 16). And ∿, queued behind a reorder, turns on the effect it was
+   clicked for (follow-up B6); an :int field stores whole numbers (B16b); a
+   slider re-rendered for another effect ends its press (B14); the
+   dropdown and the fields are the types as published (R1)."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.animation.modulator-registry :as reg]
+            [laser-show.animation.registries :as registries]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.keyframe :as keyframe]
             [laser-show.routing.zone-patterns :as zone-patterns]
@@ -94,6 +99,30 @@
     (is (ui/wait-for! #(and (not (ui/selected? enable-keyframes)) (ui/selected? ".modulator-toggle-active")
                             (= "△ Triangle" (shown "#modulator-type-amount")) (= config (amount))))
         "Redo restores the stored modulator and its controls")))
+
+(deftest modulate-queued-behind-a-reorder-turns-on-its-own-effect-test
+  ;; Follow-up B6: the ∿ toggle names its effect by its instance. Clicked for
+  ;; A, and queued behind a reorder that puts B in A's place, it turns on
+  ;; A's modulation where A is now, and leaves B as it was
+  (let [a (random-uuid)
+        b (random-uuid)
+        intensity (fn [id] {:id id :effect-id :intensity :enabled? true :params {:amount 1.0}})
+        cell-items #(get-in (state/get-raw-state) [:chains :effect-chains [0 0] :items])
+        amount-of (fn [id] (some #(when (= id (:id %)) (get-in % [:params :amount])) (cell-items)))]
+    (events/write-state! #(-> %
+                              (assoc-in [:chains :effect-chains [0 0]] {:active? false :items [(intensity a) (intensity b)]})
+                              (assoc-in [:list-ui [:effect-chain 0 0]] {:selected-ids #{a} :last-selected-id a})))
+    (events/dispatch! {:event/type :effect-chain/open-editor :col 0 :row 0})
+    (ui/wait-for! #(some? (node "#modulate-amount")))
+    ;; The reorder the chain list sends, then a click on A's ∿, in one FX
+    ;; turn: the click's event is the one rendered while A was first
+    (ui/on-fx-thread #(do (events/dispatch! {:event/type :chain/set-items :domain :effect-chains :entity-key [0 0]
+                                             :items [(intensity b) (intensity a)]})
+                          (.fire ^ToggleButton (node "#modulate-amount"))))
+    (is (ui/wait-for! #(reg/active-modulator? (amount-of a))) "A's Amount is modulated, A now second")
+    (is (= [b a] (mapv :id (cell-items))))
+    (is (= 1.0 (amount-of b)) "B's, in A's old place, stays")
+    (is (ui/wait-for! #(ui/selected? "#modulate-amount")) "and A's editor shows it on")))
 
 (deftest pulse-types-are-in-the-dropdown-test
   (open-amount-editor! {:type :sine :active? true :min 0.0 :max 1.0 :period 1.0})
@@ -405,11 +434,23 @@
             (is (nil? (node (in-actions "#keyframe-value"))))
             (is (nil? (node (in-actions ".spinner"))))))))))
 
+(defn- context-opts
+  "The options a component mounted in a window of its own gets, as the
+   app's renderer gives them: a context of the app's state now (the
+   modulator types start-test! published too, which the modulator controls
+   read), cljfx's context-aware lifecycle, and a map event handler that
+   does nothing."
+  []
+  {:fx/context (fx/create-context (state/get-raw-state) state/cache-factory)
+   :fx.opt/type->lifecycle #(or (fx/keyword->lifecycle %) (fx/fn->lifecycle-with-context %))
+   :fx.opt/map-event-handler (fn [_])})
+
 (defn- mount!
   "The modulator control for an Intensity amount, as an editor of domain
    would show it, in a window of its own; returns the window."
   ^Stage [domain]
-  (let [stage (ui/on-fx-thread
+  (let [opts (context-opts)
+        stage (ui/on-fx-thread
                #(let [component (fx/create-component
                                  {:fx/type mod-param/modulator-param-control
                                   :param-key :amount
@@ -418,7 +459,7 @@
                                   :on-change-event {:event/type :chain/update-param :domain domain :entity-key :p1 :effect-path [0]}
                                   :on-text-event {:event/type :chain/update-param-from-text :domain domain :entity-key :p1 :effect-path [0]}
                                   :modulator-event-base {:domain domain :entity-key :p1 :effect-path [0]}}
-                                 {:fx.opt/map-event-handler (fn [_])})]
+                                 opts)]
                   (doto (Stage.)
                     (.setScene (Scene. (fx/instance component) 500 400))
                     (.show))))]
@@ -472,16 +513,41 @@
     (ui/wait-for! #(= :slider-2 (:slot (amount))))
     (ui/wait-for! #(= "2: Morph" (shown "#modulator-amount-slot")))))
 
+(deftest modulator-controls-follow-the-published-types-test
+  ;; Follow-up R1: the type dropdown and a modulator's fields are the types
+  ;; as published (subs/modulator-descriptors, reactivity plan 17), not the
+  ;; registry read while rendering: a type registered again shows as it is
+  ;; now, once published, in an editor that stays open
+  (let [triangle (reg/get-modulator :triangle)
+        period-max #(let [^Slider s (node "#modulator-amount-period")] (ui/on-fx-thread (fn [] (.getMax s))))]
+    (open-amount-editor! {:type :triangle :active? true :period 7.0 :min 0.2 :max 0.8})
+    (is (= "△ Triangle" (shown "#modulator-type-amount")))
+    (is (== 16.0 (period-max)))
+    (try
+      (reg/register-modulator! (assoc triangle
+                                      :name "Ramp"
+                                      :params (mapv #(cond-> % (= :period (:key %)) (assoc :max 32.0)) (:params triangle))))
+      (events/dispatch! (registries/published-event))
+      (is (ui/wait-for! #(= "△ Ramp" (shown "#modulator-type-amount"))) "the dropdown shows the type as published")
+      (is (some #(= "Ramp" (:name %)) (items "#modulator-type-amount")) "among its choices")
+      (is (ui/wait-for! #(== 32.0 (period-max))) "and its fields as published")
+      (finally
+        (reg/register-modulator! triangle)
+        (events/dispatch! (registries/published-event))))
+    (is (ui/wait-for! #(and (= "△ Triangle" (shown "#modulator-type-amount")) (== 16.0 (period-max))))
+        "put back, and published: as before")))
+
 
 ;; A slider's drag is one press (reactivity plan 16)
 
 (defn- mount-desc!
-  "desc, in a window of its own (its map events go nowhere: the sliders send
-   theirs through events/dispatch!, to the app). Returns [the window, a fn
-   that renders it again with a new desc, as the app's state would]."
+  "desc, in a window of its own, on a context of the app's state now
+   (context-opts; its map events go nowhere: the sliders send theirs
+   through events/dispatch!, to the app). Returns [the window, a fn that
+   renders it again with a new desc, as the app's state would]."
   [desc]
   (ui/on-fx-thread
-   #(let [opts {:fx.opt/map-event-handler (fn [_])}
+   #(let [opts (context-opts)
           component (atom (fx/create-component desc opts))
           stage (doto (Stage.)
                   (.setScene (Scene. (fx/instance @component) 500 300))
@@ -629,6 +695,61 @@
             (is (= "Adjust Period" (peek (undo-labels))) "one step for the whole drag"))
           (finally (ui/on-fx-thread #(.close stage))))))))
 
+(deftest slider-re-rendered-for-another-effect-ends-its-press-test
+  ;; Follow-up B14: re-rendered mid-press for the same parameter of another
+  ;; effect, under the same label, a slider stands for another control: its
+  ;; press ends, and the rest of its drag sends nothing. For a parameter's
+  ;; slider and for a modulator's field
+  (let [a (random-uuid)
+        b (random-uuid)
+        spec {:key :amount :label "Amount" :type :float :min 0.0 :max 3.0 :default 1.0}
+        wave {:type :sine :active? true :min 1.0 :max 2.0 :period 1.0}
+        intensity (fn [id amount] {:id id :effect-id :intensity :enabled? true :params {:amount amount}})
+        amount-of (fn [i] (get-in (state/get-raw-state) [:chains :effect-chains [0 0] :items i :params :amount]))
+        address (fn [id i] {:domain :effect-chains :entity-key [0 0] :effect-path [i] :effect-instance-id id})
+        ;; Amount's slider for effect id, at place i
+        slider (fn [id i] {:fx/type param-controls/param-slider
+                           :param-key :amount :param-spec spec :current-value 1.0
+                           :on-change-event (assoc (address id i) :event/type :chain/update-param)
+                           :on-text-event (assoc (address id i) :event/type :chain/update-param-from-text)})
+        ;; Amount's modulator, with its Min slider, for effect id at place i
+        modulator (fn [id i] {:fx/type mod-param/modulator-param-control
+                              :param-key :amount :param-spec spec :current-value wave
+                              :on-change-event (assoc (address id i) :event/type :chain/update-param)
+                              :on-text-event (assoc (address id i) :event/type :chain/update-param-from-text)
+                              :modulator-event-base (address id i)})
+        retargeted! (fn [desc-a desc-b selector]
+                      (let [[stage render!] (mount-desc! desc-a)
+                            sent (atom [])]
+                        (try
+                          (let [s (ui/on-fx-thread #(.lookup (.getRoot (.getScene ^Stage stage)) selector))]
+                            (record-dispatches!
+                             sent
+                             #(do
+                                (drag-track! s [0.1])
+                                (ui/wait-for! (fn [] (some? (open-press))))
+                                (reset! sent [])
+                                (render! desc-b)
+                                (fire-track! s MouseEvent/MOUSE_DRAGGED 0.7)
+                                (fire-track! s MouseEvent/MOUSE_RELEASED 0.7)))
+                            (events/flush!)
+                            (mapv :event/type @sent))
+                          (finally (ui/on-fx-thread #(.close ^Stage stage))))))]
+    (testing "a parameter's slider, from A to B"
+      (events/write-state! assoc-in [:chains :effect-chains [0 0]] {:active? false :items [(intensity a 1.0) (intensity b 1.0)]})
+      (is (= [:history/commit-transaction] (retargeted! (slider a 0) (slider b 1) "#param-amount-slider"))
+          "its end, and nothing more")
+      (is (ui/wait-for! #(nil? (open-press))))
+      (is (< 0.1 (amount-of 0) 0.6) "A keeps what its press sent: 0.1 of 0 to 3")
+      (is (= 1.0 (amount-of 1)) "B, the effect it stands for now, got nothing"))
+    (testing "a modulator's Min slider, from A's Amount to B's"
+      (events/write-state! assoc-in [:chains :effect-chains [0 0]] {:active? false :items [(intensity a wave) (intensity b wave)]})
+      (is (= [:history/commit-transaction] (retargeted! (modulator a 0) (modulator b 1) "#modulator-amount-min"))
+          "its end, and nothing more")
+      (is (ui/wait-for! #(nil? (open-press))))
+      (is (not= 1.0 (:min (amount-of 0))) "A's Min took what its press sent")
+      (is (= wave (amount-of 1)) "B's modulator got nothing"))))
+
 
 ;; Two edits to a modulator's fields from one render (reactivity plan 07)
 
@@ -678,3 +799,82 @@
       (ui/fill! robot "#modulator-amount-path" "/fader/1")
       (ui/submit! robot "#modulator-amount-path")
       (is (ui/wait-for! #(and (= "/fader/1" (:path (amount))) (= "/fader/1" (text-of "#modulator-amount-path"))))))))
+
+(deftest int-fields-show-and-store-whole-numbers-test
+  ;; Follow-up B16b: the Step's Steps is an :int field: its slider stops at
+  ;; whole numbers, its field shows one, and both store one
+  (let [robot (ui/robot)
+        config {:type :step :active? true :source :hit :min 0.0 :max 1.0 :steps 4 :order :up :values []}
+        slider "#modulator-amount-steps"
+        field "#modulator-amount-steps-field"]
+    (open-amount-editor! config)
+    (ui/wait-for! #(and (some? (node slider)) (some? (node field))))
+    (is (= "4" (text-of field)))
+    (testing "a click on the slider's track, 0.37 of the way along 2 to 16 (7.18)"
+      (let [s (node slider)]
+        (ui/on-fx-thread #(do (track-event! s MouseEvent/MOUSE_PRESSED 0.37)
+                              (track-event! s MouseEvent/MOUSE_RELEASED 0.37))))
+      (is (ui/wait-for! #(let [steps (:steps (amount))]
+                           (and (integer? steps) (not= 4 steps)
+                                (= (str steps) (text-of field))
+                                (== steps (slider-value slider)))))
+          "a whole number, stored and shown by the field and the slider")
+      (is (= (dissoc config :steps) (dissoc (amount) :steps)) "the rest of the Step stays"))
+    (testing "a typed 6.6"
+      (ui/fill! robot field "6.6")
+      (ui/submit! robot field)
+      (is (ui/wait-for! #(and (= 7 (:steps (amount))) (= "7" (text-of field)) (== 7.0 (slider-value slider))))))))
+
+(deftest int-param-sliders-store-whole-numbers-test
+  ;; Follow-up N1: an :int parameter's sliders (Decimate's scan rate and
+  ;; target fps) stop at whole numbers, nowhere between, an arrow key moves
+  ;; them by one, and what a drag sends between them is stored as a whole
+  ;; number: the effect chain editor's slider and a parameter list's
+  ;; (param-slider, one press)
+  (let [param-of (fn [k] (get-in (state/get-raw-state) [:chains :effect-chains [0 0] :items 0 :params k]))
+        sent-values (fn [sent k] (keep #(when (= k (:param-key %)) (:fx/event %)) @sent))
+        whole? integer?
+        value-of (fn [^Slider s] (ui/on-fx-thread #(.getValue s)))
+        right-key! (fn [^Slider s] (ui/on-fx-thread #(Event/fireEvent s (KeyEvent. KeyEvent/KEY_PRESSED "" "" KeyCode/RIGHT
+                                                                                     false false false false))))]
+    (events/write-state! assoc-in [:chains :effect-chains [0 0]]
+                         {:active? false :items [{:id (random-uuid) :effect-id :decimate :enabled? true :params {:kpps 25 :fps 30}}]})
+    (testing "the effect chain editor's Scan rate slider"
+      (events/dispatch! {:event/type :effect-chain/open-editor :col 0 :row 0})
+      (ui/wait-for! #(some? (node "#param-kpps-slider")))
+      (let [s (node "#param-kpps-slider")
+            sent (atom [])]
+        (record-dispatches! sent #(drag-track! s [0.37 0.52]))
+        (is (some (complement whole?) (sent-values sent :kpps)) "mid-drag the slider sends a fraction")
+        (is (ui/wait-for! #(let [v (param-of :kpps)] (and (whole? v) (== v (Math/round (double (last (sent-values sent :kpps))))))))
+            "stored as the whole number nearest it")
+        (fire-track! s MouseEvent/MOUSE_RELEASED 0.52)
+        (is (ui/wait-for! #(let [v (param-of :kpps)]
+                             (and (whole? v) (== v (value-of s)) (= (str v) (text-of "#param-kpps-field")))))
+            "released: a whole number on the slider, in its field and stored")
+        (let [before (param-of :kpps)]
+          (right-key! s)
+          (is (ui/wait-for! #(= (inc before) (param-of :kpps))) "an arrow key moves it by one"))))
+    (testing "a parameter list's slider (param-slider, one press)"
+      (let [id (get-in (state/get-raw-state) [:chains :effect-chains [0 0] :items 0 :id])
+            address {:domain :effect-chains :entity-key [0 0] :effect-path [0] :effect-instance-id id}
+            [stage _] (mount-desc! {:fx/type param-controls/param-slider
+                                    :param-key :fps
+                                    :param-spec {:key :fps :label "Target fps" :type :int :default 30 :min 5 :max 120}
+                                    :current-value (param-of :fps)
+                                    :on-change-event (assoc address :event/type :chain/update-param)
+                                    :on-text-event (assoc address :event/type :chain/update-param-from-text)})
+            sent (atom [])]
+        (try
+          (let [s (ui/on-fx-thread #(.lookup (.getRoot (.getScene ^Stage stage)) "#param-fps-slider"))]
+            (record-dispatches! sent #(drag-track! s [0.2 0.61]))
+            (is (some (complement whole?) (sent-values sent :fps)) "mid-drag the slider sends a fraction")
+            (is (ui/wait-for! #(let [v (param-of :fps)] (and (whole? v) (== v (Math/round (double (last (sent-values sent :fps))))))))
+                "stored as the whole number nearest it")
+            (fire-track! s MouseEvent/MOUSE_RELEASED 0.61)
+            (is (ui/wait-for! #(and (nil? (open-press)) (whole? (param-of :fps)) (== (param-of :fps) (value-of s))))
+                "released: one press ended, a whole number on the slider and stored")
+            (let [before (param-of :fps)]
+              (right-key! s)
+              (is (ui/wait-for! #(= (inc before) (param-of :fps))) "an arrow key moves it by one")))
+          (finally (ui/on-fx-thread #(.close ^Stage stage))))))))

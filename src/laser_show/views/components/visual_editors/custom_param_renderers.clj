@@ -30,6 +30,7 @@
             [laser-show.views.components.visual-editors.hue-shift-canvas :as hue-shift-canvas]
             [laser-show.views.components.tabs :as tabs]
             [laser-show.views.components.modulator-param-control :as mod-param] 
+            [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.common.util :as u]))
 
 
@@ -698,30 +699,31 @@
 ;; Set Color Picker Visual Editor
 
 
+(defn- channel-text
+  "A swatch label: \"R: 25%\", with ∿ after it while a modulator moves the
+   channel (the swatch shows the middle of its range)."
+  [letter value v]
+  (str (format "%s: %.0f%%" letter (* value 100.0)) (when (reg/active-modulator? v) " ∿")))
+
 (defn set-color-picker-visual-editor
   "Visual editor for set-color effect - color picker with preview swatch.
   
   Presents the three separate :red, :green, :blue parameters as a unified
-  color picker interface. When the color is changed, dispatches three
-  separate events to update each channel.
+  color picker interface (param-controls/color-picker). A picked color is
+  sent as event-template with :color [red green blue], one edit of all
+  three channels. The swatch, its labels and the picker show each channel
+  as param-controls/color-channel does, whatever it holds (a number, or a
+  modulator that is off or on): rendering never throws.
   
   Props:
   - :current-params - Current parameter values {:red :green :blue ...}
-  - :event-template - Base event for param changes (will add :param-key :value for each channel)
+  - :event-template - Base event for the color change (gets :color)
   - :fx-key - (optional) Unique key for color picker
   - :hint-text - (optional) Hint text above picker"
   [{:keys [current-params event-template fx-key hint-text]}]
   (let [params-map (or current-params {})
-        red (get params-map :red 1.0)
-        green (get params-map :green 1.0)
-        blue (get params-map :blue 1.0)
+        [red green blue] (map #(param-controls/color-channel (get params-map %)) [:red :green :blue])
         actual-hint (or hint-text "Click to select color")
-        ;; Create JavaFX Color from normalized RGB values
-        current-color (javafx.scene.paint.Color/color
-                       (max 0.0 (min 1.0 (double red)))
-                       (max 0.0 (min 1.0 (double green)))
-                       (max 0.0 (min 1.0 (double blue)))
-                       1.0)
         picker-key (or fx-key [:set-color-picker])]
     {:fx/type :v-box
      :spacing 8
@@ -736,6 +738,7 @@
                  :spacing 12
                  :alignment :center-left
                  :children [{:fx/type :region
+                             :id "set-color-swatch"
                              :style (str "-fx-background-color: rgb("
                                          (int (* red 255)) ","
                                          (int (* green 255)) ","
@@ -749,21 +752,22 @@
                             {:fx/type :v-box
                              :spacing 2
                              :children [{:fx/type :label
-                                         :text (format "R: %.0f%%" (* red 100))
+                                         :text (channel-text "R" red (:red params-map))
                                          :style-class ["text-monospace" "text-small"]}
                                         {:fx/type :label
-                                         :text (format "G: %.0f%%" (* green 100))
+                                         :text (channel-text "G" green (:green params-map))
                                          :style-class ["text-monospace" "text-small"]}
                                         {:fx/type :label
-                                         :text (format "B: %.0f%%" (* blue 100))
+                                         :text (channel-text "B" blue (:blue params-map))
                                          :style-class ["text-monospace" "text-small"]}]}]}
 
-                ;; Color picker - when changed, dispatches events for each channel
-                {:fx/type :color-picker
+                ;; Color picker - a pick sends the three channels as one color
+                {:fx/type param-controls/color-picker
                  :fx/key picker-key
-                 :value current-color
-                 :style "-fx-color-label-visible: false;"
-                 :on-action event-template}]}))
+                 :id "set-color-picker"
+                 :current-params params-map
+                 :event event-template
+                 :style "-fx-color-label-visible: false;"}]}))
 
 
 

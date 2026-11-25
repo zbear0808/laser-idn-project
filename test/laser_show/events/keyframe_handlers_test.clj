@@ -6,6 +6,7 @@
    state as part of the event map and return effect maps with :state key."
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.animation.effects.intensity] ; :intensity's :amount is a :float
+            [laser-show.animation.effects.points] ; :decimate's :kpps is an :int
             [laser-show.events.core :as events]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
@@ -591,5 +592,85 @@
           kf-mod (get-in result [:chains :effect-chains [0 0] :items 0 :items 0 :keyframe-modulator])]
       (is (some? kf-mod) "Should create keyframe modulator in nested effect")
       (is (true? (:enabled? kf-mod))))))
+
+
+;; A keyframe's colour (follow-ups B4, N2)
+
+
+(deftest update-keyframe-color-param-takes-a-plain-colour-test
+  ;; The colour picker reads its colour on the FX thread and sends it as
+  ;; :color [red green blue]; the handler never reads a node
+  (let [white {:red 1.0 :green 1.0 :blue 1.0}
+        effect {:id #uuid "44444444-4444-4444-4444-444444444444" :effect-id :set-color :enabled? true :params white
+                :keyframe-modulator {:enabled? true :selected-keyframe 1
+                                     :keyframes [{:position 0.0 :params white} {:position 1.0 :params white}]}}
+        state (make-test-state [effect])
+        event (fn [& {:as more}]
+                (merge {:event/type :keyframe/update-color-param :domain :effect-chains :entity-key [0 0]
+                        :effect-instance-id (:id effect) :keyframe-idx 1 :state state}
+                       more))
+        frames #(mapv (fn [kf] (select-keys (:params kf) [:red :green :blue]))
+                      (get-in % [:state :chains :effect-chains [0 0] :items 0 :keyframe-modulator :keyframes]))]
+    (testing "the selected keyframe takes the colour; the effect's own stays"
+      (let [result (keyframe/handle (event :color [0.0 0.5 1.0]))]
+        (is (= [white {:red 0.0 :green 0.5 :blue 1.0}] (frames result)))
+        (is (= white (get-in result [:state :chains :effect-chains [0 0] :items 0 :params])))))
+    (testing "anything but a colour, no such keyframe, or the colour it has: nothing ({})"
+      (doseq [more [{:fx/event (ActionEvent.)} {:color nil} {:color [0.1 0.2]} {:color "red"}
+                    {:color [0.0 0.5 1.0] :keyframe-idx 5} {:color [0.0 0.5 1.0] :keyframe-idx nil}
+                    {:color [1.0 1.0 1.0]}]]
+        (is (= {} (keyframe/handle (merge (event) more))) (pr-str (dissoc more :fx/event)))))))
+
+(deftest update-keyframe-color-param-follows-the-instance-test
+  ;; Follow-up N2: a keyframe's colour edit names its effect by its instance
+  ;; (and owner), like the modulator's (reactivity plan 07, B6): queued
+  ;; behind a reorder, it lands on that effect's keyframe where the effect
+  ;; is now, or nowhere once it is gone; never on a place
+  (let [a #uuid "aaaaaaaa-0000-0000-0000-0000000000c3"
+        b #uuid "bbbbbbbb-0000-0000-0000-0000000000c3"
+        p #uuid "cccccccc-0000-0000-0000-0000000000c3"
+        white {:red 1.0 :green 1.0 :blue 1.0}
+        keyframed (fn [id] {:id id :effect-id :set-color :enabled? true :params white
+                            :keyframe-modulator {:enabled? true :selected-keyframe 1
+                                                 :keyframes [{:position 0.0 :params white} {:position 1.0 :params white}]}})
+        ;; A's pick for its keyframe 1, rendered while A was first
+        pick {:event/type :keyframe/update-color-param :domain :effect-chains :entity-key [0 0]
+              :effect-instance-id a :effect-path [0] :keyframe-idx 1 :color [0.0 0.5 1.0]}
+        cell [:chains :effect-chains [0 0] :items]
+        frame-1 #(select-keys (get-in %1 (conj %2 :keyframe-modulator :keyframes 1 :params)) [:red :green :blue])]
+    (testing "B now where A was rendered: A's keyframe, where A is now"
+      (let [state (assoc-in {} cell [(keyframed b) (keyframed a)])
+            after (:state (keyframe/handle (assoc pick :state state)))]
+        (is (= {:red 0.0 :green 0.5 :blue 1.0} (frame-1 after (conj cell 1))))
+        (is (= white (frame-1 after (conj cell 0))) "B's stays")))
+    (testing "A gone, B in its place; or the pick names no instance: nothing ({})"
+      (is (= {} (keyframe/handle (assoc pick :state (assoc-in {} cell [(keyframed b)])))))
+      (is (= {} (keyframe/handle (assoc (dissoc pick :effect-instance-id) :state (assoc-in {} cell [(keyframed a)]))))))
+    (testing "a cue item's effect: the owner, then the effect among its own"
+      (let [root [:chains :cue-chains [0 0] :items]
+            state (assoc-in {} root [{:id p :type :preset :preset-id :circle :effects [(keyframed b) (keyframed a)]}])
+            event (assoc pick :domain :cue-chains :owner-id p :state state)]
+        (is (= {:red 0.0 :green 0.5 :blue 1.0} (frame-1 (:state (keyframe/handle event)) (conj root 0 :effects 1))))
+        (is (= {} (keyframe/handle (dissoc event :owner-id))) "no owner named")))))
+
+
+;; A keyframe's :int parameter (follow-up N1)
+
+
+(deftest update-param-rounds-an-int-param-test
+  ;; A slider's number for a keyframe's :int parameter (Decimate's scan rate)
+  ;; is stored as a whole number, as the effect's own is
+  (let [effect {:id #uuid "55555555-0000-0000-0000-0000000000e1" :effect-id :decimate :enabled? true
+                :params {:kpps 25 :fps 30}
+                :keyframe-modulator {:enabled? true :selected-keyframe 1
+                                     :keyframes [{:position 0.0 :params {:kpps 20 :fps 30}}
+                                                 {:position 1.0 :params {:kpps 40 :fps 30}}]}}
+        edit (fn [v] (keyframe/handle {:event/type :keyframe/update-param :domain :effect-chains :entity-key [0 0]
+                                       :effect-path [0] :keyframe-idx 1 :param-key :kpps :fx/event v
+                                       :state (make-test-state [effect])}))
+        kpps #(get-in % [:state :chains :effect-chains [0 0] :items 0 :keyframe-modulator :keyframes 1 :params :kpps])]
+    (is (= 26 (kpps (edit 25.6))))
+    (is (instance? Long (kpps (edit 25.6))) "a long, not 26.0")
+    (is (= {} (edit 40.2)) "40, the 40 it has: nothing")))
 
 

@@ -215,8 +215,9 @@
 
    Props: a :slider's, but no :on-value-changed, :on-mouse-pressed or
    :on-mouse-released; and :gesture {:label (the undo label) :source-id
-   (the control) :on-value-changed (the value event's template, as cljfx
-   would take it: the value as :fx/event)}."
+   (the control, down to the effect it edits: the same label on another
+   effect is another control) :on-value-changed (the value event's
+   template, as cljfx would take it: the value as :fx/event)}."
   [{:keys [gesture value] :as props}]
   (wrap-owner {:fx/type with-slider-props
                :props {:gesture gesture :model-value value}
