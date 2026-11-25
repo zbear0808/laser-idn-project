@@ -65,6 +65,11 @@
                 [(assoc (zone-patterns/preset-instance :steps :cue) :id (:effect-instance-id b1-grid))])
       (run {:event/type :step-grid/open :target b1-grid})))
 
+(def ^:private a1-item
+  "The id locked-blocks-structure-edits-test gives the item of the cue at
+   A1: an item's Target names it (follow-up R2)."
+  #uuid "00000000-0000-0000-0000-0000000000a1")
+
 (def ^:private structure-edits
   "One real edit of each kind the lock refuses, on starter."
   [{:event/type :grid/move-cell :from-col 0 :from-row 0 :to-col 5 :to-row 2}
@@ -121,7 +126,7 @@
    ;; Where a cue, an item, a track or a clip goes (zones plan Z4): as a
    ;; column's default, they re-route it, and can make it reach the audience
    {:event/type :cue-chain/set-target :col 0 :row 0 :target :zone/a}
-   {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-path [0] :target :zone/b}
+   {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-id a1-item :target :zone/b}
    {:event/type :timeline/set-track-target :col 6 :row 3 :track-id :t1 :target :zone/a}
    {:event/type :timeline/set-clip-target :col 6 :row 3 :item-id :c1 :target :graphics}
    ;; A cue's zone pattern and a new pattern cell move pictures between
@@ -152,6 +157,8 @@
                (assoc-in [:projectors :p1 :zone-groups] [:graphics])
                (assoc-in [:projectors :p1 :tags] #{:graphics})
                (assoc-in [:chains :cue-chains [7 3]] {:items [] :target :auto.laser/p9})
+               ;; the item of the cue at A1, by an id the events name
+               (assoc-in [:chains :cue-chains [0 0] :items 0 :id] a1-item)
                (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 50}] {:type :zone-map :target :map/odd-even})
                ;; a pattern pad's key (zones plan Z5)
                (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 51}] {:type :pattern-pad :target :chase})
@@ -300,7 +307,10 @@
      :step-grid/paint (assoc press :state pressed :row 0 :step 2)}))
 
 (deftest blocked-events-name-real-events-test
-  (let [valid (grid-press-events)]
+  (let [valid (assoc (grid-press-events)
+                     ;; It does nothing ({}) for an item that isn't there
+                     :cue-chain/set-item-target {:state (assoc-in (starter) [:chains :cue-chains [0 0] :items 0 :id] a1-item)
+                                                 :col 0 :row 0 :item-id a1-item :target :zone/b})]
     (doseq [type show-lock/blocked-events]
       ;; A chooser's result without a file is the one that does nothing (cancelled)
       (let [event (get valid type {:state (starter) :file-path "x.zip"})

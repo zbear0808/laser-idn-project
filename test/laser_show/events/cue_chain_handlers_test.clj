@@ -408,37 +408,47 @@
 ;; Targets (zones plan Z4): one :target on the cue, its items and groups
 
 
-(defn- set-item-target [state item-path target]
-  (cue-chain/handle {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-path item-path :target target :state state}))
+(def ^:private with-items
+  "The cue at [0 0]: Circle, then the group Pair holding Star."
+  (assoc-in sample-state-with-item [:chains :cue-chains [0 0] :items]
+            [{:type :preset :id :circle :preset-id :circle :params {:size 100} :effects []}
+             {:type :group :id :pair :name "Pair" :items [{:type :preset :id :star :preset-id :star :params {}}]}]))
+
+(defn- set-item-target [state item-id target]
+  (cue-chain/handle {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-id item-id :target target :state state}))
 
 (deftest set-item-target-test
   (testing "an item's own target, in normal form"
-    (let [result (set-item-target sample-state-with-item [0] :zone/a)]
+    (let [result (set-item-target with-items :circle :zone/a)]
       (is (= :zone/a (get-in result [:state :chains :cue-chains [0 0] :items 0 :target])))
-      (is (history/derive-dirty sample-state-with-item (:state result)) "an edit")
-      (is (= [:zone/a :zone/b] (get-in (set-item-target sample-state-with-item [0] [:zone/b :zone/a :zone/b])
+      (is (history/derive-dirty with-items (:state result)) "an edit")
+      (is (= [:zone/a :zone/b] (get-in (set-item-target with-items :circle [:zone/b :zone/a :zone/b])
                                        [:state :chains :cue-chains [0 0] :items 0 :target])))))
   (testing "a group and its child, each its own"
-    (let [state (assoc-in sample-state-with-item [:chains :cue-chains [0 0] :items]
-                          [{:type :group :id :g :name "Pair" :items [{:type :preset :id :c :preset-id :circle :params {}}]}])
-          group (:state (set-item-target state [0] [:zone/a :zone/b]))
-          child (:state (set-item-target group [0 :items 0] :graphics))]
-      (is (= [:zone/a :zone/b] (get-in child [:chains :cue-chains [0 0] :items 0 :target])))
-      (is (= :graphics (get-in child [:chains :cue-chains [0 0] :items 0 :items 0 :target])))))
+    (let [group (:state (set-item-target with-items :pair [:zone/a :zone/b]))
+          child (:state (set-item-target group :star :graphics))]
+      (is (= [:zone/a :zone/b] (get-in child [:chains :cue-chains [0 0] :items 1 :target])))
+      (is (= :graphics (get-in child [:chains :cue-chains [0 0] :items 1 :items 0 :target])))))
   (testing "from a picker's choice (:fx/event)"
-    (is (= :graphics (get-in (cue-chain/handle {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-path [0]
-                                                 :fx/event {:id :graphics :name "Graphics"} :state sample-state-with-item})
+    (is (= :graphics (get-in (cue-chain/handle {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-id :circle
+                                                 :fx/event {:id :graphics :name "Graphics"} :state with-items})
                              [:state :chains :cue-chains [0 0] :items 0 :target]))))
-  (testing "an item that isn't there: nothing changes"
-    (is (= {:state sample-state-with-item} (set-item-target sample-state-with-item [5] :zone/a)))
-    (is (= {:state base-state} (cue-chain/handle {:event/type :cue-chain/set-item-target :state base-state})))))
+  (testing "the item where it is when the choice is handled (follow-up R2): one made before a reorder sets its own item"
+    (let [reordered (update-in with-items [:chains :cue-chains [0 0] :items] (comp vec reverse))]
+      (is (= [[:pair nil] [:circle :zone/b]]
+             (map (juxt :id :target) (get-in (set-item-target reordered :circle :zone/b) [:state :chains :cue-chains [0 0] :items]))))))
+  (testing "an item that isn't there, in another cue or none: nothing ({})"
+    (is (= {} (set-item-target with-items :gone :zone/a)))
+    (is (= {} (cue-chain/handle {:event/type :cue-chain/set-item-target :col 1 :row 0 :item-id :circle :target :zone/a
+                                 :state with-items})))
+    (is (= {} (cue-chain/handle {:event/type :cue-chain/set-item-target :state base-state})))))
 
 (deftest inherit-removes-the-target-test
-  (let [with-target (assoc-in sample-state-with-item [:chains :cue-chains [0 0] :items 0 :target] :zone/a)]
+  (let [with-target (assoc-in with-items [:chains :cue-chains [0 0] :items 0 :target] :zone/a)]
     (doseq [target [nil [] :inherit]]
-      (let [item (get-in (set-item-target with-target [0] target) [:state :chains :cue-chains [0 0] :items 0])]
+      (let [item (get-in (set-item-target with-target :circle target) [:state :chains :cue-chains [0 0] :items 0])]
         (is (not (contains? item :target)) (str (pr-str target) ": no key, it inherits"))))
-    (is (not (contains? (get-in (cue-chain/handle {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-path [0]
+    (is (not (contains? (get-in (cue-chain/handle {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-id :circle
                                                    :fx/event {:id :inherit :name "Inherit"} :state with-target})
                                 [:state :chains :cue-chains [0 0] :items 0])
                         :target))

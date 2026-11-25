@@ -7,7 +7,6 @@
    and Visual | Numeric switches between the rows its style uses and the
    full list. Remove takes the pattern away."
   (:require [cljfx.api :as fx]
-            [laser-show.animation.effects :as effects]
             [laser-show.events.core :as events]
             [laser-show.subs :as subs]
             [laser-show.views.components.effect-parameter-editor :as effect-param-editor]
@@ -39,7 +38,7 @@
          :entity-key [col row]
          :effect-path [0]
          :effect pattern
-         :effect-def (effects/get-effect (:effect-id pattern))
+         :effect-def (fx/sub-ctx context subs/effect-descriptor (:effect-id pattern))
          :dialog-data dialog-data}
         {:fx/type :v-box
          :v-box/vgrow :always

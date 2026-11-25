@@ -5,7 +5,8 @@
    - Left sidebar: Current effect chain with drag-and-drop reordering
    - Right section: Effect bank (tabbed by category) + parameter editor
    
-   Effects are dynamically loaded from the effect registry.
+   Effects are as the effect registry was last published (reactivity plan
+   17: subs/effect-descriptors), so a re-registered effect shows once it is.
    
    Features:
    - Multi-select with Click, Ctrl+Click, Shift+Click
@@ -14,7 +15,6 @@
    - Copy/paste across cells"
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
-            [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
             [laser-show.views.components.effect-bank :as effect-bank]
             [laser-show.views.components.effect-parameter-editor :as param-editor]
@@ -48,10 +48,11 @@
   "Parameter editor for the selected effect using the shared component.
    Supports keyframe modulation and custom renderers. Props: :col :row,
    :selected-effect-path and :selected-effect (its effect, nil when none or
-   several are selected), :dialog-data."
-  [{:keys [col row selected-effect-path selected-effect dialog-data]}]
+   several are selected), :dialog-data. Its definition as published
+   (subs/effect-descriptor)."
+  [{:keys [fx/context col row selected-effect-path selected-effect dialog-data]}]
   (let [effect-def (when selected-effect
-                     (effects/get-effect (:effect-id selected-effect)))]
+                     (fx/sub-ctx context subs/effect-descriptor (:effect-id selected-effect)))]
     (if selected-effect
       ;; Use shared effect parameter editor component
       {:fx/type param-editor/effect-parameter-editor
@@ -93,6 +94,8 @@
                             (first selected-ids))
         first-selected-path (when first-selected-id
                               (chains/find-path-by-id effect-chain first-selected-id))
+        ;; The rows' effect names, as published (data for the list)
+        effect-descriptors (fx/sub-ctx context subs/effect-descriptors)
         ;; Get chain name for header
         chain-name (:name cell-data)
         default-name (common/default-name col row)
@@ -131,7 +134,7 @@
                             :component-id [:effect-chain col row]
                             :items-path [:chains :effect-chains [col row] :items]
                             :item-id-key :effect-id
-                            :item-registry-fn effects/get-effect
+                            :item-registry-fn [get effect-descriptors]
                             :fallback-label "Unknown Effect"
                             :on-change-event :chain/set-items
                             :on-change-params {:domain :effect-chains :entity-key [col row]}

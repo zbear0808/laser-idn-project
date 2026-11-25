@@ -295,7 +295,9 @@
      :modulator/toggle (assoc grid-target :state s :param-key :offset :param-spec {:min -64.0 :max 64.0} :fx/event true)}))
 
 (deftest history-labels-name-real-events-test
-  (let [valid (valid-events)]
+  (let [valid (assoc (valid-events)
+                     ;; It does nothing ({}) for an item that isn't there
+                     :cue-chain/set-item-target {:state (test-state) :col 0 :row 0 :item-id item-id :target :zone/a})]
     (doseq [event-type (keys history-handlers/event-descriptions)]
       (let [event (get valid event-type {:state (test-state)})
             result (try (handlers/handle-event (assoc event :event/type event-type))

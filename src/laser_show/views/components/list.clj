@@ -37,27 +37,11 @@
    [laser-show.common.util :as u]
    [laser-show.events.core :as events]
    [laser-show.state.clipboard :as clipboard]
-   [laser-show.state.core :as state]
    [laser-show.subs :as subs]
    [laser-show.views.components.list-dnd :as dnd]
    [laser-show.views.components.shortcuts :as shortcuts]
    [laser-show.views.keys :as keys])
-  (:import [javafx.scene.input MouseButton]))
-
-;; State Access Helpers
-
-(defn- get-ui-state
-  "The list-ui state of component-id in the app map as it is now
-   (state/get-raw-state): for a callback, read when its input comes. A
-   snapshot, no subscription: the list's render subscribes through its
-   context (subs/list-ui-state)."
-  [component-id]
-  (get-in (state/get-raw-state) [:list-ui component-id]))
-
-(defn- get-selected-ids
-  "Get selected IDs set from component state."
-  [component-id]
-  (or (:selected-ids (get-ui-state component-id)) #{}))
+  (:import [javafx.scene.input ContextMenuEvent MouseButton MouseEvent]))
 
 
 ;; The list's command address: which list a key, click or drop is for,
@@ -327,33 +311,57 @@
 
 ;; Shared UI Helpers - Click Handler
 
+(defn- select-for-menu!
+  "Before item-id's row shows its menu, or on a right-click: the item
+   selected for the menu and the keys after it, unless the selection has it
+   (a right-click in a multi-selection keeps it; :mode :context, decided by
+   the selection when it's handled), and the focus on the list, as a click
+   gives it."
+  [^javafx.scene.Node node item-id]
+  (when-let [{:keys [component-id items-path]} (list-address node)]
+    (events/dispatch! (u/->map& component-id item-id items-path
+                                :event/type :list/select-item
+                                :mode :context))
+    (request-list-focus! node)))
+
 (defn- setup-click-handler!
   "Setup click handler on a node for selection and double-click rename, in
-   the list the node is in when the click comes (list-address)."
+   the list the node is in when the click comes (list-address). The row's
+   menu asked for selects the row first (select-for-menu!): the menu opens
+   on the press on macOS and Linux, and its window can take the release,
+   so the row may get no click (follow-up B1)."
   [^javafx.scene.Node node item-id]
-  (.setOnMouseClicked node
-                      (on-fx-event
-                       (fn [event]
-                         (when-let [{:keys [component-id items-path]} (list-address node)]
-                           (let [button (.getButton event)
-                                 click-count (.getClickCount event)
-                                 ctrl? (or (.isShortcutDown event) (.isControlDown event))
-                                 shift? (.isShiftDown event)]
-                             (cond
-                               (= button MouseButton/PRIMARY)
-                               (do
-                                 (if (= click-count 2)
-                                   (start-rename! component-id item-id)
-                                   (handle-selection! component-id item-id ctrl? shift? items-path))
-                                 (request-list-focus! node)
-                                 (.consume event))
+  (let [;; This press asked for the row's menu: its click, if one comes,
+        ;; changes nothing more (macOS's Control-click would toggle the row
+        ;; off again)
+        menu-press? (volatile! false)]
+    (.addEventFilter node MouseEvent/MOUSE_PRESSED
+                     (on-fx-event (fn [_] (vreset! menu-press? false))))
+    ;; It comes here before the label hosting the row's menu shows it
+    (.addEventHandler node ContextMenuEvent/CONTEXT_MENU_REQUESTED
+                      (on-fx-event (fn [_]
+                                     (vreset! menu-press? true)
+                                     (select-for-menu! node item-id))))
+    (.setOnMouseClicked node
+                        (on-fx-event
+                         (fn [event]
+                           (when-let [{:keys [component-id items-path]} (when-not @menu-press? (list-address node))]
+                             (let [button (.getButton event)
+                                   click-count (.getClickCount event)
+                                   ctrl? (or (.isShortcutDown event) (.isControlDown event))
+                                   shift? (.isShiftDown event)]
+                               (cond
+                                 (= button MouseButton/PRIMARY)
+                                 (do
+                                   (if (= click-count 2)
+                                     (start-rename! component-id item-id)
+                                     (handle-selection! component-id item-id ctrl? shift? items-path))
+                                   (request-list-focus! node)
+                                   (.consume event))
 
-                               (= button MouseButton/SECONDARY)
-                               (do
-                                 ;; If item not already selected, select it on right-click
-                                 (when-not (contains? (get-selected-ids component-id) item-id)
-                                   (handle-selection! component-id item-id false false items-path))
-                                 (request-list-focus! node)))))))))
+                                 ;; Where the menu comes after the click (Windows)
+                                 (= button MouseButton/SECONDARY)
+                                 (select-for-menu! node item-id)))))))))
 
 
 ;; The toolbars' buttons: each acts on the list it is in when it's clicked
@@ -440,7 +448,7 @@
     (cond
       get-item-label (call-spec get-item-label item)
       (and item-id-key item-registry-fn) (or (:name item)
-                                             (:name (item-registry-fn (get item item-id-key)))
+                                             (:name (call-spec item-registry-fn (get item item-id-key)))
                                              fallback-label)
       :else (or (:name item) fallback-label))))
 
@@ -878,10 +886,11 @@
    - :item-id-key + :item-registry-fn - For registry lookup (always uses :name)
    
    Each label and menu function here (:get-item-label, :get-group-label,
-   :get-context-menu, :get-group-context-menu) is a top-level function, or
-   [f & args], called (f args... item): plain data with it, never a closure
-   made in the caller's render, so the list's description stays equal while
-   its inputs do and its rows don't render again.
+   :item-registry-fn, :get-context-menu, :get-group-context-menu) is a
+   top-level function, or [f & args], called (f args... item) (the
+   registry's with the item's :item-id-key value): plain data with it, never
+   a closure made in the caller's render, so the list's description stays
+   equal while its inputs do and its rows don't render again.
    
    Event dispatch:
    - :on-change-event - Event type for items changed

@@ -21,6 +21,7 @@
             [laser-show.state.domains :as domains]
             [laser-show.subs :as subs]
             [laser-show.views.components.list :as list]
+            [laser-show.views.components.target-control :as target-control]
             [laser-show.views.dialogs.cue-chain-editor :as cue-editor]
             [laser-show.views.dialogs.effect-chain-editor :as effect-editor]
             [laser-show.views.harness :as h])
@@ -177,6 +178,26 @@
               :rows #{(:id p2)} :cards #{(:id p2)} :headers #{}}
              (dissoc sel :bodies))
           "the preset's effects list is new"))))
+
+
+;; Target menus (follow-up R2)
+
+
+(deftest a-reorder-runs-no-target-menu-test
+  ;; Each row's Target menu and the selected item's Target field sent the
+  ;; item's path in their event, so a reorder gave the moved items' menus
+  ;; and the field new descriptions: they ran again. They send its id
+  (let [[p1 p2 p3] [(preset :circle "P1") (preset :square "P2") (preset :triangle "P3")]
+        ran-for (fn [step]
+                  {:menus (set (map :item-id (h/ran-of step @#'cue-editor/item-target-menu)))
+                   :fields (set (map :id (h/ran-of step target-control/target-field)))})
+        [first-render reorder] (h/each-render (selected (cue-editor-state [p1 p2 p3]) [:cue-chain 0 0] #{(:id p1)})
+                                              h/lru-512 cue-editor
+                                              [#(assoc-in % [:chains :cue-chains [0 0] :items] [p3 p1 p2])]
+                                              ran-for)]
+    (is (= {:menus (set (map :id [p1 p2 p3])) :fields #{"target-chip-item" "target-chip-cue"}} first-render)
+        "every row's menu, the item's field and the cue's")
+    (is (= {:menus #{} :fields #{}} reorder) "a reorder: no menu, no field")))
 
 
 ;; Rows
