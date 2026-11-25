@@ -9,7 +9,9 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
             [laser-show.state.core :as state]
+            [laser-show.timeline.shows :as shows]
             [laser-show.ui-test.fixtures :as fixtures]
+            [laser-show.ui-test.show-editor :as show-editor]
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.scene Node]
            [javafx.scene.control Label]))
@@ -87,17 +89,19 @@
 
 (deftest timeline-editor-shows-the-same-line-test
   (laser!)
-  (play! [6 3] {:editor-type :timeline
-                :destination-zone {:zone-group-id :all}
-                :tracks [{:id :t :type :track}]
-                :items [(assoc ring :track-id :t :timeline/start 0.0 :timeline/duration 64.0)]})
-  (fixtures/with-clock
-    (fn [_]
-      (ui/wait-for! #(ui/visible? "#grid-cell-warning-6-3"))
-      (events/dispatch! {:event/type :timeline-cue-editor/open :col 6 :row 3})
-      (ui/wait-for! #(ui/visible? "#cue-load-warning"))
-      (ui/wait-for! #(str/ends-with? (str (ui/node-text "#cue-load-warning")) line-end))
-      (is (= (str "⚠ ~3,000 points: about 8 fps " line-end) (ui/node-text "#cue-load-warning"))))))
+  (let [id (random-uuid)]
+    (show-editor/open-show! id {:editor-type :timeline
+                                :destination-zone {:zone-group-id :all}
+                                :tracks [{:id :t :type :track}]
+                                :items [(assoc ring :track-id :t :timeline/start 0.0 :timeline/duration 64.0)]})
+    (events/dispatch! {:event/type :shows/play :show-id id})
+    (ui/wait-for! #(some? (get-in (state/get-raw-state) [:playback :active-cues (shows/play-key id)])))
+    (fixtures/with-clock
+      (fn [_]
+        (ui/wait-for! #(some? (get-in (state/get-raw-state) [:backend :streaming :cue-warnings (shows/play-key id)])))
+        (ui/wait-for! #(ui/visible? "#cue-load-warning"))
+        (ui/wait-for! #(str/ends-with? (str (ui/node-text "#cue-load-warning")) line-end))
+        (is (= (str "⚠ ~3,000 points: about 8 fps " line-end) (ui/node-text "#cue-load-warning")))))))
 
 (deftest decimate-that-keeps-the-count-is-named-test
   (testing "Q-D-4 B: Decimate at its 25 kpps in a 12 kpps laser's calibration chain keeps the cue at 833 points, 14 fps"

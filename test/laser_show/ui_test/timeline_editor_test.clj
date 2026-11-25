@@ -16,6 +16,7 @@
             [laser-show.timeline.model :as model]
             [laser-show.timeline.shows :as shows]
             [laser-show.ui-test.fixtures :as fixtures]
+            [laser-show.ui-test.show-editor :as show-editor]
             [laser-show.ui-test.testfx :as ui]
             [laser-show.views.components.drag-drop-cell :as dd]
             [laser-show.views.keys :as keys]))
@@ -52,23 +53,11 @@
   ([] (tracks-list-id (sid)))
   ([id] [:timeline-tracks id]))
 
-(defn- dialog-show [] (get-in (state/get-raw-state) [:ui :dialogs :timeline-cue-editor :show-id]))
+(def ^:private dialog-show show-editor/dialog-show)
 
-(defn- editor-shown? []
-  (some (fn [title] (and title (.startsWith ^String title "Timeline Editor")))
-        (ui/window-titles)))
+(def ^:private editor-shown? show-editor/editor-shown?)
 
-(defn- new-show-from-cue!
-  "Copy the cue at [col row] into a new show, which opens the editor on it
-   (or shows it in the open editor); its id."
-  [col row]
-  (let [before (dialog-show)]
-    (events/dispatch! {:event/type :shows/new-from-cue :col col :row row})
-    (ui/wait-for! #(let [id (dialog-show)]
-                     (and (some? id) (not= before id)
-                          (get-in (state/get-raw-state) (shows/show-path id))
-                          (get-in (state/get-raw-state) [:ui :dialogs :timeline-cue-editor :open?]))))
-    (dialog-show)))
+(def ^:private new-show-from-cue! show-editor/new-show-from-cue!)
 
 (defn- open-timeline!
   "A new show copied from the starter cue at [0 0] (its zone folder, clips
