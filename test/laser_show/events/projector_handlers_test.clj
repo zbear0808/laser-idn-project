@@ -862,6 +862,22 @@
       (is (nil? (get-in (projectors/handle {:event/type :projectors/remove :projector-id :p1 :state removable-state})
                         [:state :ui :notice]))))))
 
+(deftest a-show-pinned-to-the-laser-counts-test
+  ;; plans/2026-11-25-timeline-shows 04 §4.6
+  (let [id #uuid "00000000-0000-0000-0000-0000000000aa"
+        pinned (assoc-in removable-state [:chains :shows id]
+                         {:editor-type :timeline :target :auto.laser/p1 :tracks [] :items []})
+        dialog (get-in (projectors/handle {:event/type :projectors/request-remove :projector-id :p1 :state pinned})
+                       [:state :ui :dialogs :confirm])
+        state (:state (projectors/handle {:event/type :projectors/remove :projector-id :p1
+                                          :retarget-to :auto/left :state pinned}))]
+    (is (= (str "Its calibration goes too. If it's still on the network, the next scan finds it again, turned off. "
+                "1 show is pinned to it.")
+           (:message dialog)))
+    (is (= :retarget-to (get-in dialog [:choice :key])))
+    (is (= :auto/left (get-in state [:chains :shows id :target])))
+    (is (= "Removed Laser L · references in 1 show now name Left" (get-in state [:ui :notice :text])))))
+
 (deftest effect-only-pin-gets-a-retarget-choice-test
   ;; plans/2026-11-23-cljfx-reactivity/28: no cue is pinned to Laser L, only a
   ;; pattern nested in an effect cell's group names it

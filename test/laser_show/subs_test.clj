@@ -2585,6 +2585,30 @@
 
 ;; Who uses a group (zones plan Z4, 06 §8.7)
 
+(deftest shows-count-in-the-zone-subs-test
+  ;; plans/2026-11-25-timeline-shows 04 §4.6: a library show names zones and
+  ;; draws as a cue does, with no column
+  (let [id #uuid "00000000-0000-0000-0000-0000000000aa"
+        s (-> (domains/build-initial-state)
+              (assoc-in [:chains :cue-chains] {})
+              (assoc-in [:grid :column-targets] {0 :zone/b}))
+        show {:editor-type :timeline
+              :tracks [{:id "t1" :type :track :target :zone/k}]
+              :items [{:type :preset :id "c1" :preset-id :circle :track-id "t1"
+                       :timeline/start 0.0 :timeline/duration 4.0}]}
+        with-show (assoc-in s [:chains :shows id] show)
+        ctx (context with-show)]
+    (is (some #{:zone/k} (fx/sub-ctx ctx subs/zones-in-use)) "the catalogue lists the show's zone")
+    (is (not (some #{:zone/k} (fx/sub-ctx (context s) subs/zones-in-use))))
+    (is (= 1 (:direct (fx/sub-ctx ctx subs/ref-usage :zone/k))) "the show draws there")
+    (is (= 0 (:direct (fx/sub-ctx ctx subs/ref-usage :zone/b))) "no column: column 1's default is not the show's")
+    (is (false? (fx/sub-ctx ctx subs/zone-patterns-in-use?)))
+    (is (true? (fx/sub-ctx (context (assoc-in with-show [:chains :shows id :zone-patterns]
+                                              [(zone-patterns/preset-instance :alternate :cue)]))
+                           subs/zone-patterns-in-use?))
+        "a show's zone pattern shows the pattern pads")
+    (is (false? (fx/sub-ctx (context (assoc-in s [:chains :shows] nil)) subs/zone-patterns-in-use?)) "no shows: fine")))
+
 (deftest ref-usage-direct-and-through-test
   (let [cue (fn [t] {:items [{:type :preset :preset-id :circle :target t}]})
         cells (concat (for [c (range 3)] [[c 0] (cue :auto/left)])

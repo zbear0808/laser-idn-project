@@ -379,6 +379,39 @@
         (is (= [{:position 0.0 :params {:steps [[:graphics] []]}}] (get-in (pattern-of s) [:keyframe-modulator :keyframes])))
         (is (= "Deleted Balcony · references in 1 effect cell now name Graphics" (get-in s [:ui :notice :text])))))))
 
+(deftest delete-counts-shows-test
+  ;; plans/2026-11-25-timeline-shows 04 §4.6: a show in the library names a
+  ;; group as a cue does
+  (let [id #uuid "00000000-0000-0000-0000-0000000000aa"
+        state (assoc-in balcony-state [:chains :shows id]
+                        {:editor-type :timeline :name "Encore"
+                         :tracks [{:id "t1" :type :track :target :group-balcony}]
+                         :items [{:id "c" :type :preset :preset-id :circle :track-id "t1"}]})
+        dialog (get-in (zone-groups/handle {:event/type :zone-groups/request-remove :group-id :group-balcony :state state})
+                       [:state :ui :dialogs :confirm])]
+    (is (= "2 cues, 1 show and 1 projector use it." (:message dialog)))
+    (is (= "A1 Intro · C2 Drop" (:details dialog)) "the details list the cues")
+    (testing "a show alone asks where its references go"
+      (let [only (-> state
+                     (assoc-in [:chains :cue-chains] {})
+                     (assoc-in [:projectors test-projector-id :zone-groups] [:all]))
+            dialog (get-in (zone-groups/handle {:event/type :zone-groups/request-remove :group-id :group-balcony :state only})
+                           [:state :ui :dialogs :confirm])]
+        (is (= "1 show uses it." (:message dialog)))
+        (is (= :retarget-to (get-in dialog [:choice :key])))))
+    (testing "deleting re-points the show, and the notice counts it"
+      (let [s (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony
+                                           :retarget-to :graphics :state state}))]
+        (is (= :graphics (get-in s [:chains :shows id :tracks 0 :target])))
+        (is (= "Deleted Balcony · references in 2 cues and 1 show now name Graphics" (get-in s [:ui :notice :text])))))
+    (testing "the texts"
+      (is (= "2 cues, 1 effect cell and 1 show" (zone-groups/owners-text 2 1 1)))
+      (is (= "2 cues" (zone-groups/owners-text 2 0)))
+      (is (= "1 show is pinned to it." (zone-groups/pinned-text 0 0 1)))
+      (is (= "1 cue and 2 shows are pinned to it." (zone-groups/pinned-text 1 0 2)))
+      (is (= "1 effect cell and 1 show refer to it." (zone-groups/pinned-text 0 1 1)))
+      (is (nil? (zone-groups/pinned-text 0 0 0))))))
+
 (deftest retarget-to-a-missing-group-is-all-test
   (doseq [target [:no-such-group :group-balcony]]
     (let [state (:state (zone-groups/handle {:event/type :zone-groups/remove :group-id :group-balcony

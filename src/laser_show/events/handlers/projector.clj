@@ -694,7 +694,8 @@
     (let [pin (rig/laser-ref projector-id)
           cues (refs/cues-using (get-in state [:chains :cue-chains]) pin)
           cells (refs/effect-cells-using (get-in state [:chains :effect-chains]) pin)
-          pinned (zone-groups/pinned-text (count cues) (count cells))]
+          shows (refs/shows-using (get-in state [:chains :shows]) pin)
+          pinned (zone-groups/pinned-text (count cues) (count cells) (count shows))]
       {:state (assoc-in state [:ui :dialogs :confirm]
                         (cond-> {:open? true
                                  :title (str "Remove " (projector-label state projector-id) "?")
@@ -738,7 +739,8 @@
   (if-let [p (get-in state [:projectors projector-id])]
     (let [pin (rig/laser-ref projector-id)
           owners (zone-groups/owners-text (count (refs/cues-using (get-in state [:chains :cue-chains]) pin))
-                                          (count (refs/effect-cells-using (get-in state [:chains :effect-chains]) pin)))
+                                          (count (refs/effect-cells-using (get-in state [:chains :effect-chains]) pin))
+                                          (count (refs/shows-using (get-in state [:chains :shows]) pin)))
           target (zone-groups/retarget-value state pin event)
           removed (-> state
                       (refs/replace-refs {pin target})

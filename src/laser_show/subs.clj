@@ -258,6 +258,17 @@
   [context]
   (set (keys (fx/sub-val context get-in [:chains :cue-chains]))))
 
+(defn- show-ids
+  "The ids of the shows in the library ([:chains :shows]), as a set: only a
+   show added or taken away changes it."
+  [context]
+  (set (keys (fx/sub-val context get-in [:chains :shows]))))
+
+(defn- show-chain
+  "The show id (a timeline cue map), or nil."
+  [context id]
+  (fx/sub-val context get-in [:chains :shows id]))
+
 (def ^:private timeline-view-defaults
   {:selection #{} :cursor-beat 0.0})
 
@@ -1237,6 +1248,14 @@
     (when (map? cue)
       (into #{} (filter targets/zone-ref?) (refs/cue-refs cue)))))
 
+(defn- show-zone-refs
+  "The zones show id names (routing.refs/cue-refs), nil for none: that
+   show's part of zones-in-use, as cue-zone-refs is a cue's."
+  [context id]
+  (let [show (fx/sub-ctx context show-chain id)]
+    (when (map? show)
+      (into #{} (filter targets/zone-ref?) (refs/cue-refs show)))))
+
 (defn- effect-cell-zone-refs
   "The zones the zone patterns of the effects cell at [col row] name, on or
    off (routing.refs/chain-ref-usage of that cell alone): its part of
@@ -1248,8 +1267,8 @@
       (into #{} (filter targets/zone-ref?) (keys (refs/chain-ref-usage nil {[col row] {:items items}}))))))
 
 (defn zones-in-use
-  "Every zone the show names (Z4-Q1): in a cue (routing.refs/cue-refs, its
-   zone patterns too), in an effect cell's zone patterns (a place, a source
+  "Every zone the show names (Z4-Q1): in a cue or a library show
+   (routing.refs/cue-refs, its zone patterns too), in an effect cell's zone patterns (a place, a source
    or a lit step, a keyframe's too, the pattern on or off), a column's
    default and the show's, sorted. Not a zone a label, a map's override or
    the preview alone names. Each cue's and cell's part is its own
@@ -1258,6 +1277,7 @@
    again (follow-up N9)."
   [context]
   (let [refs (concat (mapcat (fn [[col row]] (fx/sub-ctx context cue-zone-refs col row)) (fx/sub-ctx context cue-cells))
+                     (mapcat #(fx/sub-ctx context show-zone-refs %) (fx/sub-ctx context show-ids))
                      (mapcat (fn [[col row]] (fx/sub-ctx context effect-cell-zone-refs col row)) (fx/sub-ctx context effect-cells))
                      (mapcat targets/target-refs (vals (fx/sub-val context get-in [:grid :column-targets])))
                      (targets/target-refs (fx/sub-ctx context default-target)))]
@@ -1360,12 +1380,24 @@
   (when-let [cue (fx/sub-ctx context cue-cell-chain col row)]
     (targets/cue-refs cue (fx/sub-ctx context column-target col) (fx/sub-ctx context default-target))))
 
+(defn- show-draw-refs
+  "Every ref show id can draw to (routing.targets/cue-refs, the show's
+   default included; a show has no column), nil for none: its part of
+   cue-ref-sets."
+  [context id]
+  (let [show (fx/sub-ctx context show-chain id)]
+    (when (map? show)
+      (targets/cue-refs show nil (fx/sub-ctx context default-target)))))
+
 (defn- cue-ref-sets
   "Each cue's refs (routing.targets/cue-refs), its column's default and the
-   show's included: each cue's part its own (cue-draw-refs), so an edit
-   that changes none of them runs it not again (follow-up N9)."
+   show's included, then each library show's (no column): each one's part
+   its own (cue-draw-refs, show-draw-refs), so an edit that changes none of
+   them runs it not again (follow-up N9)."
   [context]
-  (into [] (keep (fn [[col row]] (fx/sub-ctx context cue-draw-refs col row))) (fx/sub-ctx context cue-cells)))
+  (-> []
+      (into (keep (fn [[col row]] (fx/sub-ctx context cue-draw-refs col row))) (fx/sub-ctx context cue-cells))
+      (into (keep #(fx/sub-ctx context show-draw-refs %)) (fx/sub-ctx context show-ids))))
 
 (defn ref-usage
   "Who uses ref, through the map in use (06 §8.7): {:direct :through
@@ -1502,15 +1534,22 @@
   [context col row]
   (boolean (seq (fx/sub-val context get-in [:chains :cue-chains [col row] :zone-patterns]))))
 
+(defn- show-has-zone-patterns?
+  "Does library show id have a zone pattern, on or off?"
+  [context id]
+  (boolean (seq (fx/sub-val context get-in [:chains :shows id :zone-patterns]))))
+
 (defn zone-patterns-in-use?
-  "Does the show have a zone pattern anywhere, on or off: on a cue, or in
-   an effects cell (07 §7.3)? The pattern pads show then. Each cue's and
-   each cell's part is its own (cue-has-zone-patterns?, effect-cell-stores):
-   a cue renamed or a cell switched on or off runs it not again."
+  "Does the show have a zone pattern anywhere, on or off: on a cue or a
+   library show, or in an effects cell (07 §7.3)? The pattern pads show
+   then. Each cue's, show's and cell's part is its own
+   (cue-has-zone-patterns?, show-has-zone-patterns?, effect-cell-stores): a
+   cue renamed or a cell switched on or off runs it not again."
   [context]
   (boolean
    (or (some (fn [[col row]] (fx/sub-ctx context cue-has-zone-patterns? col row))
              (fx/sub-ctx context cue-cells))
+       (some #(fx/sub-ctx context show-has-zone-patterns? %) (fx/sub-ctx context show-ids))
        (some-effect-cell? context :zone-pattern?))))
 
 (defn- map-cycles?

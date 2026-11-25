@@ -317,24 +317,27 @@
   (into [] (comp (filter #(some #{group} (rig/custom-refs (val %)))) (map key)) (:projectors state)))
 
 (defn- ref-owners
-  "Who stores each ref in the show: its cues and effect cells
+  "Who stores each ref in the show: its cues, effect cells and shows
    (routing.refs/chain-ref-usage)."
   [state]
-  (refs/chain-ref-usage (get-in state [:chains :cue-chains]) (get-in state [:chains :effect-chains])))
+  (refs/chain-ref-usage (get-in state [:chains :cue-chains]) (get-in state [:chains :effect-chains])
+                        (get-in state [:chains :shows])))
 
 (defn- owner-counts
   "A report row's counts of the owners of ref in usage (ref-owners): how
-   many cues, 0 too, and how many effect cells, only when there are some."
+   many cues, 0 too, and how many effect cells and shows, each only when
+   there are some."
   [usage ref]
-  (let [{:keys [cues effect-cells]} (get usage ref)]
+  (let [{:keys [cues effect-cells shows]} (get usage ref)]
     (cond-> {:cues (count cues)}
-      (seq effect-cells) (assoc :effect-cells (count effect-cells)))))
+      (seq effect-cells) (assoc :effect-cells (count effect-cells))
+      (seq shows) (assoc :shows (count shows)))))
 
 (defn- by-name [k]
   (fn [row] [(or (name-key (:name row)) "") (str (get row k))]))
 
 (defn- groups-without-lasers
-  "The show's groups its cues or effect cells name (usage, ref-owners) that
+  "The show's groups its cues, effect cells or shows name (usage, ref-owners) that
    no projector or virtual projector here is in, with this rig's group of
    the same name, if there is one."
   [state usage]
@@ -353,7 +356,7 @@
          vec)))
 
 (defn- missing-pins
-  "The lasers the show's cues or effect cells are pinned to (usage,
+  "The lasers the show's cues, effect cells or shows are pinned to (usage,
    ref-owners) that aren't on this rig, named as in the show (hardware),
    with how many of each."
   [state hardware usage]
@@ -395,14 +398,15 @@
 (defn match-report
   "What doesn't fit when a show (its hardware.edn and calibration chains) is
    open on this rig (09 §8): {:file :show-lasers :rig-lasers (the lasers
-   on) :groups-without-lasers [{:group-id :name :cues :effect-cells
+   on) :groups-without-lasers [{:group-id :name :cues :effect-cells :shows
    :same-name {:group-id :name :lasers}}]
-   :missing-pins [{:ref :name :cues :effect-cells}] :rig-groups-not-in-show
+   :missing-pins [{:ref :name :cues :effect-cells :shows}] :rig-groups-not-in-show
    [{:group-id :name :lasers}] :setup-differs [{:projector-id :name :what
    :unreadable?}] :matched-by-ip [{:name :host}] :new-lasers [show id …]}.
    The first two are its ⚠ rows (warning-count), one per ref, counting the
-   cues and the effect cells that store it (:effect-cells only when there
-   are some); state's [:chains :effect-chains] need only the cells' :items."
+   cues, the effect cells and the shows that store it (:effect-cells and
+   :shows only when there are some); state's [:chains :effect-chains] need
+   only the cells' :items."
   [state hardware chains]
   (let [pins (pin-map state hardware)
         usage (ref-owners state)

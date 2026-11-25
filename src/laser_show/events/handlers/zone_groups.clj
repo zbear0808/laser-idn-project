@@ -126,24 +126,39 @@
    :label "Replace references with:"
    :options (retarget-options state ref)})
 
+(defn- and-list
+  "\"a\", \"a and b\", \"a, b and c\"."
+  [parts]
+  (if (next parts)
+    (str (str/join ", " (butlast parts)) " and " (last parts))
+    (first parts)))
+
 (defn owners-text
-  "\"2 cues\", \"1 effect cell\", \"2 cues and 1 effect cell\": the cues and
-   the effect cells that store a reference; nil for none."
-  [cue-count cell-count]
-  (let [parts (cond-> []
-                (pos? cue-count) (conj (plural cue-count "cue" "cues"))
-                (pos? cell-count) (conj (plural cell-count "effect cell" "effect cells")))]
-    (when (seq parts)
-      (str/join " and " parts))))
+  "\"2 cues\", \"1 effect cell\", \"2 cues and 1 effect cell\", \"2 cues, 1
+   effect cell and 1 show\": the cues, the effect cells and the shows that
+   store a reference; nil for none."
+  ([cue-count cell-count]
+   (owners-text cue-count cell-count 0))
+  ([cue-count cell-count show-count]
+   (let [parts (cond-> []
+                 (pos? cue-count) (conj (plural cue-count "cue" "cues"))
+                 (pos? cell-count) (conj (plural cell-count "effect cell" "effect cells"))
+                 (pos? show-count) (conj (plural show-count "show" "shows")))]
+     (when (seq parts)
+       (and-list parts)))))
 
 (defn pinned-text
   "What removing or forgetting a laser says refers to it: \"2 cues are
-   pinned to it.\", and with effect cells \"2 cues and 1 effect cell refer
-   to it.\" (a pattern's place or source pins no cue); nil for none."
-  [cue-count cell-count]
-  (cond
-    (pos? cell-count) (str (owners-text cue-count cell-count) (if (= 1 (+ cue-count cell-count)) " refers" " refer") " to it.")
-    (pos? cue-count) (str (plural cue-count "cue" "cues") (if (= 1 cue-count) " is" " are") " pinned to it.")))
+   pinned to it.\", \"2 cues and 1 show are pinned to it.\", and with
+   effect cells \"2 cues and 1 effect cell refer to it.\" (a pattern's
+   place or source pins no cue); nil for none."
+  ([cue-count cell-count]
+   (pinned-text cue-count cell-count 0))
+  ([cue-count cell-count show-count]
+   (let [n (+ cue-count cell-count show-count)]
+     (cond
+       (pos? cell-count) (str (owners-text cue-count cell-count show-count) (if (= 1 n) " refers" " refer") " to it.")
+       (pos? n) (str (owners-text cue-count 0 show-count) (if (= 1 n) " is" " are") " pinned to it.")))))
 
 (defn replaced-text
   "What a notice says became of the references owners (owners-text) had to
@@ -162,13 +177,6 @@
   (sort (keep (fn [[col t]] (when (some #{ref} (targets/target-refs t)) col))
               (get-in state [:grid :column-targets]))))
 
-(defn- and-list
-  "\"a\", \"a and b\", \"a, b and c\"."
-  [parts]
-  (if (next parts)
-    (str (str/join ", " (butlast parts)) " and " (last parts))
-    (first parts)))
-
 (defn maps-using
   "The names of your zone maps with a lane or an override that names ref
    (zones plan Z4), by name."
@@ -178,18 +186,22 @@
 
 (defn uses-text
   "What a delete's question says uses a group: \"3 cues, 1 effect cell,
-   column 3, the show default, the map Crowd sweep and 2 projectors use
-   it.\", \"1 cue uses it.\", \"Nothing uses it.\" (cues, effect cells whose
-   zone patterns name it, the columns using it, whether the show default
-   does, the names of the zone maps using it, how many outputs are in it)."
+   1 show, column 3, the show default, the map Crowd sweep and 2 projectors
+   use it.\", \"1 cue uses it.\", \"Nothing uses it.\" (cues, effect cells
+   whose zone patterns name it, shows, the columns using it, whether the
+   show default does, the names of the zone maps using it, how many outputs
+   are in it)."
   ([cue-count cols default? outputs]
-   (uses-text cue-count 0 cols default? [] outputs))
+   (uses-text cue-count 0 0 cols default? [] outputs))
   ([cue-count cols default? maps outputs]
-   (uses-text cue-count 0 cols default? maps outputs))
+   (uses-text cue-count 0 0 cols default? maps outputs))
   ([cue-count cell-count cols default? maps outputs]
+   (uses-text cue-count cell-count 0 cols default? maps outputs))
+  ([cue-count cell-count show-count cols default? maps outputs]
    (let [parts (cond-> []
                  (pos? cue-count) (conj (plural cue-count "cue" "cues"))
                  (pos? cell-count) (conj (plural cell-count "effect cell" "effect cells"))
+                 (pos? show-count) (conj (plural show-count "show" "shows"))
                  (seq cols) (conj (if (next cols)
                                     (str "columns " (and-list (map #(str (inc %)) cols)))
                                     (str "column " (inc (first cols)))))
@@ -199,7 +211,7 @@
                                     (str "the map " (first maps))))
                  (pos? outputs) (conj (plural outputs "projector" "projectors")))
          one? (and (= 1 (count parts))
-                   (or (= 1 cue-count) (= 1 cell-count) (= 1 (count cols)) default? (= 1 (count maps)) (= 1 outputs)))]
+                   (or (= 1 cue-count) (= 1 cell-count) (= 1 show-count) (= 1 (count cols)) default? (= 1 (count maps)) (= 1 outputs)))]
      (if (empty? parts)
        "Nothing uses it."
        (let [text (and-list parts)]
@@ -207,7 +219,7 @@
 
 (defn- handle-zone-groups-request-remove
   "Ask before deleting a zone group: which cues, effect cells (their zone
-   patterns), grid columns, the show default, zone maps (zones plan Z4) and
+   patterns), shows, grid columns, the show default, zone maps (zones plan Z4) and
    projectors use it, and, when anything stores a reference to it, what
    replaces the references (All by default; Clear references leaves a map's
    lane empty, 06 SQ-13). The details list the cues only. :all can't be
@@ -217,12 +229,13 @@
     {:state state}
     (let [cues (refs/cues-using (get-in state [:chains :cue-chains]) group-id)
           cells (refs/effect-cells-using (get-in state [:chains :effect-chains]) group-id)
+          shows (refs/shows-using (get-in state [:chains :shows]) group-id)
           cols (columns-using state group-id)
           default? (boolean (some #{group-id} (targets/target-refs (get-in state [:config :default-target]))))
           maps (maps-using state group-id)
           outputs (count (filter #(some #{group-id} (:zone-groups %))
                                  (concat (vals (:projectors state)) (vals (:virtual-projectors state)))))
-          message (uses-text (count cues) (count cells) cols default? maps outputs)]
+          message (uses-text (count cues) (count cells) (count shows) cols default? maps outputs)]
       {:state (assoc-in state [:ui :dialogs :confirm]
                         (cond-> {:open? true
                                  :title (str "Delete \"" (group-name state group-id) "\"?")
@@ -231,7 +244,7 @@
                                  :danger? true
                                  :confirm-event {:event/type :zone-groups/remove :group-id group-id}}
                           (seq cues) (assoc :details (cue-list-text state cues))
-                          (or (seq cues) (seq cells) (seq cols) default? (seq maps))
+                          (or (seq cues) (seq cells) (seq shows) (seq cols) default? (seq maps))
                           (assoc :choice (retarget-choice state group-id)
                                  :choice-value :all)))})))
 
@@ -259,7 +272,8 @@
     {:state state}
     (let [target (retarget-value state group-id event)
           owners (owners-text (count (refs/cues-using (get-in state [:chains :cue-chains]) group-id))
-                              (count (refs/effect-cells-using (get-in state [:chains :effect-chains]) group-id)))
+                              (count (refs/effect-cells-using (get-in state [:chains :effect-chains]) group-id))
+                              (count (refs/shows-using (get-in state [:chains :shows]) group-id)))
           deleted-name (group-name state group-id)
           selected (get-in state [:zone-group-ui :selected-group])
           new-state (-> state

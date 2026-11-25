@@ -355,3 +355,74 @@
     (let [state {:chains {:cue-chains {[0 0] {:items [] :zone-patterns [(pattern {:style :swap})]}}}}]
       (is (identical? state (refs/replace-refs state {:all :zone/a}))
           "the cue's implicit All is read only: no target, and no source, is put in"))))
+
+
+;; Timeline shows ([:chains :shows], plans/2026-11-25-timeline-shows 04 §4.6)
+
+(def ^:private show-a #uuid "00000000-0000-0000-0000-00000000000a")
+(def ^:private show-b #uuid "00000000-0000-0000-0000-00000000000b")
+
+(defn- shows-state []
+  {:chains {:cue-chains {[0 0] {:target :left :items [(preset "p")]}}
+            :shows {show-a {:editor-type :timeline
+                            :target :graphics
+                            :tracks [{:id "t1" :type :track :target :graphics}
+                                     {:id "t2" :type :track}]
+                            :items [(preset "clip" :track-id "t1")
+                                    (preset "clip2" :track-id "t2" :target :graphics)]}
+                    show-b {:editor-type :timeline
+                            :target :left
+                            :tracks [{:id "t1" :type :track}]
+                            :items [(preset "clip" :track-id "t1")]}}}})
+
+(deftest shows-are-a-ref-place-test
+  (let [state (shows-state)
+        after (refs/replace-refs state {:graphics :crowd})
+        show (get-in after [:chains :shows show-a])]
+    (testing "a show's :target, a track's and a clip's are re-pointed"
+      (is (= :crowd (:target show)))
+      (is (= :crowd (get-in show [:tracks 0 :target])))
+      (is (= :crowd (get-in show [:items 1 :target])))
+      (is (not (names? (get-in after [:chains :shows]) :graphics))))
+    (testing "what names nothing keeps its identity"
+      (is (identical? (get-in state [:chains :shows show-b]) (get-in after [:chains :shows show-b])))
+      (is (identical? (get-in state [:chains :shows show-a :items 0]) (get-in show [:items 0])))
+      (is (identical? (get-in state [:chains :cue-chains]) (get-in after [:chains :cue-chains]))))
+    (testing "cleared: the show's levels inherit"
+      (let [cleared (get-in (refs/replace-refs state {:graphics nil}) [:chains :shows show-a])]
+        (is (not (contains? cleared :target)))
+        (is (not (contains? (get-in cleared [:tracks 0]) :target)))
+        (is (not (contains? (get-in cleared [:items 1]) :target)))))
+    (testing "no ref named: the same state"
+      (is (identical? state (refs/replace-refs state {:nothing-names-this :crowd}))))
+    (testing "no shows, or none stored: fine"
+      (let [no-key {:chains {:cue-chains {[0 0] {:target :graphics :items []}}}}
+            nil-shows (assoc-in no-key [:chains :shows] nil)]
+        (is (= :crowd (get-in (refs/replace-refs no-key {:graphics :crowd}) [:chains :cue-chains [0 0] :target])))
+        (is (not (contains? (:chains (refs/replace-refs no-key {:graphics :crowd})) :shows)))
+        (is (nil? (get-in (refs/replace-refs nil-shows {:graphics :crowd}) [:chains :shows])))
+        (is (identical? no-key (refs/replace-refs no-key {:nothing :crowd})))))))
+
+(deftest shows-using-test
+  (let [shows (get-in (shows-state) [:chains :shows])]
+    (is (= #{show-a} (refs/shows-using shows :graphics)))
+    (is (= #{show-b} (refs/shows-using shows :left)))
+    (is (sorted? (refs/shows-using shows :left)))
+    (is (= #{} (refs/shows-using shows :crowd)))
+    (is (= #{show-a} (refs/shows-using {show-a {:items []} show-b nil} :all))
+        "a show with no target of its own names All, as a cue; an absent show none")
+    (is (= #{} (refs/shows-using nil :graphics)))))
+
+(deftest chain-ref-usage-with-shows-test
+  (let [{:keys [chains]} (shows-state)
+        cells {[1 1] {:items [{:effect-id :zone-pattern :params {:zones [:graphics]}}]}}]
+    (is (= {:left {:cues #{[0 0]} :effect-cells #{} :shows #{show-b}}
+            :graphics {:cues #{} :effect-cells #{[1 1]} :shows #{show-a}}}
+           (refs/chain-ref-usage (:cue-chains chains) cells (:shows chains))))
+    (is (= {:left {:cues #{[0 0]} :effect-cells #{}}
+            :graphics {:cues #{} :effect-cells #{[1 1]}}}
+           (refs/chain-ref-usage (:cue-chains chains) cells))
+        "two grids only: the entries as before")
+    (is (= {:left {:cues #{[0 0]} :effect-cells #{} :shows #{}}}
+           (refs/chain-ref-usage (:cue-chains chains) nil nil))
+        "no shows: :shows there, empty")))

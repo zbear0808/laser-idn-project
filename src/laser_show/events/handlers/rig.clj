@@ -336,7 +336,8 @@
     (let [pin (rig/laser-ref projector-id)
           cues (refs/cues-using (get-in state [:chains :cue-chains]) pin)
           cells (refs/effect-cells-using (get-in state [:chains :effect-chains]) pin)
-          pinned (zone-groups/pinned-text (count cues) (count cells))]
+          shows (refs/shows-using (get-in state [:chains :shows]) pin)
+          pinned (zone-groups/pinned-text (count cues) (count cells) (count shows))]
       {:state (assoc-in state [:ui :dialogs :confirm]
                         (cond-> {:open? true
                                  :title (str "Forget " (rig/projector-name state projector-id) "?")
