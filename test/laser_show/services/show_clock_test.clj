@@ -486,29 +486,17 @@
 (deftest show-key-ignores-column-target-test
   (testing "a show has no column: it draws to the show's default target, a grid cue in column 0 to its column's"
     (let [u #uuid "00000000-0000-0000-0000-0000000005a1"
-          sk (shows/play-key u)
-          active-runs show-time/active-runs]
+          sk (shows/play-key u)]
       (init! {[0 0] (cue :circle)} {u one-clip-timeline})
       (state/swap-state! #(-> %
                               (assoc-in [:grid :column-targets] {0 :zone/a})
                               (assoc-in [:config :default-target] :graphics)))
       (trigger! 0 0)
       (state/swap-state! update :playback cue-timing/activate-cue sk (random-uuid) {:timeline? true :start-beat 0.0})
-      ;; Until show-time resolves a show's cue itself (shows/cue-at, S1's
-      ;; clock half), the show's run is rendered with its cue here; once it
-      ;; does, this adds nothing
-      (with-redefs [show-time/active-runs
-                    (fn [state runtime]
-                      (let [runs (active-runs state runtime)
-                            run (get-in state [:playback :active-cues sk :run])]
-                        (if (or (some #(= sk (:cell %)) runs) (nil? (get-in runtime [:runs run])))
-                          runs
-                          (conj runs {:cell sk :run run :cue-chain (shows/cue-at state sk)
-                                      :cue-timing (get-in runtime [:runs run])}))))]
-        (let [s (ticks! 2)]
-          (is (= {[0 0] [:zone/a] sk [:graphics]}
-                 (into {} (map (fn [{:keys [cell zone-frames]}] [cell (vec (keys zone-frames))])) (:cues s))))
-          (is (not (contains? (output-errors/snapshot) [:render sk]))))))))
+      (let [s (ticks! 2)]
+        (is (= {[0 0] [:zone/a] sk [:graphics]}
+               (into {} (map (fn [{:keys [cell zone-frames]}] [cell (vec (keys zone-frames))])) (:cues s))))
+        (is (not (contains? (output-errors/snapshot) [:render sk])))))))
 
 (deftest edited-cells-name-a-shows-key-test
   (let [u #uuid "00000000-0000-0000-0000-0000000005a1"
@@ -1228,23 +1216,29 @@
             (events/event-handler (assoc (get-in (menu/handle {:event/type :file/open :state (now)})
                                                  [:fx/show-file-chooser :on-result])
                                          :file-path file)))
-          (let [d3 (doc)]
+          (let [d3 (doc)
+                ;; Open moves the grid's timeline into the show library
+                ;; (timeline shows plan 04 §4.3): the same cue, now a show
+                [[id show]] (seq (get-in (now) [:chains :shows]))
+                k (shows/play-key id)]
             (is (= file (get-in (now) [:project :current-file])) "it opened")
             (is (not-any? #{d3} [nil d1]))
-            (is (= (get-in saved ["content.edn" :chains :cue-chains c]) (get-in (now) [:chains :cue-chains c])))
+            (is (nil? (get-in (now) [:chains :cue-chains c])) "the cell left the grid")
+            (is (= (dissoc (get-in saved ["content.edn" :chains :cue-chains c]) :name)
+                   (dissoc show :name)))
             (is (unchanged-by? held) "even the old show's On for that cue changes nothing")
             (let [s (tick-at! 220 3605.79)
                   [on3 :as ons3] (chases)]
               (is (= [] (:cues s)) "a show opens stopped")
-              (is (close? 11.58 (get (:positions s) c)) "its own episode, at the timecode")
-              (is (= [d3 0 :none {:restart nil :allowed? true}]
-                     ((juxt :document-id :source-version :expected-owner :start) on3))
+              (is (close? 11.58 (get (:positions s) k)) "its own episode, at the timecode")
+              (is (= [k d3 0 :none {:restart nil :allowed? true}]
+                     ((juxt :cell :document-id :source-version :expected-owner :start) on3))
                   "its own On, at once: 20 ms after the old show's, another report")
               (is (= d3 (first (:chase-id on3))))
               (run! events/event-handler ons3)
-              (is (= (marker on3) (get-in (now) [:playback :active-cues c])))
+              (is (= (marker on3) (get-in (now) [:playback :active-cues k])))
               (is (true? (get-in (now) [:playback :playing?])))
-              (is (= [c] (map :cell (:cues (tick-at! 240 3605.81))))))))))))
+              (is (= [k] (map :cell (:cues (tick-at! 240 3605.81))))))))))))
 
 
 ;; Reactivity plan 27: the Map cycle reads the tick's input values, as its
