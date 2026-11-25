@@ -192,26 +192,33 @@
 
 
 (defn link-sync-button
-  "Enable Link; once enabled, toggle whether the app follows its tempo."
+  "Connect Carabiner while it isn't connected (one click, as Settings'
+   Connect: :timing/carabiner-connect; disabled while that connect waits);
+   then enable Link; once enabled, toggle whether the app follows its
+   tempo."
   [{:keys [fx/context]}]
-  (let [{:keys [carabiner-connected? link-enabled? sync-enabled? link-bpm link-peers]}
+  (let [{:keys [carabiner-connected? connecting link-enabled? sync-enabled? link-bpm link-peers]}
         (fx/sub-ctx context subs/link-status)
         tempo (if link-bpm (format "%.1f BPM" (double link-bpm)) "waiting for tempo")
         tooltip-text (cond
-                       (not carabiner-connected?) "Carabiner not connected"
+                       (and (not carabiner-connected?) connecting) "Connecting to Carabiner…"
+                       (not carabiner-connected?) "Carabiner not connected — click to connect"
                        (not link-enabled?) "Carabiner ready - Click to enable Link"
                        :else (format "%s (%s, %d peers)\nClick to %s BPM sync"
                                      (if sync-enabled? "Syncing BPM from Ableton Link" "Link enabled")
                                      tempo (or link-peers 0) (if sync-enabled? "stop" "enable")))]
     {:fx/type :button
      :id "link-sync-btn"
-     :disable (not carabiner-connected?)
+     :disable (and (not carabiner-connected?) (some? connecting))
      :pref-width 50
      :graphic {:fx/type svg/icon :src "ableton.svg" :color :white :size 36}
      :style-class (if (and link-enabled? sync-enabled?) "transport-btn-active" "transport-btn")
      :focus-traversable false
      :tooltip {:fx/type :tooltip :text tooltip-text}
-     :on-action {:event/type (if link-enabled? :timing/toggle-link-sync :timing/link-toggle)}}))
+     :on-action {:event/type (cond
+                               (not carabiner-connected?) :timing/carabiner-connect
+                               link-enabled? :timing/toggle-link-sync
+                               :else :timing/link-toggle)}}))
 
 
 (defn connection-indicator
