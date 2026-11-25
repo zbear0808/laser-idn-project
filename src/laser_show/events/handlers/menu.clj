@@ -248,7 +248,10 @@
                         (log/error "Project can't be opened:" file-path "-" (ex-message e))
                         nil))]
       (do (log/info "Project loaded:" file-path)
-          {:state opened})
+          ;; Timeline cues moved into the library: show them once (Save's
+          ;; dry Open, prepare-open alone, never switches tabs)
+          {:state (cond-> opened
+                    (get-in opened [:ui :shows :migrated]) (assoc-in [:ui :active-tab] :shows))})
       {:dispatch {:event/type :file/project-load-failed :file-path file-path}})))
 
 (defn- handle-file-project-load-failed

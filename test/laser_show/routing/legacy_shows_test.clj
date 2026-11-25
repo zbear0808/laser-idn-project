@@ -17,6 +17,7 @@
             [clojure.java.io :as io]
             [clojure.pprint :as pprint]
             [clojure.test :refer [deftest is testing]]
+            [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.animation.show-time :as show-time]
             [laser-show.events.core :as events]
             [laser-show.routing.compose :as compose]
@@ -24,6 +25,7 @@
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.state.persistent :as persistent]
+            [laser-show.timeline.shows :as shows]
             [laser-show.views.components.preview :as preview]))
 
 (def show-names
@@ -116,15 +118,30 @@
   (let [p (some-> (:preview snapshot) deref)]
     (mapv #(digest (not-empty (preview/cell-points p %))) (get-in state [:config :preview :grid-cells]))))
 
+(defn- start!
+  "Start the cue at playback key k as a press of its cell did: a grid cell
+   by :grid/trigger-cell; a show (a timeline cue Open moved out of the grid,
+   timeline shows plan 04 §4.3) from beat 0 as a new run, with the press's
+   :cue pulse (grid/start-cue)."
+  [k]
+  (if (shows/play-key? k)
+    (state/swap-state! (fn [s]
+                         (-> s
+                             (update :playback cue-timing/activate-cue k (random-uuid) {:timeline? true :start-beat 0.0})
+                             (update-in [:playback :pulses :cue :id] (fnil inc 0)))))
+    (let [[col row] k]
+      (events/event-handler {:event/type :grid/trigger-cell :col col :row row}))))
+
 (defn play
-  "Cue cell of the opened state played alone, ticked every quarter beat:
-   {beat {:lasers :preview}} at each of beats."
-  [opened [col row]]
+  "The cue at playback key k (a grid cell, or a show's [:show id]) of the
+   opened state played alone, ticked every quarter beat: {beat {:lasers
+   :preview}} at each of beats."
+  [opened k]
   (state/init-state! opened)
   (show-time/reset-runtime!)
   (try
     (with-redefs [events/dispatch! (fn [_])]
-      (events/event-handler {:event/type :grid/trigger-cell :col col :row row})
+      (start! k)
       (into (sorted-map)
             (keep (fn [b]
                     (let [s (show-clock/tick! (tick-ns b))]
@@ -135,8 +152,23 @@
     (finally
       (show-time/reset-runtime!))))
 
-(defn- cue-cells [state]
-  (sort (keys (get-in state [:chains :cue-chains]))))
+(defn- cue-keys
+  "{cell playback-key} of every cue the fixture show held, by the cell the
+   file put it in (golden.edn's keys): a grid cue at its cell, a timeline
+   cue that Open moved into the show library at its show's [:show id],
+   found by its name (each timeline fixture cue has its own)."
+  [show-name opened]
+  (let [file-cues (get-in (show-file show-name) ["content.edn" :chains :cue-chains])
+        by-name (into {} (map (fn [[id s]] [(:name s) (shows/play-key id)])) (get-in opened [:chains :shows]))]
+    (into (sorted-map)
+          (map (fn [[cell cue]]
+                 [cell (if (contains? (get-in opened [:chains :cue-chains]) cell)
+                         cell
+                         (get by-name (:name cue)))]))
+          file-cues)))
+
+(defn- cue-name [opened k]
+  (:name (shows/cue-at opened k)))
 
 (defn routes
   "{show {cell (play …)}} for every fixture show and every one of its cues."
@@ -144,7 +176,7 @@
   (into (sorted-map)
         (for [show show-names
               :let [opened (open-show show)]]
-          [show (into (sorted-map) (for [cell (cue-cells opened)] [cell (play opened cell)]))])))
+          [show (into (sorted-map) (for [[cell k] (cue-keys show opened)] [cell (play opened k)]))])))
 
 (def ^:private golden-file "test/laser_show/routing/legacy_shows/golden.edn")
 
@@ -168,10 +200,11 @@
     (is (= (set show-names) (set (keys expected))) "every show was recorded")
     (doseq [show show-names
             :let [opened (open-show show)]]
-      (is (= (sort (keys (get expected show))) (cue-cells opened)) (str show ": the same cues"))
-      (doseq [cell (cue-cells opened)]
-        (testing (str show " " cell " " (get-in opened [:chains :cue-chains cell :name]))
-          (let [got (play opened cell)]
+      (is (= (sort (keys (get expected show))) (keys (cue-keys show opened))) (str show ": the same cues"))
+      (is (every? some? (vals (cue-keys show opened))) (str show ": each found, in the grid or the show library"))
+      (doseq [[cell k] (cue-keys show opened)]
+        (testing (str show " " cell " " (cue-name opened k))
+          (let [got (play opened k)]
             (doseq [b beats]
               (is (= (get-in expected [show cell b :lasers]) (get-in got [b :lasers]))
                   (str "every laser at beat " b))
@@ -204,6 +237,7 @@
         (testing "and what it saves opens the same"
           (let [again (persistent/apply-loaded-project (rig-state) (persistent/project-files opened) "again.zip")]
             (is (= (get-in opened [:chains :cue-chains]) (get-in again [:chains :cue-chains])))
+            (is (= (get-in opened [:chains :shows]) (get-in again [:chains :shows])))
             (is (= (get-in opened [:chains :effect-chains]) (get-in again [:chains :effect-chains])))
             (is (= (:zone-groups opened) (:zone-groups again)))
             (is (= (get-in opened [:config :preview]) (get-in again [:config :preview])))

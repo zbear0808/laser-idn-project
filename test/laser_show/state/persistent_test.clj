@@ -303,7 +303,11 @@
     (let [loaded (persistent/apply-loaded-project (domains/build-initial-state)
                                                   (persistent/read-project test-project-file)
                                                   test-project-file)
-          cue (get-in loaded [:chains :cue-chains [0 0]])]
+          ;; The grid's timeline moved into the show library (timeline shows
+          ;; plan 04 §4.3), found by the name the migration gave it
+          cue (some (fn [[_ show]] (when (= "Timeline A1" (:name show)) show)) (get-in loaded [:chains :shows]))]
+      (is (nil? (get-in loaded [:chains :cue-chains [0 0]])) "the cell left the grid")
+      (is (= 1 (get-in loaded [:ui :shows :migrated :moved])))
       (is (= 0.0 (get-in cue [:items 0 :timeline/start])))
       (is (= 4.0 (get-in cue [:items 0 :timeline/duration])))
       (is (= track-id (get-in cue [:items 0 :track-id])))
@@ -912,6 +916,12 @@
     (testing "apply-loaded-project checks first, so what isn't a show replaces nothing"
       (is (thrown? ExceptionInfo (persistent/apply-loaded-project (test-state) {"project-metadata.edn" {}} "x.zip"))))))
 
+(defn- by-show-name
+  "doc with its show library keyed by show name: the timeline shows Open
+   moves out of the grid get a fresh id each time."
+  [doc]
+  (update-in doc [:chains :shows] #(into {} (map (fn [[_ s]] [(:name s) s])) %)))
+
 (deftest checked-open-accepts-old-and-empty-shows-test
   (let [^File dir (jar/temp-dir! "checked-open")
         zip-of! (fn [file-name files]
@@ -926,8 +936,9 @@
                   read (persistent/read-project (zip-of! (str show ".zip") files))
                   opened (persistent/apply-loaded-project (legacy/rig-state) read (str show ".zip"))]
               (is (= files read) "read as written")
-              (is (= (history/extract-document-state (legacy/open-show show)) (history/extract-document-state opened))
-                  "and opened as legacy-shows-test opens it")
+              (is (= (by-show-name (history/extract-document-state (legacy/open-show show)))
+                     (by-show-name (history/extract-document-state opened)))
+                  "and opened as legacy-shows-test opens it (moved timelines get new ids each Open)")
               (is (false? (get-in opened [:project :dirty?])))
               (is (empty? (get-in opened [:history :undo-stack])))))))
       (testing "one from before zones Z2: its hardware has no :rig"
