@@ -151,6 +151,24 @@ jobs:
       if: ${{ !cancelled() && matrix.shard == 1 && matrix.platform != 'linux' }}
       run: clojure '-M:${{ matrix.platform }}:test:test-ui-headless' -n laser-show.output.addons-test
 
+    # Dev mode (the :dev alias: -Dlaser-show.dev=true, dev/ and cljfx.dev)
+    # checks every render against cljfx.dev's specs and dev/'s corrections
+    # to them (reactivity plan 31). Only these runs use it, so they keep the
+    # specs and corrections honest: the renderer's wiring, the F12 inspector
+    # and the Settings tab, in that mode. Once, in Linux's first shard, each
+    # in its own JVM. They run even when the UI tests failed.
+    - name: Run dev-mode renderer wiring tests
+      if: &dev-mode ${{ !cancelled() && matrix.shard == 1 && matrix.platform == 'linux' }}
+      run: clojure -M:dev:linux:test:test-ui-headless -n laser-show.renderer-wiring-test
+
+    - name: Run dev-mode inspector test
+      if: *dev-mode
+      run: clojure -M:dev:linux:test-ui:test-ui-headless -v laser-show.ui-test.menu-bar-test/renderer-inspector-is-dev-only-test
+
+    - name: Run dev-mode Settings tests
+      if: *dev-mode
+      run: clojure -M:dev:linux:test-ui:test-ui-headless -n laser-show.ui-test.settings-test
+
     - name: Upload UI test results and screenshots
       if: failure()
       uses: actions/upload-artifact@v7
