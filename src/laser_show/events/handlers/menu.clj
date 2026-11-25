@@ -30,12 +30,13 @@
 ;; succeeded (:file/confirm-save). Open's chooser comes back later, so its
 ;; result carries the permission it was opened with (discard-authorization),
 ;; and :file/project-loaded asks again when that no longer covers the show
-;; open by then (may-discard?), parked as an Open of the file picked; while
-;; the dialog asks something else, that Open waits behind the question
-;; ([:ui :dialogs :unsaved-confirm :queued], ask-again) and comes back once
-;; it is answered (then-queued). So does an Exit that comes back later: Try
-;; again's, once the rig is written, and Exit's own, once it has waited for
-;; the rig writer (wait-for-the-rig).
+;; open by then (may-discard?), parked as an Open of the file picked. So does
+;; an Exit that comes back later: Try again's, once the rig is written, and
+;; Exit's own, once it has waited for the rig writer (wait-for-the-rig). While
+;; the dialog asks something else, such an Open or Exit waits behind the
+;; question ([:ui :dialogs :unsaved-confirm :queued], ask-again) and comes
+;; back once it is answered (then-queued); the Exit then does nothing if the
+;; answer has replaced the show it was for (stale-exit?).
 
 (def ^:private confirm-path [:ui :dialogs :unsaved-confirm])
 
@@ -80,21 +81,35 @@
                        :pending (parked-request event))}))
 
 (defn- ask-again
-  "ask-first for an Open asked about again once its chooser came back
-   (handle-file-project-loaded). While the dialog asks something else, it
-   isn't dropped: it waits behind that question, once, in :queued, carrying
-   a permission that throws away no unsaved changes, so when it comes back
-   after the answer (then-queued) it opens only a show with nothing
-   unsaved, and asks again otherwise."
-  [state event]
-  (let [{:keys [open? pending queued]} (get-in state confirm-path)
-        parked (parked-request event)]
-    (cond
-      (not open?) (ask-first state event)
-      (or (= parked (parked-request pending)) (some #(= parked (parked-request %)) queued)) {:state state}
-      :else (do (log/info "Asking about" (:event/type parked) (:file-path parked) "once the question open now is answered")
-                {:state (update-in state (conj confirm-path :queued) (fnil conj [])
-                                   (assoc parked :authorized {:document-id (h/document-id state) :dirty? false}))}))))
+  "(ask state event), ask-first unless given, for a request asked about
+   again once it came back: an Open once its chooser did
+   (handle-file-project-loaded), an Exit once the rig was written or waited
+   for (handle-file-exit). While the dialog asks something else, it isn't
+   dropped: it waits behind that question, once, in :queued, carrying a
+   permission that throws away no unsaved changes, so when it comes back
+   after the answer (then-queued) it throws away only a show with nothing
+   unsaved, and asks again otherwise. An Exit waits marked for the show open
+   now (:queued?, h/for-document): once the answer has replaced that show
+   (Don't Save or Save on a New, or on an Open asked about again), it does
+   nothing (stale-exit?), where an Open still opens its file."
+  ([state event] (ask-again state event ask-first))
+  ([state event ask]
+   (let [{:keys [open? pending queued]} (get-in state confirm-path)
+         parked (parked-request event)]
+     (cond
+       (not open?) (ask state event)
+       (or (= parked (parked-request pending)) (some #(= parked (parked-request %)) queued)) {:state state}
+       :else (let [waiting (cond-> (assoc parked :authorized {:document-id (h/document-id state) :dirty? false})
+                             (= :file/exit (:event/type parked)) (-> (assoc :queued? true) (h/for-document state)))]
+               (log/info "Asking about" parked "once the question open now is answered")
+               {:state (update-in state (conj confirm-path :queued) (fnil conj []) waiting)})))))
+
+(defn- stale-exit?
+  "Is event an Exit that waited behind the dialog's question (:queued?,
+   ask-again) for a show that New or Open has replaced since
+   (h/same-document?)? What it was to close is gone."
+  [state {:keys [queued?] :as event}]
+  (and queued? (not (h/same-document? state event))))
 
 (defn- then-queued
   "effects of an answer to the dialog's question, and after them the
@@ -132,10 +147,11 @@
 
 (defn- ask-about-the-rig
   "Open the same dialog with the rig's question (reason :rig): its last
-   changes couldn't be written. Quit anyway continues with Exit, past both
-   questions; Try again writes the rig, then quits. That Exit carries the
-   permission the show's question gave (:authorized, the event's or now's),
-   which it is checked against when it comes back."
+   changes couldn't be written (ignored if the dialog is already open).
+   Quit anyway continues with Exit, past both questions; Try again writes
+   the rig, then quits. That Exit carries the permission the show's
+   question gave (:authorized, the event's or now's), which it is checked
+   against when it comes back."
   [state {:keys [authorized]}]
   (if (get-in state (conj confirm-path :open?))
     {:state state}
@@ -356,13 +372,21 @@
    that wait) carries the permission it was given (:authorized): when that
    no longer covers the show open now (may-discard?), the show's question
    is asked again, so an edit made meanwhile isn't thrown away unasked.
-   Also the handler for closing the main window."
+   While the dialog asks something else, such an Exit waits behind that
+   question to ask its own, or the rig's, once it is answered (ask-again);
+   back for a show the answer replaced, it does nothing (stale-exit?). Exit
+   pressed while the dialog is open is ignored (ask-first,
+   ask-about-the-rig). Also the handler for closing the main window."
   [{:keys [state authorized] :as event}]
   (log/debug "File > Exit")
   (cond
-    (and authorized (not (may-discard? state authorized))) (ask-first state {:event/type :file/exit})
+    (stale-exit? state event) (do (log/info "Not closing: the show this Exit waited for is no longer open")
+                                  {})
+    (and authorized (not (may-discard? state authorized))) (ask-again state {:event/type :file/exit})
     (guard-needed? state event) (ask-first state event)
-    (rig-guard-needed? state event) (ask-about-the-rig state event)
+    (rig-guard-needed? state event) (if authorized
+                                      (ask-again state event ask-about-the-rig)
+                                      (ask-about-the-rig state event))
     (rig-wait-needed? state event) (wait-for-the-rig state event)
     :else {:system/exit true}))
 

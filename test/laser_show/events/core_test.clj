@@ -11,6 +11,7 @@
    [clojure.tools.logging.test :as log-test]
    [laser-show.events.core :as events]
    [laser-show.events.handlers :as handlers]
+   [laser-show.events.handlers.menu :as menu]
    [laser-show.events.handlers.timing :as timing]
    [laser-show.idn.hello :as idn-hello]
    [laser-show.backend.output-runtime :as output-runtime]
@@ -20,6 +21,7 @@
    [laser-show.output.recording-driver :as rd]
    [laser-show.state.core :as state]
    [laser-show.state.domains :as domains]
+   [laser-show.state.history :as history]
    [laser-show.state.persistent :as persistent]
    [laser-show.state.rig-store :as rig-store])
   (:import [java.io File]
@@ -389,6 +391,70 @@
           (deliver gate true)
           (rig-store/flush! 2000)
           (doseq [^File f (reverse (file-seq dir))] (.delete f)))))))
+
+(deftest a-retired-app-s-queued-exit-never-quits-the-next-app-test
+  ;; Follow-up B12b: an Exit back to be asked again while the dialog asks
+  ;; something else waits behind that question, in its app's state, and
+  ;; comes back once the question is answered. Not for an app stopped while
+  ;; it answered: that answer, and the Exit after it, are the stopped app's.
+  ;; The next app has the same show here, clean, so only the app instance
+  ;; stands between that Exit and quitting
+  (let [exits (atom 0)
+        show (-> (domains/build-initial-state)
+                 (assoc-in [:project :document-id] (random-uuid))
+                 (history/mark-clean))
+        ;; Exit back from its wait for the rig, pressed on the clean show
+        back {:event/type :file/exit :force? true :rig-waited? true
+              :authorized {:document-id (get-in show [:project :document-id]) :dirty? false}}
+        dialog #(get-in (state/get-raw-state) [:ui :dialogs :unsaved-confirm])
+        asking? (fn [pending] (= {:open? true :pending pending} (select-keys (dialog) [:open? :pending])))
+        exit-waits-behind-new! (fn [app]
+                                 (app {:event/type :cue-chain/set-name :col 2 :row 0 :name "Edited while Exit waited"})
+                                 (app {:event/type :file/new-project})
+                                 (app back)
+                                 (is (handled? app))
+                                 (is (asking? {:event/type :file/new-project}))
+                                 (is (= [:file/exit] (mapv :event/type (:queued (dialog)))) "the Exit waits behind New's question"))]
+    (events/set-exit-fn! #(swap! exits inc))
+    (testing "in its own app, the Exit asks once the question is answered"
+      (state/reset-state! show)
+      (with-instance
+        (fn [app]
+          (exit-waits-behind-new! app)
+          (app {:event/type :file/confirm-cancel})
+          (is (handled? app))
+          (is (asking? {:event/type :file/exit})))))
+    (testing "an app stopped while it answered"
+      (state/reset-state! show)
+      (let [entered (promise)
+            gate (promise)
+            handle menu/handle]
+        (with-redefs [menu/handle (fn [event]
+                                    (when (= :file/confirm-cancel (:event/type event))
+                                      (deliver entered true)
+                                      (deref gate 5000 nil))
+                                    (handle event))]
+          (try
+            (with-instance
+              (fn [first-app]
+                (exit-waits-behind-new! first-app)
+                (first-app {:event/type :file/confirm-cancel})
+                (is (deref entered 2000 false) "Cancel is being answered")
+                (events/retire!)
+                (state/init-state! (assoc show :marker :next))
+                (let [next-app (dispatcher-of (events/new-instance!))]
+                  (deliver gate true)
+                  (is (handled? first-app))
+                  (testing "; and its next Exit back, late"
+                    (first-app back)
+                    (is (handled? first-app)))
+                  (is (handled? next-app))
+                  (let [s (state/get-raw-state)]
+                    (is (= :next (:marker s)) "the next app's context")
+                    (is (= (get-in show [:ui :dialogs]) (get-in s [:ui :dialogs])) "no question, nothing waits"))
+                  (is (zero? @exits) "and it doesn't quit"))))
+            (finally
+              (deliver gate true))))))))
 
 (deftest an-instance-writes-only-into-its-own-context-test
   (log-test/with-log
