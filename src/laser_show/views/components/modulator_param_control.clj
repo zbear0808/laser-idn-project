@@ -713,8 +713,8 @@
    - :label-width - Optional label width
    - :spacing - Optional spacing between controls"
   [{:keys [params-map current-params on-change-event on-text-event on-color-event modulator-event-base label-width spacing]}]
-  ;; Auto-derive color event from on-change-event if not explicitly provided
-  ;; Color pickers use ActionEvent, so we need :chain/update-color-param handler
+  ;; Auto-derive color event from on-change-event if not explicitly provided:
+  ;; a color picker sends :chain/update-color-param with the picked :color
   (let [color-event (or on-color-event
                         (when on-change-event
                           (assoc on-change-event :event/type :chain/update-color-param)))]
@@ -722,7 +722,7 @@
      :spacing (or spacing 6)
      :children (vec
                 (for [[param-key param-spec] params-map]
-                  ;; Use color event for color params (ColorPicker fires ActionEvent, not color value)
+                  ;; Use color event for color params
                   (let [change-evt (if (= :color (:type param-spec))
                                      color-event
                                      on-change-event)]

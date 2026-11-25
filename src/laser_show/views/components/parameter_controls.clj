@@ -15,8 +15,9 @@
    - :step-list - A step grid's steps (zones plan Z6): how many
    
    Note: Color parameters are now handled as separate :red, :green, :blue floats
-   for modulator support. Use param-color-picker directly when you need a unified
-   color picker interface that reads/writes these separate RGB params.
+   for modulator support. Use param-color-picker (or color-picker, without its
+   label) when you need a unified color picker interface that reads/writes
+   these separate RGB params; it sends the picked colour as plain data.
    
    Usage:
    ```clojure
@@ -35,7 +36,10 @@
             [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.commit-field :as commit-field]
             [laser-show.views.components.gesture :as gesture]
-            [laser-show.views.components.target-control :as target-control]))
+            [laser-show.views.components.target-control :as target-control])
+  (:import [javafx.event ActionEvent]
+           [javafx.scene.control ColorPicker]
+           [javafx.scene.paint Color]))
 
 
 ;; Parameter Spec Conversion
@@ -212,39 +216,68 @@
                         :id (str "param-" (str/replace (name param-key) "?" "") "-check")
                         :text display-label}}]}))
 
+(defn- normalized-color
+  "The colour of red, green and blue, each clamped to 0.0-1.0: a number, or
+   a modulator's static value (reg/get-static-value; 1.0 for none)."
+  ^Color [red green blue]
+  (let [c (fn [v] (let [s (reg/get-static-value v 1.0)]
+                    (max 0.0 (min 1.0 (if (number? s) (double s) 1.0)))))]
+    (Color/color (c red) (c green) (c blue))))
+
+(defn- send-picked-color!
+  "A colour picker's action, its user's pick (a square of its palette, or
+   Use or Save in its custom colour dialog): event with the picker's colour
+   as plain data, :color [red green blue], read here on the FX thread."
+  [event ^ActionEvent e]
+  (let [^Color c (.getValue ^ColorPicker (.getSource e))]
+    (when c
+      (events/dispatch! (assoc event :color [(.getRed c) (.getGreen c) (.getBlue c)])))))
+
+(defn color-picker
+  "A colour picker showing the colour of :red, :green and :blue in
+   :current-params (normalized, 0.0-1.0). The user's pick sends :event
+   with that colour as :color [red green blue] (send-picked-color!): plain
+   data, never the picker or its ActionEvent. A colour it shows while its
+   palette or custom colour dialog is open is a preview, not an edit. After
+   a pick the app refused, or that changed nothing, it shows the colour
+   that applies again (applied-value).
+   Props: :current-params, :event, and the :color-picker's own (:id,
+   :style, :pref-width)."
+  [{:keys [current-params event] :as props}]
+  (let [{:keys [red green blue]} current-params]
+    {:fx/type applied-value/applied-control
+     :property :value
+     :address [event :color]
+     :value (normalized-color red green blue)
+     :desc (-> props
+               (dissoc :current-params :event :fx/context)
+               (assoc :fx/type :color-picker
+                      :on-action #(send-picked-color! event %)))}))
+
 (defn param-color-picker
-  "Color picker for RGB color parameters.
+  "Color picker for RGB color parameters (color-picker), with its label.
    
    Reads color from separate :red, :green, :blue values in current-params map
    with NORMALIZED 0.0-1.0 components.
-   The color picker displays/edits using the native JavaFX color picker.
    
    Props:
    - :current-params - Map containing :red, :green, :blue values (0.0-1.0)
-   - :on-change-event - Event template for color changes (no :param-key needed)
+   - :on-change-event - Event template for color changes (no :param-key
+     needed): sent with the picked :color [red green blue]
    - :label-width - Optional label width (default 80)"
   [{:keys [current-params on-change-event label-width]}]
-  (let [;; Read separate RGB values from params map
-        r (get current-params :red 1.0)
-        g (get current-params :green 1.0)
-        b (get current-params :blue 1.0)
-        label-w (or label-width 80)
-        ;; Create JavaFX Color object from normalized values
-        color-value (javafx.scene.paint.Color/color
-                     (max 0.0 (min 1.0 (double r)))
-                     (max 0.0 (min 1.0 (double g)))
-                     (max 0.0 (min 1.0 (double b))))]
-    {:fx/type :h-box
-     :spacing 8
-     :alignment :center-left
-     :children [{:fx/type :label
-                 :text "Color"
-                 :pref-width label-w
-                 :style-class ["label-secondary"]}
-                {:fx/type :color-picker
-                 :value color-value
-                 :pref-width 100
-                 :on-action on-change-event}]}))
+  {:fx/type :h-box
+   :spacing 8
+   :alignment :center-left
+   :children [{:fx/type :label
+               :text "Color"
+               :pref-width (or label-width 80)
+               :style-class ["label-secondary"]}
+              {:fx/type color-picker
+               :id "param-color-picker"
+               :current-params current-params
+               :event on-change-event
+               :pref-width 100}]})
 
 
 ;; Refs: where a zone pattern moves pictures (zones plan Z5)

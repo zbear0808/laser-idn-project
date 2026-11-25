@@ -129,11 +129,22 @@
   [spec]
   (contains? #{:float :int} (:type spec :float)))
 
-(defn handle-update-color-param
-  "Update color parameters from ColorPicker's ActionEvent.
-   Extracts the color from the ColorPicker source and converts to normalized RGB.
+(defn color-value
+  "The colour a colour edit sets: its :color, [red green blue] as the
+   colour picker reads it on the FX thread (parameter-controls/color-picker),
+   each a finite number, clamped to 0.0-1.0; nil for anything else, such
+   as the picker's ActionEvent, which is never read here.
    
-   Updates :red, :green, :blue as separate parameters for modulator support.
+   Example: (color-value {:color [1.0 0.5 0.0]}) => [1.0 0.5 0.0]"
+  [event]
+  (let [c (:color event)]
+    (when (and (vector? c) (= 3 (count c)) (every? h/finite-number? c))
+      (mapv #(max 0.0 (min 1.0 (double %))) c))))
+
+(defn handle-update-color-param
+  "Update the color parameters of the effect at :effect-path to the
+   event's :color (color-value): :red, :green and :blue, separate
+   parameters for modulator support.
    
    NOTE: Uses NORMALIZED values (0.0-1.0), not 8-bit (0-255).
    All color effects in laser-show use normalized color values internally.
@@ -141,27 +152,21 @@
    Parameters:
    - state: Application state
    - config: Configuration map with :items-path
-   - event: Map with :effect-path and :fx/event (ActionEvent)
+   - event: Map with :effect-path and :color [red green blue]
    
-   Returns: Updated state"
+   Returns: Updated state (unchanged without a colour, or without an effect
+   at :effect-path)"
   [state config {:keys [effect-path] :as event}]
-  (let [action-event (:fx/event event)
-        color-picker (.getSource action-event)
-        color (.getValue color-picker)
-        ;; Use normalized values (0.0-1.0) for color effects
-        red (.getRed color)
-        green (.getGreen color)
-        blue (.getBlue color)
-        items-path (:items-path config)
+  (let [items-path (:items-path config)
         items-vec (vec (get-in state items-path []))
-        params-path (conj (vec effect-path) :params)
-        updated-items (-> items-vec
-                          (assoc-in (conj params-path :red) red)
-                          (assoc-in (conj params-path :green) green)
-                          (assoc-in (conj params-path :blue) blue))]
-    (log/debug "handle-update-color-param: effect-path=" effect-path
-               "rgb=" [red green blue])
-    (assoc-in state items-path updated-items)))
+        params-path (conj (vec effect-path) :params)]
+    (if-let [[red green blue] (when (map? (get-in items-vec (vec effect-path))) (color-value event))]
+      (do (log/debug "handle-update-color-param: effect-path=" effect-path "rgb=" [red green blue])
+          (assoc-in state items-path (-> items-vec
+                                         (assoc-in (conj params-path :red) red)
+                                         (assoc-in (conj params-path :green) green)
+                                         (assoc-in (conj params-path :blue) blue))))
+      state)))
 
 
 ;; UI Mode Operations

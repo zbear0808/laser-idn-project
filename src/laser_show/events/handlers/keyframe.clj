@@ -496,23 +496,16 @@
    - config: Chain config
    - effect-path: Path to effect
    - keyframe-idx: Index of keyframe to update
-   - action-event: JavaFX ActionEvent from ColorPicker
+   - rgb: [red green blue], normalized (0.0-1.0): the picked colour as
+     plain data (params/color-value)
    
-   Returns: Updated state"
-  [state config effect-path keyframe-idx ^javafx.event.ActionEvent action-event]
-  (let [keyframe-mod (get-keyframe-modulator state config effect-path)
-        keyframes (:keyframes keyframe-mod [])]
-    (if (and (>= keyframe-idx 0) (< keyframe-idx (count keyframes)))
-      (let [color-picker (.getSource action-event)
-            color (.getValue color-picker)
-            red (.getRed color)
-            green (.getGreen color)
-            blue (.getBlue color)]
-        (-> state
-            (update-keyframe-modulator config effect-path
-                                       update-in [:keyframes keyframe-idx :params]
-                                       merge {:red red :green green :blue blue})))
-      state)))
+   Returns: Updated state (unchanged when keyframe-idx is no keyframe's)"
+  [state config effect-path keyframe-idx [red green blue]]
+  (if (keyframe-index? (get-keyframe-modulator state config effect-path) keyframe-idx)
+    (update-keyframe-modulator state config effect-path
+                               update-in [:keyframes keyframe-idx :params]
+                               merge {:red red :green green :blue blue})
+    state))
 
 (defn handle
   "Handle keyframe modulator events.
@@ -595,9 +588,11 @@
       {:state (handle-set-normalize state config effect-path (h/first-some (:normalize? event) (:fx/event event)))}
 
       :keyframe/update-color-param
-      {:state (handle-update-keyframe-color-param state config effect-path
-                                                  (:keyframe-idx event)
-                                                  (:fx/event event))}
+      (if-let [rgb (params/color-value event)]
+        (keyframe-edit state
+                       (handle-update-keyframe-color-param state config effect-path (:keyframe-idx event) rgb)
+                       config effect-path)
+        {})
 
       ;; Unknown keyframe event
       (do
