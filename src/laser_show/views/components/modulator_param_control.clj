@@ -31,9 +31,11 @@
    07). :current-value is what the controls show. After a change the app
    refused (the show lock) or that changed nothing, each control shows the
    value that applies again (applied-value; the text fields, commit-field)."
-  (:require [clj-font-awesome.core :as fa]
+  (:require [cljfx.api :as fx]
+            [clj-font-awesome.core :as fa]
             [clojure.string :as str]
             [laser-show.animation.modulator-registry :as reg]
+            [laser-show.subs :as subs]
             [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.commit-field :as commit-field]
             [laser-show.views.components.gesture :as gesture]
@@ -71,38 +73,53 @@
       {:text (str (:icon item) " " (:name item))})))
 
 (defn modulator-choices
-  "The modulator types the dropdown offers in an editor of domain: every UI
-   type, but the :pulse ones (Envelope, Step, Energy) for calibration
-   (:projector-effects), which never sees a press."
-  [domain]
-  (cond->> (reg/all-ui-modulators)
+  "The modulator types the dropdown offers in an editor of domain, from
+   descriptors, the types as published ({type descriptor},
+   subs/modulator-descriptors): every type but the internal ones (e.g.
+   :unified-keyframe-param), by category and name, and for calibration
+   (:projector-effects), which never sees a press, none of the :pulse ones
+   (Envelope, Step, Energy)."
+  [descriptors domain]
+  (cond->> (->> (vals descriptors)
+                (remove #(= :internal (:category %)))
+                (sort-by (juxt :category :name)))
     (= :projector-effects domain) (remove #(= :pulse (:category %)))))
 
 (defn- modulator-type-selector
-  "Dropdown to select modulator type; after a type the app refused (the
-   show lock), it shows the one that applies (applied-value).
+  "Dropdown to select modulator type, among the types as published
+   (subs/modulator-descriptors, through the context cljfx gives it: a type
+   registered again and published shows as it is now); after a type the
+   app refused (the show lock), it shows the one that applies
+   (applied-value).
    
    Props:
    - :current-type - Current modulator type keyword
    - :on-select-event - Event template for type selection, sent with the
      selected type's id as :mod-type; its :domain picks the types
      (modulator-choices), its :param-key names it (id modulator-type-<param>)"
-  [{:keys [current-type on-select-event]}]
-  (let [all-types (modulator-choices (:domain on-select-event))
-        current-info (reg/get-modulator current-type)]
-    {:fx/type applied-value/applied-control
-     :property :value
-     :address [on-select-event :type]
-     :value (or current-info (first all-types))
-     ;; The item is the registry's entry (its evaluator too): send its id
-     :on-change (fn [item] (when-let [id (:id item)] (assoc on-select-event :mod-type id)))
-     :desc {:fx/type :combo-box
-            :id (str "modulator-type-" (some-> (:param-key on-select-event) name))
-            :pref-width 140
-            :items (vec all-types)
-            :button-cell (fn [item] (modulator-cell-desc item))
-            :cell-factory {:fx/cell-type :list-cell
-                           :describe (fn [item] (modulator-cell-desc item))}}}))
+  [{:keys [fx/context current-type on-select-event]}]
+  (let [descriptors (fx/sub-ctx context subs/modulator-descriptors)
+        all-types (vec (modulator-choices descriptors (:domain on-select-event)))
+        current-info (get descriptors current-type)]
+    ;; A new combo box when the types it offers change (a publication):
+    ;; cljfx sets changed props in no fixed order, and a ComboBox given the
+    ;; new value before the new items can go on showing the value's
+    ;; toString instead of its cell
+    {:fx/type fx/ext-recreate-on-key-changed
+     :key all-types
+     :desc {:fx/type applied-value/applied-control
+            :property :value
+            :address [on-select-event :type]
+            :value (or current-info (first all-types))
+            ;; The item is the type's descriptor: send its id
+            :on-change (fn [item] (when-let [id (:id item)] (assoc on-select-event :mod-type id)))
+            :desc {:fx/type :combo-box
+                   :id (str "modulator-type-" (some-> (:param-key on-select-event) name))
+                   :pref-width 140
+                   :items all-types
+                   :button-cell (fn [item] (modulator-cell-desc item))
+                   :cell-factory {:fx/cell-type :list-cell
+                                  :describe (fn [item] (modulator-cell-desc item))}}}}))
 
 (defn- param-id
   "A modulator param control's id: modulator-<param>-<modulator param>."
@@ -301,7 +318,10 @@
                         :id (param-id on-change-event key)}}]}))
 
 (defn- modulator-params-editor
-  "Editor for modulator-specific parameters.
+  "Editor for modulator-specific parameters: the fields its type defines
+   as published (subs/modulator-descriptors, through the context cljfx
+   gives it: a type registered again and published shows its fields as
+   they are now).
    
    Props:
    - :modulator-config - Current modulator configuration map
@@ -310,9 +330,9 @@
      there is no Restart on
    - :on-retrigger-event - Event template for retrigger button (optional)
    - :param-spec - The original param spec (for getting min/max bounds)"
-  [{:keys [modulator-config on-param-change-event on-retrigger-event param-spec]}]
-  (let [mod-type (:type modulator-config)
-        base-params (cond->> (reg/get-params mod-type)
+  [{:keys [fx/context modulator-config on-param-change-event on-retrigger-event param-spec]}]
+  (let [descriptor (get (fx/sub-ctx context subs/modulator-descriptors) (:type modulator-config))
+        base-params (cond->> (:params descriptor [])
                       (= :projector-effects (:domain on-param-change-event))
                       (remove #(= :restart-on (:key %))))
         ;; Adjust min/max param bounds to use param-spec's bounds
@@ -335,7 +355,7 @@
                 (concat
                  ;; Retrigger button at top (for wave and decay modulators)
                  (when (and on-retrigger-event
-                            (reg/retrigger? mod-type))
+                            (:retrigger? descriptor))
                    [{:fx/type :h-box
                      :spacing 6
                      :alignment :center-left

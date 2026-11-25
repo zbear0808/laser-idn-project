@@ -12,11 +12,14 @@
    stay, and what is typed into one is stored in it alone (reactivity plan
    07). And the sliders' drags, each one press, one undo step (reactivity
    plan 16). And ∿, queued behind a reorder, turns on the effect it was
-   clicked for (follow-up B6)."
+   clicked for (follow-up B6); an :int field stores whole numbers (B16b); a
+   slider re-rendered for another effect ends its press (B14); the
+   dropdown and the fields are the types as published (R1)."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.animation.modulator-registry :as reg]
+            [laser-show.animation.registries :as registries]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.keyframe :as keyframe]
             [laser-show.routing.zone-patterns :as zone-patterns]
@@ -431,11 +434,23 @@
             (is (nil? (node (in-actions "#keyframe-value"))))
             (is (nil? (node (in-actions ".spinner"))))))))))
 
+(defn- context-opts
+  "The options a component mounted in a window of its own gets, as the
+   app's renderer gives them: a context of the app's state now (the
+   modulator types start-test! published too, which the modulator controls
+   read), cljfx's context-aware lifecycle, and a map event handler that
+   does nothing."
+  []
+  {:fx/context (fx/create-context (state/get-raw-state) state/cache-factory)
+   :fx.opt/type->lifecycle #(or (fx/keyword->lifecycle %) (fx/fn->lifecycle-with-context %))
+   :fx.opt/map-event-handler (fn [_])})
+
 (defn- mount!
   "The modulator control for an Intensity amount, as an editor of domain
    would show it, in a window of its own; returns the window."
   ^Stage [domain]
-  (let [stage (ui/on-fx-thread
+  (let [opts (context-opts)
+        stage (ui/on-fx-thread
                #(let [component (fx/create-component
                                  {:fx/type mod-param/modulator-param-control
                                   :param-key :amount
@@ -444,7 +459,7 @@
                                   :on-change-event {:event/type :chain/update-param :domain domain :entity-key :p1 :effect-path [0]}
                                   :on-text-event {:event/type :chain/update-param-from-text :domain domain :entity-key :p1 :effect-path [0]}
                                   :modulator-event-base {:domain domain :entity-key :p1 :effect-path [0]}}
-                                 {:fx.opt/map-event-handler (fn [_])})]
+                                 opts)]
                   (doto (Stage.)
                     (.setScene (Scene. (fx/instance component) 500 400))
                     (.show))))]
@@ -498,16 +513,41 @@
     (ui/wait-for! #(= :slider-2 (:slot (amount))))
     (ui/wait-for! #(= "2: Morph" (shown "#modulator-amount-slot")))))
 
+(deftest modulator-controls-follow-the-published-types-test
+  ;; Follow-up R1: the type dropdown and a modulator's fields are the types
+  ;; as published (subs/modulator-descriptors, reactivity plan 17), not the
+  ;; registry read while rendering: a type registered again shows as it is
+  ;; now, once published, in an editor that stays open
+  (let [triangle (reg/get-modulator :triangle)
+        period-max #(let [^Slider s (node "#modulator-amount-period")] (ui/on-fx-thread (fn [] (.getMax s))))]
+    (open-amount-editor! {:type :triangle :active? true :period 7.0 :min 0.2 :max 0.8})
+    (is (= "△ Triangle" (shown "#modulator-type-amount")))
+    (is (== 16.0 (period-max)))
+    (try
+      (reg/register-modulator! (assoc triangle
+                                      :name "Ramp"
+                                      :params (mapv #(cond-> % (= :period (:key %)) (assoc :max 32.0)) (:params triangle))))
+      (events/dispatch! (registries/published-event))
+      (is (ui/wait-for! #(= "△ Ramp" (shown "#modulator-type-amount"))) "the dropdown shows the type as published")
+      (is (some #(= "Ramp" (:name %)) (items "#modulator-type-amount")) "among its choices")
+      (is (ui/wait-for! #(== 32.0 (period-max))) "and its fields as published")
+      (finally
+        (reg/register-modulator! triangle)
+        (events/dispatch! (registries/published-event))))
+    (is (ui/wait-for! #(and (= "△ Triangle" (shown "#modulator-type-amount")) (== 16.0 (period-max))))
+        "put back, and published: as before")))
+
 
 ;; A slider's drag is one press (reactivity plan 16)
 
 (defn- mount-desc!
-  "desc, in a window of its own (its map events go nowhere: the sliders send
-   theirs through events/dispatch!, to the app). Returns [the window, a fn
-   that renders it again with a new desc, as the app's state would]."
+  "desc, in a window of its own, on a context of the app's state now
+   (context-opts; its map events go nowhere: the sliders send theirs
+   through events/dispatch!, to the app). Returns [the window, a fn that
+   renders it again with a new desc, as the app's state would]."
   [desc]
   (ui/on-fx-thread
-   #(let [opts {:fx.opt/map-event-handler (fn [_])}
+   #(let [opts (context-opts)
           component (atom (fx/create-component desc opts))
           stage (doto (Stage.)
                   (.setScene (Scene. (fx/instance @component) 500 300))
