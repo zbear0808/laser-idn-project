@@ -20,6 +20,7 @@
    [laser-show.state.domains :as domains]
    [laser-show.subs :as subs]
    [laser-show.events.handlers :as handlers]
+   [laser-show.routing.refs :as refs]
    [laser-show.routing.rig :as rig]
    [laser-show.routing.targets :as targets]
    [laser-show.routing.zone-maps :as zone-maps]
@@ -2238,6 +2239,204 @@
       (is (:active? (fx/sub-ctx (context s) subs/map-pad :map/left-right)))
       (is (not (:active? (fx/sub-ctx (context on) subs/map-pad :map/left-right))))
       (is (:active? (fx/sub-ctx (context (assoc-in on [:zone-map :cycle-paused?] true)) subs/map-pad :map/left-right))))))
+
+
+;; The selectors that read a whole grid for one fact read it cell by cell
+;; (follow-up N9): each cue's and each effects cell's part is its own, worked
+;; out by the same domain function on that cell alone, so an edit to a cell
+;; runs only its part, and the whole only when that part changes. Each
+;; result is the one the whole-grid rule gives (the reference-* oracles,
+;; the selectors as they were).
+
+(defn- runs-per-edit
+  "{key n}: the bodies of vars ({var key}) that ran for each of edits (fns
+   of the state), each on the context after the one before it, after s's
+   context was warmed: the views' reads, (demand ctx), each time."
+  [vars s demand edits]
+  (let [runs (atom {})
+        counted (into {} (map (fn [[v k]] (let [f @v] [v (fn [& args] (swap! runs update k (fnil inc 0)) (apply f args))])))
+                      vars)]
+    (with-redefs-fn counted
+      #(loop [ctx (doto (context s) demand) [edit & more] edits acc []]
+         (if-not edit
+           acc
+           (let [ctx' (fx/swap-context ctx edit)]
+             (reset! runs {})
+             (demand ctx')
+             (recur ctx' more (conj acc @runs))))))))
+
+(defn- reference-zones-in-use
+  "The zones the show names, by the whole-grid rule: routing.refs/chain-ref-
+   usage over every cue and every effects cell with items, with the columns'
+   defaults and the show's."
+  [s]
+  (let [usage (refs/chain-ref-usage (get-in s [:chains :cue-chains])
+                                    (into {} (keep (fn [[cell chain]]
+                                                     (when (and (map? chain) (seq (:items chain)))
+                                                       [cell {:items (:items chain)}])))
+                                          (get-in s [:chains :effect-chains])))]
+    (vec (sort-by targets/zone-index
+                  (into #{} (filter targets/zone-ref?)
+                        (concat (keys usage)
+                                (mapcat targets/target-refs (vals (get-in s [:grid :column-targets])))
+                                (targets/target-refs (get-in s [:config :default-target]))))))))
+
+(defn- reference-ref-usage
+  "Who draws to ref (routing.zone-maps/usage), from every cue's refs
+   (routing.targets/cue-refs, its column's default and the show's)."
+  [ctx s ref]
+  (zone-maps/usage (fx/sub-ctx ctx subs/active-zone-map)
+                   (into [] (keep (fn [[[col _] cue]]
+                                    (when cue
+                                      (targets/cue-refs cue (get-in s [:grid :column-targets col]) (get-in s [:config :default-target])))))
+                         (get-in s [:chains :cue-chains]))
+                   ref))
+
+(def ^:private named-everywhere
+  "A show naming zones in each place the catalogue reads (28 §7): a cue's
+   own target, an item's, a group with a zone, a timeline track's, a cue's
+   zone pattern, an effects cell's (off, in a disabled group, a keyframe's
+   step), a column's default and the show's; groups beside them."
+  (-> (domains/build-initial-state)
+      (templates/apply-starter-cue-chains)
+      (assoc-in [:chains :cue-chains [2 0] :target] :zone/a)
+      (assoc-in [:chains :cue-chains [3 0] :target] [:zone/b :graphics])
+      (assoc-in [:chains :cue-chains [4 0] :items 0 :target] :zone/c)
+      (assoc-in [:chains :cue-chains [5 0] :zone-patterns]
+                [{:effect-id :zone-pattern :enabled? true :params {:zones [:zone/a :zone/d] :from :zone/e}}])
+      (assoc-in [:chains :cue-chains [6 3]] {:editor-type :timeline
+                                             :tracks [{:id :t1 :type :track :name "T" :target :zone/j}]
+                                             :items [{:type :preset :id :c1 :preset-id :circle :track-id :t1
+                                                      :timeline/start 0.0 :timeline/duration 4.0}]})
+      (assoc-in [:chains :effect-chains [1 1]]
+                {:active? false
+                 :items [{:type :group :enabled? false
+                          :items [{:effect-id :zone-pattern :enabled? true :params {:zones [:zone/f]}
+                                   :keyframe-modulator {:enabled? true :keyframes [{:position 0.0 :params {:steps [[:zone/g]]}}]}}]}]})
+      (assoc-in [:chains :effect-chains [2 1]] {:active? true :items [{:effect-id :scale :params {:x-scale 1.0}}]})
+      (assoc-in [:grid :column-targets] {6 :zone/h 7 :graphics})
+      (assoc-in [:config :default-target] :zone/i)))
+
+(deftest zone-catalogue-and-usage-read-each-cue-on-its-own-test
+  (testing "the same zones and usage as the whole-grid rule"
+    (doseq [s [named-everywhere
+               (update named-everywhere :grid dissoc :column-targets)
+               (assoc-in named-everywhere [:config :default-target] nil)
+               (update-in named-everywhere [:chains :cue-chains] dissoc [5 0] [6 3])
+               (update-in named-everywhere [:chains :effect-chains] dissoc [1 1])
+               (assoc-in named-everywhere [:chains :cue-chains [0 1]] nil)
+               (assoc-in named-everywhere [:zone-map :active] :map/odd-even)
+               (domains/build-initial-state)]]
+      (let [ctx (context s)]
+        (is (= (reference-zones-in-use s) (fx/sub-ctx ctx subs/zones-in-use)))
+        (doseq [ref [:all :graphics :crowd :auto/left :auto/right :auto/odd :zone/a :zone/h]]
+          (is (= (reference-ref-usage ctx s ref) (fx/sub-ctx ctx subs/ref-usage ref)) (str ref))))))
+  (is (= [:zone/a :zone/b :zone/c :zone/d :zone/e :zone/f :zone/g :zone/h :zone/i :zone/j]
+         (fx/sub-ctx (context named-everywhere) subs/zones-in-use)))
+  (testing "an edit to one cue walks that cue alone, and runs neither the catalogue nor the usage list"
+    (is (= [{:cue-walks 1 :draw-walks 1}
+            {:cue-walks 1 :draw-walks 1}
+            {}
+            {}
+            {:zones-in-use 1 :cue-ref-sets 1 :cue-walks 1 :draw-walks 1}]
+           (runs-per-edit {#'subs/zones-in-use :zones-in-use #'subs/cue-ref-sets :cue-ref-sets
+                           #'refs/cue-refs :cue-walks #'targets/cue-refs :draw-walks}
+                          named-everywhere
+                          #(do (fx/sub-ctx % subs/zones-in-use) (fx/sub-ctx % subs/ref-usage :graphics))
+                          [#(assoc-in % [:chains :cue-chains [7 0] :items 0 :params :length] 0.9)
+                           #(assoc-in % [:chains :cue-chains [1 0] :name] "Box")
+                           #(assoc-in % [:chains :effect-chains [2 1] :items 0 :params :x-scale] 1.2)
+                           #(update-in % [:chains :effect-chains [2 1] :active?] not)
+                           #(assoc-in % [:chains :cue-chains [1 0] :target] :zone/k)]))
+        "a preset's parameter, a cue's name, an effect's parameter, a cell's switch; then a new zone: both run")))
+
+(defn- reference-cycle-state
+  "What CYCLE shows of the Map cycles by the whole-grid rule
+   (zone-maps/cycle-on?, zone-patterns/active-cycle)."
+  [s]
+  (let [on? (zone-maps/cycle-on? s)
+        paused? (true? (get-in s [:zone-map :cycle-paused?]))
+        running (when on? (zone-patterns/active-cycle s))]
+    {:on? on?
+     :running? (and on? (not paused?))
+     :paused? (and on? paused?)
+     :maps (if running (into [] (keep #(:name (zone-maps/map-by-id s %))) (:maps (:params running))) [])
+     :description (when running (zone-patterns/describe-cycle (:params running) s))}))
+
+(deftest map-cycle-selectors-read-only-the-cells-with-cycles-test
+  (let [cycle (fn [maps] (assoc-in (zone-patterns/cycle-instance) [:params :maps] maps))
+        s (-> (domains/build-initial-state)
+              (templates/apply-starter-effects)
+              (assoc-in [:chains :effect-chains [2 0]] {:active? true :items [{:effect-id :scale :params {:x-scale 1.0}}]})
+              (assoc-in [:chains :effect-chains [3 0]] {:active? true :items [(cycle [:map/left-right :map/odd-even])]}))]
+    (testing "the same as the whole-grid rule"
+      (doseq [v [s
+                 (assoc-in s [:chains :effect-chains [3 0] :active?] false)
+                 (assoc-in s [:chains :effect-chains [1 1]] {:active? true :items [(cycle [:map/unison :map/gone])]})
+                 (assoc-in s [:chains :effect-chains [0 1]] {:active? true :items [(cycle [:map/odd-even]) (cycle [:map/unison])]})
+                 (assoc-in s [:chains :effect-chains [3 0] :items] [{:type :group :enabled? false :items [(cycle [:map/odd-even])]}])
+                 (assoc-in s [:zone-map :cycle-paused?] true)
+                 (update-in s [:chains :effect-chains] dissoc [3 0])
+                 (domains/build-initial-state)]]
+        (let [ctx (context v)]
+          (is (= (reference-cycle-state v)
+                 (select-keys (fx/sub-ctx ctx subs/map-cycle-state) [:on? :running? :paused? :maps :description])))
+          (is (= (and (zone-maps/cycle-on? v) (not (get-in v [:zone-map :cycle-paused?])))
+                 (fx/sub-ctx ctx subs/map-cycle-running?))))))
+    (testing "another cell's parameter, name or switch runs neither, and walks that cell alone"
+      (is (= [{:cell-walks 1} {:cell-walks 1} {} {:map-cycle-running? 1 :map-cycle-state 1}]
+             (runs-per-edit {#'subs/map-cycle-running? :map-cycle-running? #'subs/map-cycle-state :map-cycle-state
+                             #'chains/flatten-chain :cell-walks}
+                            s
+                            #(do (fx/sub-ctx % subs/map-cycle-state) (fx/sub-ctx % subs/manual-map-marker-id))
+                            [#(assoc-in % [:chains :effect-chains [2 0] :items 0 :params :x-scale] 1.2)
+                             #(assoc-in % [:chains :effect-chains [2 0] :name] "Big")
+                             #(update-in % [:chains :effect-chains [2 0] :active?] not)
+                             #(update-in % [:chains :effect-chains [3 0] :active?] not)]))
+          "[2 0] on, then off (a cell that is off isn't walked); then the Map cycle's own cell switched off: both run"))))
+
+(deftest vibe-meters-read-the-cues-of-the-vibe-that-plays-test
+  (let [fader {:type :macro :active? true :slot :slider-2 :min 0.0 :max 1.0 :default 0.5}
+        s (-> (domains/build-initial-state)
+              (templates/apply-starter-cue-chains)
+              (templates/apply-starter-vibes)
+              (templates/apply-starter-effects))]
+    (testing "the same as faders/slot-wired? on the whole show"
+      (doseq [v [s
+                 (assoc-in s [:chains :cue-chains [1 0] :effects] [{:effect-id :scale :enabled? true :params {:x-scale fader}}])
+                 (assoc-in s [:chains :cue-chains [7 0] :effects] [{:effect-id :scale :enabled? true :params {:x-scale fader}}])
+                 (assoc-in s [:chains :cue-chains [6 0] :items 0 :effects] [{:effect-id :scale :enabled? true :params {:x-scale fader}}])
+                 (assoc-in s [:chains :effect-chains [2 1]] {:active? false :items [{:effect-id :scale :enabled? true :params {:x-scale fader}}]})
+                 (assoc-in s [:chains :effect-chains [2 1]] {:active? true :items [{:effect-id :scale :enabled? true :params {:x-scale fader}}]})
+                 (update-in s [:chains :effect-chains] dissoc [0 3])
+                 (assoc-in s [:vibe-runtime :current] :vibe-2)
+                 (domains/build-initial-state)]
+              slot faders/slots]
+        (is (= (faders/slot-wired? v (library/current-id v) slot) (:wired? (fx/sub-ctx (context v) subs/vibe-meter slot)))
+            (str slot))))
+    (testing "a cue no slot of the vibe that plays names runs neither meter; one of its HIT cues does"
+      (is (= [{} {} {:vibe-meter 2}]
+             (runs-per-edit {#'subs/vibe-meter :vibe-meter}
+                            s
+                            (fn [ctx] (doseq [slot faders/slots] (fx/sub-ctx ctx subs/vibe-meter slot)))
+                            [#(assoc-in % [:chains :cue-chains [7 0] :items 0 :params :length] 0.9)
+                             #(assoc-in % [:chains :cue-chains [7 0] :name] "Lines end")
+                             #(assoc-in % [:chains :cue-chains [1 0] :items 0 :params :size] 0.6)]))
+          "Lines' cue [7 0], twice; then Shapes' [1 0]"))))
+
+(deftest a-projectors-chain-reads-only-that-chain-test
+  (let [s (-> (domains/build-initial-state)
+              (templates/apply-starter-cue-chains)
+              (assoc-in [:chains :projector-effects :p1 :items] [{:id :c :type :effect :effect-id :axis-transform :enabled? true :params {}}]))]
+    (is (= [{} {} {:projector-effect-chain 1}]
+           (runs-per-edit {#'subs/projector-effect-chain :projector-effect-chain}
+                          s
+                          #(fx/sub-ctx % subs/projector-effect-chain :p1)
+                          [#(assoc-in % [:chains :cue-chains [1 0] :name] "Box")
+                           #(assoc-in % [:chains :effect-chains [0 3] :active?] false)
+                           #(assoc-in % [:chains :projector-effects :p1 :items 0 :enabled?] false)]))
+        "a cue's name, a cell's switch: no; its own chain: yes")
+    (is (= [] (fx/sub-ctx (context s) subs/projector-effect-chain :p2)) "a projector without a chain")))
 
 (defn- tick-map
   "The map a tick at beats routes by (show-clock's order, the cycle's

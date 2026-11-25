@@ -252,6 +252,12 @@
   [context col row]
   (fx/sub-val context get-in [:chains :cue-chains [col row]] {:items []}))
 
+(defn- cue-cells
+  "The cue cells there are, as a set of [col row]: only a cue added or taken
+   away changes it."
+  [context]
+  (set (keys (fx/sub-val context get-in [:chains :cue-chains]))))
+
 (def ^:private timeline-view-defaults
   {:selection #{} :cursor-beat 0.0})
 
@@ -997,11 +1003,9 @@
 
 (defn projector-effect-chain
   "Get the effects chain for a specific projector.
-   Depends on: chains domain"
+   Depends on: that projector's chain only (follow-up N9)"
   [context projector-id]
-  (get-in (fx/sub-val context :chains)
-          [:projector-effects projector-id :items]
-          []))
+  (fx/sub-val context get-in [:chains :projector-effects projector-id :items] []))
 
 
 ;; Hierarchical List UI Subscriptions
@@ -1204,9 +1208,9 @@
 
 (defn effect-ref-inputs
   "The effect cells' chains as their stored references read them
-   (routing.refs/chain-ref-usage: the zone catalogue, the rig report):
-   {cell {:items items}} for each cell with items, so switching a cell on or
-   off leaves it equal."
+   (routing.refs/chain-ref-usage: the rig report; the zone catalogue reads
+   them cell by cell, effect-cell-zone-refs): {cell {:items items}} for
+   each cell with items, so switching a cell on or off leaves it equal."
   [context]
   (into {}
         (keep (fn [[cell chain]]
@@ -1214,16 +1218,37 @@
                   [cell {:items (:items chain)}])))
         (fx/sub-val context get-in [:chains :effect-chains])))
 
+(defn- cue-zone-refs
+  "The zones the cue at [col row] names (routing.refs/cue-refs, its zone
+   patterns too), nil for no cue: that cue's part of zones-in-use. Only
+   that cell's cue: a preset's parameter or its name leaves the set equal."
+  [context col row]
+  (let [cue (fx/sub-ctx context cue-cell-chain col row)]
+    (when (map? cue)
+      (into #{} (filter targets/zone-ref?) (refs/cue-refs cue)))))
+
+(defn- effect-cell-zone-refs
+  "The zones the zone patterns of the effects cell at [col row] name, on or
+   off (routing.refs/chain-ref-usage of that cell alone): its part of
+   zones-in-use. Only that cell's items: its switch, its name or another
+   effect's parameter leave the set equal."
+  [context col row]
+  (let [items (fx/sub-val context get-in [:chains :effect-chains [col row] :items])]
+    (when (seq items)
+      (into #{} (filter targets/zone-ref?) (keys (refs/chain-ref-usage nil {[col row] {:items items}}))))))
+
 (defn zones-in-use
   "Every zone the show names (Z4-Q1): in a cue (routing.refs/cue-refs, its
    zone patterns too), in an effect cell's zone patterns (a place, a source
    or a lit step, a keyframe's too, the pattern on or off), a column's
    default and the show's, sorted. Not a zone a label, a map's override or
-   the preview alone names."
+   the preview alone names. Each cue's and cell's part is its own
+   (cue-zone-refs, effect-cell-zone-refs: routing.refs/chain-ref-usage's
+   refs, cell by cell), so an edit that names no new zone runs it not
+   again (follow-up N9)."
   [context]
-  (let [usage (refs/chain-ref-usage (fx/sub-val context get-in [:chains :cue-chains])
-                                    (fx/sub-ctx context effect-ref-inputs))
-        refs (concat (keys usage)
+  (let [refs (concat (mapcat (fn [[col row]] (fx/sub-ctx context cue-zone-refs col row)) (fx/sub-ctx context cue-cells))
+                     (mapcat (fn [[col row]] (fx/sub-ctx context effect-cell-zone-refs col row)) (fx/sub-ctx context effect-cells))
                      (mapcat targets/target-refs (vals (fx/sub-val context get-in [:grid :column-targets])))
                      (targets/target-refs (fx/sub-ctx context default-target)))]
     (vec (sort-by targets/zone-index (into #{} (filter targets/zone-ref?) refs)))))
@@ -1266,12 +1291,30 @@
        (sort-by pr-str)
        vec))
 
+(defn- effect-cell-active-cycles
+  "The Map cycles that run in the effects cell at [col row]
+   (zone-patterns/active-cycles of that cell alone: enabled ones, the cell
+   on): [] for most cells. Only that cell's entry."
+  [context col row]
+  (zone-patterns/active-cycles {:chains {:effect-chains {[col row] (fx/sub-ctx context effect-cell-chain col row)}}}))
+
+(defn- active-map-cycles
+  "Every Map cycle that runs (zone-patterns/active-cycles: in reading order,
+   row, column, then chain order), each cell's part its own
+   (effect-cell-active-cycles), so another cell's switch, parameter or name
+   runs it not again (follow-up N9)."
+  [context]
+  (into []
+        (mapcat (fn [[col row]] (fx/sub-ctx context effect-cell-active-cycles col row)))
+        (sort-by (fn [[col row]] [row col]) (fx/sub-ctx context effect-cells))))
+
 (defn map-cycle-running?
   "Is a Map cycle enabled and unpaused (zones plan Z5): an enabled Map
-   cycle in a cell that is on, and no switch that landed paused it? A
-   state fact: it says nothing of the map a tick picks, which can be none."
+   cycle in a cell that is on (active-map-cycles), and no switch that
+   landed paused it? A state fact: it says nothing of the map a tick picks,
+   which can be none."
   [context]
-  (and (zone-maps/cycle-on? {:chains {:effect-chains (fx/sub-val context get-in [:chains :effect-chains])}})
+  (and (boolean (seq (fx/sub-ctx context active-map-cycles)))
        (not (fx/sub-val context get-in [:zone-map :cycle-paused?]))))
 
 (defn manual-map-marker-id
@@ -1299,15 +1342,20 @@
      :learning? (learning? context {:type :zone-map :target id})
      :bindings (fx/sub-ctx context map-pad-bindings id)}))
 
+(defn- cue-draw-refs
+  "Every ref the cue at [col row] can draw to (routing.targets/cue-refs,
+   its column's default and the show's included), nil for no cue: that
+   cue's part of cue-ref-sets."
+  [context col row]
+  (when-let [cue (fx/sub-ctx context cue-cell-chain col row)]
+    (targets/cue-refs cue (fx/sub-ctx context column-target col) (fx/sub-ctx context default-target))))
+
 (defn- cue-ref-sets
   "Each cue's refs (routing.targets/cue-refs), its column's default and the
-   show's included."
+   show's included: each cue's part its own (cue-draw-refs), so an edit
+   that changes none of them runs it not again (follow-up N9)."
   [context]
-  (let [cols (fx/sub-val context get-in [:grid :column-targets])
-        show (fx/sub-ctx context default-target)]
-    (into []
-          (keep (fn [[[col _] cue]] (when cue (targets/cue-refs cue (get cols col) show))))
-          (fx/sub-val context get-in [:chains :cue-chains]))))
+  (into [] (keep (fn [[col row]] (fx/sub-ctx context cue-draw-refs col row))) (fx/sub-ctx context cue-cells)))
 
 (defn ref-usage
   "Who uses ref, through the map in use (06 §8.7): {:direct :through
@@ -1439,12 +1487,6 @@
   [context zones]
   (zone-patterns/fold-text (fx/sub-ctx context pattern-fold-world) {:zones zones} (fx/sub-ctx context fold-names)))
 
-(defn- cue-cells
-  "The cue cells there are, as a set of [col row]: only a cue added or taken
-   away changes it."
-  [context]
-  (set (keys (fx/sub-val context get-in [:chains :cue-chains]))))
-
 (defn- cue-has-zone-patterns?
   "Does the cue at [col row] have a zone pattern, on or off?"
   [context col row]
@@ -1516,14 +1558,16 @@
    picks the map: on, and no map pad's press paused it) :paused? :pending
    (nil, or :beat or :bar while CYCLE waits) :bar? :learning? :bindings
    :maps (the running cycle's maps by name) :description (what it does,
-   routing.zone-patterns/describe-cycle)}."
+   routing.zone-patterns/describe-cycle)}. The cycles from
+   active-map-cycles, the maps' names from [:zone-maps]."
   [context]
-  (let [state {:chains {:effect-chains (fx/sub-val context get-in [:chains :effect-chains])}
-               :zone-maps (fx/sub-val context :zone-maps)}
-        on? (zone-maps/cycle-on? state)
+  (let [cycles (fx/sub-ctx context active-map-cycles)
+        state {:zone-maps (fx/sub-val context :zone-maps)}
+        on? (boolean (seq cycles))
         paused? (true? (fx/sub-val context get-in [:zone-map :cycle-paused?]))
         pending (fx/sub-val context get-in [:zone-map :pending])
-        running-cycle (when on? (zone-patterns/active-cycle state))]
+        ;; zone-patterns/active-cycle's: the last that runs
+        running-cycle (peek cycles)]
     {:on? on?
      :running? (and on? (not paused?))
      :paused? (and on? paused?)
@@ -2561,14 +2605,20 @@
 (defn vibe-meter
   "A meter of the Perform tab: {:slot :label :wired?}, :wired? while
    something the vibe that plays plays follows the fader
-   (vibes.faders/slot-wired?). Recomputed when the chains, the vibes or the
-   vibe that plays change."
+   (vibes.faders/slot-wired?). It reads the effects grid (which cells are
+   on counts) and the cues the vibe's slots name (slot-chains), not the
+   rest of the cue grid (follow-up N9). Recomputed when those, the vibes or
+   the vibe that plays change."
   [context slot]
   (let [{:keys [library]} (fx/sub-ctx context vibe-config)
-        state {:chains (fx/sub-val context :chains) :config {:vibes {:library library}}}]
+        id (fx/sub-ctx context vibe-current-id)
+        pool-cells (into [] (mapcat #(library/slot-cells (get library id) %)) library/cue-slots)
+        state {:chains {:effect-chains (fx/sub-val context get-in [:chains :effect-chains])
+                        :cue-chains (slot-chains context pool-cells)}
+               :config {:vibes {:library library}}}]
     {:slot slot
      :label (meter-labels slot)
-     :wired? (faders/slot-wired? state (fx/sub-ctx context vibe-current-id) slot)}))
+     :wired? (faders/slot-wired? state id slot)}))
 
 (defn- fader-cells [state]
   {:chains {:effect-chains (get-in state [:chains :effect-chains])}
