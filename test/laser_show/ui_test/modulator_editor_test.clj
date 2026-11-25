@@ -824,3 +824,57 @@
       (ui/fill! robot field "6.6")
       (ui/submit! robot field)
       (is (ui/wait-for! #(and (= 7 (:steps (amount))) (= "7" (text-of field)) (== 7.0 (slider-value slider))))))))
+
+(deftest int-param-sliders-store-whole-numbers-test
+  ;; Follow-up N1: an :int parameter's sliders (Decimate's scan rate and
+  ;; target fps) stop at whole numbers, nowhere between, an arrow key moves
+  ;; them by one, and what a drag sends between them is stored as a whole
+  ;; number: the effect chain editor's slider and a parameter list's
+  ;; (param-slider, one press)
+  (let [param-of (fn [k] (get-in (state/get-raw-state) [:chains :effect-chains [0 0] :items 0 :params k]))
+        sent-values (fn [sent k] (keep #(when (= k (:param-key %)) (:fx/event %)) @sent))
+        whole? integer?
+        value-of (fn [^Slider s] (ui/on-fx-thread #(.getValue s)))
+        right-key! (fn [^Slider s] (ui/on-fx-thread #(Event/fireEvent s (KeyEvent. KeyEvent/KEY_PRESSED "" "" KeyCode/RIGHT
+                                                                                     false false false false))))]
+    (events/write-state! assoc-in [:chains :effect-chains [0 0]]
+                         {:active? false :items [{:id (random-uuid) :effect-id :decimate :enabled? true :params {:kpps 25 :fps 30}}]})
+    (testing "the effect chain editor's Scan rate slider"
+      (events/dispatch! {:event/type :effect-chain/open-editor :col 0 :row 0})
+      (ui/wait-for! #(some? (node "#param-kpps-slider")))
+      (let [s (node "#param-kpps-slider")
+            sent (atom [])]
+        (record-dispatches! sent #(drag-track! s [0.37 0.52]))
+        (is (some (complement whole?) (sent-values sent :kpps)) "mid-drag the slider sends a fraction")
+        (is (ui/wait-for! #(let [v (param-of :kpps)] (and (whole? v) (== v (Math/round (double (last (sent-values sent :kpps))))))))
+            "stored as the whole number nearest it")
+        (fire-track! s MouseEvent/MOUSE_RELEASED 0.52)
+        (is (ui/wait-for! #(let [v (param-of :kpps)]
+                             (and (whole? v) (== v (value-of s)) (= (str v) (text-of "#param-kpps-field")))))
+            "released: a whole number on the slider, in its field and stored")
+        (let [before (param-of :kpps)]
+          (right-key! s)
+          (is (ui/wait-for! #(= (inc before) (param-of :kpps))) "an arrow key moves it by one"))))
+    (testing "a parameter list's slider (param-slider, one press)"
+      (let [id (get-in (state/get-raw-state) [:chains :effect-chains [0 0] :items 0 :id])
+            address {:domain :effect-chains :entity-key [0 0] :effect-path [0] :effect-instance-id id}
+            [stage _] (mount-desc! {:fx/type param-controls/param-slider
+                                    :param-key :fps
+                                    :param-spec {:key :fps :label "Target fps" :type :int :default 30 :min 5 :max 120}
+                                    :current-value (param-of :fps)
+                                    :on-change-event (assoc address :event/type :chain/update-param)
+                                    :on-text-event (assoc address :event/type :chain/update-param-from-text)})
+            sent (atom [])]
+        (try
+          (let [s (ui/on-fx-thread #(.lookup (.getRoot (.getScene ^Stage stage)) "#param-fps-slider"))]
+            (record-dispatches! sent #(drag-track! s [0.2 0.61]))
+            (is (some (complement whole?) (sent-values sent :fps)) "mid-drag the slider sends a fraction")
+            (is (ui/wait-for! #(let [v (param-of :fps)] (and (whole? v) (== v (Math/round (double (last (sent-values sent :fps))))))))
+                "stored as the whole number nearest it")
+            (fire-track! s MouseEvent/MOUSE_RELEASED 0.61)
+            (is (ui/wait-for! #(and (nil? (open-press)) (whole? (param-of :fps)) (== (param-of :fps) (value-of s))))
+                "released: one press ended, a whole number on the slider and stored")
+            (let [before (param-of :fps)]
+              (right-key! s)
+              (is (ui/wait-for! #(= (inc before) (param-of :fps))) "an arrow key moves it by one")))
+          (finally (ui/on-fx-thread #(.close ^Stage stage))))))))

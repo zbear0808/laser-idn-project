@@ -11,6 +11,7 @@
    field, through Save and Open."
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.animation.effects.intensity] ; :intensity's :amount is a :float
+            [laser-show.animation.effects.points] ; :decimate's :kpps is an :int
             [laser-show.animation.effects.zone] ; :zone-pattern's :style is a modulatable :choice
             [laser-show.animation.modulator-registry :as reg]
             [laser-show.events.core :as events]
@@ -358,7 +359,15 @@
         (is (= {} (choose :no-such-style)))
         (is (= {} (commit {:state (assoc-in state [:chains :effect-chains [0 0] :items 0 :effect-id] :test)
                            :param-key :style :fx/event :chase}))
-            "not without its effect's definition, which lists the choices")))))
+            "not without its effect's definition, which lists the choices")))
+    (testing "an :int parameter's (Decimate's scan rate): the slider's number as a whole one (follow-up N1)"
+      (let [off {:type :sine :active? false :min 10.0 :max 40.0 :period 1.0 :value 25}
+            state {:chains {:effect-chains {[0 0] {:items [{:id effect-id :effect-id :decimate :params {:kpps off :fps 30}}]}}}}
+            slid #(commit {:state state :param-key :kpps :fx/event %})
+            kpps #(get-in % [:state :chains :effect-chains [0 0] :items 0 :params :kpps :value])]
+        (is (= 26 (kpps (slid 25.6))))
+        (is (instance? Long (kpps (slid 25.6))) "a long, not 26.0")
+        (is (= {} (slid 25.3)) "25, the 25 it has: nothing")))))
 
 (defn- run
   "Run event through the event pipeline from state, then each :dispatch it

@@ -8,7 +8,9 @@
   (:require
    [clojure.tools.logging :as log]
    [laser-show.animation.effects :as effects]
+   [laser-show.animation.presets :as presets]
    [laser-show.events.helpers :as h]
+   [laser-show.events.handlers.chain.helpers :as chain-helpers]
    [laser-show.events.handlers.effect-params :as effect-params]))
 
 ;; Effect Parameter Operations (Delegate to effect-params)
@@ -78,9 +80,13 @@
       (assoc-in state (conj path :clamp-after?) value)
       state)))
 
+(declare param-spec param-number)
+
 (defn handle-update-param
   "Update an effect parameter value.
-   Extracts value from :value or :fx/event.
+   Extracts value from :value or :fx/event; a number for an :int parameter
+   is stored as a whole one (param-number, by its definition: param-spec),
+   so a slider's mid-drag 25.6 is 26.
    
    Parameters:
    - state: Application state
@@ -89,7 +95,8 @@
    
    Returns: Updated state"
   [state config {:keys [effect-path param-key] :as event}]
-  (let [value (h/first-some (:fx/event event) (:value event))
+  (let [value (param-number (param-spec state config effect-path param-key)
+                            (h/first-some (:fx/event event) (:value event)))
         items-path (:items-path config)
         items-vec (vec (get-in state items-path []))
         updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) value)]
@@ -114,14 +121,34 @@
       (assoc-in state items-path updated-items))
     state))
 
+(defn- item-parameters
+  "The parameter definitions of item: an effect's, the effect registry's for
+   its :effect-id; a cue item's or a clip's, its preset's (:preset-id);
+   nil for anything else."
+  [item]
+  (cond
+    (:effect-id item) (:parameters (effects/get-effect (:effect-id item)))
+    (:preset-id item) (:parameters (presets/presets-by-id (:preset-id item)))))
+
 (defn param-spec
-  "The definition of param-key in the effect registry's entry for the effect
-   at effect-path (a path under config's :items-path), or nil when the
-   registry has no such effect or parameter."
+  "The definition of param-key for the item at effect-path (a path under
+   config's :items-path): an effect's from the effect registry, a cue
+   item's or a clip's from its preset (item-parameters); nil when there is
+   no such item, definition or parameter."
   [state config effect-path param-key]
-  (let [effect (get-in state (into (:items-path config) effect-path))]
-    (some #(when (= param-key (:key %)) %)
-          (:parameters (effects/get-effect (:effect-id effect))))))
+  (let [item (get-in state (into (:items-path config) effect-path))]
+    (some #(when (= param-key (:key %)) %) (item-parameters item))))
+
+(defn param-number
+  "value as a parameter of spec holds it: for an :int parameter a finite
+   number rounded to a whole number, a long, as h/parse-number-text reads
+   a typed one; any other value, or another parameter's, as it is.
+   
+   Example: (param-number {:key :kpps :type :int} 25.6) => 26"
+  [spec value]
+  (if (and (= :int (:type spec)) (h/finite-number? value))
+    (Math/round (double value))
+    value))
 
 (defn numeric-spec?
   "Does a parameter of spec hold a number: :float or :int, or no :type (a
@@ -141,9 +168,21 @@
     (when (and (vector? c) (= 3 (count c)) (every? h/finite-number? c))
       (mapv #(max 0.0 (min 1.0 (double %))) c))))
 
+(defn- color-target
+  "Where a colour edit goes, under config's :items-path: the effect it names
+   by its instance (and owner), where that effect is now
+   (chain-helpers/resolve-effect-instance-path), or nil once it is gone; an
+   edit that names no instance (the preset editor's: a cue item's own
+   colour, whose parameters all go by their place) goes to its
+   :effect-path."
+  [state event]
+  (if (contains? event :effect-instance-id)
+    (chain-helpers/resolve-effect-instance-path state event)
+    (:effect-path event)))
+
 (defn handle-update-color-param
-  "Update the color parameters of the effect at :effect-path to the
-   event's :color (color-value): :red, :green and :blue, separate
+  "Update the color parameters of the effect the event names (color-target)
+   to the event's :color (color-value): :red, :green and :blue, separate
    parameters for modulator support.
    
    NOTE: Uses NORMALIZED values (0.0-1.0), not 8-bit (0-255).
@@ -152,15 +191,19 @@
    Parameters:
    - state: Application state
    - config: Configuration map with :items-path
-   - event: Map with :effect-path and :color [red green blue]
+   - event: Map with :domain, :entity-key, :effect-instance-id (and
+     :owner-id for an owned effect), or for a cue item's own colour
+     :effect-path, and :color [red green blue]
    
    Returns: Updated state (unchanged without a colour, or without an effect
-   at :effect-path)"
-  [state config {:keys [effect-path] :as event}]
+   there)"
+  [state config event]
   (let [items-path (:items-path config)
         items-vec (vec (get-in state items-path []))
-        params-path (conj (vec effect-path) :params)]
-    (if-let [[red green blue] (when (map? (get-in items-vec (vec effect-path))) (color-value event))]
+        effect-path (vec (color-target state event))
+        params-path (conj effect-path :params)]
+    (if-let [[red green blue] (when (and (seq effect-path) (map? (get-in items-vec effect-path)))
+                                (color-value event))]
       (do (log/debug "handle-update-color-param: effect-path=" effect-path "rgb=" [red green blue])
           (assoc-in state items-path (-> items-vec
                                          (assoc-in (conj params-path :red) red)

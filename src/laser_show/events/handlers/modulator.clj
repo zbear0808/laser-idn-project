@@ -249,17 +249,18 @@
 (defn- static-value
   "The static value event sets, or nil for none. A field's typed :text is a
    number (h/parse-number-text, with :min, :max and :is-int?). Otherwise
-   :value or :fx/event when it is a finite number (the slider's), or a
-   keyword the parameter's definition lists in its :choices (a modulatable
-   choice's combo box; the definition is the target effect's,
-   params/param-spec); never anything else, such as the ActionEvent a text
-   field's Enter delivers."
+   :value or :fx/event when it is a finite number (the slider's; a whole
+   one for an :int parameter, params/param-number), or a keyword the
+   parameter's definition lists in its :choices (a modulatable choice's
+   combo box; the definition is the target effect's, params/param-spec);
+   never anything else, such as the ActionEvent a text field's Enter
+   delivers."
   [state {:keys [config effect-path]} {:keys [param-key] :as event}]
   (if (contains? event :text)
     (h/parse-number-text (:text event) (:min event) (:max event) (:is-int? event))
     (let [value (h/first-some (:value event) (:fx/event event))]
       (cond
-        (h/finite-number? value) value
+        (h/finite-number? value) (params/param-number (params/param-spec state config effect-path param-key) value)
         (keyword? value) (some #{value} (:choices (params/param-spec state config effect-path param-key)))))))
 
 (defn- handle-update-static-value

@@ -1,9 +1,13 @@
 (ns laser-show.events.chain-params-handlers-test
   "Tests that boolean parameter edits keep `false` instead of turning it into
-   nil, that a numeric field's typed text commits only a number, and that a
-   colour edit takes only a plain colour (follow-up B4)."
+   nil, that a numeric field's typed text commits only a number, that a
+   colour edit takes only a plain colour (follow-up B4), for the effect it
+   names by its instance (N2), and that an :int parameter stores a whole
+   number (N1)."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [laser-show.animation.effects.intensity] ; :intensity's :amount is a :float
+   [laser-show.animation.effects.points] ; :decimate's :kpps and :fps are :int
    [laser-show.events.handlers.chain.helpers :as chain-helpers]
    [laser-show.events.handlers.chain.params :as params]
    [laser-show.events.handlers.keyframe :as keyframe]
@@ -64,6 +68,84 @@
     (testing "no effect at its path: nothing, not a new item"
       (is (identical? cell (commit {:effect-path [1] :color [0.1 0.2 0.3]})))
       (is (identical? cell (commit {:effect-path nil :color [0.1 0.2 0.3]}))))))
+
+(deftest update-color-param-follows-the-instance-test
+  ;; Follow-up N2: an effect's colour edit names its effect by its instance
+  ;; (and owner), like the modulator's (reactivity plan 07, B6): queued
+  ;; behind a reorder, it lands on that effect where it is now, or nowhere
+  ;; once it is gone. One that names no instance (the preset editor's, a
+  ;; cue item's own colour) still goes by its :effect-path
+  (let [a #uuid "aaaaaaaa-0000-0000-0000-0000000000c2"
+        b #uuid "bbbbbbbb-0000-0000-0000-0000000000c2"
+        p #uuid "cccccccc-0000-0000-0000-0000000000c2"
+        other #uuid "dddddddd-0000-0000-0000-0000000000c2"
+        white {:red 1.0 :green 1.0 :blue 1.0}
+        set-color (fn [id] {:id id :effect-id :set-color :enabled? true :params white})
+        ;; A's pick, rendered while A was first (and its owner P first)
+        pick (fn [domain & {:as more}]
+               (merge {:domain domain :entity-key [0 0] :effect-instance-id a :effect-path [0] :color [0.0 0.5 1.0]}
+                      more))
+        commit (fn [state event]
+                 (params/handle-update-color-param state (chain-helpers/chain-config (:domain event) [0 0]) event))
+        colour-of #(select-keys (get-in %1 (conj %2 :params)) [:red :green :blue])
+        lands-on (fn [state event leaf]
+                   (let [after (commit state event)]
+                     (is (= {:red 0.0 :green 0.5 :blue 1.0} (colour-of after leaf)) (str "A, now at " leaf))
+                     (is (= state (update-in after (conj leaf :params) merge white)) "nothing else")))]
+    (testing "an effects cell's chain, B now where A was rendered"
+      (let [cell [:chains :effect-chains [0 0] :items]
+            event (pick :effect-chains)]
+        (lands-on (assoc-in {} cell [(set-color b) (set-color a)]) event (conj cell 1))
+        (lands-on (assoc-in {} cell [{:type :group :id other :items [(set-color b) (set-color a)]}]) event (conj cell 0 :items 1))
+        (let [b-only (assoc-in {} cell [(set-color b)])]
+          (is (identical? b-only (commit b-only event)) "A gone, B in its place: nothing"))
+        (let [unnamed (assoc-in {} cell [(set-color a)])]
+          (is (identical? unnamed (commit unnamed (assoc event :effect-instance-id nil))) "an instance it can't find: nothing"))))
+    (testing "a cue item's effect: the owner, then the effect among its own"
+      (let [root [:chains :cue-chains [0 0] :items]
+            event (pick :cue-chains :owner-id p)
+            moved (assoc-in {} root [{:id other :type :preset :preset-id :circle :effects [(set-color b)]}
+                                     {:id p :type :preset :preset-id :circle :effects [(set-color b) (set-color a)]}])]
+        (lands-on moved event (conj root 1 :effects 1))
+        (is (identical? moved (commit moved (dissoc event :owner-id))) "no owner named: nothing")))
+    (testing "one that names no instance: a cue item's own colour, at its :effect-path"
+      (let [root [:chains :cue-chains [0 0] :items]
+            items (assoc-in {} root [{:id p :type :preset :preset-id :circle :params (assoc white :radius 0.5)}])]
+        (is (= {:red 0.0 :green 0.5 :blue 1.0}
+               (colour-of (commit items {:domain :cue-chains :entity-key [0 0] :effect-path [0] :color [0.0 0.5 1.0]})
+                          (conj root 0))))))))
+
+(deftest update-param-rounds-an-int-param-test
+  ;; Follow-up N1: a number for an :int parameter (Decimate's scan rate and
+  ;; target fps, a preset's point count) is stored as a whole number, a long,
+  ;; as 01's typed text is (h/parse-number-text): a slider's mid-drag 25.6 is
+  ;; 26. A :float parameter keeps its decimals, and what isn't a number is
+  ;; stored as before
+  (let [cell (assoc-in {} [:chains :effect-chains [0 0] :items]
+                       [{:id #uuid "eeeeeeee-0000-0000-0000-0000000000e1" :effect-id :decimate :enabled? true :params {:kpps 25 :fps 30}}
+                        {:id #uuid "eeeeeeee-0000-0000-0000-0000000000e2" :effect-id :intensity :enabled? true :params {:amount 1.0}}])
+        param #(get-in %1 [:chains :effect-chains [0 0] :items %2 :params %3])
+        commit (fn [event] (params/handle-update-param cell config (merge {:effect-path [0]} event)))]
+    (testing "an effect's :int parameter"
+      (is (= 26 (param (commit {:param-key :kpps :fx/event 25.6}) 0 :kpps)))
+      (is (= 25 (param (commit {:param-key :kpps :fx/event 25.4}) 0 :kpps)))
+      (is (instance? Long (param (commit {:param-key :kpps :fx/event 25.6}) 0 :kpps)) "a long, not 26.0")
+      (is (= 30 (param (commit {:param-key :fps :value 30.25}) 0 :fps)) "from :value too")
+      (is (= 40 (param (commit {:param-key :fps :fx/event 40}) 0 :fps)) "a whole number as it is"))
+    (testing "a :float parameter keeps its decimals"
+      (is (= 0.25 (param (commit {:effect-path [1] :param-key :amount :fx/event 0.25}) 1 :amount))))
+    (testing "what isn't a finite number is stored as before"
+      (is (= {:type :sine :min 1.0 :max 2.0} (param (commit {:param-key :kpps :fx/event {:type :sine :min 1.0 :max 2.0}}) 0 :kpps)))
+      (is (false? (param (commit {:param-key :kpps :fx/event false}) 0 :kpps))))
+    (testing "a preset's :int parameter, in a cue chain"
+      (let [cue (assoc-in {} [:chains :cue-chains [0 0] :items]
+                          [{:id #uuid "eeeeeeee-0000-0000-0000-0000000000e3" :type :preset :preset-id :star
+                            :params {:spikes 5 :outer-radius 0.5}}])
+            cue-config (chain-helpers/chain-config :cue-chains [0 0])
+            edited #(params/handle-update-param cue cue-config {:effect-path [0] :param-key %1 :fx/event %2})]
+        (is (= 7 (get-in (edited :spikes 6.7) [:chains :cue-chains [0 0] :items 0 :params :spikes])))
+        (is (= 0.45 (get-in (edited :outer-radius 0.45) [:chains :cue-chains [0 0] :items 0 :params :outer-radius]))
+            "its :float parameter keeps its decimals")))))
 
 (deftest update-param-unchecked-checkbox-test
   (testing "checkbox :fx/event false is stored as false"

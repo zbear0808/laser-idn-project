@@ -21,7 +21,10 @@
                                      {:position 1.0 :params {...}}]}}
    
    Events use :domain and :entity-key to locate the chain, and :effect-path
-   to locate the effect within that chain.
+   to locate the effect within that chain; a keyframe's colour edit names
+   its effect by its instance instead (:effect-instance-id, and :owner-id
+   for an effect a cue item, a clip or a track owns:
+   chain-helpers/resolve-effect-instance-path).
    
    DEBUG: Set log level to DEBUG for this namespace to see keyframe operations."
   (:require
@@ -30,6 +33,7 @@
    [laser-show.animation.modulator-registry :as reg]
    [laser-show.events.helpers :as h]
    [laser-show.events.handlers.chain :as chain]
+   [laser-show.events.handlers.chain.helpers :as chain-helpers]
    [laser-show.events.handlers.chain.params :as params]))
 
 
@@ -341,8 +345,9 @@
   "What :keyframe/update-param writes, as [value], or nil to write nothing.
    A field's typed :text is a number (h/parse-number-text, with :min, :max
    and :is-int?). Otherwise :value or :fx/event, but never a JavaFX event
-   (what a text field's Enter delivers), and for a numeric parameter
-   (numeric-param?) only a finite number."
+   (what a text field's Enter delivers), for a numeric parameter
+   (numeric-param?) only a finite number, and for an :int one a whole
+   number (params/param-number)."
   [state config {:keys [effect-path keyframe-idx param-key] :as event}]
   (if (contains? event :text)
     (some-> (h/parse-number-text (:text event) (:min event) (:max event) (:is-int? event)) vector)
@@ -350,7 +355,7 @@
       (when-not (or (instance? javafx.event.Event value)
                     (and (numeric-param? state config effect-path keyframe-idx param-key)
                          (not (h/finite-number? value))))
-        [value]))))
+        [(params/param-number (params/param-spec state config effect-path param-key) value)]))))
 
 (defn- zone-value
   "The zone :keyframe/set-zone-value sets, or nil for no edit: its :value,
@@ -588,11 +593,15 @@
       {:state (handle-set-normalize state config effect-path (h/first-some (:normalize? event) (:fx/event event)))}
 
       :keyframe/update-color-param
-      (if-let [rgb (params/color-value event)]
-        (keyframe-edit state
-                       (handle-update-keyframe-color-param state config effect-path (:keyframe-idx event) rgb)
-                       config effect-path)
-        {})
+      ;; Names its effect by its instance (and owner), where it is now:
+      ;; never the place it had when its picker rendered (follow-up N2)
+      (let [path (chain-helpers/resolve-effect-instance-path state event)
+            rgb (params/color-value event)]
+        (if (and path rgb)
+          (keyframe-edit state
+                         (handle-update-keyframe-color-param state config path (:keyframe-idx event) rgb)
+                         config path)
+          {}))
 
       ;; Unknown keyframe event
       (do
