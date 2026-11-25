@@ -211,7 +211,7 @@
                        :last-render-time 0}
              :doc "preview panel state"}
    :timeline-editor {:default {}
-                     :doc "timeline editor view state per cue: [col row] -> {:selection #{clip-id} :cursor-beat}"}
+                     :doc "timeline editor view state per show: show-id -> {:selection #{clip-id} :cursor-beat}; for the session, reset on New and Open"}
    :timeline-prefs {:default {:snap {:enabled? true :value 0.25}
                               :add-panel {:open? false :preset-tab :geometric :effect-tab :shape}
                               :inspector-open? true
@@ -222,6 +222,9 @@
                                 :doc "Cell index whose zone selector popup is open, or nil if none"}
    :vibes {:default {:selected nil :slot :hit}
            :doc "the Vibes tab (views/tabs/vibes.clj): :selected, the vibe edited (nil: the first); :slot, what a click on the picker fills (vibes.library/slots); for the session, not saved. Learn all is a learn attempt ([:ui :input-learn])"}
+   :shows {:default {:query "" :scope :all :sort {:column :title :dir :asc}
+                     :selected #{} :editing nil :manual nil :migrated nil}
+           :doc "the Shows tab (plans/2026-11-25-timeline-shows), for the session, not saved: :query and :scope, the search; :sort {:column :dir}; :selected, a set of show ids; :editing, the one table cell being edited and its draft; :manual, the show played by hand; :migrated {:moved :timecode-off :vibe-refs-removed :triggers-rewritten}, what Open moved out of the grid (cleared by :shows/dismiss-migration). New and Open keep :query, :scope and :sort and reset the rest"}
    :input-learn {:default {:active nil :settings {}}
                  :doc "Learning an input (reactivity plan 24, events/handlers/input.clj), for the session: never saved or undone, and New and Open start it afresh. :active, the one attempt waiting for an input, or nil: {:learn-id (new for each attempt, each Learn all step and retry too) :owner (:settings Settings' identify, :binding a cell's, a pad's, a role's or a fader's learn, :trigger-editor, :learn-all) :capture (:observe, :press, :continuous)}, with :source (:midi, :osc) for :settings, else :document-id (the show it binds into, [:project :document-id]) and :target-action (what it binds, for the trigger editor with the behaviour shown), and for :learn-all :wizard {:queue (its role first) :done :refused}. :settings {source {:status :captured :input-event (what it says: :type :source :channel :note ...)} or {:status :timeout|:failed}}: what each Settings card identified last. Only plain data: the listener, its gate and its waiter are laser-show.input.learn's"}
    :zone-maps {:default {:selected nil}
@@ -507,10 +510,11 @@
   "Unified chain storage for all hierarchical lists.
    
    SIMPLIFIED ARCHITECTURE (v2):
-   Three chain types with consistent structure:
+   Chain types with consistent structure:
    - :effect-chains - Effect modifiers for grid cells
    - :cue-chains - Cue presets/groups for grid cells
    - :projector-effects - Calibration effects for projectors (RGB curves, corner-pin)
+   - :shows - The timeline show library, {show-id show}
    
    Corner-pin geometry IS stored as an effect in [:chains :projector-effects projector-id :items].
    It is applied as a normal effect during frame rendering in multi_engine.clj.
@@ -522,7 +526,9 @@
    :cue-chains {:default {}
                 :doc "Map of [col row] -> {:items [...]}. Starter content is applied via laser-show.state.templates/apply-starter-cue-chains"}
    :projector-effects {:default {}
-                       :doc "Map of projector-id -> {:items [...]} - RGB curves and corner-pin for calibration"}})
+                       :doc "Map of projector-id -> {:items [...]} - RGB curves and corner-pin for calibration"}
+   :shows {:default {}
+           :doc "{show-id (uuid) show}: the timeline show library (plans/2026-11-25-timeline-shows). A show is a timeline cue map with :editor-type :timeline and no :id. Show content: undoable, unsaved, saved in content.edn"}})
 
 
 ;; Backend State Domain
