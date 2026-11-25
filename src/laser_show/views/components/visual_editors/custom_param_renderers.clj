@@ -510,10 +510,11 @@
    - :fx/context - from cljfx, which gives every component its own; the
      zone groups are read through it (no caller gives it)
    - :current-params - {:target-zone :all}
-   - :event-template - Base event with :domain, :entity-key, :effect-path"
+   - :event-template - Base event with :domain, :entity-key, :effect-path
+     and the effect's instance (:effect-instance-id, and :owner-id), by
+     which its :chain/update-param finds the effect (follow-up N14)"
   [{:keys [fx/context current-params event-template]}]
-  (let [{:keys [domain entity-key effect-path]} event-template
-        zone-groups (fx/sub-ctx context subs/target-groups)
+  (let [zone-groups (fx/sub-ctx context subs/target-groups)
         target-zone (get current-params :target-zone :all)
         items (zone-chips/zone-options zone-groups)
         selected-item (or (u/seek #(= (:id %) target-zone) items)
@@ -537,12 +538,10 @@
                  :on-value-changed (fn [new-item]
                                      (when new-item
                                        (events/dispatch!
-                                        {:event/type :chain/update-param
-                                         :domain domain
-                                         :entity-key entity-key
-                                         :effect-path effect-path
-                                         :param-key :target-zone
-                                         :value (:id new-item)})))}]}))
+                                        (assoc event-template
+                                               :event/type :chain/update-param
+                                               :param-key :target-zone
+                                               :value (:id new-item)))))}]}))
 
 ;; Hue Slider Visual Editor (for Set Hue effect - 0-360 range)
 

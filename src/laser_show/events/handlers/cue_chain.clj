@@ -9,6 +9,8 @@
    - Preset management (add)
    - A preset's own parameters and colour, by the item's :id and the cue's
      cell, found where the item is when the edit is handled (follow-up N10)
+   - An item's effects: its effects list's changes and the effect bank's
+     adds, by the item's :id the same way (follow-up N14)
    - Tab switching (preset banks, effect banks)
    - Targets: the cue's and each item's (zones plan Z4)
    
@@ -38,6 +40,16 @@
    Uses new unified :chains domain structure."
   [col row]
   [:chains :cue-chains [col row] :items])
+
+(defn- cue-item-path
+  "Where the item or group item-id of the cue at [col row] is in app state
+   now (chains/find-path-by-id, groups searched), or nil once it is gone:
+   an edit made before a reorder finds its own item (follow-up N14)."
+  [state col row item-id]
+  (let [items-path (cue-chain-path col row)
+        items (get-in state items-path)]
+    (when (and (some? item-id) (sequential? items))
+      (some->> (chains/find-path-by-id (vec items) item-id) (into items-path)))))
 
 
 ;; Editor Lifecycle
@@ -89,30 +101,31 @@
                 :mode :single}}))
 
 (defn- handle-cue-chain-add-effect-from-bank
-  "Add the effect :item-id to a cue chain item's effects (:parent-path, e.g.
-   [0 :effects]) from the effect bank, with its definition's defaults as
-   they are when the click is handled (effects/get-default-params: the
-   bank's event carries the id alone, reactivity plan 17); an id no effect
-   has adds nothing.
+  "Add the effect :item-id from the effect bank to the effects of the cue
+   item or group :owner-id of the cue at [col row], found where it is when
+   the click is handled (follow-up N14: a click queued behind a reorder adds
+   to its own item, and one for an item that is gone adds nothing, {}),
+   with its definition's defaults as they are then
+   (effects/get-default-params: the bank's event carries the id alone,
+   reactivity plan 17); an id no effect has adds nothing.
    
-   Auto-selects the newly added effect for better UX.
-   
-   Requires cell to exist - errors if [:chains :cue-chains [col row]] is nil."
-  [{:keys [col row parent-path item-id state]}]
-  (if-let [params-map (effects/get-default-params item-id)]
-    (let [new-effect (h/ensure-item-fields {:effect-id item-id
-                                            :params params-map})
-          new-effect-id (:id new-effect)
-          ;; parent-path should be something like [0 :effects]
-          target-path (vec (concat [:chains :cue-chains [col row] :items] parent-path))
-          current-effects (get-in state target-path [])]
-      {:state (-> state
-                  (assoc-in target-path (conj current-effects new-effect)))
-       :dispatch {:event/type :list/select-item
-                  :component-id [:item-effects col row]
-                  :item-id new-effect-id
-                  :mode :single}})
-    {:state state}))
+   Auto-selects the newly added effect for better UX."
+  [{:keys [col row owner-id item-id state]}]
+  (if-let [owner-path (cue-item-path state col row owner-id)]
+    (if-let [params-map (effects/get-default-params item-id)]
+      (let [new-effect (h/ensure-item-fields {:effect-id item-id
+                                              :params params-map})
+            new-effect-id (:id new-effect)
+            target-path (conj owner-path :effects)
+            current-effects (get-in state target-path [])]
+        {:state (-> state
+                    (assoc-in target-path (conj current-effects new-effect)))
+         :dispatch {:event/type :list/select-item
+                    :component-id [:item-effects col row]
+                    :item-id new-effect-id
+                    :mode :single}})
+      {:state state})
+    {}))
 
 ;; A preset's parameters (follow-up N10): the item by its id, as its target
 ;; is (R2). The preset editor sends the cue's cell and the item's :id, never
@@ -179,13 +192,15 @@
 
 
 (defn- handle-cue-chain-set-item-effects
-  "Set the entire effects array for a cue chain item (simple persistence callback).
-   
-   Requires cell to exist - errors if [:chains :cue-chains [col row]] is nil."
-  [{:keys [col row item-path items state]}]
-  (let [effects-path (vec (concat (cue-chain-path col row) item-path [:effects]))]
-    {:state (-> state
-                (assoc-in effects-path items))}))
+  "Set the effects of the cue item or group :item-id of the cue at [col
+   row] to :items: what its item effects list sends for each change (a
+   drop, a delete, a paste...). The item is found where it is when the
+   change is handled (follow-up N14: one made before a reorder lands on its
+   own item); one that is gone, or another cue's, changes nothing ({})."
+  [{:keys [col row item-id items state]}]
+  (if-let [item-path (cue-item-path state col row item-id)]
+    {:state (assoc-in state (conj item-path :effects) items)}
+    {}))
 
 
 ;; Targets (zones plan Z4): where the cue's content goes

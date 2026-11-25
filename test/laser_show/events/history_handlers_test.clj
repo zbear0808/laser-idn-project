@@ -303,7 +303,9 @@
                      :cue-chain/update-preset-param (assoc preset :param-key :size :value 2.0)
                      :cue-chain/update-preset-param-from-text (assoc preset :param-key :size :min 0.0 :max 10.0 :is-int? false
                                                                      :text "2.0")
-                     :cue-chain/update-preset-color (assoc preset :color [0.5 0.5 0.5]))]
+                     :cue-chain/update-preset-color (assoc preset :color [0.5 0.5 0.5])
+                     ;; Nor does a bank's add, for an item that isn't there (follow-up N14)
+                     :cue-chain/add-effect-from-bank {:state (test-state) :col 0 :row 0 :owner-id item-id :item-id :scale})]
     (doseq [event-type (keys history-handlers/event-descriptions)]
       (let [event (get valid event-type {:state (test-state)})
             result (try (handlers/handle-event (assoc event :event/type event-type))

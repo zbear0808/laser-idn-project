@@ -879,6 +879,59 @@
           (is (= {:red 0.0 :green 0.5 :blue 1.0} (read s)) "on the Set Color, where it is now")
           (is (= pattern (get-in s [:chains :effect-chains [4 2] :items 0])) "the pattern is untouched"))))))
 
+(deftest lock-classifies-reordered-parameter-target-test
+  ;; Follow-up N14: the effect parameter editor's edits name their effect by
+  ;; its instance (the pipeline finds it, chain-helpers/
+  ;; wrap-effect-instance-target), so the lock judges the effect they edit
+  ;; where it is now, as it does a modulator's and a colour's: a pattern's
+  ;; edit is refused though a point effect holds the place it was rendered
+  ;; at, and a point effect's goes through though a pattern holds its place
+  (let [pattern-id #uuid "0000000a-0000-0000-0000-0000000000e1"
+        point-id #uuid "0000000a-0000-0000-0000-0000000000e2"
+        pattern (assoc (zone-patterns/preset-instance :swap :cell) :id pattern-id)
+        point {:id point-id :effect-id :intensity :enabled? true :params {:amount 1.0}}
+        ;; Rendered as [point pattern]; swapped since
+        s0 (-> (starter)
+               (assoc-in [:chains :effect-chains [4 2]] {:active? false :items [pattern point]})
+               (history/mark-clean))
+        edit (fn [type id rendered-at & {:as more}]
+               (merge {:event/type type :domain :effect-chains :entity-key [4 2] :effect-instance-id id
+                       :effect-path [rendered-at]}
+                      more))
+        pattern-edits [(edit :chain/update-param pattern-id 1 :param-key :rate :value 2.0)
+                       (edit :chain/update-param-from-text pattern-id 1 :param-key :rate :min -8.0 :max 8.0 :is-int? false
+                             :text "2")
+                       (edit :keyframe/toggle-enabled pattern-id 1 :enabled? true)]
+        point-edits [(edit :chain/update-param point-id 0 :param-key :amount :value 0.5)
+                     (edit :chain/update-param-from-text point-id 0 :param-key :amount :min 0.0 :max 3.0 :is-int? false
+                           :text "0.5")
+                     (edit :keyframe/toggle-enabled point-id 0 :enabled? true)]]
+    (doseq [event pattern-edits]
+      (testing (str "the pattern's " (:event/type event) ", now where the point effect was rendered")
+        (is (not= (history/extract-document-state s0) (history/extract-document-state (run s0 event))) "unlocked, a real edit")
+        (let [s (run (lock s0) event)]
+          (is (= (lock s0) (without-notices s)) "locked, only the notice")
+          (is (= {:text "Zone pattern edit refused" :event (:event/type event)} (get-in s [:ui :show-lock-notice]))))))
+    (doseq [event point-edits]
+      (testing (str "the point effect's " (:event/type event) ", now where the pattern was rendered")
+        (let [s (run (lock s0) event)]
+          (is (nil? (get-in s [:ui :show-lock-notice])) "goes through")
+          (is (not= (history/extract-document-state s0) (history/extract-document-state s)) "a real edit")
+          (is (= (history/extract-document-state (run s0 event)) (history/extract-document-state s)) "as it does unlocked")
+          (is (= pattern (get-in s [:chains :effect-chains [4 2] :items 0]))
+              "on the point effect, where it is now: the pattern is untouched"))))
+    (testing "a cue item's effect's edit goes through, as before: a cue's items aren't patterns"
+      (let [p #uuid "0000000a-0000-0000-0000-0000000000e3"
+            s1 (-> (starter)
+                   (assoc-in [:chains :cue-chains [0 0] :items 0 :id] p)
+                   (assoc-in [:chains :cue-chains [0 0] :items 0 :effects] [point])
+                   (history/mark-clean))
+            event {:event/type :chain/update-param :domain :cue-chains :entity-key [0 0] :effect-path [0 :effects 0]
+                   :effect-instance-id point-id :owner-id p :param-key :amount :value 0.5}
+            s (run (lock s1) event)]
+        (is (nil? (get-in s [:ui :show-lock-notice])))
+        (is (= 0.5 (get-in s [:chains :cue-chains [0 0] :items 0 :effects 0 :params :amount])))))))
+
 (deftest locked-preset-edits-go-through-test
   ;; Follow-up N10: the preset editor's edits name the item by its id
   ;; (:cue-chain/update-preset-*). Like the :chain/* edits they replace, they
