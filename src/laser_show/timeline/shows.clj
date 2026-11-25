@@ -11,7 +11,8 @@
    cue-at is the one place that says where a playback key's cue lives, and
    key-order the one order over playback keys: plain compare throws on a
    mix of the two shapes (it compares :show with a number)."
-  (:require [laser-show.animation.cue-chains :as cue-chains]
+  (:require [clojure.string :as str]
+            [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.timeline.model :as model]
             [laser-show.timeline.timecode :as tc]))
 
@@ -50,6 +51,15 @@
   (if (play-key? k)
     (show-path (key-show-id k))
     [:chains :cue-chains k]))
+
+(defn new-show
+  "An empty show named name (\"Untitled\" when blank): a timeline with no
+   clips, made as an empty grid cell's was (model/convert-to-timeline: a
+   Default folder holding one track), normalized. No :id: its id is its key
+   in the library."
+  [{:keys [name]}]
+  (assoc (model/convert-to-timeline nil {})
+         :name (if (and (string? name) (not (str/blank? name))) (str/trim name) "Untitled")))
 
 (defn cue-at
   "The cue the playback key k plays in state, or nil."

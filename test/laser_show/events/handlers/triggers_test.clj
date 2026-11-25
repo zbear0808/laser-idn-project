@@ -12,7 +12,8 @@
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.state.persistent :as persistent]
-            [laser-show.state.templates :as templates]))
+            [laser-show.state.templates :as templates]
+            [laser-show.timeline.shows :as shows]))
 
 (deftest legacy-cue-trigger-dispatches-grid-event
   (let [input {:type :trigger :source :keyboard :id :space :timestamp 1000}
@@ -275,11 +276,44 @@
                                                     :input-event {:type :trigger :source :keyboard :id :t :timestamp 1}
                                                     :time 1})
                                   :dispatch
-                                  (select-keys [:event/type :col :row])
-                                  not-empty))]
-    (is (= {:event/type :timeline/play :col 2 :row 1} (fire {:type :start-timeline :target [2 1]})))
-    (is (= {:event/type :timeline/stop :col 2 :row 1} (fire {:type :stop-timeline :target [2 1]})))
-    (is (nil? (fire {:type :start-timeline :target :some-id})) "non-cell targets do nothing")))
+                                  (select-keys [:event/type :show-id :col :row])
+                                  not-empty))
+        u #uuid "00000000-0000-0000-0000-0000000000a1"]
+    (is (= {:event/type :timeline/play :show-id u} (fire {:type :start-timeline :target [:show u]})))
+    (is (= {:event/type :timeline/stop :show-id u} (fire {:type :stop-timeline :target [:show u]})))
+    (is (nil? (fire {:type :start-timeline :target [2 1]})) "a grid cell holds no timeline: nothing")
+    (is (nil? (fire {:type :stop-timeline :target [2 1]})))
+    (is (nil? (fire {:type :start-timeline :target :some-id})) "nor does any other target")))
+
+(deftest show-targets-play-and-toggle-test
+  (let [u #uuid "00000000-0000-0000-0000-0000000000a1"
+        k (shows/play-key u)
+        bound (fn [action] {:config {:input {:trigger-map {note-key action}}}
+                            :chains {:shows {u {:name "One More Time" :editor-type :timeline :items []}}}
+                            :playback {:active-cues {}}
+                            :trigger-runtime {}})
+        dispatched #(some-> % :dispatch (dissoc :source-trigger :source-input))]
+    (testing ":toggle-show: a press toggles the show's run, its release does nothing"
+      (let [s (bound {:type :toggle-show :target k})
+            pressed (input s :note-on)]
+        (is (= {:event/type :shows/toggle-run :show-id u} (dispatched pressed)))
+        (is (some? (get-in pressed [:dispatch :source-trigger])) "a trigger's: no undo step")
+        (is (nil? (dispatched (input (:state pressed) :note-off))))
+        (testing "through the routed handlers: starts it from beat 0, then stops it"
+          (let [started (routed s (note :note-on))
+                stopped (routed (routed started (note :note-off)) (note :note-on))]
+            (is (= {:timeline? true :start-beat 0.0} (dissoc (get-in started [:playback :active-cues k]) :run)))
+            (is (not (contains? (get-in stopped [:playback :active-cues]) k)))))))
+    (testing "a momentary :toggle-show plays while held"
+      (let [s (bound {:type :toggle-show :target k :behavior :momentary})
+            pressed (input s :note-on)]
+        (is (= {:event/type :timeline/play :show-id u :from 0.0} (dispatched pressed)))
+        (is (= {:event/type :timeline/stop :show-id u} (dispatched (input (:state pressed) :note-off))))
+        (is (nil? (dispatched (input s :note-off))) "a release whose press nobody saw ends nothing")))
+    (testing "a :toggle-show at a cell, or no target: nothing"
+      (doseq [target [[0 0] nil :x]]
+        (is (nil? (dispatched (input (bound {:type :toggle-show :target target}) :note-on))))
+        (is (nil? (dispatched (input (bound {:type :toggle-show :target target :behavior :momentary}) :note-on))))))))
 
 
 ;; Vibe mode's role bindings

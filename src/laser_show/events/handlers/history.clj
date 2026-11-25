@@ -264,6 +264,8 @@
    :timeline/add-preset-to-track "Add Content to Track"
    :timeline/delete-selection "Delete Clip(s)"
    :timeline/nudge-selection "Nudge Clip(s)"
+   :shows/create "New Show"
+   :shows/new-from-cue "New Show from Cue"
    :projectors/add-manual "Add Projector"
    :projectors/submit-manual-form "Add Projector"
    :projectors/remove "Remove Projector"
