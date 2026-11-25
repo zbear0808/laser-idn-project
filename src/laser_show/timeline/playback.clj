@@ -13,6 +13,7 @@
   (:require [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.timeline.model :as model]
+            [laser-show.timeline.shows :as shows]
             [laser-show.timeline.timecode :as tc]))
 
 
@@ -58,17 +59,18 @@
   (and (cue-chains/timeline-cue? cue) (= :mtc (:timeline/chase cue))))
 
 (defn source-version
-  "Which version of the cue at cell in state follows timecode
-   ([:playback :chase-sources :cells cell], given by the edit that made it,
-   events.handlers.timeline/reconcile-chase-sources), or nil when the cue
-   there doesn't follow. A follower the show opened or started with, which
-   no edit has versioned, is 0."
-  [state cell]
-  (when (chases-mtc? (get-in state [:chains :cue-chains cell]))
-    (get-in state [:playback :chase-sources :cells cell] 0)))
+  "Which version of the cue the playback key k plays in state
+   (shows/cue-at: a grid cell's or a show's) follows timecode
+   ([:playback :chase-sources :cells k], given by the edit that made it,
+   events.handlers.timeline/reconcile-chase-sources), or nil when that cue
+   doesn't follow. A follower the show opened or started with, which no
+   edit has versioned, is 0."
+  [state k]
+  (when (chases-mtc? (shows/cue-at state k))
+    (get-in state [:playback :chase-sources :cells k] 0)))
 
 (defn intent-owner
-  "Who holds a cell, by its intent in [:playback :active-cues]: :none (no
+  "Who holds a key, by its intent in [:playback :active-cues]: :none (no
    intent), [:run r] (a run the grid, the editor or a vibe started), or
    [:chase k] (timecode, episode k, show-time's :chase-id). Anything else
    is [:other intent], never :none."
@@ -86,7 +88,8 @@
                      (cue-bpm cue global-bpm)))
 
 (defn apply-chase
-  "Set every chasing timeline in cue-chains from the MTC position
+  "Set every chasing timeline in cues, a {key cue} map (a grid cell's or a
+   show's playback key, shows/playable-shows), from the MTC position
    (laser-show.input.mtc/position), in (:active-cues chase), the show clock's
    map of chased cues (show-time/step):
    - running or freewheeling inside [0, length): active, at the chased beat
@@ -94,23 +97,23 @@
    The position is set, not integrated, so the playhead is always exactly
    the timecode. Other cues are untouched. App state's intents follow
    through the :show-clock/chase event."
-  [chase cue-chains {:keys [state seconds]} global-bpm now-ms]
+  [chase cues {:keys [state seconds]} global-bpm now-ms]
   (reduce-kv
-   (fn [pb cell cue]
+   (fn [pb k cue]
      (if-not (chases-mtc? cue)
        pb
        (let [bpm (cue-bpm cue global-bpm)
              beat (when (and seconds (not= :stopped state))
                     (chase-beat cue seconds global-bpm))
              inside? (and beat (>= beat 0.0) (< beat (double (model/effective-length cue))))
-             active? (some? (get-in pb [:active-cues cell]))]
+             active? (some? (get-in pb [:active-cues k]))]
          (cond
            inside?
            (-> (if active?
                  pb
-                 (assoc-in pb [:active-cues cell]
+                 (assoc-in pb [:active-cues k]
                            (cue-timing/start-timing now-ms 0.0 {:timeline? true :start-beat beat})))
-               (update-in [:active-cues cell]
+               (update-in [:active-cues k]
                           (fn [t]
                             (-> (cue-timing/seek t beat)
                                 (assoc :timeline? true
@@ -119,7 +122,7 @@
                                        :accumulated-ms (* beat (/ 60000.0 (double bpm)))
                                        :last-frame-time now-ms)))))
 
-           active? (update pb :active-cues dissoc cell)
+           active? (update pb :active-cues dissoc k)
            :else pb))))
    chase
-   (or cue-chains {})))
+   (or cues {})))

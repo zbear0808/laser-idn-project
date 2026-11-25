@@ -95,3 +95,18 @@
                  :playback {:chase-sources {:next 8 :cells {[0 0] 7 [1 0] 6}}}}]
       (is (= [7 nil 0 nil] (map #(playback/source-version state %) [[0 0] [1 0] [2 0] [3 0]]))
           "its own; none for an ordinary cue or an empty cell; 0 for a follower no edit versioned"))))
+
+(deftest source-version-reads-show-keys-test
+  (testing "a show's version, by its playback key (plans/2026-11-25-timeline-shows/03 §10)"
+    (let [u #uuid "00000000-0000-0000-0000-000000000001"
+          u2 #uuid "00000000-0000-0000-0000-000000000002"
+          state {:chains {:shows {u chasing-cue}}
+                 :playback {:chase-sources {:cells {[:show u] 5}}}}]
+      (is (= 5 (playback/source-version state [:show u])))
+      (is (= 0 (playback/source-version (assoc-in state [:playback :chase-sources :cells] {}) [:show u]))
+          "a follower no edit versioned")
+      (is (nil? (playback/source-version (update-in state [:chains :shows u] dissoc :timeline/chase) [:show u]))
+          "not following")
+      (is (nil? (playback/source-version state [:show u2])) "no such show")
+      (is (nil? (playback/source-version (assoc-in state [:chains :cue-chains [:show u]] chasing-cue) [:show u2]))
+          "a show key never reads the grid's cues"))))

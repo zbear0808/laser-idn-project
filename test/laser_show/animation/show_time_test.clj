@@ -30,12 +30,15 @@
   "The show open in init!'s state (reactivity plan 20's [:project :document-id])."
   #uuid "00000000-0000-0000-0000-00000000d0c1")
 
-(defn- init! [chains]
-  (state/init-state! (-> (domains/build-initial-state)
-                         (assoc-in [:chains :cue-chains] chains)
-                         (assoc-in [:timing :bpm] 120.0)
-                         (assoc-in [:project :document-id] doc-id)))
-  (show-time/reset-runtime!))
+(defn- init!
+  ([chains] (init! chains nil))
+  ([chains shows]
+   (state/init-state! (cond-> (-> (domains/build-initial-state)
+                                  (assoc-in [:chains :cue-chains] chains)
+                                  (assoc-in [:timing :bpm] 120.0)
+                                  (assoc-in [:project :document-id] doc-id))
+                        (some? shows) (assoc-in [:chains :shows] shows)))
+   (show-time/reset-runtime!)))
 
 (use-fixtures :each (fn [f] (init! {}) (f)))
 
@@ -1124,3 +1127,168 @@
           (state/reset-state! pressed)
           (handle! event)
           (is (= {} (stopped-for)) label))))))
+
+
+;; Shows play under [:show id] beside the grid's cells
+;; (plans/2026-11-25-timeline-shows/03 §8, §10): the same runs, ends, chase
+;; and reports, the cue from [:chains :shows id]
+
+(def ^:private u1 #uuid "00000000-0000-0000-0000-000000000001")
+(def ^:private u2 #uuid "00000000-0000-0000-0000-000000000002")
+(def ^:private S1 [:show u1])
+(def ^:private S2 [:show u2])
+
+(defn- start-show!
+  "Show key k started as run r, as cue-timing/activate-cue writes it."
+  [k r opts]
+  (state/swap-state! update :playback cue-timing/activate-cue k r opts))
+
+(defn- installed!
+  "Show u1, following timecode, taken by it at 3,605.55 s and installed:
+   [runtime k1]."
+  []
+  (init! {} {u1 follower})
+  (let [{rt :runtime reports :reports} (step (:runtime start) 70.0 (mtc-at 70))]
+    (deliver! rt reports)
+    [rt (chase-id rt S1)]))
+
+(deftest show-key-runs-and-ends-test
+  (testing "E1: a manual show runs at its own tempo and ends at its length"
+    (init! {} {u1 (timeline {:timeline/tempo-bpm 120.0 :timeline/length 8.0})})
+    (let [r (random-uuid)]
+      (start-show! S1 r {:timeline? true :start-beat 0.0})
+      (let [{rt :runtime reports :reports} (step (run-at (:runtime start) 0.0 1000.0 2000.0 3000.0) 4000.0)
+            run (get-in rt [:runs r])]
+        (is (= [S1 true true 8.0] ((juxt :cell :timeline? :ended? :accumulated-beats) run)))
+        (is (= [{:event/type :show-clock/cue-ended :cell S1 :run r :position-ids {:restart nil :seek nil}}]
+               reports))
+        (is (empty? (show-time/active-runs (state/get-raw-state) rt)) "an ended show isn't rendered")
+        (run! events/event-handler reports)
+        (is (= [false {} nil] (transport))))))
+  (testing "the show's locked tempo, not the global BPM, and it renders"
+    (init! {} {u1 (timeline {:timeline/tempo-bpm 60.0 :timeline/length 100.0})})
+    (let [r (random-uuid)]
+      (start-show! S1 r {:timeline? true :start-beat 0.0})
+      (let [rt (run-at (:runtime start) 0.0 1000.0)]
+        (is (close? 1.0 (get-in rt [:runs r :accumulated-beats])) "1 s at 60 BPM, the global 120 ignored")
+        (is (= {S1 (get-in rt [:runs r :accumulated-beats])} (show-time/positions rt)))
+        (is (= [[S1 r]] (map (juxt :cell :run) (show-time/active-runs (state/get-raw-state) rt))))
+        (is (= (get-in (state/get-raw-state) [:chains :shows u1])
+               (:cue-chain (first (show-time/active-runs (state/get-raw-state) rt))))))))
+  (testing "a show key never reads the grid's cue at the same key"
+    (init! {S1 (timeline {:timeline/tempo-bpm 60.0 :timeline/length 100.0})} {})
+    (let [r (random-uuid)]
+      (start-show! S1 r {:timeline? true :start-beat 0.0})
+      (let [rt (run-at (:runtime start) 0.0 1000.0)]
+        (is (close? 2.0 (get-in rt [:runs r :accumulated-beats])) "no show: the global BPM")
+        (is (empty? (show-time/active-runs (state/get-raw-state) rt)) "nothing to draw")))))
+
+(deftest show-key-chases-mtc-test
+  (init! {} {u1 follower})
+  (let [{rt1 :runtime reports1 :reports} (step (:runtime start) 70.0 (mtc-at 70))
+        k1 (show-time/chase-id rt1 S1)]
+    (testing "E2: On"
+      (is (close? 11.10 (chase-at rt1 S1)))
+      (is (= [doc-id S1 0 nil (:tick rt1)] k1) "version 0: no edit versioned it")
+      (is (= [(on-report S1 0 :none k1 {:restart nil :allowed? true})] reports1))
+      (is (= {S1 1} (drawn rt1)) "drawn before app state hears of it")
+      (deliver! rt1 reports1)
+      (is (= (marker k1) (intent S1)))
+      (is (= [true {S1 nil} S1] (transport)))
+      (is (= {S1 1} (drawn rt1)) "drawn once, in its marker's place")
+      (is (= [] (:reports (step rt1 370.0 (mtc-at 370)))) "app state agrees"))
+    (testing "E3: timecode stops: Off"
+      (let [{rt2 :runtime reports2 :reports} (step rt1 670.0 (mtc-at 670))]
+        (is (= {} (:chase rt2)))
+        (is (= [(off-report S1 0 [:chase k1])] reports2))
+        (deliver! rt2 reports2)
+        (is (= [false {} nil] (transport)))))))
+
+(deftest show-follower-takes-over-its-manual-run-test
+  (testing "a show playing when it starts following stops when no timecode runs"
+    (init! {} {u1 (timeline {:timeline/length 64.0})})
+    (let [r1 (random-uuid)]
+      (start-show! S1 r1 {:timeline? true :start-beat 2.0})
+      (let [rt (run-at (:runtime start) 0.0)]
+        (is (contains? (:runs rt) r1))
+        (state/swap-state! assoc-in [:chains :shows u1] follower)
+        (let [{rt' :runtime reports :reports} (step rt 16.0 stopped)]
+          (is (empty? (:runs rt')) "timecode drives it now")
+          (is (empty? (show-time/active-runs (state/get-raw-state) rt')))
+          (is (= [(off-report S1 0 [:run r1])] reports))
+          (deliver! rt' reports)
+          (is (= [false {} nil] (transport)))))))
+  (testing "while timecode runs inside it, timecode takes it over"
+    (init! {} {u1 (timeline {:timeline/length 64.0})})
+    (let [r1 (random-uuid)]
+      (start-show! S1 r1 {:timeline? true :start-beat 2.0})
+      (let [rt (run-at (:runtime start) 0.0)]
+        (state/swap-state! assoc-in [:chains :shows u1] follower)
+        (let [{rt' :runtime reports :reports} (step rt 16.0 (running 3610.0))
+              k (chase-id rt' S1)]
+          (is (close? 20.0 (chase-at rt' S1)))
+          (is (empty? (:runs rt')))
+          (is (= {S1 1} (drawn rt')))
+          (is (= [(on-report S1 0 [:run r1] k {:restart nil :allowed? true})] reports))
+          (deliver! rt' reports)
+          (is (= (marker k) (intent S1)))
+          (is (= [true {S1 nil} S1] (transport))))))))
+
+(deftest mixed-keys-report-in-key-order-test
+  (testing "E4: a grid follower and two show followers, no markers yet"
+    (init! {C follower} {u2 follower u1 follower})
+    (let [{rt :runtime reports :reports} (step (:runtime start) 70.0 (mtc-at 70))]
+      (is (= [C S1 S2] (map :cell reports)) "grid cells first, then shows by id: no throw")
+      (is (every? :active? reports))
+      (is (= [C S1 S2] (map :cell (show-time/active-runs (state/get-raw-state) rt))))
+      (deliver! rt (filter #(= S2 (:cell %)) reports))
+      (is (= (marker (chase-id rt S2)) (intent S2)))
+      (is (= [S2 C S1] (map :cell (show-time/active-runs (state/get-raw-state) rt)))
+          "the installed one in its intent's place, the others chased later in key order")
+      (is (= {C 1 S1 1 S2 1} (drawn rt)))
+      (is (= [C S1] (map :cell (:reports (step rt 400.0 (mtc-at 370)))))
+          "the two still to install, in key order"))))
+
+(deftest removed-show-retires-its-chase-test
+  (testing "E5: the show goes while its episode runs"
+    (let [[rt1 k1] (installed!)]
+      (is (= (marker k1) (intent S1)))
+      (state/swap-state! update-in [:chains :shows] dissoc u1)
+      (let [{rt :runtime reports :reports} (step rt1 100.0 (mtc-at 100))]
+        (is (= {} (:chase rt)) "its episode is gone from this tick")
+        (is (= [(off-report S1 nil [:chase k1])] reports) "one Off, for no version")
+        (is (empty? (drawn rt)))
+        (deliver! rt reports)
+        (is (nil? (intent S1)))
+        (is (= [false {} nil] (transport)))))))
+
+(deftest a-stopped-show-stays-stopped-until-timecode-enters-again-test
+  ;; As a grid press stops a chased cue (events.handlers.grid stop-chase):
+  ;; [:playback :chase-stopped] is keyed by the playback key, a show's too
+  (let [[rt1 k1] (installed!)
+        stopped-for #(get-in (state/get-raw-state) [:playback :chase-stopped])]
+    (state/swap-state! #(-> %
+                            (update :playback cue-timing/deactivate-cue S1)
+                            (assoc-in [:playback :chase-stopped S1] k1)))
+    (let [pressed (state/get-raw-state)]
+      (is (= [false {} nil] (transport)))
+      (testing "timecode runs on: the same episode, neither reported, drawn nor positioned"
+        (let [{rt2 :runtime r2 :reports} (step rt1 370.0 (mtc-at 370))
+              {rt3 :runtime r3 :reports} (step rt2 700.0 (running 3606.2))]
+          (is (= k1 (chase-id rt2 S1) (chase-id rt3 S1)))
+          (is (= [[] []] [r2 r3]))
+          (is (= [{} {}] [(drawn rt2) (drawn rt3)]))
+          (is (not-any? #(contains? (show-time/positions %) S1) [rt2 rt3]))
+          (is (identical? pressed (deliver! rt3 [(on-report S1 0 :none k1 {:restart nil :allowed? true})]))
+              "a late On for k1 changes nothing")))
+      (testing "timecode stops, then runs again: a new episode, which plays"
+        (let [{rt2 :runtime offs :reports} (step rt1 670.0 (mtc-at 670))
+              {rt3 :runtime ons :reports} (step rt2 1000.0 (running 3610.0))
+              k2 (chase-id rt3 S1)]
+          (is (= [] offs))
+          (is (not= k1 k2))
+          (is (= [(on-report S1 0 :none k2 {:restart nil :allowed? true})] ons))
+          (deliver! rt3 ons)
+          (is (= (marker k2) (intent S1)))
+          (is (= {} (stopped-for)) "the show's stop is over")
+          (is (= {S1 1} (drawn rt3))))))))
