@@ -885,6 +885,68 @@
       (finally
         (jar/delete-tree! dir)))))
 
+(deftest an-open-asked-about-again-waits-for-the-question-open-test
+  ;; Follow-up B12 (b): an Open whose chooser came back once the show had
+  ;; changed asks before replacing it. When the dialog was already asking
+  ;; something else by then (closing the window while choosing), that Open
+  ;; was dropped, only logged
+  (let [^File dir (jar/temp-dir! "open-waits")
+        a-path (str (io/file dir "A.zip"))
+        b-path (str (io/file dir "B.zip"))
+        clean (-> document-state
+                  (assoc-in [:project :document-id] (random-uuid))
+                  (assoc-in [:project :current-file] a-path)
+                  history/mark-clean)
+        now #(state/get-raw-state)
+        exits (atom 0)
+        b-open? #(and (= b-path (get-in % [:project :current-file]))
+                      (= 77.0 (get-in % [:timing :bpm])))
+        asking? (fn [pending] (= {:open? true :pending pending} (select-keys (confirm-dialog (now)) [:open? :pending])))
+        waiting #(mapv (fn [e] (select-keys e [:event/type :file-path])) (:queued (confirm-dialog (now))))
+        b-back-while-asking! (fn [question]
+                               (state/reset-state! clean)
+                               (let [picked (chooser-result {:event/type :file/open} clean b-path)]
+                                 (rename-cue! "While choosing")
+                                 (events/event-handler question)
+                                 (is (asking? question))
+                                 (events/event-handler picked)
+                                 picked))]
+    (events/set-exit-fn! #(swap! exits inc))
+    (try
+      (is (persistent/write-project! b-path (zip-contents-of (assoc-in document-state [:timing :bpm] 77.0))))
+      (testing "B.zip comes back while the dialog asks about closing"
+        (let [picked (b-back-while-asking! {:event/type :file/exit})]
+          (is (asking? {:event/type :file/exit}) "the question open stays")
+          (is (= [{:event/type :file/open-result :file-path b-path}] (waiting)) "the Open waits behind it")
+          (events/event-handler picked)
+          (is (= 1 (count (waiting))) "once")
+          (is (not (b-open? (now))))
+          (testing "; Cancel: then B.zip's question, the show still as it was"
+            (events/event-handler {:event/type :file/confirm-cancel})
+            (is (zero? @exits))
+            (is (asking? {:event/type :file/open-result :file-path b-path}))
+            (is (empty? (waiting)))
+            (is (= "While choosing" (get-in (now) [:chains :cue-chains [2 0] :name])))
+            (testing "; Don't Save opens it"
+              (events/event-handler {:event/type :file/confirm-discard})
+              (is (b-open? (now)))
+              (is (not (:open? (confirm-dialog (now)))))))))
+      (testing "while it asks about a New, Don't Save: the new show, then B.zip, which has nothing to ask"
+        (b-back-while-asking! {:event/type :file/new-project})
+        (is (= 1 (count (waiting))))
+        (events/event-handler {:event/type :file/confirm-discard})
+        (is (b-open? (now)))
+        (is (not (:open? (confirm-dialog (now))))))
+      (testing "Save: A.zip written with the edit, the New, then B.zip"
+        (b-back-while-asking! {:event/type :file/new-project})
+        (events/event-handler {:event/type :file/confirm-save})
+        (is (b-open? (now)))
+        (is (= "While choosing" (get-in (persistent/read-project a-path) ["content.edn" :chains :cue-chains [2 0] :name]))))
+      (is (zero? @exits))
+      (finally
+        (events/set-exit-fn! nil)
+        (jar/delete-tree! dir)))))
+
 (deftest parked-paste-from-a-replaced-document-does-nothing-test
   ;; Before: a paste waiting for the OS clipboard pasted into the show New or
   ;; Open had put there meanwhile
