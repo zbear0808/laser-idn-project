@@ -1022,3 +1022,25 @@
       (is (contains? (shows-handlers/handle {:event/type type :state s}) :state) (str type))
       (is (contains? (handlers/handle-event {:event/type type :state s}) :state)
           (str type " is routed to the shows handler")))))
+
+(deftest set-timecode-from-row-uses-selection-test
+  (let [s0 (-> (tc-state {sa (tc-show "A" ca 0.0 600.0)
+                          sb (tc-show "B" cb 300.0 600.0)
+                          sc (tc-show "C" cc 600.0 600.0)})
+               (assoc-in [:ui :shows :selected] #{sa sb}))
+        on-ids (fn [result] (set (filter #(= :mtc (chase-of (:state result) %)) [sa sb sc])))]
+    (testing "the row menu on a selected row: the visible selection"
+      (let [result (pipeline {:event/type :shows/set-timecode :from-row sb :enabled? true :state s0})]
+        (is (= #{sa sb} (on-ids result)))
+        (is (= "Enable Timecode" (history/undo-label (:history (:state result)))))))
+    (testing "on a row outside the selection: that row"
+      (is (= #{sc} (on-ids (pipeline {:event/type :shows/set-timecode :from-row sc :enabled? true :state s0})))))
+    (testing "a selected row the search hides is left out"
+      (let [hidden (assoc-in s0 [:ui :shows :query] "B")]
+        (is (= #{sb} (on-ids (pipeline {:event/type :shows/set-timecode :from-row sb :enabled? true :state hidden}))))))
+    (testing ":from-selection, and Disable for the selection"
+      (let [s1 (:state (pipeline {:event/type :shows/set-timecode :from-selection true :enabled? true :state s0}))
+            s2 (:state (pipeline {:event/type :shows/set-timecode :from-row sa :enabled? false :state s1}))]
+        (is (= #{sa sb} (on-ids {:state s1})))
+        (is (= #{} (on-ids {:state s2})))
+        (is (= "Disable Timecode" (history/undo-label (:history s2))))))))

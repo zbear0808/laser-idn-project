@@ -629,11 +629,15 @@
 
 (defn- handle-set-timecode
   "The TC column's tick: timecode on (:enabled? true) or off for the shows
-   :show-ids (or the one :show-id; :on? reads as :enabled?). On is checked
-   against TS-6 (enable-timecode); a show already so, or missing, is left
-   alone (07 §4.5)."
+   :show-ids (or the one :show-id; :from-row and :from-selection as
+   target-ids reads them; :on? reads as :enabled?). On is checked against
+   TS-6 (enable-timecode); a show already so, or missing, is left alone
+   (07 §4.5)."
   [{:keys [show-ids show-id enabled? on? state] :as event}]
-  (let [ids (timecode-order state (cond-> (set show-ids) (some? show-id) (conj show-id)))]
+  (let [ids (timecode-order state
+                            (if (or (contains? event :from-row) (contains? event :from-selection))
+                              (target-ids state event)
+                              (cond-> (set show-ids) (some? show-id) (conj show-id))))]
     (if (if (contains? event :enabled?) enabled? on?)
       (enable-timecode state ids)
       (disable-timecode state ids))))

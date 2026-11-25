@@ -903,3 +903,36 @@
   (ui/wait-for! #(= "One More Time" (get-in (state/get-raw-state) (show-path :name))))
   (ui/wait-for! #(title-showing? "Timeline Editor - One More Time"))
   (is (= "Rename Show" (undo-label))))
+
+(deftest inspector-chase-refused-snaps-back-test
+  (let [robot (ui/robot)
+        chase #(get-in (state/get-raw-state) (show-path :timeline/chase))]
+    (open-timeline!)
+    (testing "an unlocked show: the reason it can't follow"
+      (ui/wait-for! #(ui/visible? "#timeline-tc-problem"))
+      (is (= "Lock the tempo to follow timecode." (ui/node-text "#timeline-tc-problem")))
+      (is (ui/selected? "#timeline-chase-off")))
+    (testing "MTC refused: the notice, and Off selected again"
+      (ui/click! robot "#timeline-chase-mtc")
+      (ui/wait-for! #(some-> (get-in (state/get-raw-state) [:ui :notice :text]) (.contains "needs a BPM")))
+      (Thread/sleep 400)
+      (ui/wait-for! #(not (ui/selected? "#timeline-chase-mtc")))
+      (is (ui/selected? "#timeline-chase-off"))
+      (is (nil? (chase)))
+      (is (ui/visible? "#timeline-tc-problem")))
+    (testing "Off clicked while selected: no edit, it stays selected"
+      (ui/click! robot "#timeline-chase-off")
+      (ui/wait-for! #(ui/selected? "#timeline-chase-off"))
+      (is (nil? (chase))))
+    (testing "locked: MTC goes on, the reason goes, and Off turns it off"
+      (ui/click! robot "#timeline-tempo-lock")
+      (ui/wait-for! #(some? (get-in (state/get-raw-state) (show-path :timeline/tempo-bpm))))
+      (ui/wait-for! #(not (ui/visible? "#timeline-tc-problem")))
+      (ui/click! robot "#timeline-chase-mtc")
+      (ui/wait-for! #(= :mtc (chase)))
+      (ui/wait-for! #(and (ui/selected? "#timeline-chase-mtc") (not (ui/selected? "#timeline-chase-off"))))
+      (is (= "Enable Timecode" (history/undo-label (:history (state/get-raw-state)))))
+      (ui/click! robot "#timeline-chase-off")
+      (ui/wait-for! #(nil? (chase)))
+      (ui/wait-for! #(and (ui/selected? "#timeline-chase-off") (not (ui/selected? "#timeline-chase-mtc"))))
+      (is (= "Disable Timecode" (history/undo-label (:history (state/get-raw-state))))))))

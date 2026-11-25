@@ -28,7 +28,9 @@
             [clojure.string :as str]
             [laser-show.events.core :as events]
             [laser-show.subs :as subs]
+            [laser-show.timeline.shows :as shows]
             [laser-show.timeline.timecode :as tc]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.keys :as keys])
   (:import [javafx.animation PauseTransition]
            [javafx.application Platform]
@@ -359,17 +361,52 @@
 (defn- status-cell-desc [row]
   (if (nil? (:id row)) no-row {:text nil :graphic {:fx/type status-cell :show-id (:id row)}}))
 
-(defn- tc-cell-desc
-  "Its timecode, shown: S4 makes it a control."
-  [row]
+(defn- problem-text
+  "The ⚠'s tooltip for a timecode problem (subs/show-timecode-problem's),
+   with-title the title of the show it would overlap."
+  [{:keys [reason range]} with-title]
+  (case reason
+    :no-bpm "needs a BPM"
+    :empty "empty"
+    :overlap (str "would overlap '" with-title "' (" (shows/tc-range-text range) ")")))
+
+(defn- tc-problem
+  "⚠ while show-id can't follow timecode (subs/show-timecode-problem): its
+   own subscription, so the rows hold no problem and stay apart from the
+   other shows."
+  [{:keys [fx/context show-id]}]
+  (if-let [problem (fx/sub-ctx context subs/show-timecode-problem show-id)]
+    (let [with-title (when-let [w (:with problem)]
+                       (shows/title (fx/sub-val context get-in [:chains :shows w])))]
+      {:fx/type :label
+       :id (str "shows-tc-problem-" show-id)
+       :text "⚠"
+       :style-class ["label" "shows-tc-problem"]
+       :tooltip {:fx/type :tooltip :text (problem-text problem with-title)}})
+    {:fx/type :region}))
+
+(defn- tc-cell
+  "The TC check box: :shows/set-timecode for its row, showing what applies
+   (a refused tick unticks itself, 07 §4.10), and its ⚠."
+  [{:keys [show-id timecode?]}]
+  {:fx/type :h-box
+   :alignment :center-left
+   :spacing 2
+   :children [{:fx/type applied-value/applied-control
+               :property :selected
+               :address [:show show-id :timecode]
+               :value (boolean timecode?)
+               :on-change (fn [v] {:event/type :shows/set-timecode :show-ids #{show-id} :enabled? v})
+               :desc {:fx/type :check-box
+                      :id (str "shows-tc-" show-id)
+                      :focus-traversable false}}
+              {:fx/type tc-problem :show-id show-id}]})
+
+(defn- tc-cell-desc [row]
   (if (nil? (:id row))
     no-row
     {:text nil
-     :graphic {:fx/type :check-box
-             :id (str "shows-tc-" (:id row))
-             :selected (boolean (:timecode? row))
-             :disable true
-             :focus-traversable false}}))
+     :graphic {:fx/type tc-cell :show-id (:id row) :timecode? (boolean (:timecode? row))}}))
 
 (def ^:private describe-title (partial text-cell :title))
 (def ^:private describe-artist (partial text-cell :artist))
@@ -394,7 +431,7 @@
 (def ^:private columns
   "The columns, in order: [ref description]."
   [[:status (column :status "▶" 28 status-cell-desc :min-width 28 :max-width 28 :resizable false)]
-   [:tc (column :tc "TC" 48 tc-cell-desc :min-width 48 :max-width 48 :resizable false)]
+   [:tc (column :tc "TC" 56 tc-cell-desc :min-width 56 :max-width 56 :resizable false)]
    [:title (column :title "Title" 220 describe-title :min-width 120)]
    [:artist (column :artist "Artist" 160 describe-artist)]
    [:album (column :album "Album" 160 describe-album)]
@@ -482,8 +519,6 @@
                           {:fx/type :menu-item :text "Open in Editor"
                            :on-action {:event/type :shows/open-editor :from-row id}}
                           {:fx/type :menu-item :text (if timecode? "Disable Timecode" "Enable Timecode")
-                           ;; S4 turns timecode on and off
-                           :disable true
                            :on-action {:event/type :shows/set-timecode :from-row id :enabled? (not timecode?)}}
                           {:fx/type :separator-menu-item}
                           {:fx/type :menu-item :text "Duplicate"
