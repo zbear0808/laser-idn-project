@@ -43,7 +43,8 @@
 
 (deftest top-level-tabs-update-content-and-preview
   (let [robot (ui/robot)]
-    (doseq [[tab preview?] [["effects" true]
+    (doseq [[tab preview?] [["shows" true]
+                            ["effects" true]
                             ["projectors" false]
                             ["zones" false]
                             ["settings" false]
