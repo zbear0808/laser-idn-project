@@ -208,22 +208,6 @@
   (when recovered?
     (events/dispatch! {:event/type :rig/retry-write})))
 
-(defn- connect-link!
-  "Connect to the Carabiner daemon unless [:backend :link :auto-connect?] is
-   false: on this thread (it blocks as link/connect-carabiner! does), then
-   the result goes to app state through :timing/carabiner-connected, queued
-   like every other event, so an event in flight can't undo it."
-  []
-  (let [link-state (get-in (state/get-raw-state) [:backend :link])]
-    (when (:auto-connect? link-state true)
-      (let [{:keys [carabiner-connected? listener]}
-            (link/connect-carabiner! link-state events/dispatch! state/get-raw-state)]
-        (events/dispatch! (cond-> {:event/type :timing/carabiner-connected
-                                   :connected? (boolean carabiner-connected?)}
-                            listener (assoc :listener listener)))
-        (when carabiner-connected?
-          (log/info "Carabiner daemon connected (Link available via UI button)"))))))
-
 (defn start!
   "Start the laser show application.
    
@@ -254,6 +238,7 @@
     (output-runtime/open!)
     (output-runtime/install-shutdown-hook!)
     (devices/open!)
+    (link/open!)
     (rig-store/install-shutdown-hook!)
 
     (let [app (create-app)]
@@ -275,7 +260,9 @@
   ;; After dispatch! reaches the agent, so the clock's reports queue there
   (show-clock/start!)
 
-  (connect-link!)
+  ;; Carabiner, unless Auto-connect is off: the Link owner connects on its
+  ;; own thread (input.link), and its status comes back as events
+  (events/dispatch! {:event/type :timing/carabiner-auto-connect})
 
   ;; Auto-scan for IDN devices on startup
   (log/info "Starting automatic device discovery...")
@@ -303,20 +290,20 @@
       (log/warn "Error stopping streaming engines:" (.getMessage e)))))
 
 (defn- release-devices!
-  "Close the MIDI inputs and the OSC server (input.devices/release!: what
-   their owner has open, whatever state says), and the Carabiner connection
-   when state says it is connected. Each is closed once, in its own try, and
-   nothing is written back: the next start replaces app state."
-  [state]
+  "Close the MIDI inputs and the OSC server (input.devices/release!) and the
+   Carabiner connection with its status listener (input.link/release!):
+   what their owners have open, whatever state says. Each is closed once,
+   in its own try, and nothing is written back: the next start replaces app
+   state."
+  []
   (try
     (devices/release! 1000)
     (catch Exception e
       (log/warn "Error releasing the MIDI inputs and the OSC server:" (.getMessage e))))
-  (when (get-in state [:backend :link :carabiner-connected?])
-    (try
-      (link/disconnect-carabiner! (get-in state [:backend :link]))
-      (catch Exception e
-        (log/warn "Error disconnecting from Carabiner:" (.getMessage e))))))
+  (try
+    (link/release! 1000)
+    (catch Exception e
+      (log/warn "Error disconnecting from Carabiner:" (.getMessage e)))))
 
 (defn- stop-rig-file!
   "Write the rig change still pending, and wait for the write running (at
@@ -351,7 +338,8 @@
    can't wait for them and doesn't), and only by the call that claimed the
    app, so each is closed once: the MIDI inputs and the OSC server by their
    owner (input.devices/release!, which takes no request until the next
-   start), the Carabiner link from one read. Then the app instance
+   start), the Carabiner connection by its own (input.link/release!,
+   likewise). Then the app instance
    is retired (events/retire!), before the rig file's last write: what
    comes back to it later (that write's result, Exit after its wait for the
    rig, a scan, a learn, an event still running) is dropped, so it can't
@@ -371,7 +359,7 @@
     (addons/unload-all!)
     (when app
       (events/flush! 1000)
-      (release-devices! (state/get-raw-state)))
+      (release-devices!))
     (events/retire!)
     ;; A learn attempt's listener and waiter go with the app: whatever it
     ;; caught is dropped with the app's late events, never sent elsewhere
@@ -434,6 +422,7 @@
      (show-time/reset-runtime!)
      (output-runtime/open!)
      (devices/open!)
+     (link/open!)
      (let [app (create-app)]
        (reset! *app app)
        (events/set-dispatch-fn! (:handler app))

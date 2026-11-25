@@ -35,7 +35,8 @@
      attempt's waiter (input.learn), :dispatch-later, :rig/flush's wait;
      the FX thread: file chooser; the output runtime's status thread; the
      rig writer; the input device worker, input.devices, which owns the
-     MIDI inputs and the OSC server)
+     MIDI inputs and the OSC server; the Link thread, input.link, which
+     owns the Carabiner connection)
      only do their side effect there. Their result goes through the
      dispatch fn the effect was given, which queues it on the agent behind the
      current event
@@ -466,6 +467,14 @@
    continues with a phase correction."
   [_ dispatch]
   (link/sync-to-downbeat! #(run-inline % dispatch) (show-time/global-beats)))
+
+(defn- effect-link-connect
+  "Effect that has the Link owner connect to Carabiner on its own thread
+   (input.link/connect!): :timing/carabiner-connected, then the status
+   listener's reports, come back through dispatch, the dispatcher of the
+   app this effect is for."
+  [request dispatch]
+  (link/connect! request dispatch))
 
 ;; Show Clock Effects
 
@@ -940,6 +949,9 @@
      its, arm the next; it dispatches :history/gesture-timeout (later,
      wake-up thread)
    - :link/sync-to-downbeat - align phase to Link's downbeat (inline)
+   - :link/connect - connect to Carabiner on the Link thread (input.link);
+     :timing/carabiner-connected and the status listener's reports come
+     back (later, Link thread and Carabiner's)
    - :show-clock/read - continue :on-read with the show clock's beats, or
      with :chase-cell its timecode episode there (inline)
    - :input/sync-learn - the router's learn slot to the active learn
@@ -987,6 +999,7 @@
     :dispatch-later effect-dispatch-later
     :history/gesture-alarm effect-gesture-alarm
     :link/sync-to-downbeat effect-link-sync-to-downbeat
+    :link/connect effect-link-connect
     :show-clock/read effect-show-clock-read
     :input/sync-learn effect-sync-learn
     ;; Input devices (on the device worker)

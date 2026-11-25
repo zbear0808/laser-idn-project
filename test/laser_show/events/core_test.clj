@@ -51,7 +51,7 @@
 (deftest effects-and-co-effects-are-shared-maps-test
   (is (= #{:state :time} (set (keys events/co-effects))))
   (is (every? #(contains? events/effects %)
-              [:state :dispatch :dispatch-n :dispatch-later :link/sync-to-downbeat
+              [:state :dispatch :dispatch-n :dispatch-later :link/sync-to-downbeat :link/connect
                :input/sync-learn :multi-engine/start :multi-engine/stop :multi-engine/refresh
                :input/midi-list :input/midi-connect :input/midi-disconnect :input/osc-start :input/osc-stop
                :output/write-status

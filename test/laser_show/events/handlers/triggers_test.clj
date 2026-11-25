@@ -591,6 +591,56 @@
       (let [none (played (world {}) (midi-note 60 100))]
         (is (= {} (events/handle-event-pipeline {:event/type :trigger/retire :source :osc :state none :time 0})))))))
 
+(defn- osc-start
+  "state after the port is set to port and Start Server is pressed: the
+   device worker asked (nothing opens here), and its request's id."
+  [state port]
+  (let [asked (played state {:event/type :input/osc-set-port :port port} {:event/type :input/osc-start-server})]
+    [asked (get-in asked [:backend :input :osc :requests :server])]))
+
+(defn- osc-started
+  "state after the device worker's answer to request id: it listens on port."
+  [state id port]
+  (played state {:event/type :input/osc-started :request-id id :server-running? true :port port}))
+
+(defn- osc-listening
+  "state after Start Server on port, and the device worker's answer."
+  [state port]
+  (let [[asked id] (osc-start state port)]
+    (osc-started asked id port)))
+
+(deftest an-osc-server-moved-to-another-port-retires-its-holds-test
+  ;; Reactivity follow-up B5: its controls send to the port it left
+  (let [b4 {:type :trigger-effect :target [1 3] :behavior :momentary}
+        listening (osc-listening (world {push b4 note-60 a1}) 9000)
+        held (played listening (osc-button "/1/push1" 1.0) (midi-note 60 100))
+        osc-port #(get-in % [:backend :input :osc :listening-port])]
+    (is (= 9000 (osc-port listening)))
+    (is (effect-on? held [1 3]))
+    (is (= #{push note-60} (set (keys (activations held)))))
+    (testing "Start again on the port it listens on: the button's release still comes there"
+      (let [s (osc-listening held 9000)]
+        (is (effect-on? s [1 3]))
+        (is (= #{push note-60} (set (keys (activations s)))))))
+    (testing "moved to another port: OSC's holds let go, as their releases can't come in"
+      (let [s (osc-listening held 9100)]
+        (is (= 9100 (osc-port s)))
+        (is (not (effect-on? s [1 3])) "B4 goes off")
+        (is (some? (playing s [0 0])) "MIDI's A1 holds on")
+        (is (= #{note-60} (set (keys (activations s)))))
+        (testing "and the button's release, if it still comes, ends nothing"
+          (let [s (played s {:event/type :effects/toggle-cell :col 1 :row 3} (osc-button "/1/push1" 0.0))]
+            (is (effect-on? s [1 3]) "B4, on again from a click, stays on")))))
+    (testing "an earlier Start's answer, superseded, retires nothing; the latest one, on the new port, does"
+      (let [[asked first-id] (osc-start held 9100)
+            [asked latest-id] (osc-start asked 9100)
+            s (osc-started asked first-id 9100)]
+        (is (effect-on? s [1 3]))
+        (is (= 9000 (osc-port s)) "still the port of the last answer it took")
+        (let [s (osc-started s latest-id 9100)]
+          (is (= 9100 (osc-port s)))
+          (is (not (effect-on? s [1 3]))))))))
+
 (deftest new-or-open-retires-every-hold-test
   (let [bindings {note-60 a1
                   push {:type :trigger-effect :target [1 3] :behavior :momentary}

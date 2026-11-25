@@ -269,3 +269,79 @@
       (testing "nor a control 123 from another source than MIDI"
         (router/dispatch! (input :control-change :source :osc :control 123 :value 0.0))
         (is (= #{:hit :accent} (set (keys (held)))))))))
+
+;; ... and what each MIDI key holds is over (reactivity follow-up B5): the
+;; keys' note-offs may never come, so a key's next press plays again
+
+(defn- with-held-keys
+  "(f) with the mapper on app state where MIDI note 36 holds HIT and note 60
+   holds A1 (While held), both pressed as the device sends them, every event
+   run through the real handlers. HIT plays D1 only, never A1."
+  [f]
+  (state/init-state! (-> (domains/build-initial-state)
+                         (templates/apply-starter-cue-chains)
+                         (templates/apply-starter-vibes)
+                         (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)
+                         (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [[3 0]])
+                         (assoc-in [:config :input :trigger-map]
+                                   {{:source :midi :channel 0 :note 36} {:type :vibe :role :hit}
+                                    {:source :midi :channel 0 :note 60} {:type :trigger-cue :target [0 0] :behavior :momentary}})))
+  (store/clear-continuous-values!)
+  (input-mapper/set-dispatch-fn! events/event-handler)
+  (input-mapper/start-mapper!)
+  (try
+    (router/dispatch! (midi/midi-msg->event (fixtures/note-on 0 36 100)))
+    (router/dispatch! (midi/midi-msg->event (fixtures/note-on 0 60 100)))
+    (f)
+    (finally
+      (input-mapper/stop-mapper!)
+      (input-mapper/set-dispatch-fn! nil)
+      (store/clear-continuous-values!))))
+
+(defn- a1-run [] (get-in (state/get-raw-state) [:playback :active-cues [0 0] :run]))
+
+(defn- midi-activations []
+  (into {} (filter (comp #{:midi} :source key)) (get-in (state/get-raw-state) [:trigger-runtime :activations])))
+
+(deftest all-notes-off-ends-what-midi-keys-hold-test
+  (with-held-keys
+    (fn []
+      (let [first-run (a1-run)]
+        (is (some? first-run) "A1 plays while note 60 is down")
+        (is (= :input (get-in (held) [:hit :src])))
+        (is (= 2 (count (midi-activations))))
+        (router/dispatch! (cc 0 123 0))
+        (is (nil? (a1-run)) "every key is up: A1 lets go, as its note-off would have")
+        (is (nil? (:hit (held))))
+        (is (empty? (midi-activations)) "no MIDI key holds anything")
+        (testing "a key's next press plays again: it isn't a repeat of the press before"
+          (router/dispatch! (midi/midi-msg->event (fixtures/note-on 0 36 100)))
+          (router/dispatch! (midi/midi-msg->event (fixtures/note-on 0 60 100)))
+          (is (= :input (get-in (held) [:hit :src])) "HIT is held again")
+          (is (uuid? (a1-run)))
+          (is (not= first-run (a1-run)) "A1 started again")
+          (router/dispatch! (midi/midi-msg->event (fixtures/note-off 0 60)))
+          (router/dispatch! (midi/midi-msg->event (fixtures/note-off 0 36)))
+          (is (nil? (a1-run)) "and its note-off ends it")
+          (is (nil? (:hit (held))))
+          (is (empty? (midi-activations))))
+        (testing "All Sound Off, on another channel, too"
+          (router/dispatch! (midi/midi-msg->event (fixtures/note-on 0 60 100)))
+          (router/dispatch! (cc 5 120 0))
+          (is (nil? (a1-run)))
+          (is (empty? (midi-activations))))))))
+
+(deftest a-note-off-after-all-notes-off-ends-nothing-test
+  (with-held-keys
+    (fn []
+      (router/dispatch! (cc 0 123 0))
+      ;; A1 and HIT again, from a click and a pad, while the keys are still down
+      (events/event-handler {:event/type :grid/activate-cell :col 0 :row 0})
+      (events/event-handler {:event/type :vibe/press :role :hit :src :pad})
+      (let [run (a1-run)]
+        (is (uuid? run))
+        (router/dispatch! (midi/midi-msg->event (fixtures/note-off 0 60)))
+        (router/dispatch! (midi/midi-msg->event (fixtures/note-off 0 36)))
+        (is (= run (a1-run)) "the keys' late note-offs end nothing: the click's A1 plays on")
+        (is (= :pad (get-in (held) [:hit :src])) "and the pad's HIT holds on")
+        (is (empty? (midi-activations)))))))

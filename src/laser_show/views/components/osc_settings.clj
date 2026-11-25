@@ -92,11 +92,15 @@
 
 
 (defn osc-settings-section
-  "OSC configuration section for settings tab."
+  "OSC configuration section for settings tab. The Port field shows the
+   port the next Start listens on; the status, the one the server listens
+   on, as the device worker answered (:listening-port): they differ after
+   the port is set while it listens, until a Start moves it."
   [{:keys [fx/context]}]
   (let [osc-config (fx/sub-ctx context subs/osc-config)
         server-running? (:server-running? osc-config false)
         port (:port osc-config 9000)
+        listening-port (:listening-port osc-config)
         address-mappings (:address-mappings osc-config {})]
     {:fx/type :v-box
      :id "osc-settings"
@@ -133,7 +137,8 @@
                                :id "osc-port-field"
                                :text (str port)
                                :pref-width 80
-                               ;; Listening, the port is the server's
+                               ;; Listening, the server keeps its port: one
+                               ;; set now would wait for the next Start
                                :disable server-running?
                                :on-commit (fn [typed]
                                             (when-let [new-port (parse-port typed)]
@@ -159,9 +164,11 @@
                                :children [{:fx/type status-indicator
                                            :status (if server-running? :running :stopped)}
                                           {:fx/type :label
-                                           :text (if server-running?
-                                                   (str "Listening on port " port)
-                                                   "Server stopped")
+                                           :id "osc-server-status"
+                                           :text (cond
+                                                   (not server-running?) "Server stopped"
+                                                   listening-port (str "Listening on port " listening-port)
+                                                   :else "Listening")
                                            :style (str "-fx-text-fill: "
                                                        (if server-running?
                                                          "#4CAF50"
