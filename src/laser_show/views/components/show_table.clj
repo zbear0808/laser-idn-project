@@ -167,9 +167,9 @@
     (case column
       :title (if v [v nil] ["Untitled" "shows-cell-muted"])
       :bpm (if v [(format "%.1f" (double v)) nil] ["—" "shows-cell-muted"])
-      :tc-start [(tc/format-tc (tc/seconds->tc (or (:tc-start-s row) 0.0) (:fps row))) "shows-cell-mono"]
+      :tc-start [(tc/format-tc (tc/seconds->tc (or (:tc-start-s row) 0.0) (or (:fps row) 30))) "shows-cell-mono"]
       :tc-end (if-let [e (:tc-end-s row)]
-                [(tc/format-tc (tc/seconds->tc-ceil e (:fps row))) "shows-cell-mono"]
+                [(tc/format-tc (tc/seconds->tc-ceil e (or (:fps row) 30))) "shows-cell-mono"]
                 ["—" "shows-cell-muted"])
       [(or v "") nil])))
 
@@ -199,12 +199,21 @@
 
 (defn- focus-field!
   "Give the edit field the focus, the caret at the end (or all its text
-   selected, for a new show's title), once it is still in a scene."
+   selected, for a new show's title), once it is still in a scene. Taking
+   it from a field a cell rebuild removed makes the main window give the
+   focus to its layout on the next runLater (views/root.clj
+   take-focus-from-removed-owners!), so it asks once more after that."
   [^TextField f]
-  (Platform/runLater
-   #(when (.getScene f)
-      (.requestFocus f)
-      (if (:select? (.getUserData f)) (.selectAll f) (.end f)))))
+  (let [take! #(when (and (.getScene f) (not (.get (.getProperties f) ::done)))
+                 (.requestFocus f)
+                 (if (:select? (.getUserData f)) (.selectAll f) (.end f)))]
+    (Platform/runLater
+     (fn []
+       (take!)
+       (Platform/runLater
+        #(when-not (or (typed-text? f)
+                       (instance? TextInputControl (some-> f .getScene .getFocusOwner)))
+           (take!)))))))
 
 (defn- refocus-on-refusal!
   "A commit refused (the draft doesn't parse) leaves the field: take the
@@ -236,12 +245,21 @@
       KeyCode/ESCAPE (do (.consume e) (finish-edit! f {:event/type :shows/cancel-edit}))
       nil)))
 
+(defn- detaches
+  "How many times the field has left its scene."
+  ^long [^TextField f]
+  (long (or (.get (.getProperties f) ::detaches) 0)))
+
 (defn- edit-field-created!
   "The edit field's lifetime: the focus once its skin exists (a field
    focused before then has its text all selected when the skin comes, so
-   the first key would replace the draft: probe d2), its keys, and a commit
-   when the focus goes elsewhere in its scene. A field taken out by a cell
-   rebuild commits nothing: its replacement takes the focus back."
+   the first key would replace the draft: probe d2), and again whenever a
+   cell rebuild puts it back in its scene; its keys; and a commit when the
+   focus goes elsewhere in its scene. A field a cell rebuild takes out
+   commits nothing, as it loses the focus: it, or its replacement, takes
+   the focus back. JavaFX gives the table the focus from a cell it
+   rebuilds, so a focus going to the table commits nothing: a press in the
+   table does (commit-on-press!)."
   [^TextField f]
   (if (.getSkin f)
     (focus-field! f)
@@ -251,20 +269,31 @@
                       (when skin
                         (.removeListener (.skinProperty f) this)
                         (focus-field! f))))))
+  (.addListener (.sceneProperty f)
+                (reify ChangeListener
+                  (changed [_ _ old scene]
+                    (cond
+                      (nil? scene) (.put (.getProperties f) ::detaches (inc (detaches f)))
+                      (and (nil? old) (not (.get (.getProperties f) ::done))) (focus-field! f)))))
   (.addEventFilter f KeyEvent/KEY_PRESSED (reify EventHandler (handle [_ e] (edit-field-key! f e))))
   (.addListener (.focusedProperty f)
                 (reify ChangeListener
                   (changed [_ _ _ focused?]
-                    (when-not focused?
-                      (Platform/runLater
-                       #(let [scene (.getScene f)
-                              owner (some-> scene .getFocusOwner)
-                              {:keys [show-id column]} (.getUserData f)]
-                          (when (and scene owner (not (identical? owner f))
-                                     (not (.get (.getProperties f) ::done)))
-                            (.put (.getProperties f) ::done true)
-                            (events/dispatch! {:event/type :shows/commit-edit
-                                               :show-id show-id :column column})))))))))
+                    (when (and (not focused?) (.getScene f))
+                      (let [n0 (detaches f)]
+                        (Platform/runLater
+                         #(let [scene (.getScene f)
+                                owner (some-> scene .getFocusOwner)
+                                {:keys [show-id column]} (.getUserData f)]
+                            (when (and scene owner (not (identical? owner f))
+                                       ;; the table takes the focus from a cell it
+                                       ;; rebuilds; a press in it commits instead
+                                       (not (identical? owner (enclosing-table f)))
+                                       (= n0 (detaches f))
+                                       (not (.get (.getProperties f) ::done)))
+                              (.put (.getProperties f) ::done true)
+                              (events/dispatch! {:event/type :shows/commit-edit
+                                                 :show-id show-id :column column}))))))))))
 
 (defn- edit-field
   "The one text field, in the cell being edited: its text is the draft
@@ -287,15 +316,21 @@
                           :user-data {:show-id show-id :column column :select? (boolean select?)}
                           :on-text-changed {:event/type :shows/edit-draft :show-id show-id :column column}}}}}))
 
+(def ^:private no-row
+  "A cell JavaFX shows without a row (between two items): nothing."
+  {})
+
 (defn- text-cell
   "A text column's cell: its label, or the edit field while it is the one
    being edited."
   [column row]
-  {:text nil
-   :graphic (if (= column (::editing row))
+  (if (nil? (:id row))
+    no-row
+    {:text nil
+     :graphic (if (= column (::editing row))
               {:fx/type edit-field :show-id (:id row) :column column}
-              (let [[text style] (shown column row)]
-                (cell-label (:id row) column text style)))})
+                (let [[text style] (shown column row)]
+                  (cell-label (:id row) column text style)))}))
 
 (defn- approx-duration
   "An unlocked show's duration at the global BPM, \"≈2:08\": it subscribes
@@ -306,10 +341,12 @@
     (cell-label id :duration (str "≈" (duration-text (tc/beats->seconds beats bpm))) "shows-cell-approx")))
 
 (defn- duration-cell [row]
-  {:text nil
+  (if (nil? (:id row))
+    no-row
+    {:text nil
    :graphic (if (:approx? row)
               {:fx/type approx-duration :id (:id row) :beats (:length-beats row)}
-              (cell-label (:id row) :duration (duration-text (or (:duration-s row) 0.0)) nil))})
+              (cell-label (:id row) :duration (duration-text (or (:duration-s row) 0.0)) nil))}))
 
 (defn- status-cell
   "▶ while the show plays, TC while timecode drives it (subs/show-row-status,
@@ -322,17 +359,19 @@
     {:fx/type :region}))
 
 (defn- status-cell-desc [row]
-  {:text nil :graphic {:fx/type status-cell :show-id (:id row)}})
+  (if (nil? (:id row)) no-row {:text nil :graphic {:fx/type status-cell :show-id (:id row)}}))
 
 (defn- tc-cell-desc
   "Its timecode, shown: S4 makes it a control."
   [row]
-  {:text nil
-   :graphic {:fx/type :check-box
+  (if (nil? (:id row))
+    no-row
+    {:text nil
+     :graphic {:fx/type :check-box
              :id (str "shows-tc-" (:id row))
              :selected (boolean (:timecode? row))
              :disable true
-             :focus-traversable false}})
+             :focus-traversable false}}))
 
 (def ^:private describe-title (partial text-cell :title))
 (def ^:private describe-artist (partial text-cell :artist))
@@ -435,7 +474,9 @@
   "A row: its id, its menu (whose events say :from-row, as a row can't see
    the selection) and its clicks."
   [{:keys [id timecode?]}]
-  {:id (str "shows-row-" id)
+  (if (nil? id)
+    {}
+    {:id (str "shows-row-" id)
    :on-mouse-clicked row-clicked
    :context-menu {:fx/type :context-menu
                   :items [{:fx/type :menu-item :text "Play"
@@ -450,7 +491,7 @@
                           {:fx/type :menu-item :text "Duplicate"
                            :on-action {:event/type :shows/duplicate :from-row id}}
                           {:fx/type :menu-item :text "Delete…"
-                           :on-action {:event/type :shows/request-delete :from-row id}}]}})
+                           :on-action {:event/type :shows/request-delete :from-row id}}]}}))
 
 
 ;; Keys and presses (06 §4.2)
@@ -485,6 +526,16 @@
           (instance? TableRow n) (:id (.getItem ^TableRow n))
           :else (recur (.getParent ^Node n)))))
 
+(defn- commit-on-press!
+  "A press in the table outside the edit field commits the edit (as the
+   field's focus loss does when the focus goes out of the table)."
+  [^TableView table ^MouseEvent e]
+  (when-let [^TextField f (.lookup table "#shows-edit-field")]
+    (when-not (or (in-text-input? e) (.get (.getProperties f) ::done))
+      (let [{:keys [show-id column]} (.getUserData f)]
+        (.put (.getProperties f) ::done true)
+        (events/dispatch! {:event/type :shows/commit-edit :show-id show-id :column column})))))
+
 (defn- install-table-keys!
   "The table's keys (claim-keys!, and a filter that acts while the focus is
    in the table and nobody types) and its press record for the slow click:
@@ -503,6 +554,7 @@
   (.addEventFilter table MouseEvent/MOUSE_PRESSED
                    (reify EventHandler
                      (handle [_ e]
+                       (commit-on-press! table e)
                        (let [id (pressed-row-id e)
                              selected (.getSelectedItems (.getSelectionModel table))]
                          (.put (.getProperties table) ::press
