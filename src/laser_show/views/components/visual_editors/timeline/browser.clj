@@ -20,9 +20,9 @@
               {:fx/type :label :id id :style-class "tl-hint" :wrap-text true :text hint}]})
 
 (defn browser
-  "Props: :col :row :preset-tab :effect-tab :cursor-label :insert-track-id
+  "Props: :show-id :preset-tab :effect-tab :cursor-label :insert-track-id
    :insert-track-name :target (inspector/selection-target)."
-  [{:keys [col row preset-tab effect-tab cursor-label insert-track-id insert-track-name target]}]
+  [{:keys [show-id preset-tab effect-tab cursor-label insert-track-id insert-track-name target]}]
   (let [{:keys [kind entity]} target
         effect-target? (#{:clip :track} kind)]
     {:fx/type :v-box
@@ -36,12 +36,11 @@
       {:fx/type preset-bank/preset-bank
        :v-box/vgrow :always
        :fill? true
-       :cell [col row]
        :drag-kind :preset
        :active-tab (or preset-tab :geometric)
        :on-tab-change {:event/type :timeline/set-add-panel-tab :panel :preset}
        :item-event-template {:event/type :timeline/add-preset-to-track
-                             :col col :row row
+                             :show-id show-id
                              :track-id insert-track-id}}
       (section-header "EFFECTS" "timeline-browser-effect-hint"
                       (if effect-target?
@@ -62,6 +61,6 @@
          ;; Where content goes is its Target, not an effect (zones plan Z4)
          :active-tab (if (= :zone effect-tab) :shape (or effect-tab :shape))
          :on-tab-change {:event/type :timeline/set-add-panel-tab :panel :effect}
-         :item-event-template (cond-> {:event/type :timeline/add-effect-to-item :col col :row row}
+         :item-event-template (cond-> {:event/type :timeline/add-effect-to-item :show-id show-id}
                                 (= :clip kind) (assoc :target-item-id (:id entity))
                                 (= :track kind) (assoc :target-track-id (:id entity)))}]}]}))

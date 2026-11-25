@@ -11,7 +11,9 @@
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
             [laser-show.state.history :as history]
+            [laser-show.timeline.shows :as shows]
             [laser-show.ui-test.fixtures :as fixtures]
+            [laser-show.ui-test.show-editor :as show-editor]
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.css PseudoClass]
            [javafx.scene Node]
@@ -247,15 +249,20 @@
            {:type :preset :id :c2 :preset-id :wave :params {} :effects [] :enabled? true
             :track-id :lead :timeline/start 0.0 :timeline/duration 4.0}]})
 
+(def ^:private show-id #uuid "6f1c0000-0000-4000-8000-0000000000a1")
+
+(defn- show [] (get-in (app-state) (shows/show-path show-id)))
+
 (defn- track-target [id]
-  (:target (some #(when (= id (:id %)) %) (tree-seq map? :items {:items (:tracks (cue 0 0))}))))
+  (:target (some #(when (= id (:id %)) %) (tree-seq map? :items {:items (:tracks (show))}))))
 
 (defn- clip-target [id]
-  (:target (some #(when (= id (:id %)) %) (:items (cue 0 0)))))
+  (:target (some #(when (= id (:id %)) %) (:items (show)))))
 
-(defn- open-timeline! []
-  (events/write-state! assoc-in [:chains :cue-chains [0 0]] timeline-cue)
-  (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
+(defn- open-timeline!
+  "The editor on timeline-cue, a show in the library."
+  []
+  (show-editor/open-show! show-id timeline-cue)
   (ui/wait-for! #(some? (ui/query "#timeline-track-target-2"))))
 
 (defn- header-target-menu
@@ -285,7 +292,7 @@
           (ui/wait-for! #(nil? (track-target :lead)))
           (ui/assert-text! "#timeline-track-target-2" "(All)")))))
   (testing "the inspector: a track inherits its folder's"
-    (events/dispatch! {:event/type :timeline/select-track :col 0 :row 0 :track-id :kick})
+    (events/dispatch! {:event/type :timeline/select-track :show-id show-id :track-id :kick})
     (ui/wait-for! #(= "TRACK PROPERTIES" (ui/node-text "#timeline-inspector-title")))
     (ui/wait-for! #(some? (ui/query "#target-chip-track")))
     (ui/assert-text! "#target-chip-track" "(C → Left)")
@@ -296,7 +303,7 @@
     (ui/assert-text! "#timeline-track-target-1" "A")
     (is (= "Change Track Target" (history/undo-label (:history (app-state))))))
   (testing "the inspector: a clip inherits its track's"
-    (events/dispatch! {:event/type :timeline/select-items :col 0 :row 0 :ids #{:c1} :mode :replace})
+    (events/dispatch! {:event/type :timeline/select-items :show-id show-id :ids #{:c1} :mode :replace})
     (ui/wait-for! #(= "CLIP" (ui/node-text "#timeline-inspector-title")))
     (ui/wait-for! #(some? (ui/query "#target-chip-clip")))
     (ui/assert-text! "#target-chip-clip" "(A → Left)")
@@ -640,7 +647,7 @@
   (testing "the timeline's browser, a clip selected: none either"
     (open-timeline!)
     (events/write-state! assoc-in [:ui :timeline-prefs :add-panel :open?] true)
-    (events/dispatch! {:event/type :timeline/select-items :col 0 :row 0 :ids #{:c1} :mode :replace})
+    (events/dispatch! {:event/type :timeline/select-items :show-id show-id :ids #{:c1} :mode :replace})
     (ui/wait-for! #(seq (ui/query-all "#timeline-browser-effects #shape-tab")))
     (is (empty? (ui/query-all "#zone-tab")))))
 

@@ -174,11 +174,13 @@ These examples use test mode. Exercise the input that actually triggers the chan
 (def dlg (wait-for #(window-titled "Cue Chain Editor")))
 (click! (by-text dlg "Close"))
 
-;; Create a timeline cue and click inside the editor's canvas. Canvases have
-;; no child nodes, so aim at an offset read off a screenshot. At the default
-;; zoom this clicks the ruler at bar 3, which moves the playhead there.
-(right-click! "#grid-cell-0-3")
-(choose! "Create Timeline Cue")
+;; Copy a grid cue into a new show and click inside the timeline editor's
+;; canvas. Canvases have no child nodes, so aim at an offset read off a
+;; screenshot. At the default zoom this clicks the ruler at bar 3, which
+;; moves the playhead there.
+(double-click! "#grid-cell-0-0")
+(def dlg (wait-for #(window-titled "Cue Chain Editor")))
+(click! (by-text dlg "New Show from Cue"))
 (def tl (wait-for #(window-titled "Timeline Editor")))
 (let [[x0 y0] (p/point (p/one tl "#timeline-canvas") 0 0)]
   (p/mouse-click! tl [(+ x0 401) (+ y0 10)] :primary))

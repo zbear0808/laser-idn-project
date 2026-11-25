@@ -68,13 +68,13 @@
   "{:event e :preview p} for dropping the bank item `payload` on `hit`, or nil
    when it can't land there. `hit` is a layout/hit-test result with the
    pointer's :beat (clip hits don't carry one), {:type :header :track-id id},
-   or {:type :chain :target selection-target :index i}. opts: :col :row, the
-   cue's :tracks and the editor's :snap. Previews: {:ghost {:row-id :start
+   or {:type :chain :target selection-target :index i}. opts: :show-id, the
+   show's :tracks and the editor's :snap. Previews: {:ghost {:row-id :start
    :length}}, {:highlight-clip id} or {:highlight-row id}. Never throws."
-  [payload hit {:keys [col row] :as opts}]
+  [payload hit {:keys [show-id] :as opts}]
   (try
     (when (and (valid-payload? payload) (map? hit))
-      (let [base {:col col :row row :item-id (:id payload)}]
+      (let [base {:show-id show-id :item-id (:id payload)}]
         (case (:kind payload)
           :preset (preset-target (assoc base :event/type :timeline/add-preset-to-track) hit opts)
           :effect (effect-target (assoc base :event/type :timeline/add-effect-to-item) payload hit))))

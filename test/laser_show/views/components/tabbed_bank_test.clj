@@ -4,11 +4,13 @@
 
 (def ^:private item-button @#'tabbed-bank/item-button)
 
+(def ^:private show-id #uuid "6f1c0000-0000-4000-8000-000000000001")
+
 (def ^:private square {:id :square :name "Square" :category :geometric})
 
 (def ^:private props
   {:item square :item-name-key :name :item-id-key :id
-   :event-template {:event/type :timeline/add-preset-to-track :col 0 :row 0 :track-id :t1}
+   :event-template {:event/type :timeline/add-preset-to-track :show-id show-id :track-id :t1}
    :style-class "bank-item-btn"})
 
 (deftest bank-click-event-unchanged-test
@@ -16,7 +18,7 @@
     (is (= {:fx/type :button
             :text "Square"
             :style-class "bank-item-btn"
-            :on-action {:event/type :timeline/add-preset-to-track :col 0 :row 0 :track-id :t1
+            :on-action {:event/type :timeline/add-preset-to-track :show-id show-id :track-id :t1
                         :item-id :square}}
            (item-button props)
            (item-button (assoc props :drag-kind nil)))))

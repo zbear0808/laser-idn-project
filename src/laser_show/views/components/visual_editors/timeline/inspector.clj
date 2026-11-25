@@ -15,8 +15,8 @@
   (:import [javafx.scene.control TextField]))
 
 
-(defn- apply-op! [col row op]
-  (events/dispatch! {:event/type :timeline/apply-op :col col :row row :op op}))
+(defn- apply-op! [show-id op]
+  (events/dispatch! {:event/type :timeline/apply-op :show-id show-id :op op}))
 
 (defn- title [text] {:fx/type :label :id "timeline-inspector-title" :text text :style-class "tl-inspector-title"})
 (defn- field-label [text] {:fx/type :label :text text :style-class "tl-field-label"})
@@ -68,7 +68,7 @@
     "Timeline"))
 
 (defn- clip-section
-  [{:keys [col row tracks explain]} clip]
+  [{:keys [show-id tracks explain]} clip]
   (let [track (model/find-track tracks (:track-id clip))
         leaves (leaf-tracks tracks)]
     [(title "CLIP")
@@ -81,7 +81,7 @@
                  (assoc (beats-field {:id "timeline-clip-start"
                                       :value (model/clip-start clip)
                                       :on-commit (fn [v]
-                                                   (apply-op! col row {:op :move-clips :clip-ids #{(:id clip)}
+                                                   (apply-op! show-id {:op :move-clips :clip-ids #{(:id clip)}
                                                                        :delta (- v (model/clip-start clip))
                                                                        :snap? false}))})
                         :grid-pane/row 0 :grid-pane/column 1)
@@ -89,7 +89,7 @@
                  (assoc (beats-field {:id "timeline-clip-length"
                                       :value (model/clip-length clip)
                                       :on-commit (fn [v]
-                                                   (apply-op! col row {:op :trim-end :clip-id (:id clip)
+                                                   (apply-op! show-id {:op :trim-end :clip-id (:id clip)
                                                                        :to (+ (model/clip-start clip) v)
                                                                        :snap? false}))})
                         :grid-pane/row 1 :grid-pane/column 1)]}
@@ -102,25 +102,25 @@
       :cell-factory {:fx/cell-type :list-cell :describe (fn [t] {:text (:name t "Track")})}
       :on-value-changed (fn [t]
                           (when (and t (not= (:id t) (:track-id clip)))
-                            (apply-op! col row {:op :set-clip-track :clip-id (:id clip) :track-id (:id t)})))}
+                            (apply-op! show-id {:op :set-clip-track :clip-id (:id clip) :track-id (:id t)})))}
      {:fx/type target-control/target-field
       :id "target-chip-clip"
       :from-id "target-from-clip"
       :scope :clip
       :own (:target clip)
       :inherited (get-in explain [:item-inherits (:id clip)])
-      :on-set {:event/type :timeline/set-clip-target :col col :row row :item-id (:id clip)}
+      :on-set {:event/type :timeline/set-clip-target :show-id show-id :item-id (:id clip)}
       :tooltip "Where this clip goes"}]))
 
-(defn- clips-section [{:keys [col row]} clip-ids]
+(defn- clips-section [{:keys [show-id]} clip-ids]
   [(title "CLIPS")
    {:fx/type :label :text (str (count clip-ids) " clips selected") :style-class "tl-inspector-name"}
    {:fx/type :button
     :text "Delete"
     :style-class "button-secondary"
-    :on-action {:event/type :timeline/delete-selection :col col :row row}}])
+    :on-action {:event/type :timeline/delete-selection :show-id show-id}}])
 
-(defn- track-section [{:keys [col row explain]} track]
+(defn- track-section [{:keys [show-id explain]} track]
   (let [folder? (model/track-group? track)]
     (cond-> [(title (if folder? "FOLDER PROPERTIES" "TRACK PROPERTIES"))
              {:fx/type :label :text (:name track (if folder? "Folder" "Track")) :style-class "tl-inspector-name"}
@@ -130,14 +130,14 @@
               :scope :track
               :own (:target track)
               :inherited (get-in explain [:track-inherits (:id track)])
-              :on-set {:event/type :timeline/set-track-target :col col :row row :track-id (:id track)}
+              :on-set {:event/type :timeline/set-track-target :show-id show-id :track-id (:id track)}
               :tooltip (if folder?
                          "Where this folder's clips go, unless a track or a clip in it sets its own"
                          "Where this track's clips go, unless a clip sets its own")}
              {:fx/type :check-box
               :text "Muted"
               :selected (true? (:muted? track))
-              :on-selected-changed (fn [m] (apply-op! col row {:op :set-track-muted :track-id (:id track) :muted? m}))}]
+              :on-selected-changed (fn [m] (apply-op! show-id {:op :set-track-muted :track-id (:id track) :muted? m}))}]
       (not folder?)
       (into [(field-label "Colour")
              {:fx/type :flow-pane
@@ -146,7 +146,7 @@
                                 {:fx/type :button
                                  :style-class (cond-> ["tl-swatch"] (= hex (:color track)) (conj "tl-swatch-selected"))
                                  :style (str "-fx-background-color: " hex ";")
-                                 :on-action (fn [_] (apply-op! col row {:op :set-track-color :track-id (:id track) :color hex}))})
+                                 :on-action (fn [_] (apply-op! show-id {:op :set-track-color :track-id (:id track) :color hex}))})
                               model/track-palette)}]))))
 
 (defn- text-commit-field
@@ -177,7 +177,7 @@
              (str "Incoming " (fps-name incoming) " fps, timeline set to " (fps-name fps) " fps")
              "")}))
 
-(defn- chase-toggle [col row chase]
+(defn- chase-toggle [show-id chase]
   {:fx/type :h-box
    :children [{:fx/type :toggle-button
                :id "timeline-chase-off"
@@ -185,7 +185,7 @@
                :style-class ["toggle-button" "tl-toggle" "tl-segment"]
                :focus-traversable false
                :selected (nil? chase)
-               :on-action (fn [_] (apply-op! col row {:op :set-chase :source nil}))}
+               :on-action (fn [_] (apply-op! show-id {:op :set-chase :source nil}))}
               {:fx/type :toggle-button
                :id "timeline-chase-mtc"
                :text "MTC"
@@ -195,9 +195,9 @@
                :tooltip {:fx/type :tooltip
                          :text (str "Follow MIDI timecode from the connected MIDI inputs. Beat 0 sits at "
                                     "'Starts at'; the timeline plays while timecode runs inside it.")}
-               :on-action (fn [_] (apply-op! col row {:op :set-chase :source :mtc}))}]})
+               :on-action (fn [_] (apply-op! show-id {:op :set-chase :source :mtc}))}]})
 
-(defn- timeline-section [{:keys [col row cue global-bpm]}]
+(defn- timeline-section [{:keys [show-id cue global-bpm]}]
   (let [{:keys [enabled? start duration] :or {start 0.0 duration 4.0}} (:loop cue)
         clips (:items cue)
         explicit (:timeline/length cue)
@@ -216,31 +216,31 @@
       :hgap 8 :vgap 6
       :children [(cell 0 0 (field-label "Length"))
                  (cell 0 1 (beats-field {:id "timeline-length" :value length
-                                         :on-commit #(apply-op! col row {:op :set-length :beats % :snap? false})}))
+                                         :on-commit #(apply-op! show-id {:op :set-length :beats % :snap? false})}))
                  (cell 0 2 {:fx/type :button
                             :id "timeline-length-auto"
                             :text "Auto"
                             :disable (nil? explicit)
                             :style-class ["button" "tl-icon-button"]
                             :tooltip {:fx/type :tooltip :text "End at the last clip"}
-                            :on-action (fn [_] (apply-op! col row {:op :set-length :beats nil}))})
+                            :on-action (fn [_] (apply-op! show-id {:op :set-length :beats nil}))})
                  (cell 1 0 (field-label "Tempo"))
                  (cell 1 1 (if locked
                              (beats-field {:id "timeline-tempo-bpm" :value locked
-                                           :on-commit #(apply-op! col row {:op :set-tempo :bpm %})})
+                                           :on-commit #(apply-op! show-id {:op :set-tempo :bpm %})})
                              {:fx/type :label :text (format "follows %.1f" (double (or global-bpm 120.0)))
                               :style-class "tl-field-value"}))
                  (cell 1 2 {:fx/type :button
                             :text (if locked "Follow" "Lock")
                             :style-class ["button" "tl-icon-button"]
-                            :on-action (fn [_] (apply-op! col row {:op :set-tempo :bpm (when-not locked global-bpm)}))})
+                            :on-action (fn [_] (apply-op! show-id {:op :set-tempo :bpm (when-not locked global-bpm)}))})
                  (cell 2 0 (field-label "Starts at"))
                  (cell 2 1 (text-commit-field
                             {:id "timeline-tc-start"
                              :text (tc/format-tc (tc/seconds->tc tc-start fps))
                              :on-commit (fn [text]
                                           (when-let [t (tc/parse-tc text fps)]
-                                            (apply-op! col row {:op :set-tc-start :seconds (tc/tc->seconds t fps)})))}))
+                                            (apply-op! show-id {:op :set-tc-start :seconds (tc/tc->seconds t fps)})))}))
                  (cell 3 0 (field-label "Frame rate"))
                  (cell 3 1 {:fx/type :combo-box
                             :id "timeline-tc-fps"
@@ -250,9 +250,9 @@
                             :cell-factory {:fx/cell-type :list-cell
                                            :describe (fn [f] {:text (fps-name f)})}
                             :on-value-changed (fn [f] (when (and f (not= f fps))
-                                                        (apply-op! col row {:op :set-tc-fps :fps f})))})
+                                                        (apply-op! show-id {:op :set-tc-fps :fps f})))})
                  (cell 4 0 (field-label "Follow timecode"))
-                 (cell 4 1 (assoc (chase-toggle col row chase) :grid-pane/column-span 2))]}
+                 (cell 4 1 (assoc (chase-toggle show-id chase) :grid-pane/column-span 2))]}
      {:fx/type mtc-rate-warning :fps fps}
      {:fx/type :label
       :text "Tempo isn't locked: the timecode maps to beats at the global BPM."
@@ -263,15 +263,15 @@
      {:fx/type :check-box
       :text "Loop"
       :selected (boolean enabled?)
-      :on-selected-changed (fn [on] (apply-op! col row {:op :set-loop :enabled? on}))}
+      :on-selected-changed (fn [on] (apply-op! show-id {:op :set-loop :enabled? on}))}
      {:fx/type :grid-pane
       :hgap 8 :vgap 6
       :children [(cell 0 0 (field-label "Loop start"))
                  (cell 0 1 (beats-field {:id "timeline-loop-start" :value start
-                                         :on-commit #(apply-op! col row {:op :set-loop :start (max 0.0 %)})}))
+                                         :on-commit #(apply-op! show-id {:op :set-loop :start (max 0.0 %)})}))
                  (cell 1 0 (field-label "Loop length"))
                  (cell 1 1 (beats-field {:id "timeline-loop-length" :value duration
-                                         :on-commit #(apply-op! col row {:op :set-loop :duration (max model/min-clip-length %)})}))]}
+                                         :on-commit #(apply-op! show-id {:op :set-loop :duration (max model/min-clip-length %)})}))]}
      {:fx/type :label
       :text (str "Without a loop the timeline stops at its end. Lock the tempo for pre-recorded shows "
                  "so beats map to fixed times. Click or drag the ruler to move the cursor; Space plays from it.")
@@ -279,8 +279,8 @@
       :style-class "tl-field-label"}]))
 
 (defn inspector
-  "Props: :col :row :cue :tracks :explain (how the cue's levels resolve:
-   subs/cue-target-explain) :target (selection-target) :global-bpm"
+  "Props: :show-id :cue (the show) :tracks :explain (how the show's levels
+   resolve: subs/show-target-explain) :target (selection-target) :global-bpm"
   [{:keys [target] :as props}]
   {:fx/type :scroll-pane
    :id "timeline-inspector"
