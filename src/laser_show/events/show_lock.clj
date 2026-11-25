@@ -102,18 +102,21 @@
 
 (def ^:private instance-addressed
   "The events that name their effect by its instance, not by its place: a
-   modulator's field edits (reactivity plan 07,
-   chain-helpers/resolve-effect-instance-path)."
-  #{:modulator/update-param :modulator/set-type :modulator/update-static-value})
+   modulator's toggle and its field edits (reactivity plan 07,
+   chain-helpers/resolve-effect-instance-path), and an effect's colour
+   edits (follow-up N2)."
+  #{:modulator/toggle :modulator/update-param :modulator/set-type :modulator/update-static-value
+    :chain/update-color-param :keyframe/update-color-param})
 
 (defn pattern-edit?
   "Is event an edit of a zone pattern or a Map cycle (zones plan Z5): a
    chain, modulator or keyframe event on a cue's patterns (the domain
    :cue-zone-patterns, the pattern window's), or on a zone pattern or Map
-   cycle in an effects cell (the item at :effect-path, or for a modulator's
-   field edit the effect with its instance's id, wherever it is now)? Where
-   the pictures go is structure, as a target is (Z4-Q4 A); a point
-   effect's edit in a cell goes through, as before."
+   cycle in an effects cell (the item at :effect-path, or for an edit that
+   names its effect by its instance, instance-addressed, the effect with
+   that id, wherever it is now)? Where the pictures go is structure, as a
+   target is (Z4-Q4 A); a point effect's edit in a cell goes through, as
+   before."
   [{:keys [event/type domain entity-key effect-path state] :as event}]
   (boolean
    (and (keyword? type)
