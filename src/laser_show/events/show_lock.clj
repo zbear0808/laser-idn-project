@@ -82,7 +82,9 @@
     ;; audience
     :cue-chain/set-target :cue-chain/set-item-target :timeline/set-track-target :timeline/set-clip-target
     :timeline/set-cue-target
-    ;; A cue's zone pattern and a new pattern or Map cycle cell (zones plan
+    ;; A show's timecode (timeline shows S4): it starts or stops light, as
+    ;; timecode runs through the show
+    :shows/set-timecode    ;; A cue's zone pattern and a new pattern or Map cycle cell (zones plan
     ;; Z5): they move pictures between places, as a target does; a pattern
     ;; pad's setting and its key, as a map pad's. A pad's press, STEP, CYCLE,
     ;; their keys and a due switch are a performer's, and go through
