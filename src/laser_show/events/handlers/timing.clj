@@ -141,19 +141,23 @@
                 (assoc-in [:backend :link :link-bpm] bpm))
               (follow-link-tempo bpm))})
 
-(defn- handle-timing-sync-to-downbeat
-  "Synchronize playback to Link's next downbeat.
-   Uses phase-offset-target mechanism for smooth correction.
-   The Link query runs in the :link/sync-to-downbeat effect, which reads the
-   show clock's beats and dispatches :timing/set-phase-offset-target. Nothing
-   sends this event, and while Link's beat isn't known (beat-carabiner 8.0.0
-   gives none: link/get-link-beat-position) it corrects nothing."
-  [_event]
-  {:link/sync-to-downbeat {}})
+(defn- handle-timing-align-to-link-beat
+  "A beat correction from the Link owner (input.link check-beat!): :offset
+   beats, the shorter way onto Link's beat. While the app still aligns with
+   Link (link/aligning?: Carabiner connected, Link on with its tempo
+   followed, Align beats with Link on), the show clock moves its phase
+   targets by it, as external sync does (:shift: the global clock and every
+   cue but timelines, gliding there); else {} (one of those went off since
+   the check)."
+  [{:keys [state offset]}]
+  (if (and (number? offset) (link/aligning? state))
+    {:state (request state :shift {:offset (double offset)})}
+    {}))
 
 (defn- handle-timing-set-phase-offset-target
   "Ask the show clock to move the phase targets by :offset (the global clock
-   and every cue but timelines). Used by external sync."
+   and every cue but timelines). Link's beat alignment has its own,
+   checked, :timing/align-to-link-beat."
   [{:keys [state offset]}]
   {:state (request state :shift {:offset (double (or offset 0.0))})})
 
@@ -321,7 +325,9 @@
   {:state (set-link-bpm-sync state event)})
 
 (defn- handle-timing-link-set-beat-sync
-  "Enable or disable downbeat alignment sync."
+  "Align beats with Link on or off (the Settings checkbox): while it is on,
+   with Link and BPM sync, the Link owner keeps the beat phase on Link's
+   (link/aligning?). The key keeps its old name, :beat-sync?."
   [{:keys [state fx/event]}]
   {:state (assoc-in state [:backend :link :beat-sync?] (boolean event))})
 
@@ -415,7 +421,7 @@
     ;; Link sync events
     :timing/toggle-link-sync (handle-timing-toggle-link-sync event)
     :timing/link-bpm-changed (handle-timing-link-bpm-changed event)
-    :timing/sync-to-downbeat (handle-timing-sync-to-downbeat event)
+    :timing/align-to-link-beat (handle-timing-align-to-link-beat event)
     :timing/set-phase-offset-target (handle-timing-set-phase-offset-target event)
     
     ;; Link settings events (from Settings tab)

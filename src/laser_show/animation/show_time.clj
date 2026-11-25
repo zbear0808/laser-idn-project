@@ -502,6 +502,24 @@
   [snapshot now-ns]
   (> (- (long now-ns) (long (:at-ns snapshot))) (* STALE_MS 1000000)))
 
+(defn global-beats-at
+  "Where the global clock of runtime (one read of !runtime) is at now-ns
+   (System/nanoTime: the clock's time base, and Link's), at bpm (app
+   state's, the tempo it runs at): {:current (its effective beats)
+   :settled (where they end once its phase offset has glided onto its
+   target)}, its last tick's run on to now-ns. nil before its first tick,
+   or when that tick is more than STALE_MS old (the clock isn't running).
+   Beat alignment with Link reads it (input.link)."
+  [runtime bpm now-ns]
+  (let [{:keys [t0-ns global]} runtime
+        {:keys [accumulated-beats phase-offset phase-offset-target last-frame-time]} global]
+    (when (and t0-ns last-frame-time)
+      (let [since-ms (- (/ (- (long now-ns) (long t0-ns)) 1e6) (double last-frame-time))]
+        (when (<= since-ms STALE_MS)
+          (let [beats (+ (double (or accumulated-beats 0.0)) (* since-ms (/ (double bpm) 60000.0)))]
+            {:current (+ beats (double (or phase-offset 0.0)))
+             :settled (+ beats (double (or phase-offset-target 0.0)))}))))))
+
 (defn set-clock-running!
   "Whether a clock thread is running (show-clock/start! and stop!). While it
    isn't, engines pace themselves."

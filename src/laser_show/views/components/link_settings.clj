@@ -10,9 +10,10 @@
    - Dual connection status display (Carabiner + Link)
    - Enable/disable Link sync via button
    - Enable/disable BPM sync (Link BPM -> app BPM)
-   - Enable/disable beat (downbeat) sync
+   - Align beats with Link (the beat phase; bars aren't aligned), the
+     [:backend :link :beat-sync?] switch
    - Auto-connect on startup toggle
-   - Latency compensation setting"
+   - Latency compensation setting (how far the aligned beats run ahead)"
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [laser-show.css.core :as css]))
@@ -201,8 +202,9 @@
                    :on-change {:event/type :timing/link-set-sync-enabled}}
                   
                   {:fx/type setting-row
-                   :label "Sync downbeat alignment"
-                   :description "Align beat phase with Link session (requires BPM sync)"
+                   :id "link-align-beats"
+                   :label "Align beats with Link"
+                   :description "Line the app's beats up with the Link session's (beats, not bars; requires BPM sync)"
                    :checked? beat-sync?
                    :disabled? (or (not link-enabled?) (not sync-enabled?))
                    :on-change {:event/type :timing/link-set-beat-sync}}]}
@@ -233,7 +235,7 @@
                    :disabled? (not link-enabled?)}
                   
                   {:fx/type :label
-                   :text "Positive values = packets arrive late, negative = early"
+                   :text "Positive values = packets arrive late, negative = early: the aligned beats run that far ahead of Link"
                    :style (str "-fx-text-fill: " (css/text-muted) "; "
                                "-fx-font-size: 10; "
                                "-fx-padding: 0 0 0 8;")}]}]}))

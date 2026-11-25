@@ -1,10 +1,9 @@
 (ns laser-show.input.link
   "Ableton Link synchronization service using beat-carabiner.
    
-   This is a READ-ONLY integration - we receive BPM and peers from Link
-   (not its beat position: beat-carabiner gives none, see
-   get-link-beat-position) but never push our tempo, or a beat, to the
-   Link session.
+   This is a READ-ONLY integration - we receive BPM, peers and the beat
+   phase from Link but never push our tempo, or a beat, to the Link
+   session.
    
    Architecture:
    - Carabiner: Auto-connects on app startup (embedded lib-carabiner):
@@ -20,7 +19,10 @@
    2. Enables/disables Link sync mode on user request
    3. Listens for Link tempo and peer updates
    4. Dispatches events to update app state
-   5. Does NOT call set-link-tempo, lock-tempo or beat-at-time (read-only)
+   5. Keeps the app's beats on Link's (Align beats with Link): Link's beat
+      phase read on a query connection of its own (beat-carabiner gives
+      none), the show clock's phase moved onto it
+   6. Does NOT call set-link-tempo, lock-tempo or beat-at-time (read-only)
    
    The connection:
    - connect! (the :link/connect effect) connects on the Link thread
@@ -38,19 +40,33 @@
      disconnection listener says so through that dispatch fn too:
      :timing/carabiner-connected {:connected? false} (follow-up N5). The
      connection is over; the next connect! makes a new one.
-   - release! (app/stop!) removes the listeners and disconnects, once,
-     whatever app state says, and drops connects until open! (app/start!,
-     start-test!); what a connect running then connects is undone at once.
-     Before the first release! the Link thread starts with the first
-     connect, so tests without an app can use it.
+   - While it is up, the Link thread checks the app's beat phase against
+     Link's every alignment-interval-ms, and soon after each tempo change
+     (check-beat!, follow-up N4's successor): only while the app aligns
+     (aligning?), on a query connection to Carabiner of the owner's own,
+     asking phase-at-time and nothing else; a correction goes through the
+     same dispatch fn (:timing/align-to-link-beat).
+   - release! (app/stop!) removes the listeners, stops the checks, closes
+     the query connection and disconnects, once, whatever app state says,
+     and drops connects until open! (app/start!, start-test!); what a
+     connect running then connects is undone at once. Before the first
+     release! the Link thread starts with the first connect, so tests
+     without an app can use it.
    
    The rest of this module is pure functions for Link state management, on
    [:backend :link] (state/domains.clj)."
-  (:require [clojure.tools.logging :as log]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
+            [clojure.tools.logging :as log]
             [beat-carabiner.core :as bc]
+            [laser-show.animation.show-time :as show-time]
             [laser-show.state.core :as state]
             [laser-show.state.extractors :as ex])
-  (:import [java.util.concurrent ExecutorService Executors ThreadFactory TimeUnit]))
+  (:import [java.io BufferedReader EOFException InputStreamReader OutputStream]
+           [java.net InetSocketAddress Socket]
+           [java.nio.charset StandardCharsets]
+           [java.util.concurrent ExecutorService RejectedExecutionException ScheduledFuture
+            ScheduledThreadPoolExecutor ThreadFactory TimeUnit]))
 
 
 ;; BPM Change Threshold
@@ -99,15 +115,86 @@
             (dispatch! {:event/type :timing/link-peers-changed :peers link-peers})))))))
 
 
+;; Beat alignment: the app's beat phase on Link's (quantum 1: beats line
+;; up, bars needn't)
+;;
+;; beat-carabiner 8.0.0 can't read Link's beat: its state has :link-bpm and
+;; :link-peers only, and its beat-at-time is no query (it moves the whole
+;; session's beat grid, so this read-only integration never calls it).
+;; Carabiner itself answers a pure query, though: phase-at-time <micros>
+;; <quantum>, on any of its client connections, so the owner opens one of
+;; its own for it (query-phase!). Times are Link's clock, which is
+;; System/nanoTime in microseconds (the show clock's time base too).
+
+
+(def beat-deadband
+  "A beat phase error up to this many beats is left alone: 2% of a beat
+   (about 10 ms at 120 BPM), what the show clock's phase glide snaps across
+   too (cue-timing)."
+  0.02)
+
+(def alignment-interval-ms
+  "How often the Link thread checks the app's beat phase against Link's
+   while it aligns them."
+  1000)
+
+(def tempo-check-delay-ms
+  "How soon after Link's tempo changes the beat phase is checked again: the
+   app follows the new tempo meanwhile."
+  250)
+
+(def query-timeout-ms
+  "How long a query to Carabiner may take, its connection's connect
+   included: it answers at once, as it only reads Link's timeline."
+  500)
+
+(defn- the-short-way
+  "d beats, the shorter way round a beat: -0.5 to just under 0.5."
+  ^double [^double d]
+  (let [m (- d (Math/floor d))]
+    (if (>= m 0.5) (- m 1.0) m)))
+
+(defn beat-correction
+  "The correction, in beats (the shorter way round: -0.5 to 0.5), that puts
+   the app's beat phase on Link's: link-phase (0 to 1, Link's phase-at-time
+   for quantum 1) against the app's beats at the same instant ({:current
+   :settled}, show-time/global-beats-at). nil when :settled is within
+   beat-deadband of Link's beat: aligned, or gliding onto it already. The
+   correction is from :current, as the show clock moves a phase target
+   from where the phase is (its :shift request)."
+  [link-phase {:keys [current settled]}]
+  (when (> (Math/abs (the-short-way (- (double link-phase) (double settled)))) beat-deadband)
+    (the-short-way (- (double link-phase) (double current)))))
+
+(defn aligning?
+  "Does the app keep its beats on Link's now: Carabiner connected, Link
+   enabled with its tempo followed (Sync BPM from Link: aligning the phase
+   of a tempo the app doesn't follow would only chase it), and Align beats
+   with Link on ([:backend :link :beat-sync?], on unless set off)?"
+  [state]
+  (and (true? (get-in state [:backend :link :carabiner-connected?]))
+       (boolean (ex/link-sync-enabled? state))
+       (not (false? (get-in state [:backend :link :beat-sync?])))))
+
+
 ;; The connection to Carabiner: its owner
 ;; Carabiner is the underlying daemon - connects automatically on startup
 
 
 (defonce ^{:private true
            :doc "The connection connect! made, or nil: {:token :listener (its
-   status listener) :on-closed (its disconnection listener)}, both
-   registered with beat-carabiner."}
+   status listener) :on-closed (its disconnection listener), both
+   registered with beat-carabiner, :checks (its beat checks, a task on the
+   Link thread) :soon (an atom: the check asked for after a tempo change,
+   until it has run)}."}
   !connection
+  (atom nil))
+
+(defonce ^{:private true
+           :doc "The query connection to Carabiner (beat alignment), or nil:
+   {:token (that of the connection it belongs to) :socket :reader :writer}.
+   Only the Link thread opens and uses it; whoever takes it out closes it."}
+  !query
   (atom nil))
 
 (defonce ^{:private true
@@ -144,15 +231,159 @@
       (log/error e "Error connecting to Carabiner:" (.getMessage e))
       false)))
 
+
+;; The query connection (beat alignment)
+
+(defn- close-query!
+  "Close the query connection, if one is open."
+  []
+  (when-let [^Socket socket (:socket (first (reset-vals! !query nil)))]
+    (try (.close socket) (catch Exception _ nil))))
+
+(defn- open-query!
+  "A new query connection to Carabiner, for the connection with token:
+   {:token :socket :reader :writer}, a socket to the loopback address
+   (Carabiner listens only there, and takes several clients) at
+   beat-carabiner's port (bc/state's :port). nil (logged) when it can't be
+   opened."
+  [token]
+  (let [port (int (or (:port (bc/state)) 17000))
+        socket (Socket.)]
+    (try
+      (.connect socket (InetSocketAddress. "127.0.0.1" port) (int query-timeout-ms))
+      (.setSoTimeout socket (int query-timeout-ms))
+      (.setTcpNoDelay socket true)
+      {:token token
+       :socket socket
+       :reader (BufferedReader. (InputStreamReader. (.getInputStream socket) StandardCharsets/UTF_8))
+       :writer (.getOutputStream socket)}
+      (catch Exception e
+        (try (.close socket) (catch Exception _ nil))
+        (log/warn "Could not open a query connection to Carabiner on port" port ":" (.getMessage e))
+        nil))))
+
+(defn- query-connection!
+  "The query connection of the owner's connection with token: the one
+   open, or a new one (open-query!), kept unless release! or the
+   connection's close came meanwhile. nil when there is none."
+  [token generation]
+  (or (let [q @!query] (when (identical? token (:token q)) q))
+      (when-let [q (open-query! token)]
+        (if (locking lock
+              (when (and (current? generation) (identical? token (:token @!connection)))
+                (close-query!)
+                (reset! !query q)
+                true))
+          q
+          (do (.close ^Socket (:socket q)) nil)))))
+
+(def ^:private phase-answer "phase-at-time ")
+
+(defn- query-phase!
+  "Link's beat phase (0 to 1) at time-us, microseconds on Link's clock:
+   Carabiner's answer to phase-at-time time-us 1 on the query connection q,
+   the other lines it sends every client (its status) passed over. Nothing
+   else is ever sent on it: no command that changes the session. nil when
+   no answer came within query-timeout-ms, or the connection failed; then
+   it is closed, for a new one at the next check."
+  [{:keys [^OutputStream writer ^BufferedReader reader]} time-us]
+  (try
+    (.write writer (.getBytes (str phase-answer time-us " 1\n") StandardCharsets/UTF_8))
+    (.flush writer)
+    (loop []
+      (let [line (.readLine reader)]
+        (cond
+          (nil? line)
+          (throw (EOFException. "Carabiner closed the query connection"))
+
+          (str/starts-with? line phase-answer)
+          (let [{at :when phase :phase} (edn/read-string (subs line (count phase-answer)))]
+            (if (and (number? at) (== (long at) (long time-us)) (number? phase))
+              (double phase)
+              (recur)))
+
+          (str/starts-with? line "bad-")
+          (throw (ex-info (str "Carabiner refused the query: " line) {}))
+
+          :else (recur))))
+    (catch Exception e
+      (log/debug "Link beat query failed:" (.getMessage e))
+      (close-query!)
+      nil)))
+
+
+;; The beat checks
+
+(defn- check-beat!
+  "One beat check, on the Link thread, for the owner's connection with
+   token: while the app aligns its beats with Link's (aligning?, app state
+   now), Link's beat phase at this instant, the stored latency ahead
+   (:latency-ms: our output arrives that late, so the beats run that far
+   ahead of Link's), is asked of Carabiner (query-phase!) and set against
+   where the show clock is at the same instant (show-time/global-beats-at).
+   An error beyond beat-deadband goes to dispatch, the dispatcher of the
+   app that connected: :timing/align-to-link-beat {:offset
+   (beat-correction)}. Never throws: a periodic task that did would stop."
+  [token dispatch generation]
+  (try
+    (when (and (current? generation) (identical? token (:token @!connection)))
+      (let [state (state/get-raw-state)]
+        (when (aligning? state)
+          (when-let [q (query-connection! token generation)]
+            (let [now-ns (System/nanoTime)
+                  ahead-us (* 1000 (long (or (get-in state [:backend :link :latency-ms]) 0)))
+                  link-phase (query-phase! q (+ (quot now-ns 1000) ahead-us))
+                  app (show-time/global-beats-at @show-time/!runtime (double (or (ex/bpm state) 120.0)) now-ns)]
+              (when-let [offset (and link-phase app (beat-correction link-phase app))]
+                (dispatch {:event/type :timing/align-to-link-beat :offset offset})))))))
+    (catch Throwable t
+      (log/error t "Link beat check failed"))))
+
+(defn- schedule!
+  "f on the Link thread after delay-ms, and with period-ms every period-ms
+   after that, unless release! came since generation: its ScheduledFuture,
+   or nil."
+  ([generation delay-ms f] (schedule! generation delay-ms nil f))
+  ([generation delay-ms period-ms f]
+   (let [{:keys [^ScheduledThreadPoolExecutor executor]} @!runtime
+         task ^Runnable (bound-fn* f)]
+     (when (and executor (current? generation))
+       (try
+         (if period-ms
+           (.scheduleWithFixedDelay executor task (long delay-ms) (long period-ms) TimeUnit/MILLISECONDS)
+           (.schedule executor task (long delay-ms) TimeUnit/MILLISECONDS))
+         (catch RejectedExecutionException _ nil))))))
+
+(defn- check-soon!
+  "check on the Link thread tempo-check-delay-ms from now, unless one asked
+   for so is still to run (soon, the connection's)."
+  [soon generation check]
+  (let [^ScheduledFuture pending @soon]
+    (when-not (and pending (not (.isDone pending)))
+      (reset! soon (schedule! generation tempo-check-delay-ms check)))))
+
+(defn- stop-checks!
+  "The beat checks of the connection conn stop: its periodic one, and one
+   asked for after a tempo change."
+  [{:keys [^ScheduledFuture checks soon]}]
+  (some-> checks (.cancel false))
+  (some-> ^ScheduledFuture (some-> soon deref) (.cancel false)))
+
+
+;; The connection's lifetime
+
 (defn- forget!
   "The connection with token is over: unless it is gone already (release!,
-   a close heard before), it isn't the owner's any more and its listeners
-   are removed. True if it was the owner's."
+   a close heard before), it isn't the owner's any more, its listeners are
+   removed, its beat checks stop and its query connection is closed. True
+   if it was the owner's."
   [token]
   (locking lock
     (let [{:keys [listener on-closed] :as conn} @!connection]
       (when (identical? token (:token conn))
         (reset! !connection nil)
+        (stop-checks! conn)
+        (close-query!)
         (bc/remove-status-listener listener)
         (bc/remove-disconnection-listener on-closed)
         true))))
@@ -175,18 +406,29 @@
 (defn- register!
   "Make the connection just connected the owner's: a status listener, its
    reports through dispatch, and a disconnection listener (closed!), both
-   registered with beat-carabiner. Under lock. True if Carabiner is still
+   registered with beat-carabiner, and its beat checks (check-beat!) on the
+   Link thread every alignment-interval-ms, and soon after each change of
+   tempo the status listener hears. Under lock. True if Carabiner is still
    connected with them in; if it closed before its close could be heard,
    the connection is over at once."
-  [dispatch]
+  [dispatch generation]
   (let [token (Object.)
-        listener (create-status-listener dispatch state/get-raw-state)
+        report (create-status-listener dispatch state/get-raw-state)
+        check #(check-beat! token dispatch generation)
+        soon (atom nil)
+        tempo (atom ::none)
+        listener (fn [{:keys [link-bpm] :as status}]
+                   (report status)
+                   (let [[heard _] (reset-vals! tempo link-bpm)]
+                     (when (and (not= ::none heard) (not= heard link-bpm))
+                       (check-soon! soon generation check))))
         on-closed (fn [unexpected?] (closed! token dispatch unexpected?))]
-    (reset! !connection {:token token :listener listener :on-closed on-closed})
+    (reset! !connection {:token token :listener listener :on-closed on-closed :soon soon
+                         :checks (schedule! generation alignment-interval-ms alignment-interval-ms check)})
     (bc/add-disconnection-listener on-closed)
     ;; connect can receive the first tempo before registration. Seed it
     ;; without letting an older snapshot overtake a later callback.
-    (locking listener
+    (locking report
       (bc/add-status-listener listener)
       (listener (bc/state)))
     (or (boolean (bc/active?))
@@ -196,11 +438,11 @@
 
 (defn- connect-now!
   "Connect to Carabiner, unless connected already (nothing new opens), with
-   its listeners (register!), and send how it went through dispatch:
-   :timing/carabiner-connected {:connected?}, under the lock, so a close of
-   this connection is reported after it. One that release! came during is
-   undone: disconnected, unless release! has the connection to close itself,
-   or an app opened since (its own connect takes it over)."
+   its listeners and checks (register!), and send how it went through
+   dispatch: :timing/carabiner-connected {:connected?}, under the lock, so a
+   close of this connection is reported after it. One that release! came
+   during is undone: disconnected, unless release! has the connection to
+   close itself, or an app opened since (its own connect takes it over)."
   [dispatch generation]
   (let [connected? (or (and (holds-connection?) (bc/active?))
                        (connect-carabiner!))]
@@ -218,7 +460,7 @@
 
                          (holds-connection?) true
 
-                         (register! dispatch)
+                         (register! dispatch generation)
                          (do (log/info "Carabiner daemon connected (Link not yet enabled)")
                              true))))}))))
 
@@ -241,7 +483,8 @@
   "Queue a connect to Carabiner for the Link thread (the :link/connect
    effect, events/core.clj; its value, request, is {}): dispatch gets
    :timing/carabiner-connected {:connected?}, then the status listener's
-   reports (see the ns doc). False (logged) after release!, until open!."
+   reports and the beat checks' corrections (see the ns doc). False
+   (logged) after release!, until open!."
   [_request dispatch]
   (locking lock
     (if (= :closed (:state @!runtime))
@@ -251,7 +494,9 @@
         (when (= :idle (:state @!runtime))
           (swap! !runtime assoc
                  :state :open
-                 :executor (Executors/newSingleThreadExecutor (daemon-factory "link-carabiner"))))
+                 :executor (doto (ScheduledThreadPoolExecutor. 1 ^ThreadFactory (daemon-factory "link-carabiner"))
+                             (.setExecuteExistingDelayedTasksAfterShutdownPolicy false)
+                             (.setRemoveOnCancelPolicy true))))
         (let [{:keys [generation ^ExecutorService executor]} @!runtime]
           ;; With the asker's bindings, as a future would have them
           (.execute executor ^Runnable (bound-fn* #(run-connect! dispatch generation)))
@@ -266,12 +511,13 @@
       (swap! !runtime assoc :state :idle))))
 
 (defn release!
-  "Remove the listeners and disconnect from Carabiner, once, on this
-   thread, whatever app state says (app/stop!): a connect not yet run is
-   dropped, the one running gets up to timeout-ms to finish (what it
-   connects after that is undone at once), and later connects are dropped
-   until open!. Its own close isn't reported (the disconnection listener
-   goes first). Writes no app state. Idempotent; nil."
+  "Remove the listeners, stop the beat checks, close the query connection
+   and disconnect from Carabiner, once, on this thread, whatever app state
+   says (app/stop!): a connect or check not yet run is dropped, the one
+   running gets up to timeout-ms to finish (what a connect connects after
+   that is undone at once), and later connects are dropped until open!. Its
+   own close isn't reported (the disconnection listener goes first). Writes
+   no app state. Idempotent; nil."
   [timeout-ms]
   (let [{:keys [^ExecutorService executor]}
         (locking lock
@@ -283,7 +529,8 @@
       (when-not (.awaitTermination executor timeout-ms TimeUnit/MILLISECONDS)
         (log/warn "Link: the connect to Carabiner did not finish within" timeout-ms "ms")
         (.shutdownNow executor)))
-    (when-let [{:keys [listener on-closed]} (locking lock (first (reset-vals! !connection nil)))]
+    (when-let [{:keys [listener on-closed] :as conn} (locking lock (first (reset-vals! !connection nil)))]
+      (stop-checks! conn)
       (try
         (bc/remove-disconnection-listener on-closed)
         (bc/remove-status-listener listener)
@@ -291,6 +538,7 @@
         (log/info "Carabiner daemon disconnected")
         (catch Exception e
           (log/warn e "Error disconnecting from Carabiner:" (.getMessage e)))))
+    (close-query!)
     nil))
 
 
@@ -364,55 +612,6 @@
   [link-state]
   (:sync-enabled? link-state false))
 
-
-;; Beat Position Query
-;;
-;; beat-carabiner 8.0.0 has no way to read Link's beat. state (and so what
-;; its status listeners get) holds :link-bpm and :link-peers only: of each
-;; Carabiner status, which carries the beat too (:beat, :start), it keeps
-;; :bpm and :peers. Its phase probe (phase-at-time) is private, for lining
-;; a Pioneer player up with Link. And its beat-at-time is no query: it
-;; sends Carabiner "beat-at-time t 4.0" (t on Link's clock: System/nanoTime
-;; in microseconds, not the wall clock), returns nil (the socket write's),
-;; and when the answer comes back it moves the whole Link session's beat
-;; grid so a beat falls at t, unless one nearly does (Carabiner's
-;; force-beat-at-time: every peer's playback shifts). This integration is
-;; read only, so it never calls it.
-
-
-(defn get-link-beat-position
-  "Link's beat phase now (0.0-1.0 within the beat), or nil when it isn't
-   known: with beat-carabiner 8.0.0, always (see above). Sends nothing to
-   Carabiner."
-  []
-  nil)
-
-(defn sync-to-downbeat!
-  "Synchronizes playback to the next downbeat.
-   Uses the phase-offset-target mechanism for smooth correction.
-   
-   This is a one-shot sync operation that calculates the phase
-   offset needed to align with Link's next downbeat. While Link's beat
-   phase isn't known (get-link-beat-position: with beat-carabiner 8.0.0,
-   never), it does nothing."
-  [dispatch-fn accumulated-beats]
-  (try
-    (when-let [link-beat-phase (get-link-beat-position)]
-      (let [;; Calculate how far we are into the current beat
-            internal-phase (mod accumulated-beats 1.0)
-            ;; Calculate correction needed to align with Link (never reached
-            ;; while get-link-beat-position can only answer nil)
-            phase-diff #_{:clj-kondo/ignore [:type-mismatch]} (- link-beat-phase internal-phase)
-            ;; Normalize to -0.5 to 0.5 range (shortest path)
-            correction (cond
-                         (> phase-diff 0.5)  (- phase-diff 1.0)
-                         (< phase-diff -0.5) (+ phase-diff 1.0)
-                         :else phase-diff)]
-        ;; Dispatch phase offset target change
-        (dispatch-fn {:event/type :timing/set-phase-offset-target
-                      :offset correction})))
-    (catch Exception e
-      (log/error e "Error syncing to downbeat:" (.getMessage e)))))
 
 (defn connected?
   "DEPRECATED: Use carabiner-connected? or link-enabled?.

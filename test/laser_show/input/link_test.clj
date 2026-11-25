@@ -1,12 +1,14 @@
 (ns laser-show.input.link-test
   "Tests for Ableton Link synchronization service. Carabiner is stood in
-   for at beat-carabiner's functions: nothing here reaches a daemon or
-   starts one."
+   for at beat-carabiner's functions, and on a loopback port of the test's
+   own for the beat queries: nothing here reaches a daemon or starts one."
   (:require [beat-carabiner.core :as bc]
             [cljfx.api :as fx]
             [cljfx.event-handler :as event-handler]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.tools.logging.test :as log-test]
+            [laser-show.animation.show-time :as show-time]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.timing :as timing]
             [laser-show.input.fixtures :as fixtures]
@@ -428,27 +430,175 @@
         (finally (events/retire!))))))
 
 
-;; Link's beat (follow-up N4): beat-carabiner 8.0.0 gives none, and its
-;; beat-at-time is no query but a push that moves the Link session's beat
-;; grid; a read-only follower never sends it
+;; Beat alignment with Link (the user's decision of 2026-11-25: beats line
+;; up, bars needn't): the app's beat phase follows Link's, read on a query
+;; connection of the owner's own (Carabiner's phase-at-time: beat-carabiner
+;; gives no beat, and its beat-at-time would move the session's grid).
+;; Carabiner is stood in for twice: beat-carabiner's connection
+;; (with-carabiner) and Carabiner's own port (with-phase-server, an
+;; in-process loopback server); nothing reaches a daemon
 
-(deftest the-beat-read-sends-nothing-to-carabiner-test
-  (with-carabiner {:status {:link-bpm 128.0 :link-peers 2}}
-    (fn [carabiner]
-      (let [sent (atom [])]
-        (link/connect! {} #(swap! sent conj %))
-        (is (eventually? #(some #{connected} @sent)) "a Link session to read")
-        (reset! sent [])
-        (is (nil? (link/get-link-beat-position)) "not known: beat-carabiner gives no beat")
-        (link/sync-to-downbeat! #(swap! sent conj %) 4.3)
-        (is (empty? @sent) "so downbeat sync corrects nothing")
-        (is (zero? (calls carabiner :beat-at-time)) "and no beat probe went to Carabiner")))))
+(defn- close? [a b] (< (Math/abs (- (double a) (double b))) 1e-9))
 
-(deftest sync-to-downbeat-changes-nothing-while-the-beat-is-unknown-test
-  (with-carabiner {:status {:link-bpm 128.0 :link-peers 2}}
-    (fn [carabiner]
-      (link/connect! {} (fn [_]))
-      (is (eventually? link/holds-connection?))
-      (events/event-handler {:event/type :timing/sync-to-downbeat})
-      (is (nil? (get-in (state/get-raw-state) [:playback :requests :shift])) "no phase shift asked of the show clock")
-      (is (zero? (calls carabiner :beat-at-time))))))
+(deftest beat-correction-test
+  (testing "the shorter way round, from the phase now"
+    (is (close? 0.3 (link/beat-correction 0.3 {:current 10.0 :settled 10.0})))
+    (is (close? -0.2 (link/beat-correction 0.8 {:current 10.0 :settled 10.0})))
+    (is (close? 0.03 (link/beat-correction 0.02 {:current 9.99 :settled 9.99})) "across the beat"))
+  (testing "within the deadband: nothing"
+    (is (nil? (link/beat-correction 0.01 {:current 10.0 :settled 10.0})))
+    (is (nil? (link/beat-correction 0.99 {:current 10.0 :settled 10.0}))))
+  (testing "gliding onto Link's beat already: nothing"
+    (is (nil? (link/beat-correction 0.3 {:current 10.1 :settled 10.3}))))
+  (testing "gliding elsewhere: the correction from where the phase is now, as :shift moves the target from there"
+    (is (close? 0.2 (link/beat-correction 0.3 {:current 10.1 :settled 10.6})))))
+
+(defn- with-ticking-clock
+  "(f t0) while a thread steps the show clock every 5 ms from app state, as
+   the show clock does (show-time/step: its requests, then its clocks), its
+   global clock's beats counted from t0 (System/nanoTime); show time reset
+   after."
+  [f]
+  (let [t0 (System/nanoTime)
+        running (atom true)]
+    (reset! show-time/!runtime (-> show-time/initial-runtime
+                                   (assoc :t0-ns t0)
+                                   (assoc-in [:global :last-frame-time] 0.0)))
+    (let [ticker (future
+                   (while @running
+                     (let [now-ms (/ (- (System/nanoTime) t0) 1e6)]
+                       (swap! show-time/!runtime #(:runtime (show-time/step % (state/get-raw-state) nil now-ms))))
+                     (Thread/sleep 5)))]
+      (try
+        (f t0)
+        (finally
+          (reset! running false)
+          (deref ticker 1000 nil)
+          (show-time/reset-runtime!))))))
+
+(defn- link-ahead
+  "A Link session at 120 BPM whose beats are ahead (beats) of the app's
+   unshifted ones, counted from t0: its beat phase at t-us, microseconds on
+   Link's clock."
+  [t0 ahead]
+  (fn [t-us]
+    (let [beats (+ (* (/ (- (* 1000.0 t-us) t0) 1e9) 2.0) ahead)]
+      (- beats (Math/floor beats)))))
+
+(defn- with-link-beats
+  "(f {:server :carabiner :sent}) with the Link owner connected for an app
+   (app-dispatcher) that follows Link at 120 BPM with Align beats with Link
+   on (link, merged into [:backend :link], may turn things off or set
+   :latency-ms), its show clock ticking, Link's beats :ahead of the app's,
+   and a beat check every :interval-ms (50). With :hold? the phase server
+   holds its answers until (:hold @server) is delivered. sent: what the
+   owner dispatched, in order (an atom), on its way to the app."
+  [{:keys [ahead link hold? interval-ms]} f]
+  (fixtures/with-phase-server
+    (fn [server]
+      (state/init-state! (update-in (domains/build-initial-state) [:backend :link] merge
+                                    {:carabiner-connected? true :link-enabled? true :sync-enabled? true
+                                     :beat-sync? true :link-bpm 120.0}
+                                    link))
+      (with-redefs [link/alignment-interval-ms (or interval-ms 50)]
+        (fixtures/with-carabiner {:status {:port (:port @server) :link-bpm 120.0 :link-peers 1}}
+          (fn [carabiner]
+            (with-ticking-clock
+              (fn [t0]
+                (swap! server assoc :phase-at (link-ahead t0 (or ahead 0.0)) :hold (when hold? (promise)))
+                (let [app (app-dispatcher)
+                      sent (atom [])]
+                  (try
+                    (link/connect! {} (fn [event] (swap! sent conj event) (app event)))
+                    (f {:server server :carabiner carabiner :sent sent})
+                    (finally
+                      (some-> (:hold @server) (deliver true))
+                      (events/retire!))))))))))))
+
+(defn- corrections [sent] (filterv #(= :timing/align-to-link-beat (:event/type %)) @sent))
+
+(defn- shift-asked [] (get-in (state/get-raw-state) [:playback :requests :shift :offset]))
+
+(deftest a-beat-error-beyond-the-deadband-is-corrected-once-the-short-way-test
+  (doseq [[ahead expected] [[0.3 0.3] [0.8 -0.2]]]
+    (testing (str "Link's beats " ahead " of a beat ahead of the app's")
+      (with-link-beats {:ahead ahead}
+        (fn [{:keys [server carabiner sent]}]
+          (is (eventually? #(seq (corrections sent))) "corrected")
+          (Thread/sleep 500)
+          (let [[{:keys [offset]} :as all] (corrections sent)]
+            (is (= 1 (count all)) "once: the show clock is gliding onto Link's beat, so the checks after it find it settled")
+            (is (< (Math/abs (- expected offset)) 0.01) (str "the shorter way round: " offset)))
+          (is (< (Math/abs (- expected (or (shift-asked) 0.0))) 0.01) "the show clock moves its phase targets by it (:shift)")
+          (is (< 5 (count (:received @server))) "checked all along")
+          (is (every? #(str/starts-with? % "phase-at-time ") (:received @server))
+              "nothing but queries asked of Carabiner: nothing that changes the session")
+          (is (zero? (calls carabiner :beat-at-time)) "nor beat-carabiner's beat-at-time"))))))
+
+(deftest a-beat-error-within-the-deadband-is-left-alone-test
+  (with-link-beats {:ahead 0.01}
+    (fn [{:keys [server sent]}]
+      (is (eventually? #(< 5 (count (:received @server)))) "checked")
+      (is (empty? (corrections sent)))
+      (is (nil? (shift-asked))))))
+
+(deftest the-latency-compensation-runs-the-beats-ahead-test
+  (with-link-beats {:ahead 0.0 :link {:latency-ms 100}}
+    (fn [{:keys [sent]}]
+      (is (eventually? #(seq (corrections sent))))
+      (is (< (Math/abs (- 0.2 (:offset (first (corrections sent))))) 0.01)
+          "output 100 ms late, at 120 BPM: the beats run 0.2 of a beat ahead of Link's"))))
+
+(deftest no-beat-check-while-the-app-doesnt-align-test
+  (doseq [[why link] [["Link disabled" {:link-enabled? false}]
+                      ["its tempo not followed" {:sync-enabled? false}]
+                      ["Align beats with Link off" {:beat-sync? false}]]]
+    (testing why
+      (with-link-beats {:ahead 0.3 :link link}
+        (fn [{:keys [server sent]}]
+          (Thread/sleep 300)
+          (is (empty? (:received @server)) "nothing asked of Carabiner")
+          (is (empty? (corrections sent))))))))
+
+(deftest a-dropped-connection-stops-the-beat-checks-test
+  (with-link-beats {:ahead 0.0}
+    (fn [{:keys [server carabiner]}]
+      (is (eventually? #(seq (:received @server))) "a query connection, asked on")
+      (fixtures/drop-carabiner! carabiner)
+      (is (eventually? #(= (:clients @server) (:closed @server))) "closed with the connection")
+      (let [asked (count (:received @server))]
+        (Thread/sleep 250)
+        (is (= asked (count (:received @server))) "and no check after it")))))
+
+(deftest release-closes-the-query-connection-test
+  (with-link-beats {:ahead 0.0}
+    (fn [{:keys [server]}]
+      (is (eventually? #(seq (:received @server))))
+      (link/release! 1000)
+      (is (eventually? #(= (:clients @server) (:closed @server))) "closed by release!")
+      (let [asked (count (:received @server))]
+        (Thread/sleep 250)
+        (is (= asked (count (:received @server))) "and no check runs after it")))))
+
+(deftest a-stopped-apps-late-beat-correction-is-dropped-test
+  ;; The answer comes back after the app that connected was replaced: its
+  ;; correction goes to that app's dispatcher (reactivity plan 19), which
+  ;; drops it
+  (log-test/with-log
+    (with-link-beats {:ahead 0.3 :hold? true}
+      (fn [{:keys [server]}]
+        (is (eventually? #(seq (:received @server))) "a check's query, its answer held")
+        (let [successor (app-dispatcher)]
+          (deliver (:hold @server) true)
+          (is (eventually? #(log-test/logged? 'laser-show.events.core :info #"dropped :timing/align-to-link-beat"))
+              "its correction came back to the stopped app")
+          (is (handled? successor 2000))
+          (is (nil? (shift-asked)) "and asked nothing of the show clock"))))))
+
+(deftest a-tempo-change-brings-a-check-soon-test
+  (with-link-beats {:ahead 0.0 :interval-ms 60000}
+    (fn [{:keys [server carabiner]}]
+      (Thread/sleep 300)
+      (is (empty? (:received @server)) "no check yet: the next is a minute away")
+      (fixtures/report-status! carabiner {:link-bpm 121.0})
+      (is (eventually? #(seq (:received @server))) "Link's tempo changed: checked soon after"))))

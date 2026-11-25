@@ -160,13 +160,23 @@
       (is (= -0.15 (get-in result [:state :playback :requests :shift :offset]))))))
 
 
-;; Sync To Downbeat Tests
+;; Beat Alignment Tests
 
 
-(deftest test-sync-to-downbeat-requests-effect
-  (testing "leaves the Link query to an effect, which reads the show clock's beats itself"
-    (is (= {:link/sync-to-downbeat {}}
-           (timing/handle {:state base-state :event/type :timing/sync-to-downbeat})))))
+(deftest align-to-link-beat-moves-the-phase-targets-while-aligning-test
+  (let [aligning (update-in base-state [:backend :link] assoc :sync-enabled? true :beat-sync? true)
+        align #(timing/handle {:state % :event/type :timing/align-to-link-beat :offset 0.3})
+        shift (get-in (align aligning) [:state :playback :requests :shift])]
+    (testing "the Link owner's correction: the show clock shifts its phase targets by it"
+      (is (uuid? (:id shift)))
+      (is (= 0.3 (:offset shift))))
+    (testing "turned off since the check, or never on: nothing"
+      (doseq [[why state] [["Link disabled" (assoc-in aligning [:backend :link :link-enabled?] false)]
+                           ["its tempo not followed" (assoc-in aligning [:backend :link :sync-enabled?] false)]
+                           ["Align beats with Link off" (assoc-in aligning [:backend :link :beat-sync?] false)]
+                           ["Carabiner not connected" (assoc-in aligning [:backend :link :carabiner-connected?] false)]]]
+        (is (= {} (align state)) why)))
+    (is (= {} (timing/handle {:state aligning :event/type :timing/align-to-link-beat})) "no offset: nothing")))
 
 
 ;; Integration Tests
