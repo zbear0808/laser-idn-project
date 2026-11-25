@@ -129,7 +129,7 @@
   (testing "the pattern window: its parameter editor"
     (let [steps (before-and-after
                  (-> (domains/build-initial-state)
-                     (assoc-in [:ui :dialogs :zone-pattern-editor] {:open? true :col 0 :row 0})
+                     (assoc-in [:ui :dialogs :zone-pattern-editor] {:open? true :cue-key [0 0]})
                      (assoc-in [:chains :cue-chains [0 0]]
                                {:items [{:id (random-uuid) :type :preset :preset-id :circle :enabled? true :params {}}]
                                 :zone-patterns [(assoc (zone-patterns/preset-instance :alternate :cue) :id (random-uuid))]}))

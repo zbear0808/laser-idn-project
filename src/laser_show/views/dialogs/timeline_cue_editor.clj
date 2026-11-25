@@ -80,8 +80,7 @@
 
       ;; While the cue is too heavy for a laser (zones plan Z3)
       {:fx/type load-warning/cue-load-warning
-       :col col
-       :row row}
+       :cue-key [col row]}
 
       ;; Footer
       {:fx/type :h-box
@@ -100,8 +99,7 @@
                   ;; The cue's zone pattern (zones plan Z5)
                   {:fx/type zone-pattern-editor/pattern-field
                    :id "pattern-chip-cue"
-                   :col col
-                   :row row}
+                   :cue-key [col row]}
                   {:fx/type common/trigger-mode-dropdown
                    :col col
                    :row row

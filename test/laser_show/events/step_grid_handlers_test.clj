@@ -347,6 +347,24 @@
 
 ;; Starting points, copy and paste
 
+(deftest step-grid-on-a-show-pattern-test
+  (let [u #uuid "6f1c0000-0000-0000-0000-000000000001"
+        s0 (-> (fresh) (assoc-in [:chains :shows u] {:editor-type :timeline :items []}) (history/mark-clean))
+        s (run s0 {:event/type :step-grid/open :target {:domain :cue-zone-patterns :entity-key [:show u]} :create-first? true})
+        [fx :as fxs] (get-in s [:chains :shows u :zone-patterns])
+        target {:domain :cue-zone-patterns :entity-key [:show u] :effect-instance-id (:id fx)}]
+    (is (= 1 (count fxs)) "the show's chip gives it a first grid")
+    (is (= (:chains s0) (update-in (:chains s) [:shows u] dissoc :zone-patterns)) "only the show changes")
+    (is (= target (get-in s [:ui :dialogs :step-grid-editor :target])))
+    (let [toggled (run s {:event/type :step-grid/toggle :target target :row 0 :step 1})]
+      (is (seq (get-in toggled [:chains :shows u :zone-patterns 0 :params :steps 1])) "an edit reaches the show's grid")
+      (is (= "Edit Step Grid" (undo-label toggled))))
+    (testing "a show that isn't there gets no grid"
+      (let [gone {:domain :cue-zone-patterns :entity-key [:show #uuid "6f1c0000-0000-0000-0000-000000000002"]}
+            s (run s0 {:event/type :step-grid/open :target gone :create-first? true})]
+        (is (= (:chains s0) (:chains s)))
+        (is (not (get-in s [:ui :dialogs :step-grid-editor :open?])))))))
+
 (deftest start-from-is-one-undo-step-test
   (let [grids #(open (with-grids) cue-target)
         s0 (run (grids) {:event/type :step-grid/set-length :target cue-target :n 16})

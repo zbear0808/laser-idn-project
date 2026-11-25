@@ -35,10 +35,6 @@
       (let [[_ proj-id] component-id]
         [:chains :projector-effects proj-id :items])
 
-      :timeline-cue-chain
-      (let [[_ col row] component-id]
-        [:chains :cue-chains [col row] :items])
-
       nil)
 
     :else nil))

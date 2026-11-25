@@ -409,8 +409,7 @@
 
                 ;; While the cue is too heavy for a laser (zones plan Z3)
                 {:fx/type load-warning/cue-load-warning
-                 :col col
-                 :row row}
+                 :cue-key [col row]}
 
                 ;; Footer with the cue's Target, its zone pattern, trigger mode, and close button;
                 ;; nothing in it shrinks below its text
@@ -430,8 +429,7 @@
                             ;; The cue's zone pattern (zones plan Z5)
                             {:fx/type zone-pattern-editor/pattern-field
                              :id "pattern-chip-cue"
-                             :col col
-                             :row row}
+                             :cue-key [col row]}
                             {:fx/type common/trigger-mode-dropdown
                              :col col
                              :row row

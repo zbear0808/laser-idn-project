@@ -1657,7 +1657,7 @@
         pattern [:chains :cue-chains [0 0] :zone-patterns 0 :params]
         others [[:lane/lasers] [:auto.laser/p1 :graphics]]
         shown (fn [ctx]
-                (let [lane (get-in (fx/sub-ctx ctx subs/cue-zone-pattern 0 0) [:params :zones])]
+                (let [lane (get-in (fx/sub-ctx ctx subs/cue-zone-pattern [0 0]) [:params :zones])]
                   {:lane lane
                    :texts (mapv #(fx/sub-ctx ctx subs/pattern-fold %) (cons lane others))
                    :folds @folds}))
@@ -1908,6 +1908,24 @@
                                     subs/cue-warning 2 0)
                         :item-name))
         "no item counts (its editor is closed): no item")))
+
+(deftest key-cue-warning-on-a-show-test
+  (let [u #uuid "6f1c0000-0000-0000-0000-000000000001"
+        ring #uuid "00000000-0000-0000-0000-0000000000a1"
+        warning {:projector :p3 :points 1750 :fps 14 :min-fps 20 :scan-rate 25000 :item {:id ring :points 1200}}
+        state (-> (domains/build-initial-state)
+                  (assoc :projectors {:p3 {:name "Laser R"}})
+                  (assoc-in [:chains :shows u] {:editor-type :timeline :items [{:id ring :type :preset :preset-id :circle}]})
+                  (assoc-in [:chains :cue-chains [2 0]] {:items [{:id ring :type :preset :preset-id :wave :name "Swell"}]})
+                  (assoc-in [:backend :streaming :cue-warnings] {[:show u] warning}))
+        ctx (context state)]
+    (is (= (assoc warning :laser "Laser R" :item-name "Circle") (fx/sub-ctx ctx subs/key-cue-warning [:show u]))
+        "keyed by the show's playback key, its item named from the show")
+    (is (nil? (fx/sub-ctx ctx subs/key-cue-warning [:show #uuid "6f1c0000-0000-0000-0000-000000000002"])) "another show has none")
+    (is (nil? (fx/sub-ctx ctx subs/cue-warning 2 0)) "the grid cell has none of the show's")
+    (is (= "Swell" (:item-name (fx/sub-ctx (context (assoc-in state [:backend :streaming :cue-warnings] {[2 0] warning}))
+                                           subs/key-cue-warning [2 0])))
+        "a grid cell's key reads the cell, as cue-warning does")))
 
 ;; Projectors with another output driver (output drivers D2)
 

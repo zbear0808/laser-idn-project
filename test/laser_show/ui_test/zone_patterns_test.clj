@@ -162,7 +162,7 @@
                               (assoc-in [:chains :cue-chains [0 0] :name] "Beams")
                               (assoc-in [:chains :cue-chains [0 0] :zone-patterns]
                                         [(assoc (zone-patterns/preset-instance :chase :cue) :id #uuid "00000000-0000-0000-0000-0000000000c1")])))
-    (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
+    (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:cue-key [0 0]}})
     (ui/wait-for! window-open?)
     (ui/wait-for! #(some? (ui/query "#zone-pattern-row-offset .modulator-toggle")))
     (ui/click! robot "#zone-pattern-row-offset .modulator-toggle")
@@ -522,7 +522,7 @@
                               (assoc-in [:chains :cue-chains [0 0] :zone-patterns]
                                         [(assoc (zone-patterns/preset-instance :alternate :cue) :id pattern-id)])))
     (cycle-on!)
-    (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
+    (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:cue-key [0 0]}})
     (ui/wait-for! window-open?)
     (ui/wait-for! #(true? (ticked "#zone-pattern-source-auto")))
     (events/dispatch! {:event/type :vibe/set-show-lock :locked? true})
@@ -622,7 +622,7 @@
   (events/write-state! #(-> %
                             (assoc-in [:chains :cue-chains [0 0] :name] "Beams")
                             (assoc-in [:chains :cue-chains [0 0] :zone-patterns] [(assoc pattern :id pattern-id)])))
-  (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
+  (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:cue-key [0 0]}})
   (ui/wait-for! window-open?)
   ;; What its Numeric button sends: the pattern by its id (follow-up N15)
   (events/dispatch! {:event/type :chain/set-ui-mode :domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]

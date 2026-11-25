@@ -52,7 +52,8 @@
             [laser-show.routing.step-grid :as step-grid]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.clipboard :as clipboard]
-            [laser-show.state.history :as history]))
+            [laser-show.state.history :as history]
+            [laser-show.timeline.shows :as shows]))
 
 (def ^:private dialog-path [:ui :dialogs :step-grid-editor])
 
@@ -216,7 +217,7 @@
                items-path
                (nil? effect-instance-id)
                (not (show-lock/locked? state))
-               (some? (get-in state [:chains :cue-chains entity-key]))
+               (some? (get-in state (shows/cue-path entity-key)))
                (empty? (get-in state items-path)))
       (let [fx (h/ensure-item-fields (zone-patterns/preset-instance :steps :cue))]
         {:state (assoc-in state items-path [fx])
