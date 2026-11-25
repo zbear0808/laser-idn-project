@@ -10,7 +10,9 @@
             [laser-show.events.core :as events]
             [laser-show.subs :as subs]
             [laser-show.timeline.model :as model]
+            [laser-show.timeline.shows :as shows]
             [laser-show.timeline.timecode :as tc]
+            [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.target-control :as target-control])
   (:import [javafx.scene.control TextField]))
 
@@ -177,25 +179,53 @@
              (str "Incoming " (fps-name incoming) " fps, timeline set to " (fps-name fps) " fps")
              "")}))
 
-(defn- chase-toggle [show-id chase]
-  {:fx/type :h-box
-   :children [{:fx/type :toggle-button
-               :id "timeline-chase-off"
-               :text "Off"
-               :style-class ["toggle-button" "tl-toggle" "tl-segment"]
-               :focus-traversable false
-               :selected (nil? chase)
-               :on-action (fn [_] (apply-op! show-id {:op :set-chase :source nil}))}
-              {:fx/type :toggle-button
-               :id "timeline-chase-mtc"
-               :text "MTC"
-               :style-class ["toggle-button" "tl-toggle" "tl-segment"]
-               :focus-traversable false
-               :selected (= :mtc chase)
-               :tooltip {:fx/type :tooltip
-                         :text (str "Follow MIDI timecode from the connected MIDI inputs. Beat 0 sits at "
-                                    "'Starts at'; the timeline plays while timecode runs inside it.")}
-               :on-action (fn [_] (apply-op! show-id {:op :set-chase :source :mtc}))}]})
+(defn- chase-toggle
+  "Off and MTC: :shows/set-timecode for the show (TS-6 may refuse MTC), each
+   showing what applies, so a refused MTC unselects itself (07 §4.11). A
+   click on the one already selected is no edit."
+  [show-id chase]
+  (let [segment (fn [id text selected? enabled? more]
+                  {:fx/type applied-value/applied-control
+                   :property :selected
+                   :address [:show show-id :chase (if enabled? :mtc :off)]
+                   :value selected?
+                   :on-change #(when % {:event/type :shows/set-timecode :show-ids #{show-id} :enabled? enabled?})
+                   :desc (merge {:fx/type :toggle-button
+                                 :id id
+                                 :text text
+                                 :style-class ["toggle-button" "tl-toggle" "tl-segment"]
+                                 :focus-traversable false}
+                                more)})]
+    {:fx/type :h-box
+     :children [(segment "timeline-chase-off" "Off" (nil? chase) false nil)
+                (segment "timeline-chase-mtc" "MTC" (= :mtc chase) true
+                         {:tooltip {:fx/type :tooltip
+                                    :text (str "Follow MIDI timecode from the connected MIDI inputs. Beat 0 sits at "
+                                               "'Starts at'; the timeline plays while timecode runs inside it.")}})]}))
+
+(defn- tc-problem-text
+  "Why the show can't follow timecode, as the inspector says it, with-title
+   the title of the show it would overlap."
+  [{:keys [reason range]} with-title]
+  (case reason
+    :no-bpm "Lock the tempo to follow timecode."
+    :empty "Add clips or set a length to follow timecode."
+    :overlap (str "Overlaps '" with-title "' (" (shows/tc-range-text range) ").")))
+
+(defn- tc-problem-hint
+  "#timeline-tc-problem: why the show can't follow timecode yet
+   (subs/show-timecode-problem), hidden when it can or does."
+  [{:keys [fx/context show-id]}]
+  (let [problem (fx/sub-ctx context subs/show-timecode-problem show-id)
+        with-title (when-let [w (:with problem)]
+                     (shows/title (fx/sub-val context get-in [:chains :shows w])))]
+    {:fx/type :label
+     :id "timeline-tc-problem"
+     :style-class "tl-warning"
+     :wrap-text true
+     :visible (some? problem)
+     :managed (some? problem)
+     :text (if problem (tc-problem-text problem with-title) "")}))
 
 (defn- timeline-section [{:keys [show-id cue global-bpm]}]
   (let [{:keys [enabled? start duration] :or {start 0.0 duration 4.0}} (:loop cue)
@@ -254,12 +284,7 @@
                  (cell 4 0 (field-label "Follow timecode"))
                  (cell 4 1 (assoc (chase-toggle show-id chase) :grid-pane/column-span 2))]}
      {:fx/type mtc-rate-warning :fps fps}
-     {:fx/type :label
-      :text "Tempo isn't locked: the timecode maps to beats at the global BPM."
-      :style-class "tl-warning"
-      :wrap-text true
-      :visible (boolean (and chase (not locked)))
-      :managed (boolean (and chase (not locked)))}
+     {:fx/type tc-problem-hint :show-id show-id}
      {:fx/type :check-box
       :text "Loop"
       :selected (boolean enabled?)

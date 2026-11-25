@@ -323,3 +323,93 @@
     (events/dispatch! {:event/type :edit/undo})
     (ui/wait-for! #(= 4 (count (item-ids))))
     (is (some? (get-in (st) [:chains :shows strobe])) "undo brings it back")))
+
+(def ^:private tc-a #uuid "00000000-0000-0000-0000-0000000000c1")
+(def ^:private tc-b #uuid "00000000-0000-0000-0000-0000000000c2")
+(def ^:private tc-c #uuid "00000000-0000-0000-0000-0000000000c3")
+
+(defn- tc-show
+  "Show title, 120 BPM locked (2 beats a second), 25 fps, one clip of beats
+   beats, beat 0 at tc-start seconds."
+  [title tc-start beats]
+  (let [track (random-uuid)]
+    {:name title
+     :editor-type :timeline
+     :timeline/tempo-bpm 120.0
+     :timeline/tc-fps 25
+     :timeline/tc-start tc-start
+     :tracks [{:id track :type :track :name "Track 1" :collapsed? false}]
+     :items [{:id (random-uuid) :type :preset :preset-id :circle :enabled? true :effects []
+              :track-id track :timeline/start 0.0 :timeline/duration beats}]}))
+
+(defn- chase-of [id] (get-in (st) [:chains :shows id :timeline/chase]))
+
+(defn- tooltip-text [selector]
+  (ui/on-fx-thread #(some-> ^javafx.scene.control.Control (ui/query selector) .getTooltip .getText)))
+
+(deftest refused-tick-snaps-back-with-notice-test
+  (let [robot (ui/robot)
+        tc-box #(str "#shows-tc-" %)]
+    (open-shows! robot)
+    ;; A on over [0, 300); B would be [299, 600); C [600, 900)
+    (events/write-state! assoc-in [:chains :shows] {tc-a (assoc (tc-show "A" 0.0 600.0) :timeline/chase :mtc)
+                                                     tc-b (tc-show "B" 299.0 602.0)
+                                                     tc-c (tc-show "C" 600.0 600.0)})
+    (ui/wait-for! #(= 3 (count (item-ids))))
+    (ui/wait-for! #(ui/selected? (tc-box tc-a)))
+    (testing "a refused tick: the notice, and the box unticks itself"
+      (let [before (count (undo-labels))]
+        (ui/click! robot (tc-box tc-b))
+        (ui/wait-for! #(some-> (get-in (st) [:ui :notice :text]) (.contains "overlaps")))
+        (ui/wait-for! #(some-> (ui/node-text "#status-notice-text") (.contains "overlaps")))
+        (Thread/sleep 400)
+        (ui/wait-for! #(not (ui/selected? (tc-box tc-b))))
+        (is (not (ui/selected? (tc-box tc-b))))
+        (is (= "'B' overlaps 'A' (00:00:00:00–00:05:00:00)" (get-in (st) [:ui :notice :text])))
+        (is (nil? (chase-of tc-b)))
+        (is (= before (count (undo-labels))) "no undo step")))
+    (testing "a tick that applies stays, one step"
+      (ui/click! robot (tc-box tc-c))
+      (ui/wait-for! #(= :mtc (chase-of tc-c)))
+      (Thread/sleep 400)
+      (ui/sync-fx!)
+      (is (ui/selected? (tc-box tc-c)))
+      (is (= "Enable Timecode" (top-undo))))
+    (testing "the row menu's Disable Timecode acts on the selection"
+      (ui/on-fx-thread #(.selectIndices (.getSelectionModel (table)) 0 (int-array [2])))
+      (ui/wait-for! #(= #{tc-a tc-c} (get-in (st) [:ui :shows :selected])))
+      (ui/right-click-node! robot (ui/query (cell :title tc-c)))
+      (menu-item! "Disable Timecode")
+      (ui/wait-for! #(and (nil? (chase-of tc-a)) (nil? (chase-of tc-c))))
+      (is (= "Disable Timecode" (top-undo)))
+      (ui/wait-for! #(not (ui/selected? (tc-box tc-a)))))
+    (testing "and Enable Timecode, on a row outside the selection: that row"
+      (ui/right-click-node! robot (ui/query (cell :title tc-b)))
+      (menu-item! "Enable Timecode")
+      (ui/wait-for! #(= :mtc (chase-of tc-b)))
+      (is (nil? (chase-of tc-a)))
+      (ui/wait-for! #(ui/selected? (tc-box tc-b))))))
+
+(deftest tc-problem-tooltip-test
+  (let [robot (ui/robot)
+        warn #(str "#shows-tc-problem-" %)]
+    (open-shows! robot)
+    (events/write-state! assoc-in [:chains :shows] {genesis (show "Genesis" "Justice" nil)
+                                                     strobe (show "Strobe" "deadmau5" 128.0)
+                                                     tc-a (assoc (tc-show "A" 0.0 600.0) :timeline/chase :mtc)
+                                                     tc-b (tc-show "B" 299.0 602.0)
+                                                     tc-c (tc-show "C" 600.0 600.0)})
+    (ui/wait-for! #(= 5 (count (item-ids))))
+    (testing "an unlocked show's ⚠ says it needs a BPM"
+      (ui/wait-for! #(ui/visible? (warn genesis)))
+      (is (= "⚠" (ui/node-text (warn genesis))))
+      (is (= "needs a BPM" (tooltip-text (warn genesis)))))
+    (testing "an empty show's, and one that would overlap"
+      (is (= "empty" (tooltip-text (warn strobe))))
+      (is (= "would overlap 'A' (00:00:00:00–00:05:00:00)" (tooltip-text (warn tc-b)))))
+    (testing "no ⚠ on a show that follows, or one that could"
+      (is (empty? (ui/query-all (warn tc-a))))
+      (is (empty? (ui/query-all (warn tc-c)))))
+    (testing "locking the tempo takes the reason away"
+      (events/write-state! assoc-in [:chains :shows genesis :timeline/tempo-bpm] 120.0)
+      (ui/wait-for! #(= "empty" (tooltip-text (warn genesis)))))))
