@@ -68,7 +68,7 @@ These came up in more than one review and are best fixed once, centrally.
 ### T4. Timing: no single clock
 - Cue timing mixes relative and absolute time, so once-mode modulators are stuck at 0 (03).
 - Cue timing advances at 30 Hz (preview timer) while hardware streams at 60 Hz. `Thread/sleep` pacing jitters; `:scan-rate` is ignored; wall-clock ms timestamps are used (04).
-- Input timestamps are overwritten by queue time, which adds tap-tempo jitter (02, 05). Link downbeat sync uses the wrong clock (05).
+- Input timestamps are overwritten by queue time, which adds tap-tempo jitter (02, 05). Link downbeat sync used the wrong clock (05); it was replaced on 2026-11-25 by beat alignment through Carabiner's `phase-at-time` query (`input/link.clj`), and bar sync is parked.
 - **Fix:** one monotonic frame-clock thread (nanoTime) that renders once per tick, feeds every projector and the preview, and passes a single relative timing context down the effect chain.
 
 ### T5. Over-broad subscriptions and hot-path allocation
