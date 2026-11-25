@@ -7,6 +7,7 @@
    [clojure.test :refer [deftest is testing]]
    [laser-show.animation.effects :as registry]
    [laser-show.animation.effects.shape]
+   [laser-show.events.core :as events]
    [laser-show.state.history :as history]
    [laser-show.events.handlers.cue-chain :as cue-chain]
    [laser-show.events.handlers.chain :as chain]
@@ -463,6 +464,74 @@
       (is (not (contains? (get-in cleared [:state :chains :cue-chains [0 0]]) :target)) "nil: none, it inherits"))
     (is (= {:state sample-state-with-item} (set-target {:col 4})) "a cell with no cue: nothing")
     (is (= {:state base-state} (cue-chain/handle {:event/type :cue-chain/set-target :state base-state})))))
+
+
+;; A preset's parameters (follow-up N10): by the item's id, as its target
+
+
+(def ^:private presets
+  "The cue at [0 0]: Circle, Square, then the group Pair holding Star."
+  (assoc-in sample-state-with-item [:chains :cue-chains [0 0] :items]
+            [{:type :preset :id :circle :preset-id :circle :params {:radius 0.5 :red 1.0 :green 1.0 :blue 1.0} :effects []}
+             {:type :preset :id :square :preset-id :square :params {:size 0.5 :red 1.0 :green 1.0 :blue 1.0} :effects []}
+             {:type :group :id :pair :name "Pair" :items [{:type :preset :id :star :preset-id :star :params {:spikes 5}}]}]))
+
+(defn- preset-edit
+  "What the preset editor sends for item-id of the cue at [col row], of
+   type (:cue-chain/update-preset-param, -param-from-text, update-preset-color)."
+  [state type item-id & {:as more}]
+  (cue-chain/handle (merge {:event/type type :col 0 :row 0 :item-id item-id :state state} more)))
+
+(defn- params-of
+  "The params of the preset item-id of the cue at [0 0] in state."
+  [state item-id]
+  (let [items (get-in state [:chains :cue-chains [0 0] :items])]
+    (:params (some #(when (= item-id (:id %)) %) (tree-seq map? #(concat (:items %)) {:items items})))))
+
+(deftest preset-edits-find-their-item-test
+  (let [reordered (update-in presets [:chains :cue-chains [0 0] :items] (fn [[c s p]] [s p c]))]
+    (testing "a value, typed text and a colour, each on its item"
+      (is (= 0.3 (:radius (params-of (:state (preset-edit presets :cue-chain/update-preset-param :circle :param-key :radius :fx/event 0.3)) :circle))))
+      (is (= 0.25 (:radius (params-of (:state (preset-edit presets :cue-chain/update-preset-param-from-text :circle :param-key :radius
+                                                           :min 0.1 :max 1.0 :is-int? false :text "0.25"))
+                                      :circle))))
+      (is (= {:red 0.0 :green 0.5 :blue 1.0}
+             (select-keys (params-of (:state (preset-edit presets :cue-chain/update-preset-color :circle :color [0.0 0.5 1.0])) :circle)
+                          [:red :green :blue]))))
+    (testing "one in a group, and an :int parameter's number whole (follow-up N1)"
+      (is (= 7 (:spikes (params-of (:state (preset-edit presets :cue-chain/update-preset-param :star :param-key :spikes :fx/event 6.7)) :star)))))
+    (testing "made before a reorder, handled after it: its own item, where it is now; the others as they were"
+      (doseq [[type more] [[:cue-chain/update-preset-param {:param-key :radius :fx/event 0.3}]
+                           [:cue-chain/update-preset-param-from-text {:param-key :radius :min 0.1 :max 1.0 :is-int? false :text "0.3"}]
+                           [:cue-chain/update-preset-color {:color [0.0 0.5 1.0]}]]]
+        (let [after (:state (apply preset-edit reordered type :circle (mapcat identity more)))]
+          (is (not= (params-of reordered :circle) (params-of after :circle)) (str type ": Circle, now last"))
+          (is (= (params-of reordered :square) (params-of after :square)) (str type ": Square, now first, as it was"))
+          (is (= (update-in reordered [:chains :cue-chains [0 0] :items 2] dissoc :params)
+                 (update-in after [:chains :cue-chains [0 0] :items 2] dissoc :params))
+              (str type ": nothing else")))))
+    (testing "an item that is gone, another cue's, a group or none: nothing ({})"
+      (let [deleted (update-in presets [:chains :cue-chains [0 0] :items] (comp vec rest))]
+        (doseq [[type more] [[:cue-chain/update-preset-param {:param-key :radius :fx/event 0.3}]
+                             [:cue-chain/update-preset-param-from-text {:param-key :radius :min 0.1 :max 1.0 :is-int? false :text "0.3"}]
+                             [:cue-chain/update-preset-color {:color [0.0 0.5 1.0]}]]]
+          (is (= {} (apply preset-edit deleted type :circle (mapcat identity more))) (str type ": Circle deleted, Square in its place"))
+          (is (= {} (apply preset-edit presets type :circle :col 1 (mapcat identity more))) (str type ": another cell"))
+          (is (= {} (apply preset-edit presets type :pair (mapcat identity more))) (str type ": a group"))
+          (is (= {} (apply preset-edit presets type nil (mapcat identity more))) (str type ": no item named")))))
+    (testing "what changes nothing: nothing ({})"
+      (is (= {} (preset-edit presets :cue-chain/update-preset-param :circle :param-key :radius :fx/event 0.5)) "the value it has")
+      (is (= {} (preset-edit presets :cue-chain/update-preset-param-from-text :circle :param-key :radius
+                             :min 0.1 :max 1.0 :is-int? false :text "abc"))
+          "text that isn't a number")
+      (is (= {} (preset-edit presets :cue-chain/update-preset-color :circle :fx/event (javafx.event.ActionEvent.)))
+          "a colour edit with no colour"))
+    (testing "through the pipeline: one undo step, Edit Preset"
+      (let [s0 (history/mark-clean presets)
+            after (:state (events/handle-event-pipeline {:event/type :cue-chain/update-preset-param :col 0 :row 0 :item-id :circle
+                                                         :param-key :radius :fx/event 0.3 :state s0}))]
+        (is (= 0.3 (:radius (params-of after :circle))))
+        (is (= "Edit Preset" (history/undo-label (:history after))))))))
 
 (deftest list-editor-component-rendering-test
   (testing "list-editor component description can be constructed with context menu"

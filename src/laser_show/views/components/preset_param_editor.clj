@@ -9,7 +9,9 @@
    - Choice: Combo box
    
    Uses the shared parameter-controls namespace for rendering controls.
-   Uses generic :chain/* events with {:domain :cue-chains} for all parameter updates."
+   Its updates are :cue-chain/update-preset-param, -param-from-text and
+   :cue-chain/update-preset-color, naming the item by its :id (follow-up
+   N10)."
   (:require [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.animation.presets :as presets]))
 
@@ -19,11 +21,14 @@
    gets shorter than its rows: in the cue chain editor, what is below it (an
    effect's parameters, which scroll) gives way first.
    
+   Its edits name the item by its :id and the cue by its cell, never the
+   item's place (follow-up N10, as R2's Target choice): the handlers find
+   the item where it is when they run, and do nothing once it is gone.
+   
    Props:
    - :cell - [col row] of cell being edited
-   - :preset-path - Path to the selected preset in the cue chain
-   - :preset-instance - The preset instance data {:preset-id :params {...} ...}"
-  [{:keys [cell preset-path preset-instance]}]
+   - :preset-instance - The preset instance data {:id :preset-id :params {...} ...}"
+  [{:keys [cell preset-instance]}]
   (let [preset-id (:preset-id preset-instance)
         preset-def (presets/presets-by-id preset-id)
         current-params (:params preset-instance {})
@@ -31,21 +36,12 @@
         [col row] (if (and (vector? cell) (= 2 (count cell)))
                     cell
                     [0 0])
-        ;; Build event templates using generic chain handlers
-        ;; These get :param-key added by the controls
-        ;; Use :effect-path key for consistency with chain handlers (path to item within chain)
-        on-change-event {:event/type :chain/update-param
-                         :domain :cue-chains
-                         :entity-key [col row]
-                         :effect-path preset-path}
-        on-text-event {:event/type :chain/update-param-from-text
-                       :domain :cue-chains
-                       :entity-key [col row]
-                       :effect-path preset-path}
-        on-color-event {:event/type :chain/update-color-param
-                        :domain :cue-chains
-                        :entity-key [col row]
-                        :effect-path preset-path}]
+        ;; The controls add :param-key and the value, the typed :text or the
+        ;; picked :color (events/handlers/cue_chain.clj)
+        item {:col col :row row :item-id (:id preset-instance)}
+        on-change-event (assoc item :event/type :cue-chain/update-preset-param)
+        on-text-event (assoc item :event/type :cue-chain/update-preset-param-from-text)
+        on-color-event (assoc item :event/type :cue-chain/update-preset-color)]
     {:fx/type :v-box
      :spacing 8
      :min-height :use-pref-size

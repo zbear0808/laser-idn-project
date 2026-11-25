@@ -7,6 +7,8 @@
    This file handles cue-chain-specific operations:
    - Editor lifecycle (open)
    - Preset management (add)
+   - A preset's own parameters and colour, by the item's :id and the cue's
+     cell, found where the item is when the edit is handled (follow-up N10)
    - Tab switching (preset banks, effect banks)
    - Targets: the cue's and each item's (zones plan Z4)
    
@@ -23,6 +25,8 @@
             [laser-show.animation.chains :as chains]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.effects :as effects]
+            [laser-show.events.handlers.chain.helpers :as chain-helpers]
+            [laser-show.events.handlers.chain.params :as params]
             [laser-show.routing.targets :as targets]))
 
 
@@ -110,9 +114,49 @@
                   :mode :single}})
     {:state state}))
 
-;; NOTE: Preset parameter handlers have been removed - now using generic :chain/* events
-;; from chain.clj with {:domain :cue-chains :entity-key [col row] :effect-path preset-path}
-;; This includes :chain/update-param, :chain/update-param-from-text, :chain/update-color-param
+;; A preset's parameters (follow-up N10): the item by its id, as its target
+;; is (R2). The preset editor sends the cue's cell and the item's :id, never
+;; its place, so an edit made before a reorder edits its own item.
+
+
+(defn- preset-edit
+  "The effects of an edit of the preset :item-id of the cue at [col row]:
+   (f state config path), path where the item is when the event is handled
+   (chains/find-path-by-id), as {:state}. {} once the item is gone (or is
+   no preset), or when the edit changes nothing."
+  [{:keys [col row item-id state]} f]
+  (let [config (chain-helpers/chain-config :cue-chains [col row])
+        items (get-in state (:items-path config))
+        path (when (and (some? item-id) (sequential? items))
+               (chains/find-path-by-id (vec items) item-id))
+        item-path (when path (into (:items-path config) path))]
+    (if (and path (some? (:preset-id (get-in state item-path))))
+      (let [new-state (f state config path)]
+        (if (= (get-in state item-path) (get-in new-state item-path))
+          {}
+          {:state new-state}))
+      {})))
+
+(defn- handle-update-preset-param
+  "Set a parameter (:param-key) of the preset :item-id of the cue at [col
+   row] to :fx/event or :value, a slider's, a choice's or a check box's (a
+   whole number for an :int parameter: params/handle-update-param)."
+  [event]
+  (preset-edit event #(params/handle-update-param %1 %2 (assoc (select-keys event [:param-key :fx/event :value])
+                                                               :effect-path %3))))
+
+(defn- handle-update-preset-param-from-text
+  "Set a parameter of the preset :item-id from its text field's typed :text
+   (params/handle-update-param-from-text, with :min, :max and :is-int?)."
+  [event]
+  (preset-edit event #(params/handle-update-param-from-text %1 %2 (assoc (select-keys event [:param-key :min :max :is-int? :text])
+                                                                         :effect-path %3))))
+
+(defn- handle-update-preset-color
+  "Set the colour (:red :green :blue) of the preset :item-id to the
+   picked :color [red green blue] (params/color-value, params/write-color)."
+  [event]
+  (preset-edit event #(params/write-color %1 %2 %3 (params/color-value event))))
 
 
 ;; Tab Switching
@@ -254,6 +298,11 @@
     ;; Targets
     :cue-chain/set-target (handle-cue-chain-set-target event)
     :cue-chain/set-item-target (handle-cue-chain-set-item-target event)
+    
+    ;; A preset's parameters, by the item's id
+    :cue-chain/update-preset-param (handle-update-preset-param event)
+    :cue-chain/update-preset-param-from-text (handle-update-preset-param-from-text event)
+    :cue-chain/update-preset-color (handle-update-preset-color event)
     
     ;; Name
     :cue-chain/set-name (handle-cue-chain-set-name event)

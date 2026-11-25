@@ -168,9 +168,9 @@
 
 (defn- middle-section
   "Middle section with preset bank and parameter editor, for the selected
-   item (:selected-item, at :selected-item-path; nil when none or several
-   are selected)."
-  [{:keys [fx/context col row active-preset-tab selected-item-path selected-item]}]
+   item (:selected-item; nil when none or several are selected). It doesn't
+   take the item's place: its edits name the item (R2, N10)."
+  [{:keys [fx/context col row active-preset-tab selected-item]}]
   (let [is-preset? (and selected-item (= :preset (:type selected-item)))
         is-group? (and selected-item (chains/group? selected-item))
         explain (fx/sub-ctx context subs/cue-target-explain col row)
@@ -207,7 +207,6 @@
                                {:fx/type preset-param-editor/preset-param-editor
                                 :v-box/vgrow :always
                                 :cell [col row]
-                                :preset-path selected-item-path
                                 :preset-instance selected-item}]}
                    (when is-group?
                      {:fx/type :v-box
@@ -384,7 +383,6 @@
                                                  {:fx/type middle-section
                                                   :col col :row row
                                                   :active-preset-tab active-preset-tab
-                                                  :selected-item-path first-selected-path
                                                   :selected-item selected-item}
 
                                                  ;; Effect bank (when item selected)
