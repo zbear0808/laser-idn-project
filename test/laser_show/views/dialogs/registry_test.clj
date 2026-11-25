@@ -33,3 +33,14 @@
         "a fresh show must not offer a report to reopen")
     (is (= 1 (fx/sub-ctx loaded rig-report/warning-count))
         "a loaded show without hardware data can still have a missing pin to report")))
+
+(deftest rig-report-counts-shows-test
+  ;; plans/2026-11-25-timeline-shows 04 §4.6: the report reads [:chains :shows] too
+  (let [id #uuid "00000000-0000-0000-0000-0000000000aa"
+        loaded (-> (domains/build-initial-state)
+                   (assoc-in [:chains :shows id] {:editor-type :timeline :target :auto.laser/missing :tracks [] :items []})
+                   (assoc-in [:ui :dialogs :rig-report] {:open? false :file "friday.zip" :hardware nil}))
+        ctx (fx/create-context loaded state/cache-factory)]
+    (is (= [{:ref :auto.laser/missing :name "missing" :cues 0 :shows 1}]
+           (:missing-pins (fx/sub-ctx ctx rig-report/report))))
+    (is (= 1 (fx/sub-ctx ctx rig-report/warning-count)))))
