@@ -3,6 +3,7 @@
             [laser-show.animation.show-time :as show-time]
             [laser-show.services.frame-service :as fs]
             [laser-show.state.domains :as domains]
+            [laser-show.state.persistent :as persistent]
             [laser-show.state.templates :as templates]
             [laser-show.vibes.faders :as faders]
             [laser-show.vibes.library :as library]))
@@ -151,3 +152,12 @@
       (is (= #{:all} (into #{} (mapcat #(keys (fs/generate-frames-by-zone % {:effective-beats 0.0 :accumulated-beats 0.0 :bpm 120.0})))
                            (vals cues)))
           "they all draw on All"))))
+
+(deftest new-project-has-no-shows-test
+  (testing "timeline shows plan 04 §4.11: no starter show, so a new project's library is empty"
+    (let [show-id #uuid "00000000-0000-0000-0000-000000000001"
+          busy (assoc-in (domains/build-initial-state) [:chains :shows show-id] {:name "Old" :editor-type :timeline})
+          fresh (persistent/new-project-state busy)]
+      (is (= {} (get-in (domains/build-initial-state) [:chains :shows])) "the domain's default")
+      (is (= {} (get-in fresh [:chains :shows])) "File > New: the old show's library goes")
+      (is (false? (get-in fresh [:project :dirty?]))))))
