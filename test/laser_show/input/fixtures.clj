@@ -140,7 +140,9 @@
    (no socket, no daemon, nothing started): carabiner is an atom
    {:connected? :status :status-listeners :disconnection-listeners :calls}.
    bc/connect connects (fails with :refuse?), bc/active? and bc/state read
-   it (:status, :link-bpm :link-peers, as given), bc/disconnect disconnects
+   it (:status, :link-bpm :link-peers, as given; a :port only when :status
+   gives one, e.g. with-phase-server's, so otherwise the Link owner opens
+   no query connection), bc/disconnect disconnects
    and, as beat-carabiner's read loop does then, tells the disconnection
    listeners left (unexpected? false), and the listeners' add and remove
    fns keep them. bc/beat-at-time, which would move the Link session's beat

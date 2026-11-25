@@ -245,22 +245,24 @@
    {:token :socket :reader :writer}, a socket to the loopback address
    (Carabiner listens only there, and takes several clients) at
    beat-carabiner's port (bc/state's :port). nil (logged) when it can't be
-   opened."
+   opened, and nil without trying when bc/state has no port: beat-carabiner
+   always gives one, so only a stand-in has none (input.fixtures'
+   with-carabiner), and a guess would reach the real daemon's port."
   [token]
-  (let [port (int (or (:port (bc/state)) 17000))
-        socket (Socket.)]
-    (try
-      (.connect socket (InetSocketAddress. "127.0.0.1" port) (int query-timeout-ms))
-      (.setSoTimeout socket (int query-timeout-ms))
-      (.setTcpNoDelay socket true)
-      {:token token
-       :socket socket
-       :reader (BufferedReader. (InputStreamReader. (.getInputStream socket) StandardCharsets/UTF_8))
-       :writer (.getOutputStream socket)}
-      (catch Exception e
-        (try (.close socket) (catch Exception _ nil))
-        (log/warn "Could not open a query connection to Carabiner on port" port ":" (.getMessage e))
-        nil))))
+  (when-let [port (:port (bc/state))]
+    (let [socket (Socket.)]
+      (try
+        (.connect socket (InetSocketAddress. "127.0.0.1" (int port)) (int query-timeout-ms))
+        (.setSoTimeout socket (int query-timeout-ms))
+        (.setTcpNoDelay socket true)
+        {:token token
+         :socket socket
+         :reader (BufferedReader. (InputStreamReader. (.getInputStream socket) StandardCharsets/UTF_8))
+         :writer (.getOutputStream socket)}
+        (catch Exception e
+          (try (.close socket) (catch Exception _ nil))
+          (log/warn "Could not open a query connection to Carabiner on port" port ":" (.getMessage e))
+          nil)))))
 
 (defn- query-connection!
   "The query connection of the owner's connection with token: the one
