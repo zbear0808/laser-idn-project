@@ -475,46 +475,64 @@
 (defn- with-paced-driver-engine
   "Call (f engine) with an engine for rec paced by show-time/frame-signal,
    sending tick-provider's frames, while the signal says a clock runs (the
-   test publishes the ticks)."
-  [rec f]
-  (show-time/reset-runtime!)
-  (show-time/set-clock-running! true)
-  (let [engine (start-driver-engine! rec tick-provider :frame-signal show-time/frame-signal)]
-    (try
-      (f engine)
-      (finally
-        (se/stop! engine)
-        (show-time/set-clock-running! false)
-        (show-time/reset-runtime!)))))
+   test publishes the ticks). opts go to create-driver-engine, e.g. :fps or
+   another :frame-signal."
+  ([rec f] (with-paced-driver-engine rec {} f))
+  ([rec opts f]
+   (show-time/reset-runtime!)
+   (show-time/set-clock-running! true)
+   (let [engine (apply start-driver-engine! rec tick-provider
+                       (mapcat identity (merge {:frame-signal show-time/frame-signal} opts)))]
+     (try
+       (f engine)
+       (finally
+         (se/stop! engine)
+         (show-time/set-clock-running! false)
+         (show-time/reset-runtime!))))))
 
 (defn- sent-ticks [rec]
   (into [] (keep #(some-> (tick-of %) (mod 1000))) @(:frames rec)))
 
+(defn- first-send-at
+  "Index in rec's calls of the first send of tick's frame, nil until that
+   call is recorded (the driver keeps the frame just before it)."
+  [rec tick]
+  (let [frames @(:frames rec)
+        sends (keep-indexed (fn [i [kind]] (when (= :send kind) i)) @(:calls rec))]
+    (when-let [k (first (keep-indexed (fn [i f] (when (= (mod tick 1000) (some-> (tick-of f) (mod 1000))) i))
+                                      frames))]
+      (nth sends k nil))))
+
 (deftest device-paced-driver-waits-for-ready-test
   (testing "01 §1.3 case B: not ready twice, then ready: that tick's frame goes out then"
-    (let [slow-tick (atom nil)
+    (let [woken-for (atom nil)
+          slow-tick (atom nil)
           polls (atom 0)
+          ;; The engine reads the newest tick once per wake, before it asks :ready?, so the
+          ;; driver is slow for the wake that readies b, whatever is newest when asked
+          signal (assoc show-time/frame-signal :tick #(reset! woken-for ((:tick show-time/frame-signal))))
           rec (rd/recording-driver {:ready (fn []
-                                             (if (= @slow-tick (:tick (show-time/latest)))
+                                             (if (and @slow-tick (= @slow-tick @woken-for))
                                                (< 2 (swap! polls inc))
                                                true))})]
-      (with-paced-driver-engine rec
+      ;; At 1 fps no keepalive of a (3 s on) is under way when b is published, and a
+      ;; stalled JVM can't stretch b's polls (about 1 ms) past one interval into a skip
+      ;; (case C)
+      (with-paced-driver-engine rec {:frame-signal signal :fps 1}
         (fn [engine]
           (let [a (publish!)]
             (is (dac/wait-for! #(some #{(mod a 1000)} (sent-ticks rec)) 1000) "a ready driver gets the tick at once")
             (reset! slow-tick (inc a))
-            (let [b (publish!)]
+            (let [b (publish!)
+                  at (dac/wait-for! #(first-send-at rec b) 1000)
+                  calls @(:calls rec)]
               (is (= (inc a) b))
-              (is (dac/wait-for! #(some #{(mod b 1000)} (sent-ticks rec)) 1000))
-              (let [calls @(:calls rec)
-                    frames @(:frames rec)
-                    ;; Index in calls of the first send of b's frame
-                    k (first (keep-indexed (fn [i f] (when (= (mod b 1000) (mod (tick-of f) 1000)) i)) frames))
-                    at (nth (keep-indexed (fn [i [kind]] (when (= :send kind) i)) calls) k)]
+              (is (some? at) "b's frame goes out")
+              (when at
                 (is (= [[:ready? false] [:ready? false] [:ready? true] [:send 2]]
-                       (subvec calls (- at 3) (inc at)))
-                    "asked again until it is ready, then sent")
-                (is (zero? (:frames-skipped (se/get-stats engine))))))))))))
+                       (subvec calls (max 0 (- at 3)) (inc at)))
+                    "asked again until it is ready, then sent"))
+              (is (zero? (:frames-skipped (se/get-stats engine)))))))))))
 
 (deftest device-paced-driver-skips-a-tick-test
   (testing "01 §1.3 case C: not ready for a whole interval: nothing is sent for that tick, it

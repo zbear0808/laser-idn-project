@@ -138,7 +138,29 @@
                                             {:a (streaming 59.8) :b {:state :error :error "no host"}})))
       (is (= "2 errors"
              (status-bar/output-health-text (on :error ["A: x" "B: y"])
-                                            {:a {:state :error :error "x"} :b {:state :error :error "y"}}))))))
+                                            {:a {:state :error :error "x"} :b {:state :error :error "y"}}))))
+    (testing "an error while an old engine retires: no rate, as a report can be the old engine's, but what the toolbar says"
+      (is (= "Updating outputs… · 1 error"
+             (status-bar/output-health-text (assoc (on :error ["A: open failed"] "Updating outputs… · 1 error") :retiring? true)
+                                            {:old (streaming 59.8) :a {:state :error :error "open failed"}}))))))
+
+(deftest output-health-shows-no-retiring-engine-test
+  (let [health (fn [status]
+                 (select-keys (status-bar/output-health
+                               {:fx/context (fx/create-context
+                                             (-> (domains/build-initial-state)
+                                                 (assoc-in [:backend :streaming :running?] true)
+                                                 (assoc-in [:backend :streaming :status] status))
+                                             state/cache-factory)})
+                              [:value :tooltip]))]
+    (testing "an output fails while an old engine, still streaming, retires: not the old engine's rate"
+      (is (= {:value "Updating outputs… · 1 error" :tooltip "Updating outputs… · 1 error\na: open failed"}
+             (health {:engines 2 :wanted 1 :pending? true
+                      :projectors {:old {:state :streaming :fps 59.8} :a {:state :error :error "open failed"}}}))))
+    (testing "while only a command is pending, every report is of a wanted output: its rate shows"
+      (is (= {:value "59.8 fps · 1 error" :tooltip "59.8 fps · 1 error\nb: open failed"}
+             (health {:engines 2 :wanted 2 :pending? true
+                      :projectors {:a {:state :streaming :fps 59.8} :b {:state :error :error "open failed"}}}))))))
 
 (defn- status-bar-items
   "The components the status bar shows, with dev mode on or off."

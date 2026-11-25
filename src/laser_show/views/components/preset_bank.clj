@@ -57,7 +57,7 @@
      :on-tab-change (or on-tab-change {:event/type :cue-chain/set-preset-tab})
      ;; Data-driven: pass items map instead of function
      :items-by-category presets-by-category
-     ;; Data-driven event template - handler will receive :item-id and :item
+     ;; Data-driven event template - the handler receives :item-id alone
      :item-event-template event-template
      :item-name-key :name
      :item-id-key :id
