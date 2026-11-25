@@ -6,6 +6,7 @@
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.animation.effects.shape]
+            [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.animation.show-time :as show-time]
             [laser-show.app]
             [laser-show.backend.multi-engine :as me]
@@ -37,6 +38,7 @@
             [laser-show.state.history :as history]
             [laser-show.state.persistent :as persistent]
             [laser-show.state.templates :as templates]
+            [laser-show.timeline.shows :as shows]
             [laser-show.vibes.faders :as faders]
             [laser-show.views.components.slider-meters :as meters]))
 
@@ -59,11 +61,14 @@
    :items [{:id :a :type :preset :preset-id :circle :track-id :t :enabled? true :effects []
             :timeline/start 0.0 :timeline/duration 4.0}]})
 
-(defn- init! [chains]
-  (state/init-state! (-> (domains/build-initial-state)
-                         (assoc-in [:chains :cue-chains] chains)
-                         (assoc-in [:timing :bpm] 120.0)))
-  (show-time/reset-runtime!))
+(defn- init!
+  ([chains] (init! chains nil))
+  ([chains shows]
+   (state/init-state! (cond-> (-> (domains/build-initial-state)
+                                  (assoc-in [:chains :cue-chains] chains)
+                                  (assoc-in [:timing :bpm] 120.0))
+                        shows (assoc-in [:chains :shows] shows)))
+   (show-time/reset-runtime!)))
 
 (use-fixtures :each (fn [f]
                       (init! {})
@@ -477,6 +482,42 @@
     (let [s (ticks! 2)]
       (is (= {[2 0] [:zone/a] [3 0] [:graphics]}
              (into {} (map (fn [{:keys [cell zone-frames]}] [cell (vec (keys zone-frames))])) (:cues s)))))))
+
+(deftest show-key-ignores-column-target-test
+  (testing "a show has no column: it draws to the show's default target, a grid cue in column 0 to its column's"
+    (let [u #uuid "00000000-0000-0000-0000-0000000005a1"
+          sk (shows/play-key u)
+          active-runs show-time/active-runs]
+      (init! {[0 0] (cue :circle)} {u one-clip-timeline})
+      (state/swap-state! #(-> %
+                              (assoc-in [:grid :column-targets] {0 :zone/a})
+                              (assoc-in [:config :default-target] :graphics)))
+      (trigger! 0 0)
+      (state/swap-state! update :playback cue-timing/activate-cue sk (random-uuid) {:timeline? true :start-beat 0.0})
+      ;; Until show-time resolves a show's cue itself (shows/cue-at, S1's
+      ;; clock half), the show's run is rendered with its cue here; once it
+      ;; does, this adds nothing
+      (with-redefs [show-time/active-runs
+                    (fn [state runtime]
+                      (let [runs (active-runs state runtime)
+                            run (get-in state [:playback :active-cues sk :run])]
+                        (if (or (some #(= sk (:cell %)) runs) (nil? (get-in runtime [:runs run])))
+                          runs
+                          (conj runs {:cell sk :run run :cue-chain (shows/cue-at state sk)
+                                      :cue-timing (get-in runtime [:runs run])}))))]
+        (let [s (ticks! 2)]
+          (is (= {[0 0] [:zone/a] sk [:graphics]}
+                 (into {} (map (fn [{:keys [cell zone-frames]}] [cell (vec (keys zone-frames))])) (:cues s))))
+          (is (not (contains? (output-errors/snapshot) [:render sk]))))))))
+
+(deftest edited-cells-name-a-shows-key-test
+  (let [u #uuid "00000000-0000-0000-0000-0000000005a1"
+        edited #'show-clock/edited-cells]
+    (is (= #{[1 2] [:show u]}
+           (edited {:ui {:dialogs {:cue-chain-editor {:open? true :col 1 :row 2}
+                                   :timeline-cue-editor {:open? true :show-id u}}}})))
+    (is (= #{[3 0]} (edited {:ui {:dialogs {:timeline-cue-editor {:open? true :col 3 :row 0}}}})) "the timeline editor on a cell, as now")
+    (is (= #{} (edited {:ui {:dialogs {:timeline-cue-editor {:open? false :show-id u}}}})))))
 
 (deftest a-throwing-resolver-keeps-the-last-routing-test
   (init! {[0 0] (cue :circle)})

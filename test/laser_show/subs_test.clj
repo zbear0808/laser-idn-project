@@ -26,6 +26,7 @@
    [laser-show.routing.zone-maps :as zone-maps]
    [laser-show.routing.zone-patterns :as zone-patterns]
    [laser-show.state.templates :as templates]
+   [laser-show.timeline.shows :as shows]
    [laser-show.vibes.engine :as engine]
    [laser-show.vibes.faders :as faders]
    [laser-show.vibes.library :as library]
@@ -942,6 +943,20 @@
                               subs/playing-cues)))))
     (testing "nothing plays while Stop holds them"
       (is (= [] (fx/sub-ctx (context (after playing-state :transport/stop)) subs/playing-cues))))))
+
+(deftest playing-cues-skips-show-keys-test
+  (let [u #uuid "00000000-0000-0000-0000-0000000005a1"
+        with-show (-> playing-state
+                      (assoc-in [:chains :shows u] {:editor-type :timeline :items []})
+                      (assoc-in [:playback :active-cues (shows/play-key u)] {:run #uuid "00000000-0000-0000-0000-000000000004"}))]
+    (testing "a show playing beside them: the grid's cues, in grid order, and no throw"
+      (is (= [[0 0] [1 0] [0 1]] (map (juxt :col :row) (fx/sub-ctx (context with-show) subs/playing-cues)))))
+    (testing "a show alone: no grid cue plays"
+      (is (= [] (fx/sub-ctx (context (assoc-in with-show [:playback :active-cues]
+                                               {(shows/play-key u) {:run #uuid "00000000-0000-0000-0000-000000000004"}}))
+                            subs/playing-cues))))
+    (testing "Stop holds the show too"
+      (is (= 4 (fx/sub-ctx (context (after with-show :transport/stop)) subs/held-cue-count))))))
 
 (deftest connection-status-says-why-nothing-streams-test
   (let [said-at (fn [running? status]

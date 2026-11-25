@@ -5,6 +5,7 @@
    [laser-show.state.history :as history]
    [laser-show.state.core :as state]
    [laser-show.events.handlers.menu :as menu]
+   [laser-show.timeline.shows :as shows]
    [laser-show.state.domains :refer [build-initial-state]]))
 
 (def base-state
@@ -56,6 +57,20 @@
       (is (= (get-in result [:state :ui :clipboard]) (:clipboard/write result)))
       (is (= {:items [{:preset-id :circle}]}
              (get-in result [:state :ui :clipboard :data]))))))
+
+(deftest copy-fallback-skips-show-keys-test
+  (testing "Edit > Copy's fallback takes the first playing grid cue, never a show's key"
+    (let [u #uuid "00000000-0000-0000-0000-0000000005a1"
+          state (-> base-state
+                    (assoc-in [:ui :active-tab] :grid)
+                    (assoc-in [:grid :selected-cell] nil)
+                    (assoc-in [:chains :cue-chains [1 0]] {:items [{:preset-id :square}]})
+                    (assoc-in [:chains :shows u] {:editor-type :timeline :items []})
+                    (assoc-in [:playback :active-cues] (array-map (shows/play-key u) {:run (random-uuid)}
+                                                                  [1 0] {:run (random-uuid)})))
+          result (menu/handle {:event/type :edit/copy :state state :time 77})]
+      (is (= :cue-chain (get-in result [:state :ui :clipboard :type])))
+      (is (= {:items [{:preset-id :square}]} (get-in result [:state :ui :clipboard :data]))))))
 
 (deftest handle-edit-copy-effects-test
   (testing "Edit > Copy on effects tab with selected cell copies effects chain"

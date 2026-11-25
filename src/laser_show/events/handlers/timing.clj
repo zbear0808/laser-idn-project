@@ -25,6 +25,7 @@
             [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.timeline.playback :as playback]
+            [laser-show.timeline.shows :as shows]
             [laser-show.triggers.tap-tempo :as tap]
             [clojure.tools.logging :as log]))
 
@@ -162,7 +163,8 @@
 
 
 (defn- handle-show-clock-cue-ended
-  "The show clock saw the run at cell end (a timeline at its end, a vibe
+  "The show clock saw the run at key cell end (a grid cell or a show,
+   timeline.shows; a timeline at its end, a vibe
    cue's decay) at the position :position-ids names. The cue stops only if
    its intent still names that run and the ids are this state's
    (cue-timing/position-ids): a cue started again since (a new run), moved,
@@ -176,7 +178,7 @@
     {:state (if (and (some? run)
                      (= run (:run intent))
                      (not (:chasing? intent))
-                     (not (playback/chases-mtc? (get-in state [:chains :cue-chains cell])))
+                     (not (playback/chases-mtc? (shows/cue-at state cell)))
                      (= position-ids (cue-timing/position-ids playback cell)))
               (update state :playback cue-timing/deactivate-cue cell)
               state)}))
@@ -186,12 +188,13 @@
   [:cell :active? :document-id :source-version :expected-owner :chase-id :start])
 
 (defn- handle-show-clock-chase
-  "The show clock saw timecode take the cell over (:active? true) or let go
+  "The show clock saw timecode take the key cell (a grid cell or a show,
+   timeline.shows) over (:active? true) or let go
    of it (false), for the show, the cue version and the owner the report
    names (show-time's chase reports). One for another show (a New or an
    Open since, or none named) is dropped at once ({}). Otherwise the report
    goes on to :show-clock/apply-chase with what the clock chases at the
-   cell now (:show-clock/read :chase-cell): timecode may have stopped, or
+   key now (:show-clock/read :chase-cell): timecode may have stopped, or
    come back, since it was sent."
   [{:keys [cell state] :as event}]
   (if (and (some? (:document-id event)) (h/same-document? state event))
@@ -205,7 +208,7 @@
   (if (vector? owner) (first owner) owner))
 
 (defn- install-chase
-  "playback with timecode's marker for episode k at cell, in place of owner
+  "playback with timecode's marker for episode k at key cell, in place of owner
    there. A marker rebound to a new episode leaves the focus and the
    transport as they are. Any other takes the focus, and the transport
    plays if it did, or if start, the episode's start authority, still
@@ -227,12 +230,13 @@
 
 (defn- handle-show-clock-apply-chase
   "A :show-clock/chase report with :clock {:chase-id}, the episode the show
-   clock chases at the cell now (nil: none). It applies only while all it
+   clock chases at the key :cell now (a grid cell or a show, timeline.shows;
+   nil: none). It applies only while all it
    was decided for still holds, a missing field holding nothing: the same
-   show (:document-id, never nil), the same version of the cell's cue
+   show (:document-id, never nil), the same version of the key's cue
    (:source-version, nil for one gone or not following:
    playback/source-version) and the same owner there (:expected-owner,
-   playback/intent-owner, :none for an empty cell); then
+   playback/intent-owner, :none for an empty key); then
    - On (:active? true): the cue follows timecode and the clock is still on
      the report's episode (:chase-id): its marker goes in (install-chase),
      unless a grid press stopped the cue for that very episode

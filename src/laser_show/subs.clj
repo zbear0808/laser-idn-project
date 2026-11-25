@@ -46,6 +46,7 @@
             [laser-show.routing.targets :as targets]
             [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.routing.zone-patterns :as zone-patterns]
+            [laser-show.timeline.shows :as shows]
             [laser-show.dev-config :as dev-config]))
 
 
@@ -374,19 +375,24 @@
     (assoc (cue-chains/grid-content cue) :name (:name cue))))
 
 (defn active-cue-cells
-  "The cells with an intent ([:playback :active-cues]), as a set. A pause,
+  "The playback keys with an intent ([:playback :active-cues]): grid cells
+   and shows' keys (timeline.shows), as a set. A pause,
    a seek or a new run inside an intent leaves it equal."
   [context]
   (set (keys (fx/sub-val context ex/active-cues))))
 
 (defn- cue-cells-in-grid-order
-  "The cells with an intent (active-cue-cells), row by row as the grid
-   reads: A1, A2 … B1 … Sorted again only when that set changes."
+  "The grid cells with an intent (active-cue-cells, without shows' keys),
+   row by row as the grid reads: A1, A2 … B1 … Sorted again only when that
+   set changes."
   [context]
-  (vec (sort-by (fn [[col row]] [row col]) (fx/sub-ctx context active-cue-cells))))
+  (->> (fx/sub-ctx context active-cue-cells)
+       (filter shows/grid-cell?)
+       (sort-by (fn [[col row]] [row col]))
+       vec))
 
 (defn playing-cues
-  "The cues that play, in grid order, each as what its cell's label is made
+  "The grid cues that play (not shows), in grid order, each as what its cell's label is made
    from (cue-label-data): {:col :row :name :first-preset-id :preset-count
    :timeline?}. None while Stop holds them (output-held?): nothing is drawn
    then."

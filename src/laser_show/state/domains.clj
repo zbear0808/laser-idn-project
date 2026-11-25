@@ -58,7 +58,8 @@
   "Playback control state for animation triggering.
    
    MULTI-CUE ARCHITECTURE:
-   - active-cues: Map of [col row] -> intent; the show clock
+   - active-cues: Map of key -> intent, a key a grid cell [col row] or a
+     show [:show id] (timeline.shows/play-key); the show clock
      (laser-show.animation.show-time) owns each cue's timing
    - requests: one-shot transport requests the show clock applies
    - where each cue is never reaches app state: views draw it from the show
@@ -72,7 +73,8 @@
 
    ;; Multi-cue playback
    :active-cues {:default {}
-                 :doc "Map of [col row] -> intent, with no position:
+                 :doc "Map of key -> intent, a key a grid cell [col row] or a
+                       show [:show id] (timeline.shows/play-key), with no position:
                        {:run uuid :timeline? bool :start-beat double
                         :paused? bool :seek {:id uuid :beat double}
                         :decay-beats double :hold? bool}
@@ -83,9 +85,9 @@
                        (show-time/step); a run with :decay-beats ends after
                        them once :hold? is false."}
    :chase-sources {:default {:next 1 :cells {}}
-                   :doc "{:next n :cells {[col row] version}}: which version of each cue that follows timecode the show clock may chase (timeline.playback/source-version). The edit that makes or changes a follower gives it the next version, one that removes it or stops it following drops its entry (events.handlers.timeline/reconcile-chase-sources, on every changed cue, undo and redo too); :next never goes back. A new show's followers are 0. Session only: not saved, undone or compared for unsaved changes"}
+                   :doc "{:next n :cells {key version}}, key a grid cell [col row] or a show [:show id] (timeline.shows/play-key): which version of each cue that follows timecode the show clock may chase (timeline.playback/source-version). The edit that makes or changes a follower gives it the next version, one that removes it or stops it following drops its entry (events.handlers.timeline/reconcile-chase-sources, on every changed cue, undo and redo too); :next never goes back. A new show's followers are 0. Session only: not saved, undone or compared for unsaved changes"}
    :chase-stopped {:default {}
-                   :doc "{[col row] chase-id}: a cue that follows timecode which a grid press stopped while the show clock chased it as that episode (events.handlers.grid): the clock neither draws nor reports the episode, and its On is ignored (:show-clock/apply-chase), until a new episode begins there, which plays; pressed again, it follows again. Session only: not saved, undone or compared for unsaved changes; New and Open start without"}
+                   :doc "{key chase-id}, key a grid cell [col row] or a show [:show id] (timeline.shows/play-key): a cue that follows timecode which a grid press stopped while the show clock chased it as that episode (events.handlers.grid): the clock neither draws nor reports the episode, and its On is ignored (:show-clock/apply-chase), until a new episode begins there, which plays; pressed again, it follows again. Session only: not saved, undone or compared for unsaved changes; New and Open start without"}
    :requests {:default {}
               :doc "{:restart {:id} :align {:id} :shift {:id :offset}}: the show clock applies each id once (Stop and Retrigger, tap tempo, Link)"}
    :pulses {:default {}
