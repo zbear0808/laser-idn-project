@@ -1500,6 +1500,33 @@
         (is (= #{:q} (set (keys (:projectors aborted)))))
         (is (nil? (get-in aborted [:projector-ui :active-projector])))))))
 
+(deftest late-chain-writes-make-no-orphan-calibration-test
+  ;; Follow-up B11: the generic chain writers took :projector-effects for any
+  ;; id, so a late :chain/* write for a removed projector made its
+  ;; calibration chain again, for no projector
+  (let [s0 (history/mark-clean state-with-projector)
+        removed (piped-state s0 {:event/type :projectors/remove :projector-id test-projector-id})
+        at {:domain :projector-effects :entity-key test-projector-id}
+        items [{:id #uuid "00000000-0000-0000-0000-0000000000e1" :effect-id :rgb-curves :enabled? true :params {}}]
+        late [(merge at {:event/type :chain/set-items :items items})
+              (merge at {:event/type :chain/update-param :effect-path [0] :param-key :gamma :value 0.9})
+              (merge at {:event/type :chain/update-spatial-params :effect-path [1] :point-id :tl :x -0.8 :y 0.8
+                         :param-map {:tl {:x :tl-x :y :tl-y}}})
+              (merge at {:event/type :chain/add-curve-point :effect-path [0] :channel :r :x 0.5 :y 0.4})
+              (merge at {:event/type :chain/set-ui-mode :effect-path [0] :mode :visual})]]
+    (is (not (contains? (get-in removed [:chains :projector-effects]) test-projector-id)))
+    (doseq [event late]
+      (testing (str (:event/type event))
+        (let [effects (events/handle-event-pipeline (assoc event :state removed :time 2000))
+              after (or (:state effects) removed)]
+          (is (nil? (:state effects)) "nothing to commit")
+          (is (not (contains? (get-in after [:chains :projector-effects]) test-projector-id)) "no orphan chain")
+          (is (= [(get-in removed [:project :dirty?]) (:history removed)] [(get-in after [:project :dirty?]) (:history after)])
+              "no unsaved change, no undo step"))))
+    (testing "a projector that is there still takes them"
+      (is (= items (get-in (piped-state s0 (first late)) [:chains :projector-effects test-projector-id :items])))
+      (is (= 0.9 (get-in (piped-state s0 (second late)) [:chains :projector-effects test-projector-id :items 0 :params :gamma]))))))
+
 
 ;; Projector ids a show and the rig file can hold (follow-up B2)
 
