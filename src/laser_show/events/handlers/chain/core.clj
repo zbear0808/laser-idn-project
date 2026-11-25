@@ -36,7 +36,7 @@
       
       ;; UI mode -> params module
       :chain/set-ui-mode
-      {:state (params/handle-set-ui-mode state config (:effect-path event) (:mode event))}
+      {:state (params/handle-set-ui-mode state config (params/ui-mode-key event) (:mode event))}
       
       ;; Param events -> params module
       :chain/add-curve-point

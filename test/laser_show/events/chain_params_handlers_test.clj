@@ -2,16 +2,20 @@
   "Tests that boolean parameter edits keep `false` instead of turning it into
    nil, that a numeric field's typed text commits only a number, that a
    colour edit takes only a plain colour (follow-up B4), for the effect it
-   names by its instance (N2), and that an :int parameter stores a whole
-   number (N1)."
+   names by its instance (N2), that an :int parameter stores a whole
+   number (N1), and that a laser's calibration edits find their effect by
+   its instance (N15)."
   (:require
    [clojure.test :refer [deftest is testing]]
    [laser-show.animation.effects.intensity] ; :intensity's :amount is a :float
    [laser-show.animation.effects.points] ; :decimate's :kpps and :fps are :int
+   [laser-show.events.core :as events]
    [laser-show.events.handlers.chain.helpers :as chain-helpers]
    [laser-show.events.handlers.chain.params :as params]
    [laser-show.events.handlers.keyframe :as keyframe]
-   [laser-show.events.helpers :as h])
+   [laser-show.events.helpers :as h]
+   [laser-show.state.domains :as domains]
+   [laser-show.state.history :as history])
   (:import [javafx.event ActionEvent]))
 
 (def config (chain-helpers/chain-config :effect-chains [0 0]))
@@ -196,4 +200,117 @@
     (is (true? (get-in result [:chains :projector-effects :p1 :items 2 :items 1 :params :swap-axes?])))
     (is (nil? (get-in result [:chains :projector-effects :p1 :items 2 :params :swap-axes?]))
         "the group itself is untouched")))
+
+
+;; A laser's calibration editor (follow-up N15): its edits name the effect
+;; by its id, and the laser as their chain's :entity-key, which the
+;; pipeline finds where the effect is (chain-helpers/
+;; wrap-effect-instance-target). Its UI modes are kept by the effect's id
+
+
+(def ^:private c1 #uuid "cccccccc-0000-0000-0000-0000000000f1")
+(def ^:private c2 #uuid "cccccccc-0000-0000-0000-0000000000f2")
+(def ^:private d1 #uuid "cccccccc-0000-0000-0000-0000000000f3")
+(def ^:private pin #uuid "cccccccc-0000-0000-0000-0000000000f4")
+
+(def ^:private corners
+  {:tl-x -1.0 :tl-y 1.0 :tr-x 1.0 :tr-y 1.0 :bl-x -1.0 :bl-y -1.0 :br-x 1.0 :br-y -1.0})
+
+(def ^:private corner-map
+  {:tl {:x :tl-x :y :tl-y} :tr {:x :tr-x :y :tr-y} :bl {:x :bl-x :y :bl-y} :br {:x :br-x :y :br-y}})
+
+(defn- curves [id]
+  {:id id :effect-id :rgb-curves :enabled? true
+   :params {:r-curve-points [[0.0 0.0] [0.5 0.5] [1.0 1.0]]
+            :g-curve-points [[0.0 0.0] [1.0 1.0]]
+            :b-curve-points [[0.0 0.0] [1.0 1.0]]}})
+
+(defn- calibration
+  "Laser :p1 with items as its calibration chain, saved, nothing to undo."
+  [items]
+  (-> (domains/build-initial-state)
+      (assoc :projectors {:p1 {:name "P1" :host "10.0.0.1" :port 7255 :enabled? true :zone-groups []}})
+      (assoc-in [:chains :projector-effects :p1 :items] items)
+      (assoc :history {:undo-stack [] :redo-stack [] :transaction nil})
+      (history/mark-clean)))
+
+(defn- run
+  "state after event and what it dispatches inline, through the pipeline
+   (events/handle-event-pipeline), as the agent runs them."
+  [state event]
+  (let [effects (events/handle-event-pipeline (assoc event :state state :time 1000))
+        s (or (:state effects) state)]
+    (if-let [next-event (:dispatch effects)]
+      (run s next-event)
+      s)))
+
+(deftest calibration-edits-find-their-effect-test
+  ;; The editor rendered [C1 C2 D P] (two RGB Curves, a Decimate, a Corner
+  ;; Pin); since, the chain is [D P C2 C1]: another effect holds each
+  ;; one's old place
+  (let [[c1-fx c2-fx d-fx p-fx] [(curves c1) (curves c2)
+                                 {:id d1 :effect-id :decimate :enabled? true :params {:kpps 30 :fps 60}}
+                                 {:id pin :effect-id :corner-pin :enabled? true :params corners}]
+        moved (calibration [d-fx p-fx c2-fx c1-fx])
+        shown-at {c1 [0] d1 [2] pin [3]}
+        now {c1 3 d1 0 pin 1}
+        ;; What the editor sends for effect id: the laser, the effect's id,
+        ;; and the place it showed it at
+        edit (fn [type id & {:as more}]
+               (merge {:event/type type :domain :projector-effects :entity-key :p1
+                       :effect-path (shown-at id) :effect-instance-id id}
+                      more))
+        chain #(get-in % [:chains :projector-effects :p1 :items])
+        edits [[(edit :chain/add-curve-point c1 :channel :r :x 0.25 :y 0.1)
+                #(= [[0.0 0.0] [0.25 0.1] [0.5 0.5] [1.0 1.0]] (get-in % [:params :r-curve-points]))]
+               [(edit :chain/update-curve-point c1 :channel :r :point-idx 1 :x 0.6 :y 0.9)
+                #(= [[0.0 0.0] [0.6 0.9] [1.0 1.0]] (get-in % [:params :r-curve-points]))]
+               [(edit :chain/remove-curve-point c1 :channel :r :point-idx 1)
+                #(= [[0.0 0.0] [1.0 1.0]] (get-in % [:params :r-curve-points]))]
+               [(edit :chain/update-param d1 :param-key :kpps :value 40)
+                #(= 40 (get-in % [:params :kpps]))]
+               [(edit :chain/update-param-from-text d1 :param-key :fps :min 5 :max 120 :is-int? true :text "50")
+                #(= 50 (get-in % [:params :fps]))]
+               [(edit :chain/update-spatial-params pin :point-id :tl :x -0.5 :y 0.5 :param-map corner-map)
+                #(= [-0.5 0.5] ((juxt :tl-x :tl-y) (:params %)))]
+               [(edit :chain/reset-params pin :defaults-map (assoc corners :tl-x -0.9))
+                #(= (assoc corners :tl-x -0.9) (:params %))]]]
+    (testing "each lands on its own effect, where it is now, and on nothing else: one undo step"
+      (doseq [[event landed?] edits]
+        (let [i (now (:effect-instance-id event))
+              after (run moved event)]
+          (is (landed? (get (chain after) i)) (str (:event/type event) ": its effect"))
+          (is (= (chain moved) (assoc (chain after) i (get (chain moved) i)))
+              (str (:event/type event) ": the others as they were"))
+          (is (= 1 (count (get-in after [:history :undo-stack]))) (str (:event/type event) ": one undo step")))))
+    (testing "the curves' channel is kept under the effect's id, so it stays with the effect"
+      (is (= :g (get-in (run moved (edit :chain/set-active-curve-channel c1 :tab-id :g))
+                        [:ui :projector-effect-ui-state :p1 :ui-modes c1 :active-curve-channel]))))
+    (testing "once its effect is gone, or its laser: nothing ({})"
+      (let [no-c1 (calibration [d-fx p-fx c2-fx])
+            no-laser (run moved {:event/type :projectors/remove :projector-id :p1})]
+        (is (nil? (get-in no-laser [:chains :projector-effects :p1])) "the laser's remove takes its chain")
+        (doseq [[event] edits
+                [s why] (cond-> [[no-laser "its laser removed"]]
+                          (= c1 (:effect-instance-id event)) (conj [no-c1 "C1 deleted"]))]
+          (is (= {} (events/handle-event-pipeline (assoc event :state s :time 1000)))
+              (str (:event/type event) ": " why)))))))
+
+(deftest ui-modes-are-kept-by-the-effects-id-test
+  ;; Follow-up N15: an effect's visual or numeric mode and its curves'
+  ;; channel are kept under its id, so a reorder doesn't show another's
+  (let [ui-modes [:ui :dialogs :effect-chain-editor :ui-modes]
+        cell (assoc-in (domains/build-initial-state) [:chains :effect-chains [0 0] :items]
+                       [{:id :b :effect-id :scale :params {}} {:id :a :effect-id :scale :params {}}])
+        set-mode #(:state (events/handle-event-pipeline (merge {:event/type :chain/set-ui-mode :domain :effect-chains
+                                                                :entity-key [0 0] :state cell}
+                                                               %)))]
+    (is (= :a (params/ui-mode-key {:effect-path [1] :effect-instance-id :a})))
+    (is (= [1] (params/ui-mode-key {:effect-path [1]})))
+    (let [s (set-mode {:effect-path [0] :effect-instance-id :a :mode :numeric})]
+      (is (= :numeric (get-in s (conj ui-modes :a))) "A, shown at [0], now at [1]: under its id")
+      (is (nil? (get-in s (conj ui-modes [0]))) "not under the place it was shown at, B's now")
+      (is (nil? (get-in s (conj ui-modes [1]))) "nor under its place now"))
+    (is (= :numeric (get-in (set-mode {:effect-path [0] :mode :numeric}) (conj ui-modes [0])))
+        "an event that names no effect: its place, as before")))
 

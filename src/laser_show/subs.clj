@@ -989,7 +989,8 @@
    [:list-ui [:projector-effects projector-id]] and accessed via list-ui-state.
    
    Returns map with:
-   - :ui-modes - map of effect-path to UI mode settings (e.g., active curve channel)"
+   - :ui-modes - map of each effect's UI mode settings (e.g., active curve
+     channel), by its id (events.handlers.chain.params/ui-mode-key)"
   [context projector-id]
   (get-in (fx/sub-val context :ui)
           [:projector-effect-ui-state projector-id]

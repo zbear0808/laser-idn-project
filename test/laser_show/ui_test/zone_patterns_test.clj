@@ -624,8 +624,9 @@
                             (assoc-in [:chains :cue-chains [0 0] :zone-patterns] [(assoc pattern :id pattern-id)])))
   (events/dispatch! {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}})
   (ui/wait-for! window-open?)
+  ;; What its Numeric button sends: the pattern by its id (follow-up N15)
   (events/dispatch! {:event/type :chain/set-ui-mode :domain :cue-zone-patterns :entity-key [0 0] :effect-path [0]
-                     :mode :numeric})
+                     :effect-instance-id pattern-id :mode :numeric})
   (ui/wait-for! #(some? (ui/query selector))))
 
 (deftest locked-numeric-controls-show-applied-values-test

@@ -457,13 +457,17 @@
     
     Props:
     - :current-params - Current parameter values
-    - :event-template - Base event map containing :domain, :entity-key, :effect-path
-    - :dialog-data - Dialog state containing UI modes and active channel"
+    - :event-template - Base event map containing :domain, :entity-key,
+      :effect-path and the effect's :effect-instance-id
+    - :dialog-data - Dialog state containing UI modes and active channel:
+      the effect's, under its id (events.handlers.chain.params/ui-mode-key)"
   [{:keys [current-params event-template dialog-data]}]
-  (let [{:keys [domain entity-key effect-path]} event-template
+  (let [{:keys [effect-path effect-instance-id]} event-template
 
         ;; Get active channel from dialog state
-        active-channel (get-in dialog-data [:ui-modes effect-path :active-curve-channel] :r)
+        active-channel (get-in dialog-data [:ui-modes (if (some? effect-instance-id) effect-instance-id effect-path)
+                                            :active-curve-channel]
+                               :r)
 
         ;; Get control points for each channel (normalized 0.0-1.0)
         r-points (get current-params :r-curve-points [[0.0 0.0] [1.0 1.0]])

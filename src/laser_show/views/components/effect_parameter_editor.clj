@@ -147,15 +147,16 @@
         ;; Convert params to map format for UI
         params-map (effect-param-ui/params-vector->map (:parameters effect-def []))
 
-        ;; Get UI mode from dialog data - stored by full effect path
-        ui-mode (get-in dialog-data [:ui-modes full-effect-path])
+        ;; Get UI mode from dialog data - kept under the effect's id, so it
+        ;; stays with the effect through a reorder (params/ui-mode-key)
+        ui-mode (get-in dialog-data [:ui-modes (if (some? (:id effect)) (:id effect) full-effect-path)])
 
         ;; The effect its events edit: by its instance and its owner's id
         ;; (a cue item's, a clip's, a track's), found where it is when they
         ;; are handled (chain-helpers/wrap-effect-instance-target), so a
         ;; reorder or a delete queued ahead of an edit can't move it onto
         ;; another effect (follow-up N14). :effect-path is where it shows
-        ;; now, for what it keeps by place (its UI mode, its canvases)
+        ;; now, for what it keeps by place (its canvases)
         base-event-params (cond-> {:domain domain
                                    :entity-key entity-key
                                    :effect-path full-effect-path

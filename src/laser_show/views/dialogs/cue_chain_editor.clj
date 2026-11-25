@@ -73,7 +73,7 @@
     (if selected-effect
       ;; Use shared effect parameter editor component: its edits name the
       ;; effect and the item by their ids (follow-up N14); item-path is
-      ;; where it shows the effect, for what it keeps by place (UI modes)
+      ;; where it shows the effect
       {:fx/type effect-param-editor/effect-parameter-editor
        :domain :cue-chains
        :entity-key [col row]
