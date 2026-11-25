@@ -63,6 +63,7 @@
             [laser-show.state.core :as state]
             [laser-show.state.extractors :as ex]
             [laser-show.timeline.playback :as playback]
+            [laser-show.timeline.shows :as shows]
             [laser-show.vibes.faders :as faders]
             [laser-show.vibes.rotation :as rotation]
             [laser-show.vibes.watchdog :as watchdog]))
@@ -78,16 +79,18 @@
 
 (defn- render-cue
   "One cue's frames by target at its run's timing, with the tick's render
-   context (its input values and presses) and its column's default target
-   (zones plan Z4); {} if the render throws, reported under [:render cell]."
+   context (its input values and presses) and, for a grid cell, its column's
+   default target (zones plan Z4; a show has no column); {} if the render
+   throws, reported under [:render key]."
   [{:keys [cell cue-chain cue-timing]} bpm render-ctx]
   (let [cue-bpm (playback/cue-bpm cue-chain bpm)
         ctx (assoc (cue-timing/get-cue-timing-context cue-timing cue-bpm)
                    :input-values (:input-values render-ctx)
-                   :pulses (:pulses render-ctx))]
+                   :pulses (:pulses render-ctx))
+        column-target (when (shows/grid-cell? cell) (get (:column-targets render-ctx) (first cell)))]
     (try
       (let [zone-frames (frame-service/generate-frames-by-zone
-                         cue-chain ctx (assoc render-ctx :column-target (get (:column-targets render-ctx) (first cell))))]
+                         cue-chain ctx (assoc render-ctx :column-target column-target))]
         (output-errors/ok! [:render cell])
         zone-frames)
       (catch Throwable e
@@ -104,14 +107,18 @@
                             :point-count (transduce (comp (mapcat (comp vals :zone-frames)) (map count)) + cues)})))
 
 (defn- edited-cells
-  "#{[col row]} of the cues whose editor is open (the cue chain editor's or
-   the timeline editor's): their renders count each item's points, for the
-   cue warnings."
+  "The playback keys of the cues whose editor is open (the cue chain
+   editor's [col row], the timeline editor's [col row] or, given a :show-id,
+   its show's key): their renders count each item's points, for the cue
+   warnings."
   [state]
   (into #{}
         (keep (fn [dialog]
-                (let [{:keys [open? col row]} (get-in state [:ui :dialogs dialog])]
-                  (when (and open? (some? col) (some? row)) [col row]))))
+                (let [{:keys [open? col row show-id]} (get-in state [:ui :dialogs dialog])]
+                  (cond
+                    (not open?) nil
+                    (and (= dialog :timeline-cue-editor) (some? show-id)) (shows/play-key show-id)
+                    (and (some? col) (some? row)) [col row]))))
         [:cue-chain-editor :timeline-cue-editor]))
 
 (defn- render
