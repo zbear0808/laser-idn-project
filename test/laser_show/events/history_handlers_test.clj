@@ -1,5 +1,6 @@
 (ns laser-show.events.history-handlers-test
   (:require [clojure.test :refer [deftest is testing]]
+            [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
             [laser-show.state.persistent :as persistent]
@@ -9,7 +10,8 @@
             [laser-show.events.core :as events]
             [laser-show.routing.zone-patterns :as zp]
             [laser-show.routing.zone-patterns :as zone-patterns]
-            [laser-show.timeline.model :as model]))
+            [laser-show.timeline.model :as model]
+            [laser-show.timeline.shows :as shows]))
 
 (def item-id #uuid "11111111-1111-1111-1111-111111111111")
 
@@ -260,6 +262,42 @@
         s2 (run s1 {:event/type :edit/undo})]
     (is (nil? (get-in s2 [:chains :cue-chains [3 3]])))
     (is (= #{[0 0]} (set (keys (get-in s2 [:playback :active-cues])))))))
+
+(def ^:private show-u #uuid "00000000-0000-0000-0000-0000000005a1")
+
+(def ^:private a-show
+  {:editor-type :timeline :tracks [] :items []})
+
+(defn- play [s cell]
+  (update s :playback cue-timing/activate-cue cell (random-uuid) {:timeline? true :start-beat 0.0}))
+
+(deftest undo-removing-show-stops-it-test
+  (testing "the undo takes the show away: its key goes, the grid cue plays on"
+    (let [s0 (play (test-state) [0 0])
+          s1 (-> (run s0 {:event/type :history/record-snapshot :description "Add Show"})
+                 (assoc-in [:chains :shows show-u] a-show)
+                 (play (shows/play-key show-u)))
+          s2 (run s1 {:event/type :edit/undo})]
+      (is (not (contains? (get-in s2 [:chains :shows]) show-u)))
+      (is (= #{[0 0]} (set (keys (get-in s2 [:playback :active-cues])))))
+      (is (true? (get-in s2 [:playback :playing?])))))
+  (testing "the show was the only cue: the transport stops"
+    (let [s1 (-> (run (test-state) {:event/type :history/record-snapshot :description "Add Show"})
+                 (assoc-in [:chains :shows show-u] a-show)
+                 (play (shows/play-key show-u)))
+          s2 (run s1 {:event/type :edit/undo})]
+      (is (= {} (get-in s2 [:playback :active-cues])))
+      (is (false? (get-in s2 [:playback :playing?]))))))
+
+(deftest undo-keeps-a-show-that-stays-test
+  (let [s0 (-> (test-state)
+               (assoc-in [:chains :shows show-u] a-show)
+               (play (shows/play-key show-u)))
+        intent (get-in s0 [:playback :active-cues (shows/play-key show-u)])
+        s1 (run s0 edit-size)
+        s2 (run s1 {:event/type :edit/undo})]
+    (is (= 1.0 (size-of s2)) "the grid edit was undone")
+    (is (= intent (get-in s2 [:playback :active-cues (shows/play-key show-u)])))))
 
 (deftest meta-keys-do-not-reach-effects-test
   (doseq [[label effects]
