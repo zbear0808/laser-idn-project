@@ -30,6 +30,25 @@
     (let [secs (/ frame (double fps))]
       (is (< (Math/abs (- secs (tc/tc->seconds (tc/seconds->tc secs fps) fps))) 1e-6)))))
 
+(deftest seconds->tc-ceil-test
+  (testing "07 §8"
+    (is (= "00:00:30:00" (tc/format-tc (tc/seconds->tc-ceil 30.0 30))) "a boundary is its own ceiling")
+    (is (= "01:05:20:20" (tc/format-tc (tc/seconds->tc-ceil 3920.78 25))))
+    (is (= "01:05:20:19" (tc/format-tc (tc/seconds->tc 3920.78 25))) "where the floor stops")
+    (is (= "00:00:59;29" (tc/format-tc (tc/seconds->tc-ceil 60.0 29.97)))
+        "60 s is 1798.2 frames at 29.97 DF: frame 1799")
+    (is (= {:h 0 :m 0 :s 0 :f 0 :drop? false} (tc/seconds->tc-ceil 0.0 25)) "zero"))
+  (testing "within 1 µs of a boundary, the boundary"
+    (is (= "00:00:30:00" (tc/format-tc (tc/seconds->tc-ceil 30.0000005 30))))
+    (is (= "00:00:30:01" (tc/format-tc (tc/seconds->tc-ceil 30.00001 30)))))
+  (testing "every frame boundary is its own ceiling and reads back as itself"
+    (doseq [fps [24 25 29.97 30]
+            frame (range 0 (* 11 60 30) 113)]
+      (let [secs (/ frame (double fps))
+            t (tc/seconds->tc-ceil secs fps)]
+        (is (= t (tc/seconds->tc secs fps)) (pr-str fps frame))
+        (is (< (Math/abs (- secs (tc/tc->seconds t fps))) 1e-6))))))
+
 (deftest parse-and-clock-test
   (is (= {:h 1 :m 2 :s 3 :f 4 :drop? false} (tc/parse-tc "01:02:03:04" 25)))
   (is (nil? (tc/parse-tc "01:02:03:30" 25)) "frame out of range")

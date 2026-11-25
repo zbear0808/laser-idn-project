@@ -269,11 +269,13 @@
 
 (defn- effect-dispatch-later
   "Effect that dispatches an event after a delay (from a future).
-   Args: {:event event-map :delay-ms milliseconds}"
-  [{:keys [event delay-ms]} dispatch]
-  (future
-    (Thread/sleep delay-ms)
-    (dispatch event)))
+   Args: {:event event-map :delay-ms milliseconds}, or a vector of them,
+   each with its own future (events.helpers/merge-notice adds one)."
+  [value dispatch]
+  (doseq [{:keys [event delay-ms]} (if (map? value) [value] value)]
+    (future
+      (Thread/sleep (long delay-ms))
+      (dispatch event))))
 
 ;; A press's deadline (reactivity plan 16): one wake-up, for the press whose
 ;; transaction is open, so a missed mouse-up is sealed even while nothing
@@ -968,7 +970,8 @@
    - :state - update application state
    - :dispatch - continue with another event (inline)
    - :dispatch-n - continue with several events, in order (inline)
-   - :dispatch-later - dispatch event after delay (later, future)
+   - :dispatch-later - dispatch event after delay; one {:event :delay-ms}
+     or a vector of them, each on its own timer (later, future)
    - :history/gesture-alarm - keep the open press's one wake-up: cancel
      its, arm the next; it dispatches :history/gesture-timeout (later,
      wake-up thread)

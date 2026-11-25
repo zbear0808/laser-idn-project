@@ -183,6 +183,22 @@
                                           #(deliver got %))
     (is (= {:event/type ::later} (deref got 2000 ::timeout)))))
 
+(deftest dispatch-later-takes-a-vector-test
+  (let [got (atom [])
+        both (CountDownLatch. 2)
+        dispatch (fn [e] (swap! got conj e) (.countDown both))]
+    ((get events/effects :dispatch-later) [{:event {:event/type ::first} :delay-ms 20}
+                                           {:event {:event/type ::second} :delay-ms 0}]
+                                          dispatch)
+    (is (.await both 2000 TimeUnit/MILLISECONDS) "both timers fire")
+    (is (= #{{:event/type ::first} {:event/type ::second}} (set @got)))
+    (is (= 2 (count @got)) "each once"))
+  (testing "an empty vector sets no timer"
+    (let [got (atom [])]
+      ((get events/effects :dispatch-later) [] #(swap! got conj %))
+      (Thread/sleep 30)
+      (is (= [] @got)))))
+
 (deftest set-fullscreen-reports-back-without-a-main-window-test
   (testing "no main window (no toolkit, or none showing): it reports not fullscreen, so the flag can't stick on"
     (let [got (promise)]
