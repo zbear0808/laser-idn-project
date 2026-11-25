@@ -418,20 +418,29 @@
 ;; Uses shared param-controls with projector-specific event templates
 
 
+(defn- projector-effect-address
+  "The effect of projector-id's calibration chain that the editor's events
+   edit: the projector (the :projector-effects chain's :entity-key) and the
+   effect by its id (:effect-instance-id), which the pipeline finds where
+   it is when an event is handled (chain-helpers/
+   wrap-effect-instance-target), so a reorder or a delete queued ahead of an
+   edit can't move it onto another effect, and one for an effect or a
+   projector that is gone does nothing (follow-up N15). :effect-path is
+   where the editor shows it."
+  [projector-id effect-path effect]
+  {:domain :projector-effects
+   :entity-key projector-id
+   :effect-path effect-path
+   :effect-instance-id (:id effect)})
+
 (defn- make-projector-param-events
   "Event templates for a projector effect's parameters: the :chain/* param
-   events, as the curves and corner pin editors use, at the effect's full
-   path in the chain (an effect inside a group is the one edited).
+   events, as the curves and corner pin editors use, for the effect at
+   address (projector-effect-address).
    Returns map with :on-change-event and :on-text-event."
-  [projector-id effect-path]
-  {:on-change-event {:event/type :chain/update-param
-                     :domain :projector-effects
-                     :entity-key projector-id
-                     :effect-path effect-path}
-   :on-text-event {:event/type :chain/update-param-from-text
-                   :domain :projector-effects
-                   :entity-key projector-id
-                   :effect-path effect-path}})
+  [address]
+  {:on-change-event (assoc address :event/type :chain/update-param)
+   :on-text-event (assoc address :event/type :chain/update-param-from-text)})
 
 (defn- standard-effect-params-editor
   "Generic parameter editor using effect registry parameters.
@@ -439,8 +448,8 @@
    Uses param-controls-list to render all parameters from the effect definition.
    This replaces individual effect-specific editors like rgb-calibration-editor,
    gamma-correction-editor, axis-flip-editor, and rotation-offset-editor."
-  [{:keys [projector-id effect-path effect-def params]}]
-  (let [{:keys [on-change-event on-text-event]} (make-projector-param-events projector-id effect-path)
+  [{:keys [address effect-def params]}]
+  (let [{:keys [on-change-event on-text-event]} (make-projector-param-events address)
         params-map (param-controls/params-vector->map (:parameters effect-def []))]
     {:fx/type param-controls/param-controls-list
      :params-map params-map
@@ -451,7 +460,8 @@
 (defn- effect-parameter-editor
   "Renders the appropriate editor for a selected effect.
    Checks for custom ui-hints renderer, falls back to generic params editor.
-   Its definition as published (subs/effect-descriptor).
+   Its definition as published (subs/effect-descriptor). Each of its events
+   names the effect by its id (projector-effect-address).
    
    Props:
    - :projector-id - ID of the projector
@@ -464,7 +474,8 @@
         effect-name (or (:name effect-def)
                         (when effect-id (name effect-id))
                         "Unknown Effect")
-        renderer-type (get-in effect-def [:ui-hints :renderer])]
+        renderer-type (get-in effect-def [:ui-hints :renderer])
+        address (projector-effect-address projector-id effect-path effect)]
     {:fx/type :v-box
      :spacing 8
      :padding 8
@@ -479,10 +490,7 @@
                    (= :rgb-curves renderer-type)
                    {:fx/type custom-renderers/rgb-curves-visual-editor
                     :current-params params
-                    :event-template {:event/type :chain/update-curve-point
-                                     :domain :projector-effects
-                                     :entity-key projector-id
-                                     :effect-path effect-path}
+                    :event-template (assoc address :event/type :chain/update-curve-point)
                     :dialog-data ui-state}
                   
                   ;; Check for custom renderer in ui-hints: corner-pin-2d
@@ -490,18 +498,13 @@
                   (= :corner-pin-2d renderer-type)
                   {:fx/type custom-renderers/corner-pin-visual-editor
                    :params params
-                   :event-template {:event/type :chain/update-spatial-params
-                                    :domain :projector-effects
-                                    :entity-key projector-id
-                                    :effect-path effect-path}
-                   :reset-event {:event/type :chain/reset-params
-                                 :domain :projector-effects
-                                 :entity-key projector-id
-                                 :effect-path effect-path
-                                 :defaults-map {:tl-x -1.0 :tl-y 1.0
-                                                :tr-x 1.0 :tr-y 1.0
-                                                :bl-x -1.0 :bl-y -1.0
-                                                :br-x 1.0 :br-y -1.0}}
+                   :event-template (assoc address :event/type :chain/update-spatial-params)
+                   :reset-event (assoc address
+                                       :event/type :chain/reset-params
+                                       :defaults-map {:tl-x -1.0 :tl-y 1.0
+                                                      :tr-x 1.0 :tr-y 1.0
+                                                      :bl-x -1.0 :bl-y -1.0
+                                                      :br-x 1.0 :br-y -1.0})
                    :fx-key [:projector projector-id effect-path]
                    :hint-text "Drag corners to adjust output geometry"}
                   
@@ -510,8 +513,7 @@
                   ;; gamma-correction-editor, axis-flip-editor, rotation-offset-editor
                   effect-def
                   {:fx/type standard-effect-params-editor
-                   :projector-id projector-id
-                   :effect-path effect-path
+                   :address address
                    :effect-def effect-def
                    :params params}
                   
@@ -520,9 +522,7 @@
                   {:fx/type :label
                    :text "Unknown effect - no parameters available"
                    :style "-fx-text-fill: #808080; -fx-font-style: italic;"})
-                 (transform-advanced/control effect-def effect {:domain :projector-effects
-                                                                :entity-key projector-id
-                                                                :effect-path effect-path})])}))
+                 (transform-advanced/control effect-def effect address)])}))
 
 (defn- projector-effects-sidebar
   "Effect chain sidebar using list-editor with built-in keyboard handling.

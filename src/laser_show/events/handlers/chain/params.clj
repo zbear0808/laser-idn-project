@@ -39,11 +39,14 @@
         params-path (vec (concat items-path effect-path [:params]))]
     (effect-params/remove-curve-point state params-path channel point-idx)))
 
+(declare ui-mode-key)
+
 (defn handle-set-active-curve-channel
   "Thin wrapper that delegates to effect-params.
-   Extracts UI path from config and effect-path, then calls effect-params."
-  [state config {:keys [effect-path tab-id]}]
-  (let [ui-path (conj (:ui-path config) :ui-modes effect-path)]
+   Extracts UI path from config and the key the effect's UI modes are kept
+   under (ui-mode-key), then calls effect-params."
+  [state config {:keys [tab-id] :as event}]
+  (let [ui-path (conj (:ui-path config) :ui-modes (ui-mode-key event))]
     (effect-params/set-active-curve-channel state ui-path tab-id)))
 
 (defn handle-update-spatial-params
@@ -215,15 +218,26 @@
 ;; UI Mode Operations
 
 
+(defn ui-mode-key
+  "The key an effect's UI modes are kept under in its editor's :ui-modes
+   (its visual or numeric mode, the RGB curves' channel): its instance's
+   id, :effect-instance-id, which a reorder doesn't change, so a mode stays
+   with its effect (follow-up N15); else, for an event that names none,
+   its :effect-path. The editors read them by the same key.
+   
+   Example: (ui-mode-key {:effect-path [1] :effect-instance-id a}) => a"
+  [{:keys [effect-instance-id effect-path]}]
+  (if (some? effect-instance-id) effect-instance-id effect-path))
+
 (defn handle-set-ui-mode
   "Set visual/numeric mode for effect parameter UI.
    
    Parameters:
    - state: Application state
    - config: Configuration map with :ui-path
-   - effect-path: Path to the effect
+   - k: The key the effect's modes are kept under (ui-mode-key)
    - mode: :visual or :numeric
    
    Returns: Updated state"
-  [state config effect-path mode]
-  (assoc-in state (conj (:ui-path config) :ui-modes effect-path) mode))
+  [state config k mode]
+  (assoc-in state (conj (:ui-path config) :ui-modes k) mode))

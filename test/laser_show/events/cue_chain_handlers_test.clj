@@ -695,9 +695,9 @@
                    (history-handlers/format-event-description (:event/type event)))
                  (history/undo-label (:history after)))
               "labelled as before"))))
-    (testing "its UI mode is kept where the effect shows now"
+    (testing "its UI mode is kept under its id, so it stays with the effect (follow-up N15)"
       (is (= :numeric (get-in (run moved (edit :chain/set-ui-mode :fx-a [0 :effects 0] :mode :numeric))
-                              [:ui :dialogs :cue-chain-editor :ui-modes [2 :effects 1]]))))
+                              [:ui :dialogs :cue-chain-editor :ui-modes :fx-a]))))
     (testing "once its effect is gone, or its item, or another item is named: nothing ({})"
       (let [no-a (update-in moved [:chains :cue-chains [0 0] :items 2 :effects] #(filterv (fn [e] (not= :fx-a (:id e))) %))
             no-circle (update-in moved [:chains :cue-chains [0 0] :items] (comp vec butlast))
