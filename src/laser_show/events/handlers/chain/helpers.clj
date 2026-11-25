@@ -15,7 +15,8 @@
    NOTE: Selection state helpers (get-selected-paths, etc.) were removed as dead code.
    Selection is now handled by the list.clj component using ID-based operations
    with state at [:list-ui component-id]."
-  (:require [laser-show.animation.chains :as chains]))
+  (:require [laser-show.animation.chains :as chains]
+            [laser-show.timeline.shows :as shows]))
 
 
 (defn chain-config
@@ -35,11 +36,16 @@
      :timeline-tracks (its tracks and folders, for track effects), or
      :cue-zone-patterns (a cue's zone patterns, zones plan Z5: the pattern
      window edits them as a chain)
-   - entity-key: The key within the domain ([col row] or projector-id)
+   - entity-key: The key within the domain ([col row] or projector-id). For
+     the domains inside a cue (:timeline-items, :timeline-tracks,
+     :cue-zone-patterns) it is a playback key, a grid cell's [col row] or a
+     show's [:show id], resolved by shows/cue-path
    
    Returns: Configuration map with :items-path, :ui-path, :domain, :entity-key"
   [domain entity-key]
-  (let [base-path [:chains (case domain (:timeline-items :timeline-tracks :cue-zone-patterns) :cue-chains domain) entity-key]]
+  (let [base-path (case domain
+                    (:timeline-items :timeline-tracks :cue-zone-patterns) (shows/cue-path entity-key)
+                    [:chains domain entity-key])]
     {:items-path (conj base-path (case domain
                                    :timeline-tracks :tracks
                                    :cue-zone-patterns :zone-patterns
@@ -70,13 +76,16 @@
 (defn zone-pattern-items-path
   "The one vector a step grid looks its zone pattern up in (zones plan Z6),
    where chain-config keeps it: a cue's :zone-patterns for
-   :cue-zone-patterns, an effects cell's :items for :effect-chains. nil for
-   any other domain, or an entity-key that isn't a cell's [col row]."
+   :cue-zone-patterns (a grid cell's [col row] or a show's [:show id]), an
+   effects cell's :items for :effect-chains. nil for any other domain, or an
+   entity-key of another shape."
   [domain entity-key]
   (when (and (contains? #{:cue-zone-patterns :effect-chains} domain)
-             (vector? entity-key)
-             (= 2 (count entity-key))
-             (every? nat-int? entity-key))
+             (or (and (vector? entity-key)
+                      (= 2 (count entity-key))
+                      (every? nat-int? entity-key))
+                 (and (= :cue-zone-patterns domain)
+                      (shows/play-key? entity-key))))
     (:items-path (chain-config domain entity-key))))
 
 (def ^:private direct-domains

@@ -132,7 +132,7 @@
    ;; A cue's zone pattern and a new pattern cell move pictures between
    ;; places, as a target does; a pattern pad's setting and its key, as a
    ;; map pad's (zones plan Z5)
-   {:event/type :zone-patterns/set-cue-pattern :col 0 :row 0 :style :chase}
+   {:event/type :zone-patterns/set-cue-pattern :cue-key [0 0] :style :chase}
    {:event/type :zone-patterns/new-cell :col 5 :row 2 :style :alternate}
    {:event/type :pattern-pads/set-pad-bar :pad :chase :bar? true}
    {:event/type :pattern-pads/clear-control :pad :chase}

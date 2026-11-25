@@ -642,19 +642,25 @@
         (:preset-id item) (or (get-in presets/presets-by-id [(:preset-id item) :name]) (name (:preset-id item)))
         :else "Group"))))
 
-(defn cue-warning
-  "The warning of the cue at col, row while it is too heavy for a laser (the
-   show clock's [:backend :streaming :cue-warnings], zones plan Z3): {:projector
+(defn key-cue-warning
+  "The warning of the cue playing under playback key k (a grid cell's [col
+   row] or a show's [:show id]) while it is too heavy for a laser (the show
+   clock's [:backend :streaming :cue-warnings], zones plan Z3): {:projector
    :points :fps :min-fps :scan-rate :item {:id :points} :decimate} with :laser,
    its name, and while its editor is open :item-name, the name of its item
    with the most points; nil when it has none. :decimate is there when the
    laser's Decimate keeps the cue's count (routing.compose/cue-warnings)."
-  [context col row]
-  (when-let [w (fx/sub-val context get-in [:backend :streaming :cue-warnings [col row]])]
-    (let [chain (fx/sub-val context get-in [:chains :cue-chains [col row]])
+  [context k]
+  (when-let [w (fx/sub-val context get-in [:backend :streaming :cue-warnings k])]
+    (let [chain (fx/sub-val context get-in (shows/cue-path k))
           item (when-let [id (get-in w [:item :id])] (item-name chain id))]
       (cond-> (assoc w :laser (rig/projector-name {:projectors (fx/sub-val context :projectors)} (:projector w)))
         item (assoc :item-name item)))))
+
+(defn cue-warning
+  "The warning of the grid cue at col, row (key-cue-warning)."
+  [context col row]
+  (fx/sub-ctx context key-cue-warning [col row]))
 
 (defn connection-status
   "Streaming status for the toolbar, from one published status.
@@ -1459,18 +1465,20 @@
 
 
 (defn cue-zone-pattern
-  "The zone pattern of the cue at [col row]: the first of its
-   :zone-patterns (v1 edits one), or nil."
-  [context col row]
-  (first (fx/sub-val context get-in [:chains :cue-chains [col row] :zone-patterns])))
+  "The zone pattern of the cue playing under playback key k (a grid cell's
+   [col row] or a show's [:show id]): the first of its :zone-patterns (v1
+   edits one), or nil."
+  [context k]
+  (first (fx/sub-val context get-in (conj (shows/cue-path k) :zone-patterns))))
 
 (defn zone-pattern-at
   "The effect at effect-path of domain's entity (:cue-zone-patterns, a
-   cue's patterns; :effect-chains, a cell's items), or nil."
+   cue's patterns, entity-key a playback key; :effect-chains, a cell's
+   items), or nil."
   [context domain entity-key effect-path]
   (when (sequential? effect-path)
     (case domain
-      :cue-zone-patterns (fx/sub-val context get-in (into [:chains :cue-chains entity-key :zone-patterns] effect-path))
+      :cue-zone-patterns (fx/sub-val context get-in (into (conj (shows/cue-path entity-key) :zone-patterns) effect-path))
       :effect-chains (fx/sub-val context get-in (into [:chains :effect-chains entity-key :items] effect-path))
       nil)))
 

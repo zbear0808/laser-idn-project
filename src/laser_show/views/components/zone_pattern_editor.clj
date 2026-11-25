@@ -531,15 +531,16 @@
 (defn pattern-field
   "\"Pattern:\" and the chip, after a cue editor's Target: None or the
    cue's pattern; its menu None, the styles (on a cue with a pattern a style
-   changes the style only), Edit pattern…. Props: :col :row :id (the
+   changes the style only), Edit pattern…. Props: :cue-key (the cue's
+   playback key, a grid cell's [col row] or a show's [:show id]) and :id (the
    chip's)."
-  [{:keys [fx/context col row id]}]
-  (let [pattern (fx/sub-ctx context subs/cue-zone-pattern col row)
+  [{:keys [fx/context cue-key id]}]
+  (let [pattern (fx/sub-ctx context subs/cue-zone-pattern cue-key)
         names (fx/sub-ctx context subs/names-ctx)
         on (enabled pattern)
         current (when on (style-of (:params on)))
         check (fn [checked? text] (str (if checked? "✓ " "   ") text))
-        set-style (fn [style] {:event/type :zone-patterns/set-cue-pattern :col col :row row :style style})]
+        set-style (fn [style] {:event/type :zone-patterns/set-cue-pattern :cue-key cue-key :style style})]
     {:fx/type :h-box
      :spacing 6
      :alignment :center-left
@@ -564,12 +565,12 @@
                                  ;; asks for its first
                                  :on-action (if pattern
                                               {:event/type :step-grid/open
-                                               :target {:domain :cue-zone-patterns :entity-key [col row]
+                                               :target {:domain :cue-zone-patterns :entity-key cue-key
                                                         :effect-instance-id (:id pattern)}}
                                               {:event/type :step-grid/open
-                                               :target {:domain :cue-zone-patterns :entity-key [col row]}
+                                               :target {:domain :cue-zone-patterns :entity-key cue-key}
                                                :create-first? true})}
                                 {:fx/type :menu-item
                                  :text "Edit pattern…"
                                  :disable (nil? pattern)
-                                 :on-action {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col col :row row}}}]))}]}))
+                                 :on-action {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:cue-key cue-key}}}]))}]}))

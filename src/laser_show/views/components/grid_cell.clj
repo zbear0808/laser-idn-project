@@ -306,7 +306,7 @@
         ;; map in use, for its tooltip
         badge (fx/sub-ctx context subs/cell-target-badge col row)
         ;; Its zone pattern (zones plan Z5): ⇄ on the badge, a line in the tooltip
-        pattern (fx/sub-ctx context subs/cue-zone-pattern col row)
+        pattern (fx/sub-ctx context subs/cue-zone-pattern [col row])
         pattern? (and pattern (not (false? (:enabled? pattern))))
         cell-display-data (assoc display-data
                                  :active? (and (:active? display-data) (not held?))

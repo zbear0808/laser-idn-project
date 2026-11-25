@@ -15,6 +15,7 @@
   (:require [cljfx.api :as fx]
             [laser-show.events.core :as events]
             [laser-show.subs :as subs]
+            [laser-show.timeline.shows :as shows]
             [laser-show.views.components.step-grid :as step-grid]
             [laser-show.views.dialogs.common :as common])
   (:import [javafx.stage WindowEvent]))
@@ -23,12 +24,16 @@
 
 (defn window-title
   "\"Step Grid — Cue A1 \\\"Beams\\\" · Zone pattern\": where the pattern
-   is, and its cue's or cell's name when it has one."
+   is, and its cue's or cell's name when it has one. A show's pattern (its
+   entity-key [:show id]) gives \"Step Grid — Show \\\"Intro\\\" · Zone
+   pattern\", its name Untitled when it has none."
   [{:keys [domain entity-key]} chain-name]
-  (let [[col row] entity-key]
-    (str "Step Grid — " (if (= :effect-chains domain) "Effects " "Cue ") (common/cell-label col row)
-         (when (seq chain-name) (str " \"" chain-name "\""))
-         " · Zone pattern")))
+  (if (shows/play-key? entity-key)
+    (str "Step Grid — Show \"" (if (seq chain-name) chain-name "Untitled") "\" · Zone pattern")
+    (let [[col row] entity-key]
+      (str "Step Grid — " (if (= :effect-chains domain) "Effects " "Cue ") (common/cell-label col row)
+           (when (seq chain-name) (str " \"" chain-name "\""))
+           " · Zone pattern"))))
 
 (defn guard-text
   "Why the grid is greyed out, or nil: its keyframes are on (08 invariant
@@ -121,10 +126,12 @@
   "The step grid window."
   [{:keys [fx/context]}]
   (let [{:keys [target editor-id]} (fx/sub-ctx context subs/dialog-data dialog-id)
-        [col row] (:entity-key target)
-        chain-name (if (= :effect-chains (:domain target))
-                     (:name (fx/sub-ctx context subs/effect-cell-chain col row))
-                     (:name (fx/sub-ctx context subs/cue-cell-chain col row)))]
+        entity-key (:entity-key target)
+        [col row] entity-key
+        chain-name (cond
+                     (= :effect-chains (:domain target)) (:name (fx/sub-ctx context subs/effect-cell-chain col row))
+                     (shows/play-key? entity-key) (fx/sub-val context get-in (conj (shows/cue-path entity-key) :name))
+                     :else (:name (fx/sub-ctx context subs/cue-cell-chain col row)))]
     {:fx/type common/dialog-stage
      :dialog-id dialog-id
      :title (window-title target chain-name)

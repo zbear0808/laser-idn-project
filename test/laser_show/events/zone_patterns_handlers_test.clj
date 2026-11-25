@@ -44,7 +44,7 @@
 ;; A cue's pattern (07 §7.1)
 
 (deftest set-cue-pattern-adds-a-preset-test
-  (let [s (run (fresh) {:event/type :zone-patterns/set-cue-pattern :col 0 :row 0 :style :alternate})
+  (let [s (run (fresh) {:event/type :zone-patterns/set-cue-pattern :cue-key [0 0] :style :alternate})
         [p :as ps] (patterns s 0 0)]
     (is (= 1 (count ps)) "a cue keeps one pattern (v1)")
     (is (= (:params (zp/preset-instance :alternate :cue)) (:params p)) "the style's preset, on the cue's clock")
@@ -54,22 +54,44 @@
     (is (= "Change Zone Pattern" (history/undo-label (:history s))) "an undo step")
     (is (true? (get-in s [:project :dirty?])) "unsaved")
     (testing "None takes it away"
-      (is (nil? (patterns (run s {:event/type :zone-patterns/set-cue-pattern :col 0 :row 0 :style nil}) 0 0))))
+      (is (nil? (patterns (run s {:event/type :zone-patterns/set-cue-pattern :cue-key [0 0] :style nil}) 0 0))))
     (testing "an empty cell has no cue to give one to; a style that isn't one changes nothing"
       (let [s0 (fresh)]
-        (is (= (:chains s0) (:chains (run s0 {:event/type :zone-patterns/set-cue-pattern :col 7 :row 3 :style :chase}))))
-        (is (= (:chains s0) (:chains (run s0 {:event/type :zone-patterns/set-cue-pattern :col 0 :row 0 :style :spin}))))))))
+        (is (= (:chains s0) (:chains (run s0 {:event/type :zone-patterns/set-cue-pattern :cue-key [7 3] :style :chase}))))
+        (is (= (:chains s0) (:chains (run s0 {:event/type :zone-patterns/set-cue-pattern :cue-key [0 0] :style :spin}))))))))
 
 (deftest set-cue-pattern-keeps-zones-test
   (let [s (-> (fresh)
-              (run {:event/type :zone-patterns/set-cue-pattern :col 0 :row 0 :style :alternate})
+              (run {:event/type :zone-patterns/set-cue-pattern :cue-key [0 0] :style :alternate})
               (assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :params :zones] [:zone/a :zone/c])
               (assoc-in [:chains :cue-chains [0 0] :zone-patterns 0 :params :rate] 2.0))
         before (first (patterns s 0 0))
-        after (first (patterns (run s {:event/type :zone-patterns/set-cue-pattern :col 0 :row 0 :style :chase}) 0 0))]
+        after (first (patterns (run s {:event/type :zone-patterns/set-cue-pattern :cue-key [0 0] :style :chase}) 0 0))]
     (is (= :chase (get-in after [:params :style])) "the style changes")
     (is (= (dissoc (:params before) :style) (dissoc (:params after) :style)) "the zones, the rate and the rest stay, as a pad switches it")
     (is (= (:id before) (:id after)) "the same pattern")))
+
+(deftest set-cue-pattern-on-a-show-test
+  (let [u #uuid "6f1c0000-0000-0000-0000-000000000001"
+        u2 #uuid "6f1c0000-0000-0000-0000-000000000002"
+        s0 (history/mark-clean (assoc-in (fresh) [:chains :shows u] {:editor-type :timeline :items [] :name "Intro"}))
+        s (run s0 {:event/type :zone-patterns/set-cue-pattern :cue-key [:show u] :style :chase})
+        [p :as ps] (get-in s [:chains :shows u :zone-patterns])]
+    (is (= 1 (count ps)) "the show gets the style's preset")
+    (is (= (:params (zp/preset-instance :chase :cue)) (:params p)))
+    (is (= (:chains s0) (update-in (:chains s) [:shows u] dissoc :zone-patterns)) "only the show changes, never a grid cell")
+    (is (= "Change Zone Pattern" (history/undo-label (:history s))))
+    (is (= :alternate (get-in (run s {:event/type :zone-patterns/set-cue-pattern :cue-key [:show u] :style :alternate})
+                              [:chains :shows u :zone-patterns 0 :params :style]))
+        "a style on a show with one changes the style only")
+    (is (nil? (get-in (run s {:event/type :zone-patterns/set-cue-pattern :cue-key [:show u] :style nil}) [:chains :shows u :zone-patterns]))
+        "None takes it away")
+    (testing "a show that isn't there changes nothing, and is not made"
+      (let [after (run s0 {:event/type :zone-patterns/set-cue-pattern :cue-key [:show u2] :style :chase})]
+        (is (= (:chains s0) (:chains after)))
+        (is (not (contains? (get-in after [:chains :shows]) u2)))))
+    (testing "an event that names no cue changes nothing"
+      (is (= (:chains s0) (:chains (run s0 {:event/type :zone-patterns/set-cue-pattern :style :chase})))))))
 
 (deftest new-cell-test
   (let [s (run (fresh) {:event/type :zone-patterns/new-cell :col 2 :row 1 :style :chase})
@@ -196,7 +218,7 @@
 ;; A cue's pattern is a one-item chain (07 §4.5)
 
 (deftest cue-pattern-domain-edits-params-test
-  (let [s (run (fresh) {:event/type :zone-patterns/set-cue-pattern :col 0 :row 0 :style :chase})
+  (let [s (run (fresh) {:event/type :zone-patterns/set-cue-pattern :cue-key [0 0] :style :chase})
         edited (run s {:event/type :chain/update-param :domain :cue-zone-patterns :entity-key [0 0]
                        :effect-path [0] :param-key :rate :value 2.0})]
     (is (= 2.0 (get-in (patterns edited 0 0) [0 :params :rate])) "params, modulators and keyframes edit it with no new event")

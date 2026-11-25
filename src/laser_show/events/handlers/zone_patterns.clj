@@ -21,7 +21,8 @@
   (:require [laser-show.animation.chains :as chains]
             [laser-show.events.handlers.vibes :as vibes]
             [laser-show.events.helpers :as h]
-            [laser-show.routing.zone-patterns :as zone-patterns])
+            [laser-show.routing.zone-patterns :as zone-patterns]
+            [laser-show.timeline.shows :as shows])
   (:import [javafx.scene.input MouseEvent]))
 
 
@@ -30,14 +31,15 @@
 (defn- style? [style] (some #{style} zone-patterns/styles))
 
 (defn- handle-set-cue-pattern
-  "The cue at [col row]'s zone pattern: a style on a cue without one adds
-   its preset (on the cue's clock); on a cue with one it changes the style
-   only, as a pad switches it, so the zones, the rate and the rest stay. nil
-   takes it away. An empty cell, or a style that isn't one, changes
-   nothing."
-  [{:keys [col row style state]}]
-  (let [path [:chains :cue-chains [col row]]
-        cue (get-in state path)]
+  "The zone pattern of the cue playing under :cue-key (a grid cell's [col
+   row] or a show's [:show id], shows/cue-path): a style on a cue without one
+   adds its preset (on the cue's clock); on a cue with one it changes the
+   style only, as a pad switches it, so the zones, the rate and the rest
+   stay. nil takes it away. An empty cell, a missing show, or a style that
+   isn't one, changes nothing."
+  [{:keys [cue-key style state]}]
+  (let [path (when (some? cue-key) (shows/cue-path cue-key))
+        cue (when path (get-in state path))]
     (cond
       (nil? cue) {:state state}
       (nil? style) {:state (update-in state path dissoc :zone-patterns)}

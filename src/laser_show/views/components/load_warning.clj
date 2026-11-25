@@ -143,10 +143,11 @@
                 " Simplify it, or lower " laser "'s minimum.")))))
 
 (defn cue-load-warning
-  "The line above the footer of the cue at col, row's editor (both editors)
+  "The line above the footer of the editor of the cue playing under
+   :cue-key (both editors; a grid cell's [col row] or a show's [:show id])
    while the cue is too heavy for a laser; out of the layout otherwise."
-  [{:keys [fx/context col row]}]
-  (let [text (cue-line-text (fx/sub-ctx context subs/cue-warning col row))]
+  [{:keys [fx/context cue-key]}]
+  (let [text (cue-line-text (fx/sub-ctx context subs/key-cue-warning cue-key))]
     {:fx/type :label
      :id "cue-load-warning"
      :text (or text "")

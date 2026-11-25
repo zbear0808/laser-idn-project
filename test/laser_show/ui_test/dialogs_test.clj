@@ -146,7 +146,7 @@
     :open {:event/type :timeline-cue-editor/open :col 1 :row 0}
     :title "Timeline Editor - Cell A2"}
    {:id :zone-pattern-editor
-    :open {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}}
+    :open {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:cue-key [0 0]}}
     :title "Zone Pattern — Cue A1 \"Intro\""}
    {:id :step-grid-editor
     :open {:event/type :step-grid/open :target a1-grid-target}
@@ -210,7 +210,7 @@
     :focus "Close"
     :edit {:event/type :effect-chain/set-name :col 0 :row 3}
     :value #(get-in (app-state) [:chains :effect-chains [0 3] :name])}
-   {:open {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:col 0 :row 0}}
+   {:open {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:cue-key [0 0]}}
     :title "Zone Pattern"
     :focus "#zone-pattern-close"
     :edit {:event/type :cue-chain/set-name :col 0 :row 0}
