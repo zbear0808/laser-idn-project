@@ -158,7 +158,7 @@
                                 :max max
                                 :pref-width 80
                                 :gesture {:label (str "Adjust " (or label (name key)))
-                                          :source-id [:modulator-slider key]
+                                          :source-id (param-controls/slider-source-id :modulator-slider key on-change-event)
                                           :on-value-changed (assoc on-change-event :mod-param-key key)}}
                          ;; A whole number at every tick, none between
                          is-int? (assoc :snap-to-ticks true :major-tick-unit 1.0 :minor-tick-count 0))}

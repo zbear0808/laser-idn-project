@@ -655,6 +655,61 @@
             (is (= "Adjust Period" (peek (undo-labels))) "one step for the whole drag"))
           (finally (ui/on-fx-thread #(.close stage))))))))
 
+(deftest slider-re-rendered-for-another-effect-ends-its-press-test
+  ;; Follow-up B14: re-rendered mid-press for the same parameter of another
+  ;; effect, under the same label, a slider stands for another control: its
+  ;; press ends, and the rest of its drag sends nothing. For a parameter's
+  ;; slider and for a modulator's field
+  (let [a (random-uuid)
+        b (random-uuid)
+        spec {:key :amount :label "Amount" :type :float :min 0.0 :max 3.0 :default 1.0}
+        wave {:type :sine :active? true :min 1.0 :max 2.0 :period 1.0}
+        intensity (fn [id amount] {:id id :effect-id :intensity :enabled? true :params {:amount amount}})
+        amount-of (fn [i] (get-in (state/get-raw-state) [:chains :effect-chains [0 0] :items i :params :amount]))
+        address (fn [id i] {:domain :effect-chains :entity-key [0 0] :effect-path [i] :effect-instance-id id})
+        ;; Amount's slider for effect id, at place i
+        slider (fn [id i] {:fx/type param-controls/param-slider
+                           :param-key :amount :param-spec spec :current-value 1.0
+                           :on-change-event (assoc (address id i) :event/type :chain/update-param)
+                           :on-text-event (assoc (address id i) :event/type :chain/update-param-from-text)})
+        ;; Amount's modulator, with its Min slider, for effect id at place i
+        modulator (fn [id i] {:fx/type mod-param/modulator-param-control
+                              :param-key :amount :param-spec spec :current-value wave
+                              :on-change-event (assoc (address id i) :event/type :chain/update-param)
+                              :on-text-event (assoc (address id i) :event/type :chain/update-param-from-text)
+                              :modulator-event-base (address id i)})
+        retargeted! (fn [desc-a desc-b selector]
+                      (let [[stage render!] (mount-desc! desc-a)
+                            sent (atom [])]
+                        (try
+                          (let [s (ui/on-fx-thread #(.lookup (.getRoot (.getScene ^Stage stage)) selector))]
+                            (record-dispatches!
+                             sent
+                             #(do
+                                (drag-track! s [0.1])
+                                (ui/wait-for! (fn [] (some? (open-press))))
+                                (reset! sent [])
+                                (render! desc-b)
+                                (fire-track! s MouseEvent/MOUSE_DRAGGED 0.7)
+                                (fire-track! s MouseEvent/MOUSE_RELEASED 0.7)))
+                            (events/flush!)
+                            (mapv :event/type @sent))
+                          (finally (ui/on-fx-thread #(.close ^Stage stage))))))]
+    (testing "a parameter's slider, from A to B"
+      (events/write-state! assoc-in [:chains :effect-chains [0 0]] {:active? false :items [(intensity a 1.0) (intensity b 1.0)]})
+      (is (= [:history/commit-transaction] (retargeted! (slider a 0) (slider b 1) "#param-amount-slider"))
+          "its end, and nothing more")
+      (is (ui/wait-for! #(nil? (open-press))))
+      (is (< 0.1 (amount-of 0) 0.6) "A keeps what its press sent: 0.1 of 0 to 3")
+      (is (= 1.0 (amount-of 1)) "B, the effect it stands for now, got nothing"))
+    (testing "a modulator's Min slider, from A's Amount to B's"
+      (events/write-state! assoc-in [:chains :effect-chains [0 0]] {:active? false :items [(intensity a wave) (intensity b wave)]})
+      (is (= [:history/commit-transaction] (retargeted! (modulator a 0) (modulator b 1) "#modulator-amount-min"))
+          "its end, and nothing more")
+      (is (ui/wait-for! #(nil? (open-press))))
+      (is (not= 1.0 (:min (amount-of 0))) "A's Min took what its press sent")
+      (is (= wave (amount-of 1)) "B's modulator got nothing"))))
+
 
 ;; Two edits to a modulator's fields from one render (reactivity plan 07)
 

@@ -77,6 +77,21 @@
    :style style
    :on-commit (fn [typed] (assoc event :text typed))})
 
+(defn slider-source-id
+  "What a parameter's slider stands for, as its press's :source-id
+   (gesture/slider): kind and key, and what its event template names: the
+   chain (:domain :entity-key), the effect by its instance
+   (:effect-instance-id, with :owner-id), or by its place (:effect-path)
+   for a template that names no instance, the keyframe it edits
+   (:keyframe-idx) and, for a modulator's field, the parameter
+   (:param-key). Re-rendered for another effect under the same label, the
+   slider stands for another control, so its press ends (reactivity plan
+   16); moved with its effect, it doesn't."
+  [kind k template]
+  [kind k (select-keys template (if (some? (:effect-instance-id template))
+                                  [:domain :entity-key :owner-id :effect-instance-id :keyframe-idx :param-key]
+                                  [:domain :entity-key :effect-path :keyframe-idx :param-key]))])
+
 (defn param-slider
   "Slider control for numeric parameters with editable text field.
    
@@ -131,7 +146,7 @@
                         :snap-to-ticks is-int?
                         :major-tick-unit (if is-int? 1.0 (/ (- max min) 10.0))
                         :gesture {:label (str "Adjust " display-label)
-                                  :source-id [:slider param-key]
+                                  :source-id (slider-source-id :slider param-key on-change-event)
                                   :on-value-changed (assoc on-change-event :param-key param-key)}}}
                 {:fx/type number-field
                  :id (str "param-" (name param-key) "-field")
