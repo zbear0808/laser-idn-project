@@ -53,7 +53,7 @@
     (testing "every rig path: a projector, a virtual projector, the calibration"
       (doseq [event [{:event/type :projectors/update-settings :projector-id :p1 :updates {:name "Stage L"}}
                      {:event/type :projectors/set-enabled :projector-id :p2 :enabled? false}
-                     {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-0.5 -0.5 0.5 0.5]}}
+                     {:event/type :projectors/set-safety-coordinate :projector-id :p1 :path [:limit 0] :value -0.5}
                      {:event/type :projectors/toggle-zone-group :projector-id :p2 :zone-group-id :crowd}
                      {:event/type :projectors/add-effect :projector-id :p1 :effect {:effect-id :rgb-curves}}]]
         (is (some? (write (handle (rigged) event))) (str (:event/type event)))))
@@ -243,8 +243,8 @@
                  (assoc-in [:backend :streaming :running?] true))
         ;; One step: a press narrowed Balcony L's area and took it out of Balcony
         edited (:state (last (steps live [{:event/type :history/begin-transaction :label "Edit" :history/gesture-id press}
-                                          {:event/type :projectors/set-safety :projector-id :p
-                                           :safety {:limit [-0.3 -0.5 0.5 0.5]} :history/gesture-id press}
+                                          {:event/type :projectors/drag-safety :projector-id :p :path [:limit]
+                                           :coordinates {0 -0.3} :history/gesture-id press}
                                           {:event/type :projectors/toggle-zone-group :projector-id :p
                                            :zone-group-id :group-balcony :history/gesture-id press}
                                           {:event/type :history/commit-transaction :history/gesture-id press}])))

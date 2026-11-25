@@ -137,14 +137,14 @@
   "The safety zone edits (zones plan Z1). The lock refuses one only when it
    would make a zone larger: a coordinate edit, Reset, a drag, a blocked
    area's removal or a Copy by the change it proposes (reviewed-widening),
-   the others by a dry run (widens-a-zone?)."
-  #{:projectors/set-safety :projectors/set-safety-coordinate :projectors/reset-safety :projectors/drag-safety
+   adding a blocked area by a dry run (widens-a-zone?)."
+  #{:projectors/set-safety-coordinate :projectors/reset-safety :projectors/drag-safety
     :projectors/add-blocked-area :projectors/remove-blocked-area :projectors/copy-safety})
 
 (def ^:private reviewed-edits
   "The safety edits whose handler trusts no :confirmed? on the event, only an
-   answer to their own question (safety-guard/review-answer): a dry run
-   with :confirmed? true would only ask."
+   answer to their own question (safety-guard/review-answer): judged by the
+   change they propose, as a dry run would only ask."
   #{:projectors/set-safety-coordinate :projectors/reset-safety :projectors/drag-safety
     :projectors/remove-blocked-area :projectors/copy-safety})
 
@@ -169,10 +169,10 @@
   (true? (get-in state [:ui :show-lock?])))
 
 (defn- widens-a-zone?
-  "Would event, answered yes, give any projector a larger safety zone? The
-   handler is pure, so it runs once more here with :confirmed? true."
+  "Would event give any projector a larger safety zone? The handler is
+   pure, so it runs once more here."
   [handler {:keys [state] :as event}]
-  (let [after (:state (handler (assoc event :confirmed? true)))]
+  (let [after (:state (handler event))]
     (boolean (some (fn [id] (safety/widens? (get-in state [:projectors id :safety])
                                             (get-in after [:projectors id :safety])))
                    (keys (:projectors after))))))

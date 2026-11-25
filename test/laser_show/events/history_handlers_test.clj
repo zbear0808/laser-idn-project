@@ -761,7 +761,7 @@
                  (assoc-in [:projectors :p1] {:name "Laser L" :host "10.0.0.5" :port 7255 :enabled? true
                                               :zone-groups [:all] :safety {:limit [-0.5 -0.5 0.5 0.5] :blocked []}})
                  (assoc-in [:backend :streaming :running?] true))
-        shrunk (run live {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-0.3 -0.5 0.5 0.5]}})
+        shrunk (run live {:event/type :projectors/set-safety-coordinate :projector-id :p1 :path [:limit 0] :value -0.3})
         zone #(get-in % [:projectors :p1 :safety :limit])]
     (is (= [-0.3 -0.5 0.5 0.5] (zone shrunk)) "shrinking applied at once")
     (let [asked (pipeline {:event/type :edit/undo :state shrunk})]
@@ -787,7 +787,7 @@
                  (assoc-in [:projectors :p1] {:name "Laser L" :host "10.0.0.5" :port 7255 :enabled? true
                                               :zone-groups [:all] :safety {:limit [-0.5 -0.5 0.5 0.5] :blocked []}})
                  (assoc-in [:backend :streaming :running?] true))
-        shrunk (run live {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-0.3 -0.5 0.5 0.5]}})
+        shrunk (run live {:event/type :projectors/set-safety-coordinate :projector-id :p1 :path [:limit 0] :value -0.3})
         asked (run shrunk {:event/type :edit/undo})
         id (get-in asked [:ui :dialogs :confirm :safety-review :id])
         allow {:event/type :ui/confirm :review-id id}
@@ -833,7 +833,7 @@
         (is (= {:open? false} (question undone)))))
     (testing "Redo asks the same way"
       (let [widened (run (assoc-in live [:backend :streaming :running?] false)
-                         {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-0.8 -0.5 0.5 0.5]}})
+                         {:event/type :projectors/set-safety-coordinate :projector-id :p1 :path [:limit 0] :value -0.8})
             undone (run widened {:event/type :edit/undo})
             asked-redo (run (assoc-in undone [:backend :streaming :running?] true) {:event/type :edit/redo})
             redo-id (get-in asked-redo [:ui :dialogs :confirm :safety-review :id])
@@ -846,8 +846,8 @@
             "after a change to the zone, nothing")))))
 
 (deftest safety-events-have-undo-labels-test
-  (doseq [[event-type label] [[:projectors/set-safety "Change Safety Zone"]
-                              [:projectors/set-safety-coordinate "Change Safety Zone"]
+  (doseq [[event-type label] [[:projectors/set-safety-coordinate "Change Safety Zone"]
+                              [:projectors/drag-safety "Change Safety Zone"]
                               [:projectors/reset-safety "Reset Safety Zone"]
                               [:projectors/add-blocked-area "Add Blocked Area"]
                               [:projectors/remove-blocked-area "Remove Blocked Area"]
