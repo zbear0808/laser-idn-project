@@ -5,21 +5,44 @@
    from Link but never push our tempo to the Link session.
    
    Architecture:
-   - Carabiner: Auto-connects on app startup (embedded lib-carabiner)
+   - Carabiner: Auto-connects on app startup (embedded lib-carabiner):
+     app/start! sends :timing/carabiner-auto-connect, which asks for
+     :link/connect unless Auto-connect is off
    - Link: local switches enable Link and following its tempo
    
    The service:
-   1. Manages connection to Carabiner (embedded lib-carabiner)
+   1. Owns the connection to Carabiner and its status listener (reactivity
+      follow-up R5, as input.devices owns the MIDI inputs and the OSC
+      server): app state never holds them, only plain status
+      ([:backend :link]), which comes back as events
    2. Enables/disables Link sync mode on user request
    3. Listens for Link tempo and beat updates
    4. Dispatches events to update app state
    5. Does NOT call set-link-tempo or lock-tempo (read-only)
    
-   State is managed by the application state in domains.clj.
-   This module provides pure functions for Link state management."
+   The connection:
+   - connect! (the :link/connect effect) connects on the Link thread
+     (link-carabiner), one connect at a time, so the event thread never
+     waits for Carabiner (it can take seconds: it may start an embedded
+     one), and registers one status listener (create-status-listener).
+     Connected already, nothing new opens and no second listener.
+   - The listener's reports (:timing/link-bpm-changed,
+     :timing/link-peers-changed) and how the connect went
+     (:timing/carabiner-connected {:connected?}) go through the dispatch fn
+     of the effect that asked, so a stopped app's are dropped.
+   - release! (app/stop!) removes the listener and disconnects, once,
+     whatever app state says, and drops connects until open! (app/start!,
+     start-test!); what a connect running then connects is undone at once.
+     Before the first release! the Link thread starts with the first
+     connect, so tests without an app can use it.
+   
+   The rest of this module is pure functions for Link state management, on
+   [:backend :link] (state/domains.clj)."
   (:require [clojure.tools.logging :as log]
             [beat-carabiner.core :as bc]
-            [laser-show.state.extractors :as ex]))
+            [laser-show.state.core :as state]
+            [laser-show.state.extractors :as ex])
+  (:import [java.util.concurrent ExecutorService Executors ThreadFactory TimeUnit]))
 
 
 ;; BPM Change Threshold
@@ -68,56 +91,149 @@
             (dispatch! {:event/type :timing/link-peers-changed :peers link-peers})))))))
 
 
-;; Carabiner Connection Lifecycle
+;; The connection to Carabiner: its owner
 ;; Carabiner is the underlying daemon - connects automatically on startup
 
 
-(defn connect-carabiner!
-  "Connects to the Carabiner daemon (embedded lib-carabiner).
-   This should be called once on app startup.
-   Does NOT enable Link - that's a separate step.
-   
-   Returns updated state map."
-  [link-state dispatch-fn get-app-state]
+(defonce ^{:private true
+           :doc "{:listener f}: the status listener of the connection connect!
+   made (registered with beat-carabiner), or nil."}
+  !connection
+  (atom nil))
+
+(defonce ^{:private true
+           :doc "{:state :idle|:open|:closed :generation n :executor}: n counts
+   the release!s, so a connect asked for before one can't keep what it
+   connects."}
+  !runtime
+  (atom {:state :idle :generation 0}))
+
+(defonce ^:private lock (Object.))
+
+(defn holds-connection?
+  "Is there a connection to Carabiner that connect! made, with its status
+   listener, and release! hasn't closed?"
+  []
+  (some? @!connection))
+
+(defn- current?
+  "Is the owner open, with no release! since a connect of generation was
+   asked for?"
+  [generation]
+  (let [{:keys [state] g :generation} @!runtime]
+    (and (not= :closed state) (= generation g))))
+
+(defn- connect-carabiner!
+  "Connect to the Carabiner daemon (bc/connect: the one on its port, else
+   an embedded one it starts), on this thread: it can take seconds. Does
+   NOT enable Link - that's a separate step. True if connected."
+  []
   (try
-    (if (bc/connect)
-      (let [listener (create-status-listener dispatch-fn get-app-state)]
-        ;; connect can receive the first tempo before registration. Seed it
-        ;; without letting an older snapshot overtake a later callback.
-        (locking listener
-          (bc/add-status-listener listener)
-          (listener (bc/state)))
-        (log/info "Carabiner daemon connected (Link not yet enabled)")
-        (assoc link-state :carabiner-connected? true :listener listener))
-      (assoc link-state :carabiner-connected? false))
+    (boolean (bc/connect))
     (catch Exception e
       (log/error e "Error connecting to Carabiner:" (.getMessage e))
-      (assoc link-state :carabiner-connected? false))))
+      false)))
 
-(defn disconnect-carabiner!
-  "Disconnects from the Carabiner daemon.
-   This should be called on app shutdown.
-   
-   Returns updated state map."
-  [link-state]
-  (try
-    ;; Remove listener if it exists
-    (when-let [listener (:listener link-state)]
-      (bc/remove-status-listener listener))
-    
-    ;; Disconnect from Carabiner
-    (bc/disconnect)
-    
-    (log/info "Carabiner daemon disconnected")
-    (-> link-state
-        (assoc :carabiner-connected? false)
-        (assoc :link-enabled? false)
-        (assoc :link-bpm nil)
-        (assoc :link-peers 0)
-        (dissoc :listener))
-    (catch Exception e
-      (log/error e "Error disconnecting from Carabiner:" (.getMessage e))
-      link-state)))
+(defn- connect-now!
+  "Connect to Carabiner, unless connected already (nothing new opens), and
+   register one status listener, its reports through dispatch. True if
+   connected. One that release! came during is undone: disconnected, unless
+   release! has the connection to close itself, or an app opened since (its
+   own connect takes it over)."
+  [dispatch generation]
+  (boolean
+   (when (or (and (holds-connection?) (bc/active?))
+             (connect-carabiner!))
+     (locking lock
+       (cond
+         (not (current? generation))
+         (when (and (= :closed (:state @!runtime)) (not (holds-connection?)))
+           (bc/disconnect)
+           (log/info "Carabiner connected after Link was released: disconnected")
+           false)
+
+         (holds-connection?) true
+
+         :else
+         (let [listener (create-status-listener dispatch state/get-raw-state)]
+           ;; connect can receive the first tempo before registration. Seed
+           ;; it without letting an older snapshot overtake a later callback.
+           (locking listener
+             (bc/add-status-listener listener)
+             (listener (bc/state)))
+           (reset! !connection {:listener listener})
+           (log/info "Carabiner daemon connected (Link not yet enabled)")
+           true))))))
+
+(defn- run-connect!
+  "Connect unless release! came since it was asked for, and send how it
+   went through dispatch."
+  [dispatch generation]
+  (when (current? generation)
+    (try
+      (dispatch {:event/type :timing/carabiner-connected :connected? (connect-now! dispatch generation)})
+      (catch Throwable t
+        (log/error t "Connecting to Carabiner failed")))))
+
+(defn- daemon-factory [thread-name]
+  (reify ThreadFactory
+    (newThread [_ r]
+      (doto (Thread. ^Runnable r ^String thread-name)
+        (.setDaemon true)))))
+
+(defn connect!
+  "Queue a connect to Carabiner for the Link thread (the :link/connect
+   effect, events/core.clj; its value, request, is {}): dispatch gets
+   :timing/carabiner-connected {:connected?}, then the status listener's
+   reports (see the ns doc). False (logged) after release!, until open!."
+  [_request dispatch]
+  (locking lock
+    (if (= :closed (:state @!runtime))
+      (do (log/warn "Link is released (the app stopped); dropping a connect to Carabiner")
+          false)
+      (do
+        (when (= :idle (:state @!runtime))
+          (swap! !runtime assoc
+                 :state :open
+                 :executor (Executors/newSingleThreadExecutor (daemon-factory "link-carabiner"))))
+        (let [{:keys [generation ^ExecutorService executor]} @!runtime]
+          ;; With the asker's bindings, as a future would have them
+          (.execute executor ^Runnable (bound-fn* #(run-connect! dispatch generation)))
+          true)))))
+
+(defn open!
+  "Take connects again after release! (app/start!, start-test!): the Link
+   thread starts with the next one."
+  []
+  (locking lock
+    (when (= :closed (:state @!runtime))
+      (swap! !runtime assoc :state :idle))))
+
+(defn release!
+  "Remove the status listener and disconnect from Carabiner, once, on this
+   thread, whatever app state says (app/stop!): a connect not yet run is
+   dropped, the one running gets up to timeout-ms to finish (what it
+   connects after that is undone at once), and later connects are dropped
+   until open!. Writes no app state. Idempotent; nil."
+  [timeout-ms]
+  (let [{:keys [^ExecutorService executor]}
+        (locking lock
+          (let [old @!runtime]
+            (reset! !runtime {:state :closed :generation (inc (:generation old))})
+            old))]
+    (when executor
+      (.shutdown executor)
+      (when-not (.awaitTermination executor timeout-ms TimeUnit/MILLISECONDS)
+        (log/warn "Link: the connect to Carabiner did not finish within" timeout-ms "ms")
+        (.shutdownNow executor)))
+    (when-let [{:keys [listener]} (locking lock (first (reset-vals! !connection nil)))]
+      (try
+        (bc/remove-status-listener listener)
+        (bc/disconnect)
+        (log/info "Carabiner daemon disconnected")
+        (catch Exception e
+          (log/warn e "Error disconnecting from Carabiner:" (.getMessage e)))))
+    nil))
 
 
 ;; Link Enable/Disable
@@ -248,15 +364,3 @@
    :sync-enabled? false
    :link-bpm nil
    :link-peers 0})
-
-(defn init
-  "Initializes Link state.
-   Optionally connects to Carabiner if auto-connect? is true.
-   Does NOT enable Link - that's controlled by user via UI.
-   Returns initialized state."
-  ([link-state]
-   (init link-state false nil nil))
-  ([link-state auto-connect? dispatch-fn get-app-state]
-   (if auto-connect?
-     (connect-carabiner! link-state dispatch-fn get-app-state)
-     link-state)))

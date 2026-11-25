@@ -255,7 +255,7 @@
                                            (swap! order conj [:dispatch (:event/type event)
                                                               (select-keys event [:addons :drivers :dir])]))
                         show-clock/start! (fn [])
-                        link/connect-carabiner! (fn [link-state _ _] link-state)
+                        link/connect! (fn [_ _] true)
                         input-mapper/start-mapper! (fn [])
                         gamepad/start! (fn [& _])]
             (app/start!)

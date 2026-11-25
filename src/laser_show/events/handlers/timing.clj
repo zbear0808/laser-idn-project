@@ -13,6 +13,8 @@
    
    Link Architecture:
    - Carabiner daemon auto-connects on app startup
+     (:timing/carabiner-auto-connect); the connection and its status
+     listener are input.link's, app state has only their status
     - Link and following its tempo are separate local controls
    - UI shows both Carabiner and Link status"
   (:require [laser-show.animation.cue-timing :as cue-timing]
@@ -331,14 +333,23 @@
   [{:keys [state peers]}]
   {:state (assoc-in state [:backend :link :link-peers] (or peers 0))})
 
+(defn- handle-timing-carabiner-auto-connect
+  "At start-up (app/start!): connect to the Carabiner daemon unless
+   [:backend :link :auto-connect?] is false. The Link owner (input.link)
+   connects off the event thread and says how it went with
+   :timing/carabiner-connected, through this app's dispatcher."
+  [{:keys [state]}]
+  (if (get-in state [:backend :link :auto-connect?] true)
+    {:link/connect {}}
+    {}))
+
 (defn- handle-timing-carabiner-connected
-  "Update Carabiner connection status (app/connect-link!'s result at
-   start-up), and the status listener when the event has one. The other
-   link keys are kept."
-  [{:keys [state connected? listener]}]
-  {:state (update-in state [:backend :link]
-                     #(cond-> (assoc % :carabiner-connected? connected?)
-                        listener (assoc :listener listener)))})
+  "Update Carabiner connection status: whether the Link owner
+   (input.link) is connected, its answer to :link/connect. The other link
+   keys are kept. The connection and its status listener are the owner's,
+   never app state."
+  [{:keys [state connected?]}]
+  {:state (assoc-in state [:backend :link :carabiner-connected?] (boolean connected?))})
 
 (defn- handle-timing-link-enabled
   "Update Link enabled status (internal event from link service)."
@@ -403,6 +414,7 @@
     :timing/link-peers-changed (handle-timing-link-peers-changed event)
     
     ;; Internal Link events
+    :timing/carabiner-auto-connect (handle-timing-carabiner-auto-connect event)
     :timing/carabiner-connected (handle-timing-carabiner-connected event)
     :timing/link-enabled (handle-timing-link-enabled event)
     

@@ -574,7 +574,7 @@
                     :latency-ms 0                  ;; Latency compensation
                     :link-bpm nil                  ;; Current Link session BPM
                     :link-peers 0}                 ;; Number of Link peers
-          :doc "Ableton Link state. Carabiner auto-connects on startup. Button toggles Link sync mode."}})
+          :doc "Ableton Link state. Carabiner auto-connects on startup. Button toggles Link sync mode. Plain data: the connection and its status listener belong to their owner (laser-show.input.link), which reports their status back as events"}})
 
 
 (defstate history

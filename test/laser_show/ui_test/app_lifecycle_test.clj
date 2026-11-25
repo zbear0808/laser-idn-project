@@ -8,7 +8,8 @@
    throws (W2 A). Once stopped, an app instance's late work (an event still
    running, a scan, a learn, the rig writer's results, Exit coming back)
    changes nothing in the app started after it (reactivity plan 19)."
-  (:require [clojure.java.io :as io]
+  (:require [beat-carabiner.core :as bc]
+            [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.tools.logging.test :as log-test]
             [laser-show.app :as app]
@@ -99,70 +100,96 @@
   (events/write-state! assoc-in [:timing :bpm] 99.0)
   (is (= 99.0 (get-in (state/get-raw-state) [:timing :bpm])) "write-state! writes on the event thread"))
 
-(deftest link-connection-survives-an-event-in-flight-test
-  (let [threads (atom {})]
-    (with-redefs [link/connect-carabiner! (fn [ls _ _] (assoc ls :carabiner-connected? true :listener ::listener))]
-      (slowed :show-clock/status 200 threads
-              (fn []
-                ;; What the show clock sends a few times a second
-                (events/dispatch! {:event/type :show-clock/status :status {:beat-index 1}})
-                (Thread/sleep 50)
-                (@#'app/connect-link!)
-                (is (events/flush!)))))
-    (let [link-state (get-in (state/get-raw-state) [:backend :link])]
-      (try
-        (is (true? (:carabiner-connected? link-state)) "the event's write-back didn't take the connection away")
-        (is (= ::listener (:listener link-state)))
-        (is (true? (:auto-connect? link-state)) "the other link keys are kept")
-        (finally
-          ;; Nothing for the fixture's stop! to disconnect
-          (events/write-state! update-in [:backend :link] #(-> % (assoc :carabiner-connected? false) (dissoc :listener))))))))
-
-(deftest stop-writes-nothing-and-closes-each-device-once-test
+(defn- with-fake-carabiner
+  "(f calls) with beat-carabiner stood in for (no daemon is reached or
+   started): a connect succeeds, and calls counts :connect, :add-listener,
+   :remove-listener and :disconnect. What f leaves connected is released
+   while it stands in."
+  [f]
   (let [calls (atom {})
         count! #(swap! calls update % (fnil inc 0))
-        pad-calls (atom [])
-        pad (input-fixtures/midi-source "Pad" pad-calls)
-        handler (current-handler)
-        threads (atom {})]
-    (with-redefs [midi/list-devices (constantly [pad])
-                  osc/open-server! (fn [port _handler] {::server port})
-                  osc/close-server! (fn [server] (count! [:osc (::server server)]) server)
-                  link/disconnect-carabiner! (fn [l] (count! :link) (assoc l :carabiner-connected? false))]
-      ;; A MIDI input and the OSC server opened by the device worker, as
-      ;; Connect and Start Server do
-      (events/dispatch! {:event/type :input/midi-connect-device :device-name "Pad"})
-      (events/dispatch! {:event/type :input/osc-start-server})
-      (ui/wait-for! #(let [{:keys [midi osc]} (get-in (state/get-raw-state) [:backend :input])]
-                       (and (= #{"Pad"} (:connected-devices midi)) (:server-running? osc)
-                            (empty? (:requests midi)) (empty? (:requests osc)))))
-      (events/write-state! assoc-in [:backend :link :carabiner-connected?] true)
-      (let [before (state/get-raw-state)]
-        (try
-          ;; An event in flight that writes neither [:backend :input] nor
-          ;; [:backend :link] (:show-clock/status writes the MTC status)
-          (slowed :timing/set-bpm 200 threads
-                  (fn []
-                    (events/dispatch! {:event/type :timing/set-bpm :bpm 128.0})
-                    (Thread/sleep 50)
-                    (app/stop!)
-                    ;; The old app's queue, the event in flight written back
-                    (let [p (promise)]
-                      (handler {:event/type :dev/flush :promise p})
-                      (is (deref p 2000 false)))
-                    (app/stop!)))
-          (let [after (state/get-raw-state)]
-            (is (= 1 (count (filter #{:close-device} @pad-calls))) "the MIDI input closed once")
-            (is (= {[:osc 9000] 1 :link 1} @calls) "the server and the link, once each")
-            (is (= {:midi #{} :osc nil} (devices/open-ports)) "nothing left open")
-            (is (identical? (get-in before [:backend :input]) (get-in after [:backend :input])) "nothing written")
-            (is (identical? (get-in before [:backend :link]) (get-in after [:backend :link])) "nothing written"))
-          (testing "a request after stop opens nothing, till the next app"
-            (is (false? (devices/submit! {:op :midi/connect :request-id (random-uuid) :device-name "Pad"} (fn [_]))))
-            (is (= 1 (count (filter #{:get-transmitter} @pad-calls)))))
-          (finally
-            ;; Nothing left connected for the fixture's stop!
-            (events/write-state! assoc-in [:backend :link :carabiner-connected?] false)))))))
+        connected? (atom false)]
+    (with-redefs [bc/connect (fn [] (count! :connect) (reset! connected? true))
+                  bc/active? #(deref connected?)
+                  bc/state (constantly {:link-bpm nil :link-peers 0})
+                  bc/add-status-listener (fn [_] (count! :add-listener))
+                  bc/remove-status-listener (fn [_] (count! :remove-listener))
+                  bc/disconnect (fn [] (count! :disconnect) (reset! connected? false))]
+      (try
+        (f calls)
+        (finally
+          (link/release! 2000)
+          (link/open!))))))
+
+(deftest link-connection-survives-an-event-in-flight-test
+  (with-fake-carabiner
+    (fn [calls]
+      (let [threads (atom {})]
+        (slowed :show-clock/status 200 threads
+                (fn []
+                  ;; What the show clock sends a few times a second
+                  (events/dispatch! {:event/type :show-clock/status :status {:beat-index 1}})
+                  (Thread/sleep 50)
+                  ;; As app/start! asks for it: the Link owner connects
+                  (events/dispatch! {:event/type :timing/carabiner-auto-connect})
+                  (ui/wait-for! #(true? (get-in (state/get-raw-state) [:backend :link :carabiner-connected?])))
+                  (is (events/flush!)))))
+      (let [link-state (get-in (state/get-raw-state) [:backend :link])]
+        (is (true? (:carabiner-connected? link-state)) "the event's write-back didn't take the connection away")
+        (is (true? (:auto-connect? link-state)) "the other link keys are kept")
+        (is (not (contains? link-state :listener)) "the status listener is the Link owner's, not app state")
+        (is (link/holds-connection?))
+        (is (= {:connect 1 :add-listener 1} @calls))))))
+
+(deftest stop-writes-nothing-and-closes-each-device-once-test
+  (with-fake-carabiner
+    (fn [link-calls]
+      (let [calls (atom {})
+            count! #(swap! calls update % (fnil inc 0))
+            pad-calls (atom [])
+            pad (input-fixtures/midi-source "Pad" pad-calls)
+            handler (current-handler)
+            threads (atom {})]
+        (with-redefs [midi/list-devices (constantly [pad])
+                      osc/open-server! (fn [port _handler] {::server port})
+                      osc/close-server! (fn [server] (count! [:osc (::server server)]) server)]
+          ;; A MIDI input and the OSC server opened by the device worker, as
+          ;; Connect and Start Server do, and Carabiner by the Link owner, as
+          ;; start-up does
+          (events/dispatch! {:event/type :input/midi-connect-device :device-name "Pad"})
+          (events/dispatch! {:event/type :input/osc-start-server})
+          (events/dispatch! {:event/type :timing/carabiner-auto-connect})
+          (ui/wait-for! #(let [{:keys [midi osc]} (get-in (state/get-raw-state) [:backend :input])]
+                           (and (= #{"Pad"} (:connected-devices midi)) (:server-running? osc)
+                                (empty? (:requests midi)) (empty? (:requests osc))
+                                (true? (get-in (state/get-raw-state) [:backend :link :carabiner-connected?])))))
+          (let [before (state/get-raw-state)]
+            ;; An event in flight that writes neither [:backend :input] nor
+            ;; [:backend :link] (:show-clock/status writes the MTC status)
+            (slowed :timing/set-bpm 200 threads
+                    (fn []
+                      (events/dispatch! {:event/type :timing/set-bpm :bpm 128.0})
+                      (Thread/sleep 50)
+                      (app/stop!)
+                      ;; The old app's queue, the event in flight written back
+                      (let [p (promise)]
+                        (handler {:event/type :dev/flush :promise p})
+                        (is (deref p 2000 false)))
+                      (app/stop!)))
+            (let [after (state/get-raw-state)]
+              (is (= 1 (count (filter #{:close-device} @pad-calls))) "the MIDI input closed once")
+              (is (= {[:osc 9000] 1} @calls) "the server once")
+              (is (= {:connect 1 :add-listener 1 :remove-listener 1 :disconnect 1} @link-calls)
+                  "and the Carabiner connection, its listener removed: whatever state says, by its owner")
+              (is (not (link/holds-connection?)))
+              (is (= {:midi #{} :osc nil} (devices/open-ports)) "nothing left open")
+              (is (identical? (get-in before [:backend :input]) (get-in after [:backend :input])) "nothing written")
+              (is (identical? (get-in before [:backend :link]) (get-in after [:backend :link])) "nothing written"))
+            (testing "a request after stop opens nothing, till the next app"
+              (is (false? (devices/submit! {:op :midi/connect :request-id (random-uuid) :device-name "Pad"} (fn [_]))))
+              (is (= 1 (count (filter #{:get-transmitter} @pad-calls))))
+              (is (false? (link/connect! {} (fn [_]))) "nor connects to Carabiner")
+              (is (= 1 (:connect @link-calls))))))))))
 
 (deftest stop-on-the-event-thread-does-not-wait-test
   (let [flushes (atom [])
