@@ -133,7 +133,9 @@
 
 (defn- handle-retry-write
   "Retry, and Exit's Try again: write the rig as it is now, at once. :then
-   is the event to continue with once it is written."
+   is the event to continue with once it is written, or once a newer rig
+   that took its place before the writer got to it is (an autosave carries
+   it on, rig-store/submit!)."
   [{:keys [then state]}]
   (if (rig-autosave/writable? state)
     (rig-autosave/write-request state {:then then :now? true})
