@@ -139,3 +139,228 @@
     (testing "containment and equal ranges overlap"
       (is (shows/tc-overlap? (r 0.0 100.0) (r 10.0 20.0)))
       (is (shows/tc-overlap? (r 10.0 20.0) (r 10.0 20.0))))))
+
+
+;; The table (01 §3, 06 §7)
+
+(def u3 #uuid "00000000-0000-0000-0000-000000000003")
+(def u4 #uuid "00000000-0000-0000-0000-000000000004")
+(def u5 #uuid "00000000-0000-0000-0000-000000000005")
+
+(def one-more-time
+  {:name "One More Time"
+   :show/info {:artist "Daft Punk" :album "Discovery" :key "F#m" :genre "House"}
+   :editor-type :timeline
+   :timeline/tempo-bpm 122.7
+   :timeline/tc-start 3600.0
+   :timeline/tc-fps 25
+   :timeline/chase :mtc
+   :timeline/length nil
+   :items [{:id 1 :track-id 1 :timeline/start 0.0 :timeline/duration 655.2}]})
+
+(def unlocked
+  {:editor-type :timeline :timeline/length 256.0 :items []})
+
+(defn- by-id [rows] (into {} (map (juxt :id identity)) rows))
+
+(deftest rows-shape-test
+  (let [rs (shows/rows {u1 one-more-time u4 unlocked})
+        {r1 u1 r4 u4} (by-id rs)]
+    (is (vector? rs))
+    (is (= 2 (count rs)))
+    (testing "06 §7: a locked show"
+      (is (= {:id u1 :title "One More Time" :artist "Daft Punk" :album "Discovery"
+              :bpm 122.7 :key "F#m" :genre "House"
+              :length-beats 655.2 :duration-s (tc/beats->seconds 655.2 122.7) :approx? false
+              :tc-start-s 3600.0 :tc-end-s (+ 3600.0 (tc/beats->seconds 655.2 122.7)) :fps 25
+              :timecode? true :problem nil}
+             r1))
+      (is (< 320.39 (:duration-s r1) 320.40))
+      (is (< 3920.39 (:tc-end-s r1) 3920.40)))
+    (testing "06 §7: an unlocked show has no seconds in its row"
+      (is (= {:id u4 :title nil :artist nil :album nil :bpm nil :key nil :genre nil
+              :length-beats 256.0 :duration-s nil :approx? true
+              :tc-start-s 0.0 :tc-end-s nil :fps 30 :timecode? false :problem nil}
+             r4)))
+    (testing "rows take no global BPM"
+      (is (= 1 (count (:arglists (meta #'shows/rows)))))
+      (is (= '[shows] (first (:arglists (meta #'shows/rows))))))
+    (testing "blank text is nil; an empty show is 0 s, not approximate"
+      (let [[r] (shows/rows {u2 {:name "  " :show/info {:artist ""} :editor-type :timeline :items []}})]
+        (is (nil? (:title r)))
+        (is (nil? (:artist r)))
+        (is (= 0.0 (:length-beats r)))
+        (is (= 0.0 (:duration-s r)))
+        (is (false? (:approx? r)))))
+    (is (= [] (shows/rows {})))
+    (is (= [] (shows/rows nil)))))
+
+(deftest duration-and-range-examples-test
+  (testing "01 §3.2"
+    (doseq [g [60.0 120.0 174.0]]
+      (is (= {:seconds 30.0 :approx? false} (shows/duration-s (timed 128.0 64.0 0.0) g)) "locked: any global BPM"))
+    (is (= {:start 0.0 :end 30.0 :fps 30} (shows/tc-range (timed 128.0 64.0 0.0))))
+    (let [s (dissoc (timed 128.0 64.0 0.0) :timeline/tempo-bpm)]
+      (is (= {:seconds 32.0 :approx? true} (shows/duration-s s 120.0)))
+      (is (= {:seconds 16.0 :approx? true} (shows/duration-s s 240.0)) "follows the global BPM")
+      (is (nil? (shows/tc-range s))))
+    (let [s {:editor-type :timeline :items []}]
+      (is (= {:seconds 0.0 :approx? false} (shows/duration-s s 120.0)))
+      (is (nil? (shows/tc-range s))))
+    (let [s (timed 60.0 16.0 3600.0 :timeline/length 32.0)]
+      (doseq [g [60.0 120.0]]
+        (is (= {:seconds 32.0 :approx? false} (shows/duration-s s g))))
+      (is (= {:start 3600.0 :end 3632.0 :fps 30} (shows/tc-range s)))))
+  (testing "no global BPM: an unlocked show is worked out at 120"
+    (is (= {:seconds 32.0 :approx? true}
+           (shows/duration-s (dissoc (timed 128.0 64.0 0.0) :timeline/tempo-bpm) nil)))))
+
+(defn- r
+  "A row as shows/rows makes it, with only what a test needs."
+  [id & {:as more}]
+  (merge {:id id :title nil :artist nil :album nil :bpm nil :key nil :genre nil
+          :length-beats 0.0 :duration-s 0.0 :approx? false
+          :tc-start-s 0.0 :tc-end-s nil :fps 30 :timecode? false :problem nil}
+         more))
+
+(defn- ids [rows] (mapv :id rows))
+
+(deftest sort-rows-examples-test
+  (let [a (r u1 :title "b" :artist "Zed" :bpm 120.0)
+        b (r u2 :title "a" :bpm 128.0)
+        c (r u3 :title "c" :artist "adam")
+        abc [a b c]]
+    (testing "01 §3.3"
+      (is (= [u3 u1 u2] (ids (shows/sort-rows abc {:column :artist :dir :asc} 120.0))) "C (adam), A (Zed), B (nil)")
+      (is (= [u1 u3 u2] (ids (shows/sort-rows abc {:column :artist :dir :desc} 120.0))) "nil is still last")
+      (is (= [u2 u1 u3] (ids (shows/sort-rows abc {:column :bpm :dir :desc} 120.0))))
+      (is (= [u1 u2 u3] (ids (shows/sort-rows abc {:column :bpm :dir :asc} 120.0))))
+      (let [d (r u4 :title "x" :artist "Same" :bpm 120.0)
+            e (r u5 :title "w" :artist "Same" :bpm 120.0)]
+        (is (= [u5 u4] (ids (shows/sort-rows [d e] {:column :artist :dir :asc} 120.0))) "ties by title")
+        (is (= [u5 u4] (ids (shows/sort-rows [d e] {:column :artist :dir :desc} 120.0))) "ties by title ascending either way")))
+    (testing "text is case-insensitive; the untitled sort last"
+      (is (= [u2 u1 u3 u4] (ids (shows/sort-rows [(r u1 :title "B") (r u4) (r u3 :title "c") (r u2 :title "a")]
+                                                 {:column :title :dir :asc} nil))))
+      (is (= [u3 u1 u2 u4] (ids (shows/sort-rows [(r u1 :title "B") (r u4) (r u3 :title "c") (r u2 :title "a")]
+                                                 {:column :title :dir :desc} nil)))))
+    (testing "ties by title, then the id's string"
+      (is (= [u1 u2] (ids (shows/sort-rows [(r u2 :title "x") (r u1 :title "X")] {:column :title :dir :asc} nil))))
+      (is (= [u1 u2] (ids (shows/sort-rows [(r u2) (r u1)] {:column :artist :dir :desc} nil)))))
+    (testing "TC: ticked first ascending, last descending"
+      (let [rs [(r u1 :title "a") (r u2 :title "b" :timecode? true) (r u3 :title "c")]]
+        (is (= [u2 u1 u3] (ids (shows/sort-rows rs {:column :timecode? :dir :asc} nil))))
+        (is (= [u1 u3 u2] (ids (shows/sort-rows rs {:column :timecode? :dir :desc} nil))))))
+    (testing "numbers compare as numbers; TC end empty last"
+      (let [rs [(r u1 :title "a" :tc-start-s 100.0 :tc-end-s 900.0)
+                (r u2 :title "b" :tc-start-s 20.0)
+                (r u3 :title "c" :tc-start-s 3.0 :tc-end-s 30.0)]]
+        (is (= [u3 u2 u1] (ids (shows/sort-rows rs {:column :tc-start-s :dir :asc} nil))))
+        (is (= [u3 u1 u2] (ids (shows/sort-rows rs {:column :tc-end-s :dir :asc} nil))))
+        (is (= [u1 u3 u2] (ids (shows/sort-rows rs {:column :tc-end-s :dir :desc} nil))))))
+    (testing "unlocked durations sort at the BPM given"
+      (let [locked (r u1 :title "locked" :bpm 120.0 :length-beats 64.0 :duration-s 32.0)
+            free (r u2 :title "free" :length-beats 64.0 :duration-s nil :approx? true)]
+        (is (= [u2 u1] (ids (shows/sort-rows [locked free] {:column :duration-s :dir :asc} 240.0))) "16 s at 240 BPM")
+        (is (= [u1 u2] (ids (shows/sort-rows [locked free] {:column :duration-s :dir :asc} 60.0))) "64 s at 60 BPM")
+        (is (= [u2 u1] (ids (shows/sort-rows [locked free] {:column :duration-s :dir :asc} nil))) "32 s at 120: a tie, by title")))
+    (testing "an unknown or missing column sorts by title"
+      (is (= [u2 u1 u3] (ids (shows/sort-rows abc {:column :status :dir :asc} nil))))
+      (is (= [u2 u1 u3] (ids (shows/sort-rows abc nil nil)))))
+    (is (= [] (shows/sort-rows [] {:column :title :dir :asc} nil)))
+    (testing "total: every shuffle sorts to one order, for every column and direction"
+      (let [rows [(r u1 :title "b" :artist "Zed" :bpm 120.0 :timecode? true :tc-end-s 10.0)
+                  (r u2 :title "a" :bpm 128.0 :duration-s nil :length-beats 8.0 :approx? true)
+                  (r u3 :title "c" :artist "adam" :key "Am" :duration-s 4.0)
+                  (r u4 :title "B" :artist "zed" :bpm 120.0 :genre "House" :tc-end-s 10.0)
+                  (r u5 :album "Discovery" :timecode? true)
+                  (r #uuid "00000000-0000-0000-0000-000000000006" :title "b" :artist "Zed" :bpm 120.0)]
+            rnd (java.util.Random. 11)]
+        (doseq [column shows/sort-columns
+                dir [:asc :desc]]
+          (let [spec {:column column :dir dir}
+                sorted (shows/sort-rows rows spec 90.0)]
+            (is (every? #(= sorted (shows/sort-rows % spec 90.0))
+                        (repeatedly 200 #(let [l (java.util.ArrayList. ^java.util.Collection rows)]
+                                           (java.util.Collections/shuffle l rnd)
+                                           (vec l))))
+                (str spec))))))))
+
+(deftest filter-rows-examples-test
+  (let [omt (r u1 :title "One More Time" :artist "Daft Punk" :album "Discovery" :key "F#m" :genre "House"
+               :bpm 122.7 :duration-s 320.39)
+        atw (r u2 :title "Around the World" :artist "Daft Punk" :album "Homework" :bpm 121.0 :duration-s 200.0)
+        strobe (r u3 :title "Strobe" :artist "deadmau5" :bpm 128.0 :duration-s 270.4)
+        free (r u4 :title "Ghosts" :artist "deadmau5" :bpm nil :length-beats 480.0 :duration-s nil :approx? true)
+        rows [omt atw strobe free]
+        f (fn [q scope & [bpm]] (ids (shows/filter-rows rows q scope bpm)))]
+    (testing "01 §3.4"
+      (doseq [scope shows/scopes]
+        (is (= [u1 u2 u3 u4] (f "" scope)) "an empty query keeps every row")
+        (is (= [u1 u2 u3 u4] (f "   " scope))))
+      (is (= [u1] (f "daft one" :all)) "every token, each in some text field")
+      (is (= [u1 u2] (f "DAFT" :artist)))
+      (is (= [] (f "discovery" :artist)) "it's the album")
+      (is (= [u1] (f "discovery" :all)))
+      (is (= [u1 u2 u3] (f "120-128" :bpm)) "unlocked rows never match")
+      (is (= [u2] (f "121" :bpm)) "120.5 < bpm < 121.5")
+      (is (= [u1] (f "123" :bpm)) "122.7 is within 0.5")
+      (is (= [] (f "122" :bpm)) "121.5 < bpm < 122.5: not 122.7")
+      (is (= [u2 u3] (f "3:00-4:30" :duration 60.0)) "180 <= s <= 270, by the shown whole seconds")
+      (is (= [u2 u3 u4] (f "3:00-4:30" :duration 120.0)) "Ghosts: 480 beats at 120 is 4:00")
+      (is (= [] (f "5:" :duration))))
+    (testing "text scopes"
+      (is (= [u1] (f "one" :name)) ":name is the title")
+      (is (= [] (f "daft" :name)))
+      (is (= [u2] (f "home" :album)))
+      (is (= [u1] (f "f#" :key)))
+      (is (= [u1] (f "hou" :genre)))
+      (is (= [u3 u4] (f "  DEADMAU5  " :all)) "trimmed, case-insensitive"))
+    (testing "BPM forms"
+      (is (= [u3] (f "125+" :bpm)))
+      (is (= [u1 u2 u3] (f "128-120" :bpm)) "either order")
+      (is (= [u1 u2 u3] (f "120 - 128" :bpm)) "spaces around the dash")
+      (is (= [] (f "x" :bpm)))
+      (is (= [] (f "120 x" :bpm)) "one bad token matches nothing"))
+    (testing "duration forms; an unlocked row at the BPM given"
+      (is (= [u1] (f "5:20" :duration)) "320.39 shows as 5:20")
+      (is (= [u2] (f "200" :duration)) "plain seconds")
+      (is (= [u1 u3] (f "4:30+" :duration)))
+      (is (= [u4] (f "4:00" :duration 120.0)) "480 beats at 120 BPM")
+      (is (= [u2 u4] (f "3:00-3:30" :duration 140.0)) "480 beats at 140 BPM: 205.7 s")
+      (is (= [u1 u3 u4] (f "4:00+" :duration nil)) "no BPM: at 120"))
+    (is (vector? (shows/filter-rows (list omt) "" :all nil)))))
+
+(deftest query-problem-test
+  (is (= :unparsed (shows/query-problem "5:" :duration)))
+  (is (= :unparsed (shows/query-problem "x" :bpm)))
+  (is (= :unparsed (shows/query-problem "120 x" :bpm)))
+  (is (= :unparsed (shows/query-problem "1:2" :duration)))
+  (is (nil? (shows/query-problem "" :all)))
+  (is (nil? (shows/query-problem "daft" :all)))
+  (is (nil? (shows/query-problem "x" :artist)) "text never fails to parse")
+  (is (nil? (shows/query-problem "" :bpm)))
+  (is (nil? (shows/query-problem nil :duration)))
+  (doseq [q ["120" "120.5" "120-128" "125+" "120 - 128"]]
+    (is (nil? (shows/query-problem q :bpm)) q))
+  (doseq [q ["3:00" "200" "3:00-4:30" "4:30+"]]
+    (is (nil? (shows/query-problem q :duration)) q)))
+
+(deftest visible-ids-test
+  (let [lib {u1 one-more-time
+             u2 (assoc (timed 120.0 64.0 0.0) :name "Around the World" :show/info {:artist "Daft Punk"})
+             u3 (assoc (timed 128.0 64.0 0.0) :name "Strobe" :show/info {:artist "deadmau5"})
+             u4 (assoc unlocked :name "Ghosts")}
+        state (fn [ui & [bpm]]
+                {:chains {:shows lib}
+                 :ui {:shows (merge {:query "" :scope :all :sort {:column :title :dir :asc}} ui)}
+                 :timing {:bpm (or bpm 120.0)}})]
+    (is (= [u2 u4 u1 u3] (shows/visible-ids (state {}))))
+    (is (= [u3 u1 u4 u2] (shows/visible-ids (state {:sort {:column :title :dir :desc}}))))
+    (is (= [u2 u1] (shows/visible-ids (state {:query "daft"}))))
+    (is (= [u1 u2] (shows/visible-ids (state {:query "daft" :sort {:column :bpm :dir :desc}}))))
+    (testing "an unlocked show's duration at [:timing :bpm]"
+      (is (= [u3 u2 u4 u1] (shows/visible-ids (state {:sort {:column :duration-s :dir :asc}} 120.0))) "Ghosts 128 s")
+      (is (= [u4 u3 u2 u1] (shows/visible-ids (state {:sort {:column :duration-s :dir :asc}} 1200.0))) "Ghosts 12.8 s")
+      (is (= [u4] (shows/visible-ids (state {:scope :duration :query "2:08"} 120.0)))))
+    (is (= [] (shows/visible-ids {})) "no library, no UI state")))

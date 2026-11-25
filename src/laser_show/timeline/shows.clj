@@ -135,3 +135,235 @@
   [a b]
   (and (< (double (:start a)) (- (double (:end b)) tc-eps))
        (< (double (:start b)) (- (double (:end a)) tc-eps))))
+
+
+;; The table (plans/2026-11-25-timeline-shows/01 §3, 06 §4)
+
+(def ^:private fallback-bpm
+  "The tempo an unlocked show is worked out at when no global BPM is given,
+   as tc/show-seconds does."
+  120.0)
+
+(defn- locked-bpm
+  "Show's locked tempo (:timeline/tempo-bpm) when it is a positive number."
+  [show]
+  (let [b (:timeline/tempo-bpm show)]
+    (when (and (number? b) (pos? b)) (double b))))
+
+(defn- usable-bpm [global-bpm]
+  (if (and (number? global-bpm) (pos? global-bpm)) (double global-bpm) fallback-bpm))
+
+(defn- length-beats [show]
+  (let [len (model/effective-length show)]
+    (if (number? len) (max 0.0 (double len)) 0.0)))
+
+(defn duration-s
+  "How long show plays: {:seconds :approx?}. Its length
+   (model/effective-length) at its locked tempo, or at global-bpm with
+   :approx? true while it has none. A show of length 0 is 0 s at any tempo,
+   so not approximate."
+  [show global-bpm]
+  (let [len (length-beats show)
+        locked (locked-bpm show)]
+    {:seconds (tc/beats->seconds len (or locked (usable-bpm global-bpm)))
+     :approx? (and (nil? locked) (pos? len))}))
+
+(defn- text-value [v]
+  (when (and (string? v) (not (str/blank? v))) v))
+
+(defn- row [id show]
+  (let [info (:show/info show)
+        {:keys [seconds approx?]} (duration-s show nil)
+        start (:timeline/tc-start show)]
+    {:id id
+     :title (text-value (:name show))
+     :artist (text-value (:artist info))
+     :album (text-value (:album info))
+     :bpm (locked-bpm show)
+     :key (text-value (:key info))
+     :genre (text-value (:genre info))
+     :length-beats (length-beats show)
+     :duration-s (when-not approx? seconds)
+     :approx? approx?
+     :tc-start-s (if (number? start) (double start) 0.0)
+     :tc-end-s (:end (tc-range show))
+     :fps (tc/cue-fps show)
+     :timecode? (= :mtc (:timeline/chase show))
+     :problem nil}))
+
+(defn rows
+  "One row map per show in the library ({id show}), for the Shows table
+   (01 §3.1). Blank text is nil. No global BPM: an unlocked show's
+   :duration-s is nil (:approx? true), and whoever shows, filters or sorts
+   it works it out from :length-beats at the BPM it has."
+  [shows]
+  (mapv (fn [[id show]] (row id show)) shows))
+
+(defn- row-seconds
+  "A row's duration in seconds: its own, or its length at global-bpm."
+  [r global-bpm]
+  (or (:duration-s r)
+      (some-> (:length-beats r) (tc/beats->seconds (usable-bpm global-bpm)))))
+
+
+;; Search (01 §3.4)
+
+(def scopes
+  "The search scopes, in the scope menu's order."
+  [:all :name :artist :album :key :genre :bpm :duration])
+
+(def ^:private text-columns [:title :artist :album :key :genre])
+
+(defn- tokens
+  "query trimmed, lower-cased and split on whitespace. In a number scope a
+   range typed with spaces (\"120 - 128\", \"120 +\") is one token."
+  [query scope]
+  (let [q (str/lower-case (str/trim (str query)))
+        q (if (#{:bpm :duration} scope)
+            (-> q (str/replace #"\s*-\s*" "-") (str/replace #"\s+\+" "+"))
+            q)]
+    (remove str/blank? (str/split q #"\s+"))))
+
+(defn- parse-number [s]
+  (when (re-matches #"\d+(\.\d+)?|\.\d+" s) (Double/parseDouble s)))
+
+(defn- parse-duration
+  "\"m:ss\" or plain seconds, in seconds."
+  [s]
+  (if-let [[_ m ss] (re-matches #"(\d+):([0-5]\d)" s)]
+    (+ (* 60.0 (Long/parseLong m)) (Long/parseLong ss))
+    (parse-number s)))
+
+(defn- range-pred
+  "The test token sets on a number: n (within tol of it), a-b (between them,
+   either order) or a+ (at least a); nil when it doesn't parse."
+  [parse tol token]
+  (cond
+    (str/ends-with? token "+")
+    (when-let [a (parse (subs token 0 (dec (count token))))]
+      (fn [v] (>= v a)))
+
+    (str/includes? token "-")
+    (let [[a b] (str/split token #"-" 2)
+          a (some-> a parse)
+          b (some-> b parse)]
+      (when (and a b)
+        (let [lo (min a b) hi (max a b)]
+          (fn [v] (<= lo v hi)))))
+
+    :else
+    (when-let [n (parse token)]
+      (fn [v] (< (Math/abs (- (double v) n)) tol)))))
+
+(defn- bpm-pred [token]
+  (range-pred parse-number 0.5 token))
+
+(defn- duration-pred
+  "Durations compare by the whole seconds the Duration column shows (m:ss),
+   so \"5:20\" finds a show of 320.4 s."
+  [token]
+  (if (re-find #"[-+]" token)
+    (when-let [p (range-pred parse-duration 0.0 token)]
+      (fn [s] (p (Math/floor s))))
+    (when-let [n (parse-duration token)]
+      (fn [s] (== n (Math/floor s))))))
+
+(defn- text-pred [columns token]
+  (fn [r] (some #(some-> (get r %) str/lower-case (str/includes? token)) columns)))
+
+(defn- token-pred [scope token global-bpm]
+  (case scope
+    :bpm (if-let [p (bpm-pred token)]
+           (fn [r] (some-> (:bpm r) p))
+           (constantly false))
+    :duration (if-let [p (duration-pred token)]
+                (fn [r] (some-> (row-seconds r global-bpm) p))
+                (constantly false))
+    (text-pred (case scope
+                 (:all nil) text-columns
+                 :name [:title]
+                 [scope])
+               token)))
+
+(defn filter-rows
+  "The rows that match query in scope (01 §3.4): every whitespace token of
+   it, case-insensitive. A text scope (:all, :name for the title, :artist,
+   :album, :key, :genre) finds it inside that field, :all inside any of
+   them. :bpm and :duration take n, a-b or a+ (BPM a number, duration m:ss
+   or seconds); a row with no BPM never matches :bpm, and an unlocked row's
+   duration is its length at global-bpm. A token that doesn't parse matches
+   nothing (query-problem). An empty query keeps every row."
+  [rows query scope global-bpm]
+  (let [toks (tokens query scope)]
+    (if (empty? toks)
+      (vec rows)
+      (let [preds (mapv #(token-pred scope % global-bpm) toks)]
+        (filterv (fn [r] (every? #(% r) preds)) rows)))))
+
+(defn query-problem
+  "nil, or :unparsed when a token of query doesn't parse in a number scope
+   (:bpm, :duration): the search field is marked invalid."
+  [query scope]
+  (when-let [parse (case scope :bpm bpm-pred :duration duration-pred nil)]
+    (when (some #(nil? (parse %)) (tokens query scope))
+      :unparsed)))
+
+
+;; Sort (01 §3.3)
+
+(def sort-columns
+  "The row keys the table sorts by."
+  #{:title :artist :album :bpm :key :genre :duration-s :tc-start-s :tc-end-s :timecode?})
+
+(defn- sort-value
+  "What row sorts on in column, or nil when it is empty."
+  [column global-bpm r]
+  (case column
+    (:bpm :tc-start-s :tc-end-s) (some-> (get r column) double)
+    :duration-s (row-seconds r global-bpm)
+    :timecode? (if (:timecode? r) 0 1)
+    (some-> (get r column) str/lower-case)))
+
+(defn- compare-empty-last [a b]
+  (cond (and (nil? a) (nil? b)) 0
+        (nil? a) 1
+        (nil? b) -1
+        :else (compare a b)))
+
+(defn sort-rows
+  "rows in the table's order for {:keys [column dir]} (01 §3.3): text
+   case-insensitive, numbers as numbers, TC ticked first ascending; empty
+   values last whichever the direction; ties by title (ascending, untitled
+   last), then the id's string, so the order is total. An unlocked row's
+   duration is its length at global-bpm. An unknown column sorts by title."
+  [rows {:keys [column dir]} global-bpm]
+  (let [column (if (contains? sort-columns column) column :title)
+        desc? (= :desc dir)
+        decorated (mapv (fn [r]
+                          [(sort-value column global-bpm r)
+                           (some-> (:title r) str/lower-case)
+                           (str (:id r))
+                           r])
+                        rows)
+        cmp (fn [[va ta ia] [vb tb ib]]
+              (let [c (cond (and (nil? va) (nil? vb)) 0
+                            (nil? va) 1
+                            (nil? vb) -1
+                            desc? (compare vb va)
+                            :else (compare va vb))]
+                (if (zero? c)
+                  (let [c (compare-empty-last ta tb)]
+                    (if (zero? c) (compare ia ib) c))
+                  c)))]
+    (mapv peek (sort cmp decorated))))
+
+(defn visible-ids
+  "The ids of the shows in state's library the Shows table shows, in its
+   order: filtered by [:ui :shows] :query and :scope, sorted by its :sort,
+   unlocked durations at [:timing :bpm]. The order subs/visible-show-rows
+   shows, for handlers (next, previous, selection)."
+  [state]
+  (let [{:keys [query scope] sort-spec :sort} (get-in state [:ui :shows])
+        global-bpm (get-in state [:timing :bpm])
+        shown (filter-rows (rows (get-in state [:chains :shows])) query scope global-bpm)]
+    (mapv :id (sort-rows shown sort-spec global-bpm))))
