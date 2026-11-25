@@ -1,17 +1,11 @@
 # Open items after the cljfx reactivity repairs
 
-**Status:** Open (only checks that need hardware, a display or CI, plus one small decision) · **Last verified against:** `followups3/integration`, merged into `master` on 2026-11-25
+**Status:** Open (only checks that need hardware, a display or CI) · **Last verified against:** `followups3/integration`, merged into `master` on 2026-11-25
 **Supersedes / Superseded by:** none · **Related findings:** the repair plan and its audit are done and deleted. Git history keeps them, and they landed in merges `4c5eae64` (38 packages), `385b6bac` (follow-ups B1–B16, R1–R5, H3, H4, N1–N15) and the 2026-11-25 merge that added beat alignment, Carabiner reconnect and B12b.
 
 Paths are under `src/laser_show/` unless stated otherwise. Priorities: **P1** can lose work, aim light wrongly or mislead during a show; **P2** is wrong but recoverable; **P3** is cost or cleanup.
 
-## 1. Decision needed
-
-| Item | What it is | Options | Now |
-|---|---|---|---|
-| **D5 · TAP while following Link** | With "Align beats with Link" on, the Link owner keeps the app's beat phase on Link's (`input/link.clj`, `:timing/align-to-link-beat`). TAP's realign-to-the-nearest-beat could fight it while BPM sync is on. | Disable TAP's realign while Link's tempo is followed, or leave both (the next Link check corrects within about a second). | Both active. |
-
-## 2. Needs a display, a DAC or CI
+## 1. Needs a display, a DAC or CI
 
 | P | Item | What to run | Why it's owed |
 |---|---|---|---|
@@ -22,12 +16,13 @@ Paths are under `src/laser_show/` unless stated otherwise. Priorities: **P1** ca
 | P3 | **H6 · GPU memory after start/stop** | On a real display, repeat many app start/stop cycles with all tabs shown and watch video memory (Activity Monitor, or `-Dprism.verbose=true`). | About 15 MB per cycle of JavaFX ScrollPane viewport-cache images are held softly and freed under heap pressure. On the GPU pipelines they may be textures that heap pressure never frees (OpenJFX JDK-8395377). |
 | P3 | **H7 · CI cache keys** | On the first CI run after these merges, the first Linux UI shard's cache step should save `Linux-clojure-test-ui-dev-…`, and the other jobs their own keys. | Per-job cache keys can only be confirmed on GitHub; the first run downloads every dependency once. |
 
-## 3. Parked (not now)
+## 2. Parked (not now)
 
 - **Bar/downbeat sync with Link.** You asked to skip it for now; beat alignment covers what matters. Bar alignment would query `phase-at-time <µs> 4` on the same query connection and needs a rule for when to realign bars.
 
-## 4. Accepted behaviour (no action)
+## 3. Accepted behaviour (no action)
 
+- **Taps while the app follows Link's tempo** (Link on with Sync BPM): they do nothing, from the TAP button (disabled then), a tap key, a mapped MIDI/OSC control or HIT, as the tempo and the beats are Link's (you, 2026-11-25; `events/handlers/timing.clj`, `views/toolbar.clj`).
 - **Undo of a cue move while the cue plays:** it stops playing, a rare edge case (you, 2026-11-25).
 - **Exit queued behind the unsaved-changes question:** it does nothing if the answer replaced the show (New/Open); a queued Open still opens its file.
 - **Whole-grid selectors left on purpose:** `vibe-meter`'s effects side, `vibe-reactions`, `checklist-world`, `effect-ref-inputs`, `zone-group-usage`, `vibe-fader-actions`. They were measured, and narrowing them would need a second copy of their rules.

@@ -253,6 +253,32 @@
       (is (<= 1 (count kept) 3))
       (is (every? #(<= 100 % 1500) (map - (rest kept) kept)) "kept taps are 100 ms to 1.5 s apart"))))
 
+(deftest tap-is-off-while-the-app-follows-links-tempo-test
+  ;; Following Link's tempo, the tempo and the beats are Link's: TAP is
+  ;; disabled, and a tap from a key or a mapped control changes nothing. As
+  ;; in toolbar-and-settings-follow-a-steady-link-tempo-test, only the
+  ;; service's status is supplied
+  (let [robot (ui/robot)
+        timing #(select-keys (:timing (state/get-raw-state)) [:bpm :tap])]
+    (events/dispatch! {:event/type :timing/carabiner-connected :connected? true})
+    (try
+      (events/dispatch! {:event/type :timing/link-bpm-changed :bpm 128.0})
+      (ui/click! robot "#link-sync-btn")
+      (ui/wait-for! #(true? (get-in (state/get-raw-state) [:backend :link :link-enabled?])))
+      (ui/assert-enabled! "#tap-tempo-btn")
+      (ui/click! robot "#link-sync-btn")
+      (ui/assert-text! "#bpm-input" "128.0")
+      (ui/assert-disabled! "#tap-tempo-btn")
+      (let [before (timing)]
+        (events/dispatch! {:event/type :timing/tap-tempo})
+        (is (events/flush!))
+        (is (= before (timing)) "a tap from a key or a mapped control changes nothing"))
+      (ui/click! robot "#link-sync-btn")
+      (ui/assert-enabled! "#tap-tempo-btn")
+      (finally
+        (events/dispatch! {:event/type :timing/carabiner-connected :connected? false})
+        (events/flush!)))))
+
 (deftest beat-indicator-moves-on-each-beat-test
   ;; app/start-test! runs no show clock: tick it by hand, on a fake clock
   (let [t0 (System/nanoTime)

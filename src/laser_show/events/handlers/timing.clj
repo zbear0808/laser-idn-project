@@ -24,6 +24,7 @@
             [laser-show.routing.zone-effects :as ze]
             [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.routing.zone-patterns :as zone-patterns]
+            [laser-show.state.extractors :as ex]
             [laser-show.timeline.playback :as playback]
             [laser-show.triggers.tap-tempo :as tap]
             [clojure.tools.logging :as log]))
@@ -50,12 +51,14 @@
    are the one algorithm's, triggers.tap-tempo, in [:timing :tap]: once the
    series has an interval the BPM is its tempo, in the same state, and every
    tap counted asks the show clock to align the beat phase to the nearest
-   whole beat. A bounce changes nothing."
+   whole beat. A bounce changes nothing, and so does any tap while the app
+   follows Link's tempo (Link on with Sync BPM, ex/link-sync-enabled?): the
+   tempo and the beats are Link's then, not the taps'."
   [{:keys [state] :as event}]
   (let [now (or (:input-time event) (h/current-time-ms event))
         taps (get-in state [:timing :tap] (tap/make))
         taps' (tap/tap taps now)]
-    {:state (if (identical? taps taps')
+    {:state (if (or (ex/link-sync-enabled? state) (identical? taps taps'))
               state
               (cond-> (-> state
                           (assoc-in [:timing :tap] taps')

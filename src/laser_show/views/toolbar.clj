@@ -135,10 +135,12 @@
                                  :bpm new-bpm}))}]}))
 
 (defn tap-tempo-button
-  "Tap tempo button."
+  "Tap tempo button. Disabled while the app follows Link's tempo (Link on
+   with Sync BPM): taps do nothing then, from any source."
   [{:keys [fx/context]}]
   {:fx/type :button
    :id "tap-tempo-btn"
+   :disable (boolean (fx/sub-ctx context subs/link-sync-enabled?))
    :pref-width 50
    :text "TAP"
    :graphic {:fx/type fa/icon

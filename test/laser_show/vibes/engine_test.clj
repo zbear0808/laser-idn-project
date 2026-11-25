@@ -706,8 +706,11 @@
         "turning Link off restores HIT tap tempo even with the sync preference still checked")
     (is (some? (rt state :voices :hit)) "the press plays as ever")
     (is (= {:id 1 :held? true :src :input} (pulse state :hit)))
-    (is (= [1000 1500] (get-in (-> linked (button 1000) (button 1500)) [:timing :tap :taps]))
-        "the TAP button still taps, as before")))
+    (is (= (:timing linked) (:timing (-> linked (button 1000) (button 1500))))
+        "nor does the TAP button: following Link, a tap does nothing")
+    (is (= [1000 1500] (get-in (-> linked (assoc-in [:backend :link :link-enabled?] false) (button 1000) (button 1500))
+                               [:timing :tap :taps]))
+        "with Link off it taps again")))
 
 (deftest hit-skips-the-tap-when-the-setting-is-off-test
   (let [{:keys [state dispatch]} (engine/press (assoc-in (starter) [:config :vibes :settings :hit-taps-tempo?] false)
