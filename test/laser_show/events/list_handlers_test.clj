@@ -4,6 +4,7 @@
    Tests the hierarchical list UI state management including
    selection, drag-drop, and rename operations."
   (:require [clojure.test :refer [deftest is testing]]
+            [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.list :as list-handlers]
             [laser-show.state.clipboard :as clipboard]
@@ -679,6 +680,29 @@
         (is (= {:state s} (list-handlers/handle (paste-event s)))))
       (let [s (lists-state {:type :cue-chain :data {:items [{:id id-a :type :preset :preset-id :circle}]} :copied-at 1})]
         (is (= {:state s} (list-handlers/handle (assoc fx-chain-paste :state s))))))))
+
+(deftest pasted-cue-items-lose-timeline-timing-test
+  ;; timeline-shows plan 04 §7.4, row 4: timed items (an older build's
+  ;; timeline clips) never make a plain cue an inferred timeline
+  (let [i-id #uuid "00000000-0000-0000-0000-0000000000a3"
+        t-id #uuid "00000000-0000-0000-0000-0000000000a4"
+        clip {:type :cue-chain-items :copied-at 1
+              :items [{:id i-id :type :preset :preset-id :circle :effects []
+                       :track-id t-id :timeline/start 4.0 :timeline/duration 2.0}]}
+        s0 (-> (domains/build-initial-state)
+               (merge (select-keys (cue-state clip) [:list-ui]))
+               (assoc-in [:chains :cue-chains [0 0]] (get-in (cue-state nil) [:chains :cue-chains [0 0]]))
+               (assoc-in [:ui :clipboard] clip))
+        effects (events/handle-event-pipeline (paste-event s0))
+        s1 (:state (events/handle-event-pipeline (assoc (:dispatch effects) :state (:state effects))))
+        cell (get-in s1 [:chains :cue-chains [0 0]])
+        pasted (get-in cell [:items 1])]
+    (is (= [:circle :circle :square] (mapv :preset-id (:items cell))) "pasted after the selection")
+    (is (not= i-id (:id pasted)) "with an id of its own")
+    (is (not-any? #(contains? pasted %) [:track-id :timeline/start :timeline/duration])
+        "without its timeline timing")
+    (is (not (cue-chains/timeline-cue? cell)) "[0 0] stays a plain cue")
+    (is (= clip (get-in s1 [:ui :clipboard])) "the clip keeps its timing")))
 
 
 (deftest paste-regenerates-ids-at-every-depth-test

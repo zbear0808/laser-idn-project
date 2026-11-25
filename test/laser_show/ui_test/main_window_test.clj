@@ -218,7 +218,7 @@
       (let [footer (ui/on-fx-thread #(.lookup (scene-root editor) ".dialog-footer"))
             labeled (filterv #(instance? Labeled %) (all-nodes footer))
             texts (set (map text-of labeled))]
-        (is (every? texts ["Target:" "Pattern:" "None" "Trigger:" "Open in Timeline Editor" "Close"])
+        (is (every? texts ["Target:" "Pattern:" "None" "Trigger:" "New Show from Cue" "Close"])
             "the timeline editor's short labels, and the Pattern chip (zones plan Z5)")
         (ui/wait-for! #(every? (fn [l] (= (text-of l) (ui/shown-text l))) labeled))
         (doseq [l labeled]
@@ -244,7 +244,7 @@
              (some-> pattern-chip tip))))
     (testing "and the buttons what they do; Close says it"
       (is (seq (by-text "⚡ Triggers...")))
-      (is (seq (by-text "Open in Timeline Editor")))
+      (is (= "Copy this cue into a new timeline show (the cue stays here)" (by-text "New Show from Cue")))
       (is (contains? by-text "Close")))))
 
 (defn- labeled-with-text

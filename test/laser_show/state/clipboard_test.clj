@@ -114,13 +114,28 @@
       (is (= [effect] (clipboard/payload fx-cell :item-effects)))
       (is (nil? (clipboard/payload cue-cell :item-effects)))
       (is (nil? (clipboard/payload fx-cell :cue-chain-items))))
-    (testing "a timeline cue's cell pastes onto a cell, never into a list"
+    (testing "a timeline cue's cell pastes nowhere: not onto a cell (TS-3), not into a list"
       (let [timeline (clipboard/cell-clip :cue-chain {:editor-type :timeline :tracks [{:id :t1 :type :track}]
                                                      :items [(assoc item :track-id :t1)]} 1)
             implicit (clipboard/cell-clip :cue-chain {:items [(assoc item :timeline/start 0.0)]} 1)]
         (doseq [c [timeline implicit]]
+          (is (clipboard/timeline-clip? c))
           (is (not (clipboard/accepts? c :cue-chain-items)))
-          (is (clipboard/accepts? c :cue-chain)))))
+          (is (not (clipboard/accepts? c :cue-chain)))
+          (is (nil? (clipboard/payload c :cue-chain)))))
+      (is (not (clipboard/timeline-clip? cue-cell)) "a plain cue's cell is no timeline")
+      (is (not (clipboard/timeline-clip? cue-items)) "nor is a list's copy")
+      (is (not (clipboard/timeline-clip? nil))))
+    (testing "cue items paste into a list untimed: no :timeline/start, :timeline/duration or :track-id"
+      (let [group {:id #uuid "00000000-0000-0000-0000-00000000000c" :type :group :name "G"
+                   :items [(assoc item :timeline/start 1.0)]}
+            timed (clipboard/list-clip :cue-chain-items
+                                       [(assoc item :track-id :t1 :timeline/start 4.0 :timeline/duration 2.0)
+                                        (assoc group :track-id :t1)]
+                                       1)]
+        (is (= [item group] (clipboard/payload timed :cue-chain-items))
+            "only top-level items lose them")
+        (is (clipboard/accepts? timed :cue-chain-items))))
     (testing "nothing takes nothing, and no target is no list"
       (is (not-any? #(clipboard/accepts? nil %) [:cue-chain-items :item-effects :cue-chain :effects-cell :step-grid]))
       (is (not-any? #(clipboard/accepts? % nil) clips))

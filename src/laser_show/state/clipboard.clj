@@ -9,7 +9,10 @@
      {:type :step-grid :grid {:zones :steps} :copied-at ms} a step grid
 
    A list's type comes from its component id (list-type), and each target
-   takes only what payload says.
+   takes only what payload says. A copied cell that holds a timeline
+   (timeline-clip?) pastes onto no cell: timelines live in the Shows tab
+   (timeline-shows plan TS-3). Cue items pasted into a list lose their
+   timeline timing, so they never make a plain cue a timeline.
 
    The clipboard is [:ui :clipboard] in app state, written only in the
    :state a handler returns: copy puts its clip there, and a paste whose
@@ -148,18 +151,36 @@
 
 (def ^:private list-targets #{:cue-chain-items :item-effects})
 
+(defn timeline-clip?
+  "Is clip a copied grid cell that holds a timeline (cue-chains/timeline-cue?,
+   inferred ones too)? The grid never holds one (timeline-shows plan TS-3), so
+   no cell takes it: it goes to the Shows tab, with New Show from Cue."
+  [clip]
+  (and (= :cue-chain (:type clip))
+       (cue-chains/timeline-cue? (:data clip))))
+
+(defn- untimed
+  "items without the keys that place an item on a timeline (:timeline/start,
+   :timeline/duration, :track-id), so pasted into a plain cue they can't make
+   it an inferred timeline. Only the top-level items: a group's own items
+   never carry them."
+  [items]
+  (mapv #(dissoc % :timeline/start :timeline/duration :track-id) items))
+
 (defn payload
   "What target takes from clip, or nil (04 §7, second table). A list
    (list-type) takes the items of a clip of its own type: a cue list
-   (:cue-chain-items) cue items, an effect list (:item-effects) effects.
+   (:cue-chain-items) cue items, untimed (no :timeline/start,
+   :timeline/duration or :track-id), an effect list (:item-effects) effects.
    With D9 A's two conversions, a cue list also takes a copied grid cell's
    items (not a timeline cue's clips), and an effect list a copied effects
    cell's effects. A cue or effects cell (:cue-chain, :effects-cell) takes a
-   cell of its type; a step grid (:step-grid) a grid."
+   cell of its type, but a cue cell never a timeline (timeline-clip?); a
+   step grid (:step-grid) a grid."
   [clip target]
   (cond
     (= :cue-chain-items target) (case (:type clip)
-                                  :cue-chain-items (:items clip)
+                                  :cue-chain-items (some-> (:items clip) untimed)
                                   :cue-chain (let [cell (:data clip)]
                                                (when-not (cue-chains/timeline-cue? cell) (:items cell)))
                                   nil)
@@ -168,21 +189,24 @@
                                :effects-cell (:items (:data clip))
                                nil)
     (contains? #{:cue-chain :effects-cell} target) (when (and (= target (:type clip))
-                                                              (not (empty-cell? (:data clip))))
+                                                              (not (empty-cell? (:data clip)))
+                                                              (not (timeline-clip? clip)))
                                                      (:data clip))
     (= :step-grid target) (when (= :step-grid (:type clip)) (:grid clip))
     :else nil))
 
 (defn accepts?
   "Does target take clip? A list when it has something to paste; a cell or
-   a step grid when the clip is of its type."
+   a step grid when the clip is of its type, a cue cell never a timeline
+   (timeline-clip?)."
   [clip target]
   (boolean
    (if (contains? list-targets target)
      (seq (payload clip target))
      (and (some? clip) (some? target) (= target (:type clip))
           (if (contains? #{:cue-chain :effects-cell} target)
-            (not (empty-cell? (:data clip)))
+            (and (not (empty-cell? (:data clip)))
+                 (not (timeline-clip? clip)))
             true)))))
 
 (defn adopt
