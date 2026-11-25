@@ -957,3 +957,24 @@
           (is (not= (circle s0) (circle s)) "a real edit")
           (is (= (history/extract-document-state (run s0 event)) (history/extract-document-state s))
               "as it does unlocked"))))))
+
+
+;; Timeline shows (plans/2026-11-25-timeline-shows 00 Show lock, S4)
+
+(deftest locked-refuses-set-timecode-test
+  (let [id #uuid "00000000-0000-0000-0000-0000000005c1"
+        s0 (-> (starter)
+               (assoc-in [:chains :shows id] {:name "A" :editor-type :timeline :timeline/tempo-bpm 120.0
+                                              :tracks [{:id :t :type :track}]
+                                              :items [{:id :c :type :preset :preset-id :circle :track-id :t
+                                                       :enabled? true :effects []
+                                                       :timeline/start 0.0 :timeline/duration 8.0}]})
+               (history/mark-clean))
+        event {:event/type :shows/set-timecode :show-ids #{id} :enabled? true}]
+    (is (contains? show-lock/blocked-events :shows/set-timecode))
+    (testing "locked: refused, the document as it was, a notice"
+      (let [s (run (lock s0) event)]
+        (is (= (history/extract-document-state s0) (history/extract-document-state s)))
+        (is (some? (get-in s [:ui :show-lock-notice])))))
+    (testing "unlocked: it goes on"
+      (is (= :mtc (get-in (run s0 event) [:chains :shows id :timeline/chase]))))))

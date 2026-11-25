@@ -22,7 +22,8 @@
    - Tracks: [:chains :shows show-id :tracks]
    - Item timing: [:chains :shows show-id :items ... :timeline/start :timeline/duration]
    - Playback: [:playback :active-cues [:show show-id]] (shows/play-key)"
-  (:require [clojure.tools.logging :as log]
+  (:require [clojure.string :as str]
+            [clojure.tools.logging :as log]
             [laser-show.events.helpers :as h]
             [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.animation.effects :as effects]
@@ -543,15 +544,57 @@
           after
           (assoc-in after path normalized))))))
 
+(defn- turn-off-reason
+  "Why a show's timecode went off, after its title: \"needs a BPM\"…"
+  [shows {:keys [reason with]}]
+  (case reason
+    :no-bpm "needs a BPM"
+    :empty "empty"
+    :overlap (str "overlaps '" (shows/title (get shows with)) "'")))
+
+(defn- turn-off-text
+  "The notice for the shows whose timecode an edit turned off: off is
+   invalid-timecode-ids' [[id problem] …], shows the library before the
+   turn-off (07 §4.2)."
+  [shows off]
+  (if (= 1 (count off))
+    (let [[id {:keys [reason with range]}] (first off)]
+      (str "Timecode off for '" (shows/title (get shows id)) "': "
+           (case reason
+             :no-bpm "it needs a BPM"
+             :empty "it is empty"
+             :overlap (str "it now overlaps '" (shows/title (get shows with)) "' ("
+                           (shows/tc-range-text range) ")"))))
+    (str "Timecode off for " (count off) " shows: "
+         (str/join ", " (map (fn [[id p]] (str "'" (shows/title (get shows id)) "' (" (turn-off-reason shows p) ")"))
+                             off)))))
+
+(defn- turn-off-invalid
+  "TS-6 after an edit: [library' off], library' the library (new) with
+   timecode turned off for each show the edit changed (not identical? to
+   old's) that now breaks it, off those as invalid-timecode-ids' pairs."
+  [old new]
+  (if (identical? old new)
+    [new []]
+    (let [changed (keep (fn [[id show]] (when-not (identical? show (get old id)) id)) new)
+          off (shows/invalid-timecode-ids new changed)]
+      [(reduce (fn [m [id]] (update m id dissoc :timeline/chase)) new off) off])))
+
 (defn wrap-normalize-timelines
   "Middleware: after the handler runs, enforce the timeline invariants
    (model/normalize-timeline-cue) on every show and every cue chain the
-   event changed, and follow the change with the versions of the cues that
-   follow timecode (reconcile-chase-sources). Undo and redo restore theirs
-   as they were (not normalized again), and are versioned too, as is a new
-   show. Runs innermost, so undo snapshots and the unsaved flag see
-   normalized state. Events that touch neither or replace the document only
-   pay two identical? checks and a document id comparison."
+   event changed, turn timecode off for each show the edit left breaking
+   TS-6 (turn-off-invalid: it overlaps another, or lost its BPM or length),
+   saying so in a notice merged into the handler's (h/merge-notice), and
+   follow the change with the versions of the cues that follow timecode
+   (reconcile-chase-sources), which also drops a turned-off show's chase
+   marker in this same event. Undo and redo restore theirs as they were
+   (not normalized again, no turn-off), and are versioned too, as is a new
+   show (New, Open: no turn-off either, so Open leaves the file saved).
+   Runs innermost, so undo snapshots and the unsaved flag see normalized
+   state, the turn-off in the edit's own step. Events that touch neither or
+   replace the document only pay two identical? checks and a document id
+   comparison."
   [handler]
   (fn [event]
     (let [effects (handler event)
@@ -561,13 +604,20 @@
               (and (every? (fn [[path]] (identical? (get-in before path) (get-in after path))) cue-domains)
                    (= (h/document-id before) (h/document-id after))))
         effects
-        (let [normalized (if (restores-history? event)
+        (let [restore? (restores-history? event)
+              normalized (if restore?
                            after
                            (reduce (fn [s [path]] (normalize-domain before s path)) after cue-domains))
-              after' (reconcile-chase-sources before normalized)]
-          (if (identical? after' after)
-            effects
-            (assoc effects :state after')))))))
+              library (get-in normalized [:chains :shows])
+              [library' off] (if (or restore? (not= (h/document-id before) (h/document-id after)))
+                               [library []]
+                               (turn-off-invalid (get-in before [:chains :shows]) library))
+              checked (if (seq off) (assoc-in normalized [:chains :shows] library') normalized)
+              after' (reconcile-chase-sources before checked)
+              effects' (if (identical? after' after) effects (assoc effects :state after'))]
+          (if (seq off)
+            (h/merge-notice effects' before (turn-off-text library off) :warning)
+            effects'))))))
 
 
 ;; Public API

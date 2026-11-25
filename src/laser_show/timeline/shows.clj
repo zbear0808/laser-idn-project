@@ -213,6 +213,19 @@
                    [nil []]
                    ranged)))))
 
+(defn title
+  "What a notice calls show: its :name, or \"Untitled\"."
+  [show]
+  (let [n (:name show)]
+    (if (and (string? n) (not (str/blank? n))) n "Untitled")))
+
+(defn tc-range-text
+  "A range ({:start :end :fps}, tc-range's) as a notice writes it, at its
+   own fps: the start's frame, then the first frame at or after its end
+   (tc/seconds->tc-ceil), \"00:05:00:00–00:10:00:00\"."
+  [{:keys [start end fps]}]
+  (str (tc/format-tc (tc/seconds->tc start fps)) "–" (tc/format-tc (tc/seconds->tc-ceil end fps))))
+
 
 ;; The table (plans/2026-11-25-timeline-shows/01 §3, 06 §4)
 
