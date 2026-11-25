@@ -16,7 +16,15 @@
                  :state state}
           result (timing/handle event)]
       (is (= 140.0 (get-in result [:state :timing :bpm])))
-      (is (double? (get-in result [:state :timing :bpm]))))))
+      (is (double? (get-in result [:state :timing :bpm])))))
+  (testing "While the app follows Link's tempo a typed BPM changes nothing; Link on without Sync BPM, or Sync BPM kept with Link off, it sets"
+    (let [state {:timing {:bpm 128.0}
+                 :backend {:link {:carabiner-connected? true :link-enabled? true :sync-enabled? true}}}
+          set-bpm #(:state (timing/handle {:event/type :timing/set-bpm :bpm 140 :state %}))]
+      (is (identical? state (set-bpm state)))
+      (doseq [link [{:link-enabled? true :sync-enabled? false}
+                    {:link-enabled? false :sync-enabled? true}]]
+        (is (= 140.0 (get-in (set-bpm (assoc-in state [:backend :link] link)) [:timing :bpm])) (pr-str link))))))
 
 
 (defn- taps

@@ -22,7 +22,7 @@ Paths are under `src/laser_show/` unless stated otherwise. Priorities: **P1** ca
 
 ## 3. Accepted behaviour (no action)
 
-- **Taps while the app follows Link's tempo** (Link on with Sync BPM): they do nothing, from the TAP button (disabled then), a tap key, a mapped MIDI/OSC control or HIT, as the tempo and the beats are Link's (you, 2026-11-25; `events/handlers/timing.clj`, `views/toolbar.clj`).
+- **Taps and typed BPMs while the app follows Link's tempo** (Link on with Sync BPM): they do nothing, from the TAP button and the BPM field (both disabled then), a tap key, a mapped MIDI/OSC control or HIT, as the tempo and the beats are Link's (you, 2026-11-25; `events/handlers/timing.clj`, `views/toolbar.clj`).
 - **Undo of a cue move while the cue plays:** it stops playing, a rare edge case (you, 2026-11-25).
 - **Exit queued behind the unsaved-changes question:** it does nothing if the answer replaced the show (New/Open); a queued Open still opens its file.
 - **Whole-grid selectors left on purpose:** `vibe-meter`'s effects side, `vibe-reactions`, `checklist-world`, `effect-ref-inputs`, `zone-group-usage`, `vibe-fader-actions`. They were measured, and narrowing them would need a second copy of their rules.

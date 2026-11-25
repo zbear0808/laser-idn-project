@@ -41,9 +41,13 @@
 
 
 (defn- handle-timing-set-bpm
-  "Set the BPM."
+  "Set the BPM, unless the app follows Link's tempo (Link on with Sync BPM,
+   ex/link-sync-enabled?): the tempo is Link's then, so a typed one changes
+   nothing, as a tap doesn't (handle-timing-tap-tempo)."
   [{:keys [bpm state]}]
-  {:state (assoc-in state [:timing :bpm] (double bpm))})
+  {:state (if (ex/link-sync-enabled? state)
+            state
+            (assoc-in state [:timing :bpm] (double bpm)))})
 
 (defn- handle-timing-tap-tempo
   "A tap of the tempo (the TAP button, a tap-tempo key, HIT), at the input's
