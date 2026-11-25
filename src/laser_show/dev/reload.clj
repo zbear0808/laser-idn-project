@@ -105,7 +105,8 @@
    
    Preserves:
    - All application state (state namespaces not reloaded)
-   - Network connections (IDN, MIDI, OSC managed by state atoms)
+   - Device and network connections (IDN, MIDI, OSC, Link): their runtime
+     owners keep them
    - The single application window
    
    Limitations:

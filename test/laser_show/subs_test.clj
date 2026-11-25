@@ -898,12 +898,13 @@
       (is (= [] (fx/sub-ctx (context (after playing-state :transport/stop)) subs/playing-cues))))))
 
 (deftest connection-status-says-why-nothing-streams-test
-  (let [status-at (fn [running? status]
-                    (select-keys (fx/sub-ctx (context (-> base-state
-                                                          (assoc-in [:backend :streaming :running?] running?)
-                                                          (assoc-in [:backend :streaming :status] status)))
-                                             subs/connection-status)
-                                 [:running? :state :status-text]))]
+  (let [said-at (fn [running? status]
+                  (fx/sub-ctx (context (-> base-state
+                                           (assoc-in [:backend :streaming :running?] running?)
+                                           (assoc-in [:backend :streaming :status] status)))
+                              subs/connection-status))
+        status-at (fn [running? status]
+                    (select-keys (said-at running? status) [:running? :state :status-text]))]
     (is (= {:running? true :state :idle :status-text "No projectors enabled"}
            (status-at true {:engines 0 :wanted 0 :pending? false :projectors {}}))
         "streaming is on, with nothing to stream")
@@ -914,10 +915,11 @@
     (is (= {:running? true :state :starting :status-text "Starting…"} (status-at true nil))
         "on, and the output runtime has published nothing yet")
     (testing "off: the intent goes first, whatever the last report says"
-      (is (= {:running? false :state :stopping :status-text "Stopping…"}
-             (status-at false {:engines 1 :wanted 0 :pending? false
-                               :projectors {:a {:state :error :error "open failed"}}}))
-          "an engine is still there, with an old error")
+      (let [stopping {:engines 1 :wanted 0 :pending? false
+                      :projectors {:a {:state :error :error "open failed"}}}]
+        (is (= {:running? false :state :stopping :status-text "Stopping…"} (status-at false stopping))
+            "an engine is still there, with an old error")
+        (is (= [] (:errors (said-at false stopping))) "and its tooltip doesn't list that error"))
       (is (= {:running? false :state :stopped :status-text "Not streaming"}
              (status-at false {:engines 0 :wanted 0 :pending? true :projectors {}}))
           "a queued command alone is no engine"))))
@@ -926,7 +928,8 @@
   ;; One published sample at a time, as output-runtime/status makes them: only
   ;; a :streaming report counts, and "N of M" needs a settled sample, with
   ;; nothing pending and a report for each wanted output and no other. A
-  ;; drained queue alone says nothing about what streams
+  ;; drained queue alone says nothing about what streams. :retiring? while
+  ;; a report is of an output no longer wanted
   (let [starting {:state :starting}
         streams {:state :streaming :fps 59.8}
         failed {:state :error :error "open failed"}
@@ -936,12 +939,13 @@
                         (assoc :projectors {:a {:name "Laser L"} :b {:name "Laser R"}})
                         (assoc-in [:backend :streaming :running?] true)))]
     (reduce
-     (fn [ctx [why status expected errors]]
+     (fn [ctx [why status expected errors retiring?]]
        (let [ctx (fx/swap-context ctx assoc-in [:backend :streaming :status] status)
              {:keys [running? state status-text] :as said} (fx/sub-ctx ctx subs/connection-status)]
          (testing (str why " " (pr-str status))
            (is (= expected [state status-text]))
            (is (= errors (:errors said)) "the tooltip: a line for each error, by id")
+           (is (= (boolean retiring?) (:retiring? said)))
            (is (true? running?) "the intent, so the button stays Stop"))
          ctx))
      on
@@ -968,11 +972,13 @@
       ["one not in the rig fails: its id names it" (sample 3 3 false {:a streams :b starting :c failed})
        [:error "Streaming to 1 of 3 · 1 starting · 1 error"] ["c: open failed"]]
       ["an old engine retires" (sample 2 1 true {:old streams :a streams})
-       [:starting "Updating outputs…"] []]
+       [:starting "Updating outputs…"] [] true]
       ["it fails while it retires" (sample 2 1 true {:old failed :a streams})
-       [:error "Updating outputs… · 1 error"] ["old: open failed"]]
+       [:error "Updating outputs… · 1 error"] ["old: open failed"] true]
+      ["the new one fails while the old one, streaming, retires" (sample 2 1 true {:old streams :a failed})
+       [:error "Updating outputs… · 1 error"] ["Laser L: open failed"] true]
       ["still there with nothing pending: never 2 of 1" (sample 2 1 false {:old streams :a streams})
-       [:starting "Updating outputs…"] []]
+       [:starting "Updating outputs…"] [] true]
       ["gone" (sample 1 1 false {:a streams})
        [:streaming "Streaming to 1 of 1"] []]
       ["a warning is no error, and its output counts once" (sample 2 2 false {:a (assoc streams :warning "Corner Pin skipped") :b streams})

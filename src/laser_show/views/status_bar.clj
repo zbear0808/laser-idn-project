@@ -184,10 +184,12 @@
    ([:backend :streaming :status :projectors]): the frame rate the projectors
    draw (the slowest and the fastest) and how many fail, also while others
    still start (:mixed). While none streams yet or the outputs change
-   (:starting), what the toolbar says (\"Starting…\", \"Updating
-   outputs…\"). nil while streaming is off or has nothing to stream, which
-   the toolbar says."
-  [{:keys [running? state status-text errors]} projectors]
+   (:starting), and while an error comes as an engine is retired
+   (:retiring?: any report can be the old engine's, so no rate is read),
+   what the toolbar says (\"Starting…\", \"Updating outputs…\", \"Updating
+   outputs… · 1 error\"). nil while streaming is off or has nothing to
+   stream, which the toolbar says."
+  [{:keys [running? state status-text errors retiring?]} projectors]
   (let [rates (sort (keep (fn [{s :state fps :fps}] (when (= :streaming s) fps)) (vals projectors)))
         rate (when (seq rates)
                (let [low (double (first rates))
@@ -198,11 +200,10 @@
         failing (when (seq errors)
                   (str (count errors) (if (= 1 (count errors)) " error" " errors")))]
     (when running?
-      (case state
-        :starting status-text
-        (:streaming :mixed :error) (or (not-empty (str/join " · " (remove nil? [rate failing])))
-                                       "Starting…")
-        nil))))
+      (cond
+        (or (= :starting state) (and (= :error state) retiring?)) status-text
+        (#{:streaming :mixed :error} state) (or (not-empty (str/join " · " (remove nil? [rate failing])))
+                                                "Starting…")))))
 
 (defn output-health
   "The output's health (output-health-text): the first thing to give way

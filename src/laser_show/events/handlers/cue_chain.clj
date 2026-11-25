@@ -67,8 +67,8 @@
 (defn- handle-cue-chain-add-preset
   "Add a preset to the cue chain.
    
-   Expects :item-id with the preset ID (e.g., :circle, :wave).
-   Optionally accepts :item with full preset definition for advanced use cases.
+   Expects :item-id with the preset ID (e.g., :circle, :wave): the bank's
+   event carries the id alone (reactivity plan 17).
    
    Auto-selects the newly added preset for better UX.
    

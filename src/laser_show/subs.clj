@@ -608,7 +608,12 @@
      enabled\" (:idle). It says N of M only of a settled status: nothing
      pending, and a report for each of the M wanted outputs, none for an
      engine still being retired
-   - :errors - [\"<projector name>: <error>\" …], by projector id"
+   - :retiring? - the status still reports an output that isn't wanted (an
+     engine being retired): more reports than wanted outputs, and nothing
+     says which is which, so no rate or count is read from them
+   - :errors - [\"<projector name>: <error>\" …], by projector id, while
+     streaming is on; none once it is off (Stopping…), whatever the last
+     report says"
   [context]
   (let [running? (boolean (fx/sub-val context get-in [:backend :streaming :running?]))
         {:keys [engines wanted pending? projectors] :as status} (fx/sub-ctx context streaming-status)
@@ -616,9 +621,12 @@
         wanted (or wanted 0)
         {streaming :streaming starting :starting :or {streaming 0 starting 0}}
         (frequencies (map :state (vals projectors)))
-        errors (vec (for [[id {:keys [state error]}] (sort-by key projectors)
-                          :when (= :error state)]
-                      (str (or (get-in names [id :name]) (name id)) ": " error)))
+        errors (if running?
+                 (vec (for [[id {:keys [state error]}] (sort-by key projectors)
+                            :when (= :error state)]
+                        (str (or (get-in names [id :name]) (name id)) ": " error)))
+                 [])
+        retiring? (> (count projectors) wanted)
         settled? (and (some? status) (not pending?) (= wanted (count projectors)))
         ratio (when (and settled? (pos? wanted))
                 (str (if (pos? streaming)
@@ -636,11 +644,12 @@
     {:running? running?
      :state state
      :errors errors
+     :retiring? retiring?
      :status-text (case state
                     :stopped "Not streaming"
                     :stopping "Stopping…"
                     :idle "No projectors enabled"
-                    :starting (if (or (pos? streaming) (> (count projectors) wanted))
+                    :starting (if (or (pos? streaming) retiring?)
                                 "Updating outputs…"
                                 "Starting…")
                     (:mixed :streaming) ratio
