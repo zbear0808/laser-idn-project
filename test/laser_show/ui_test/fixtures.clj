@@ -8,7 +8,8 @@
    with-app mounts a fresh app for each test, so any test can run on its own.
    On the first failure or error in a test it saves a screenshot to
    test-results/<namespace>/<test>.png (CI uploads test-results/)."
-  (:require [clojure.string :as str]
+  (:require [beat-carabiner.core :as bc]
+            [clojure.string :as str]
             [clojure.test :as t]
             [clojure.tools.logging :as log]
             [laser-show.app :as app]
@@ -45,18 +46,29 @@
             (log/warn e "Could not capture failure screenshot")))))
     (report m)))
 
+(defn- no-real-carabiner
+  "bc/connect while a UI test runs, unless it stands Carabiner in
+   (input.fixtures/with-carabiner): refused, loudly. A real one would reach
+   the Carabiner daemon, or start beat-carabiner's embedded one, from a
+   click on a Connect or Link button."
+  []
+  (log/error "A UI test asked for a real Carabiner connection: refused (stand one in with input.fixtures/with-carabiner)")
+  false)
+
 (defn with-app
   "Each fixture: mounts the app with app/start-test! (starter state, no
-   hardware or network services) and unmounts it after the test."
+   hardware or network services) and unmounts it after the test. No real
+   Carabiner connection can be made meanwhile (no-real-carabiner)."
   [tests]
-  (app/start-test!)
-  (try
-    (ui/sync-fx!)
-    (binding [t/report (screenshot-on-failure t/report (atom false))]
-      (tests))
-    (finally
-      (app/stop!)
-      (ui/sync-fx!))))
+  (with-redefs [bc/connect no-real-carabiner]
+    (app/start-test!)
+    (try
+      (ui/sync-fx!)
+      (binding [t/report (screenshot-on-failure t/report (atom false))]
+        (tests))
+      (finally
+        (app/stop!)
+        (ui/sync-fx!)))))
 
 (defn with-clock
   "Call (f at-ms) while a thread ticks the show clock every 16 ms, as the

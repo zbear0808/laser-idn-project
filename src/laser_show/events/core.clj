@@ -486,9 +486,12 @@
   "Effect that has the Link owner connect to Carabiner on its own thread
    (input.link/connect!): :timing/carabiner-connected, then the status
    listener's reports and the beat checks' corrections, come back through
-   dispatch, the dispatcher of the app this effect is for."
+   dispatch, the dispatcher of the app this effect is for. A connect the
+   owner refuses (released: the app stops) is answered not connected at
+   once, so nothing waits for it."
   [request dispatch]
-  (link/connect! request dispatch))
+  (when-not (link/connect! request dispatch)
+    (dispatch {:event/type :timing/carabiner-connected :connected? false})))
 
 ;; Show Clock Effects
 

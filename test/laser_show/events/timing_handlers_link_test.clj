@@ -64,7 +64,8 @@
 
 (deftest carabiner-connected-is-plain-status-test
   (let [before (assoc (get-in base-state [:backend :link])
-                      :carabiner-connected? false :link-peers 2 :auto-connect? true :sync-enabled? true)
+                      :carabiner-connected? false :link-peers 2 :auto-connect? true :sync-enabled? true
+                      :connecting nil)
         state (assoc-in base-state [:backend :link] before)
         handled #(:state (timing/handle (assoc % :state state :event/type :timing/carabiner-connected)))
         link-after #(get-in (handled %) [:backend :link])]
@@ -80,11 +81,35 @@
 
 (deftest carabiner-auto-connect-asks-the-link-owner-test
   (let [auto-connect #(timing/handle {:event/type :timing/carabiner-auto-connect :state %})]
-    (is (= {:link/connect {}} (auto-connect base-state))
+    (is (= {} (:link/connect (auto-connect base-state)))
         "start-up connects: the Link owner does, off the event thread")
-    (is (= {:link/connect {}} (auto-connect (assoc-in base-state [:backend :link :auto-connect?] true))))
+    (is (= :auto (get-in (auto-connect base-state) [:state :backend :link :connecting])) "until its answer comes")
+    (is (= {} (:link/connect (auto-connect (assoc-in base-state [:backend :link :auto-connect?] true)))))
     (is (= {} (auto-connect (assoc-in base-state [:backend :link :auto-connect?] false)))
         "Auto-connect off: nothing connects")))
+
+(deftest carabiner-connect-connects-whatever-auto-connect-says-test
+  ;; The Connect button (Settings' Link card, the toolbar's Link button
+  ;; while Carabiner isn't connected), after a drop or at any time
+  (let [disconnected (assoc-in base-state [:backend :link :carabiner-connected?] false)]
+    (doseq [auto [true false nil]]
+      (let [result (timing/handle {:event/type :timing/carabiner-connect
+                                   :state (assoc-in disconnected [:backend :link :auto-connect?] auto)})]
+        (is (= {} (:link/connect result)) (str "Auto-connect " auto ": the Link owner connects"))
+        (is (= :manual (get-in result [:state :backend :link :connecting])) "and the button says so until the answer")))))
+
+(deftest a-connects-answer-ends-its-wait-test
+  (let [handled #(timing/handle {:event/type :timing/carabiner-connected :connected? %2
+                                 :state (assoc-in base-state [:backend :link :connecting] %1)})]
+    (is (nil? (get-in (handled :manual true) [:state :backend :link :connecting])) "connected")
+    (is (nil? (get-in (handled :auto false) [:state :backend :link :connecting])))
+    (testing "the Connect button's, failed: a notice says so"
+      (let [failed (handled :manual false)]
+        (is (nil? (get-in failed [:state :backend :link :connecting])))
+        (is (= {:text "Could not connect to Carabiner" :level :warning}
+               (dissoc (get-in failed [:state :ui :notice]) :id)))))
+    (is (nil? (get-in (handled :auto false) [:state :ui :notice])) "start-up's, failed: no notice, as before")
+    (is (nil? (get-in (handled nil false) [:state :ui :notice])) "a close (no connect asked): no notice")))
 
 
 ;; Link Enabled Status Tests

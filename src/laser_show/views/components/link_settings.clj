@@ -2,7 +2,9 @@
   "Ableton Link configuration UI component for the settings tab.
    
    Architecture:
-   - Carabiner daemon auto-connects on app startup
+   - Carabiner daemon auto-connects on app startup; Connect, beside its
+     status while it isn't connected, connects it again (after a drop, or
+     with Auto-connect off)
     - The Link button and BPM-sync checkbox are separate local switches
    - Shows both Carabiner and Link connection status
    
@@ -41,8 +43,9 @@
 
 
 (defn- dual-status-row
-  "Displays Carabiner and Link connection status separately."
-  [{:keys [carabiner-connected? link-enabled? link-bpm link-peers]}]
+  "Displays Carabiner and Link connection status separately, and Connect
+   while Carabiner isn't connected (Connecting… while a connect waits)."
+  [{:keys [carabiner-connected? connecting link-enabled? link-bpm link-peers]}]
   {:fx/type :v-box
    :spacing 8
    :padding {:left 8 :right 8 :top 8 :bottom 8}
@@ -53,16 +56,25 @@
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
-     :children [{:fx/type status-indicator
-                 :status (if carabiner-connected? :connected :disconnected)
-                 :size 10}
-                {:fx/type :label
-                 :text "Carabiner:"
-                 :style (str "-fx-text-fill: " (css/text-secondary) ";")}
-                {:fx/type :label
-                 :id "carabiner-status"
-                 :text (if carabiner-connected? "Connected" "Disconnected")
-                 :style (str "-fx-text-fill: " (css/text-primary) ";")}]}
+     :children (cond-> [{:fx/type status-indicator
+                         :status (if carabiner-connected? :connected :disconnected)
+                         :size 10}
+                        {:fx/type :label
+                         :text "Carabiner:"
+                         :style (str "-fx-text-fill: " (css/text-secondary) ";")}
+                        {:fx/type :label
+                         :id "carabiner-status"
+                         :text (if carabiner-connected? "Connected" "Disconnected")
+                         :style (str "-fx-text-fill: " (css/text-primary) ";")}]
+                 (not carabiner-connected?)
+                 (into [{:fx/type :region :h-box/hgrow :always}
+                        {:fx/type :button
+                         :id "carabiner-connect-button"
+                         :text (if connecting "Connecting…" "Connect Carabiner")
+                         :disable (some? connecting)
+                         :style-class ["button-primary"]
+                         :tooltip {:fx/type :tooltip :text "Connect to the Carabiner daemon (or start the embedded one)"}
+                         :on-action {:event/type :timing/carabiner-connect}}]))}
     
     ;; Link status row
     {:fx/type :h-box
@@ -153,7 +165,7 @@
   "Ableton Link configuration section for settings tab."
   [{:keys [fx/context]}]
   (let [link-state (fx/sub-ctx context subs/link-status)
-        {:keys [carabiner-connected? link-enabled? sync-enabled? beat-sync? 
+        {:keys [carabiner-connected? connecting link-enabled? sync-enabled? beat-sync?
                 auto-connect? latency-ms link-bpm link-peers]} link-state]
     {:fx/type :v-box
      :spacing 12
@@ -182,6 +194,7 @@
       ;; Connection Status (shows both Carabiner and Link)
       {:fx/type dual-status-row
        :carabiner-connected? carabiner-connected?
+       :connecting connecting
        :link-enabled? link-enabled?
        :link-bpm link-bpm
        :link-peers (or link-peers 0)}

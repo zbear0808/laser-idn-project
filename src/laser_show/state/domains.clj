@@ -575,7 +575,8 @@
                     :auto-connect? true            ;; Auto-connect Carabiner on startup
                     :latency-ms 0                  ;; Latency compensation: our output arrives this late, so the aligned beats run this far ahead of Link's
                     :link-bpm nil                  ;; Current Link session BPM
-                    :link-peers 0}                 ;; Number of Link peers
+                    :link-peers 0                  ;; Number of Link peers
+                    :connecting nil}               ;; A connect asked for and not answered yet: :manual (the Connect button) or :auto (start-up), else nil
           :doc "Ableton Link state. Carabiner auto-connects on startup. Button toggles Link sync mode. Plain data: the connection and its status listener belong to their owner (laser-show.input.link), which reports their status back as events"}})
 
 

@@ -465,13 +465,16 @@
                              true))))}))))
 
 (defn- run-connect!
-  "Connect unless release! came since it was asked for (connect-now!)."
+  "Connect unless release! came since it was asked for (connect-now!). One
+   that fails on the way is still answered (connected if the owner holds a
+   connection), so nothing waits for it."
   [dispatch generation]
   (when (current? generation)
     (try
       (connect-now! dispatch generation)
       (catch Throwable t
-        (log/error t "Connecting to Carabiner failed")))))
+        (log/error t "Connecting to Carabiner failed")
+        (dispatch {:event/type :timing/carabiner-connected :connected? (holds-connection?)})))))
 
 (defn- daemon-factory [thread-name]
   (reify ThreadFactory

@@ -350,11 +350,24 @@
   "At start-up (app/start!): connect to the Carabiner daemon unless
    [:backend :link :auto-connect?] is false. The Link owner (input.link)
    connects off the event thread and says how it went with
-   :timing/carabiner-connected, through this app's dispatcher."
+   :timing/carabiner-connected, through this app's dispatcher; until then
+   [:backend :link :connecting] is :auto."
   [{:keys [state]}]
   (if (get-in state [:backend :link :auto-connect?] true)
-    {:link/connect {}}
+    {:state (assoc-in state [:backend :link :connecting] :auto)
+     :link/connect {}}
     {}))
+
+(defn- handle-timing-carabiner-connect
+  "The Connect button (Settings' Link card, and the toolbar's Link button
+   while Carabiner isn't connected): connect to the Carabiner daemon now,
+   whatever Auto-connect says, as start-up does. The Link owner connects one
+   connect at a time (connected already, nothing new opens); until it
+   answers, [:backend :link :connecting] is :manual, and the buttons say
+   they wait."
+  [{:keys [state]}]
+  {:state (assoc-in state [:backend :link :connecting] :manual)
+   :link/connect {}})
 
 (defn- handle-timing-carabiner-connected
   "Update Carabiner connection status: whether the Link owner
@@ -362,13 +375,20 @@
    when the connection closes. Disconnected, Link can't stay enabled (it
    needs Carabiner, link/enable-link!): it is off, and Link's tempo and
    peers are forgotten; following its tempo stays selected for when Link is
-   enabled again. The other link keys are kept. The connection and its
-   listeners are the owner's, never app state."
+   enabled again. The wait of a connect asked for ([:backend :link
+   :connecting]) is over: the Connect button's, failed, is a notice. The
+   other link keys are kept. The connection and its listeners are the
+   owner's, never app state."
   [{:keys [state connected?]}]
-  {:state (if connected?
-            (assoc-in state [:backend :link :carabiner-connected?] true)
-            (update-in state [:backend :link] assoc
-                       :carabiner-connected? false :link-enabled? false :link-bpm nil :link-peers 0))})
+  (let [asked (get-in state [:backend :link :connecting])
+        state (cond-> (assoc-in state [:backend :link :connecting] nil)
+                connected? (assoc-in [:backend :link :carabiner-connected?] true)
+                (not connected?) (update-in [:backend :link] assoc
+                                            :carabiner-connected? false :link-enabled? false
+                                            :link-bpm nil :link-peers 0))]
+    (if (and (not connected?) (= :manual asked))
+      (h/show-notice state "Could not connect to Carabiner" :warning)
+      {:state state})))
 
 (defn- handle-timing-link-enabled
   "Update Link enabled status (internal event from link service)."
@@ -434,6 +454,7 @@
     
     ;; Internal Link events
     :timing/carabiner-auto-connect (handle-timing-carabiner-auto-connect event)
+    :timing/carabiner-connect (handle-timing-carabiner-connect event)
     :timing/carabiner-connected (handle-timing-carabiner-connected event)
     :timing/link-enabled (handle-timing-link-enabled event)
     
