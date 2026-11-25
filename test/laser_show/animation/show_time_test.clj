@@ -12,7 +12,8 @@
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
             [laser-show.state.persistent :as persistent]
-            [laser-show.state.templates :as templates]))
+            [laser-show.state.templates :as templates]
+            [laser-show.timeline.shows :as shows]))
 
 (def ^:private circle
   {:destination-zone {:zone-group-id :all}
@@ -25,6 +26,14 @@
           :items [{:id :a :type :preset :preset-id :circle :track-id :t :enabled? true :effects []
                    :timeline/start 0.0 :timeline/duration 16.0}]}
          extra))
+
+(def ^:private tl
+  "The show the timeline cases play: a timeline is a library show, played by
+   :timeline/* events under its key TL (plans/2026-11-25-timeline-shows 05
+   §8.1)."
+  #uuid "00000000-0000-0000-0000-0000000000a0")
+
+(def ^:private TL (shows/play-key tl))
 
 (def ^:private doc-id
   "The show open in init!'s state (reactivity plan 20's [:project :document-id])."
@@ -74,7 +83,7 @@
 
 
 (deftest new-run-starts-at-its-start-beat-test
-  (init! {[0 0] circle [1 0] (timeline {})})
+  (init! {[0 0] circle} {tl (timeline {})})
   (let [global {:accumulated-beats 7.25 :accumulated-ms 3625.0 :phase-offset 0.0
                 :phase-offset-target 0.0 :effective-beats 7.25 :last-frame-time 1000.0}
         rt0 (assoc show-time/initial-runtime :global global)]
@@ -90,10 +99,10 @@
         (is (close? (/ 1.0 30) (:accumulated-beats r1')) "one tick at 120 BPM is 1/30 beat")
         (is (< 0.0 (:phase-offset r1') 0.25) "gliding toward 0.25")))
     (testing "a timeline starts at its start beat, with no glide"
-      (handle! {:event/type :timeline/play :col 1 :row 0 :from 3.0})
-      (is (= {:run (run-id [1 0]) :timeline? true :start-beat 3.0}
-             (get-in (state/get-raw-state) [:playback :active-cues [1 0]])))
-      (let [r2 (run-of (run-at rt0 1000.0) [1 0])]
+      (handle! {:event/type :timeline/play :show-id tl :from 3.0})
+      (is (= {:run (run-id TL) :timeline? true :start-beat 3.0}
+             (get-in (state/get-raw-state) [:playback :active-cues TL])))
+      (let [r2 (run-of (run-at rt0 1000.0) TL)]
         (is (= [true 3.0 0.0 0.0] ((juxt :timeline? :accumulated-beats :phase-offset :phase-offset-target) r2)))))))
 
 (deftest removed-intent-drops-the-run-test
@@ -123,28 +132,28 @@
       (is (= {[1 1] (get-in rt' [:runs r :accumulated-beats])} (show-time/positions rt'))))))
 
 (deftest paused-run-holds-test
-  (init! {[0 0] (timeline {})})
-  (handle! {:event/type :timeline/play :col 0 :row 0 :from 2.0})
+  (init! {} {tl (timeline {})})
+  (handle! {:event/type :timeline/play :show-id tl :from 2.0})
   (let [rt (run-at (:runtime start) 0.0)]
-    (is (close? 2.0 (beats rt [0 0])))
-    (handle! {:event/type :timeline/pause :col 0 :row 0})
+    (is (close? 2.0 (beats rt TL)))
+    (handle! {:event/type :timeline/pause :show-id tl})
     (let [rt (run-at rt 500.0)]
-      (is (close? 2.0 (beats rt [0 0])) "held")
-      (handle! {:event/type :timeline/play :col 0 :row 0})
-      (is (close? 3.0 (beats (run-at rt 1000.0) [0 0])) "resumed from where it paused"))))
+      (is (close? 2.0 (beats rt TL)) "held")
+      (handle! {:event/type :timeline/play :show-id tl})
+      (is (close? 3.0 (beats (run-at rt 1000.0) TL)) "resumed from where it paused"))))
 
 (deftest seek-request-applies-once-test
-  (init! {[0 0] (timeline {})})
-  (handle! {:event/type :timeline/play :col 0 :row 0 :from 3.0})
+  (init! {} {tl (timeline {})})
+  (handle! {:event/type :timeline/play :show-id tl :from 3.0})
   (let [rt (run-at (:runtime start) 0.0)]
-    (handle! {:event/type :timeline/seek :col 0 :row 0 :beat 9.0})
-    (let [{:keys [id beat]} (get-in (state/get-raw-state) [:playback :active-cues [0 0] :seek])]
+    (handle! {:event/type :timeline/seek :show-id tl :beat 9.0})
+    (let [{:keys [id beat]} (get-in (state/get-raw-state) [:playback :active-cues TL :seek])]
       (is (uuid? id))
       (is (= 9.0 beat)))
     (let [rt1 (run-at rt tick-ms)
           rt2 (run-at rt1 (* 2 tick-ms))]
-      (is (close? (+ 9.0 (/ 1.0 30)) (beats rt1 [0 0])) "seeked, then advanced")
-      (is (close? (+ 9.0 (/ 2.0 30)) (beats rt2 [0 0])) "the same intent again: a seek applies once"))))
+      (is (close? (+ 9.0 (/ 1.0 30)) (beats rt1 TL)) "seeked, then advanced")
+      (is (close? (+ 9.0 (/ 2.0 30)) (beats rt2 TL)) "the same intent again: a seek applies once"))))
 
 (defn- with-runs
   "The runtime with each triggered cell's run set to timing (merged)."
@@ -180,9 +189,9 @@
             (is (= 0.0 (beats (run-at rt2 1500.0) [0 0])))))))))
 
 (deftest align-request-targets-the-nearest-beat-test
-  (init! {[0 0] circle [1 0] (timeline {})})
+  (init! {[0 0] circle} {tl (timeline {})})
   (handle! {:event/type :grid/trigger-cell :col 0 :row 0})
-  (handle! {:event/type :timeline/play :col 1 :row 0 :from 4.35})
+  (handle! {:event/type :timeline/play :show-id tl :from 4.35})
   (let [rt (-> (run-at (:runtime start) 1000.0)
                (assoc :global {:accumulated-beats 12.35 :accumulated-ms 6175.0 :phase-offset 0.0
                                :phase-offset-target 0.0 :last-frame-time 1000.0})
@@ -192,17 +201,17 @@
       (is (= 0.0 (:phase-offset (:global rt1))) "no snap at the tap")
       (is (close? -0.35 (:phase-offset-target (:global rt1))) "12.35 → 12.0, the shorter way")
       (is (close? -0.35 (:phase-offset-target (run-of rt1 [0 0]))))
-      (is (= 0.0 (:phase-offset-target (run-of rt1 [1 0]))) "a timeline doesn't move")
-      (is (close? 4.35 (beats rt1 [1 0]))))
+      (is (= 0.0 (:phase-offset-target (run-of rt1 TL))) "a timeline doesn't move")
+      (is (close? 4.35 (beats rt1 TL))))
     (testing "past the half beat it pulls forward"
       (handle! {:event/type :timing/tap-tempo :time 2500})
       (is (close? 0.2 (:phase-offset-target (:global (run-at (assoc-in rt [:global :accumulated-beats] 12.8)
                                                              1000.0))))))))
 
 (deftest shift-request-adds-the-offset-test
-  (init! {[0 0] circle [1 0] (timeline {})})
+  (init! {[0 0] circle} {tl (timeline {})})
   (handle! {:event/type :grid/trigger-cell :col 0 :row 0})
-  (handle! {:event/type :timeline/play :col 1 :row 0 :from 2.0})
+  (handle! {:event/type :timeline/play :show-id tl :from 2.0})
   (let [rt (-> (run-at (:runtime start) 1000.0)
                (assoc-in [:global :phase-offset] 0.1)
                (assoc-in [:global :phase-offset-target] 0.1)
@@ -212,7 +221,7 @@
     (let [rt1 (run-at rt 1000.0)]
       (is (close? 0.35 (:phase-offset-target (:global rt1))))
       (is (close? 0.30 (:phase-offset-target (run-of rt1 [0 0]))))
-      (is (= 0.0 (:phase-offset-target (run-of rt1 [1 0]))) "timelines keep their position"))))
+      (is (= 0.0 (:phase-offset-target (run-of rt1 TL))) "timelines keep their position"))))
 
 (deftest nil-request-ids-never-apply-test
   (init! {[0 0] circle})
@@ -241,12 +250,12 @@
                                 [:global :accumulated-beats])))))))
 
 (deftest timeline-end-reports-until-the-intent-goes-test
-  (init! {[0 0] (timeline {})})
-  (handle! {:event/type :timeline/play :col 0 :row 0 :from 15.9})
-  (let [r2 (run-id [0 0])
-        report {:event/type :show-clock/cue-ended :cell [0 0] :run r2 :position-ids {:restart nil :seek nil}}
+  (init! {} {tl (timeline {})})
+  (handle! {:event/type :timeline/play :show-id tl :from 15.9})
+  (let [r2 (run-id TL)
+        report {:event/type :show-clock/cue-ended :cell TL :run r2 :position-ids {:restart nil :seek nil}}
         {rt1 :runtime reports1 :reports} (step (run-at (:runtime start) 0.0) 100.0)]
-    (is (= [true 16.0] ((juxt :ended? :accumulated-beats) (run-of rt1 [0 0]))) "held at its end")
+    (is (= [true 16.0] ((juxt :ended? :accumulated-beats) (run-of rt1 TL))) "held at its end")
     (is (= [report] reports1))
     (is (empty? (show-time/active-runs (state/get-raw-state) rt1)) "an ended run isn't rendered")
     (let [{rt2 :runtime reports2 :reports} (step rt1 200.0)
@@ -254,21 +263,21 @@
       (is (empty? reports2) "at most once every 250 ms")
       (is (= [report] reports3) "sent again while the intent is still there")
       (run! events/event-handler reports3)
-      (is (nil? (get-in (state/get-raw-state) [:playback :active-cues [0 0]])))
+      (is (nil? (get-in (state/get-raw-state) [:playback :active-cues TL])))
       (is (false? (get-in (state/get-raw-state) [:playback :playing?])))
       (let [{rt4 :runtime reports4 :reports} (step rt3 400.0)]
         (is (empty? reports4))
         (is (empty? (:runs rt4)))))))
 
 (deftest report-for-an-old-run-changes-nothing-test
-  (init! {[0 0] (timeline {})})
-  (handle! {:event/type :timeline/play :col 0 :row 0})
-  (let [r2 (run-id [0 0])]
-    (handle! {:event/type :timeline/stop :col 0 :row 0})
-    (handle! {:event/type :timeline/play :col 0 :row 0})
-    (is (not= r2 (run-id [0 0])) "started again: a new run")
+  (init! {} {tl (timeline {})})
+  (handle! {:event/type :timeline/play :show-id tl})
+  (let [r2 (run-id TL)]
+    (handle! {:event/type :timeline/stop :show-id tl})
+    (handle! {:event/type :timeline/play :show-id tl})
+    (is (not= r2 (run-id TL)) "started again: a new run")
     (let [before (state/get-raw-state)]
-      (events/event-handler {:event/type :show-clock/cue-ended :cell [0 0] :run r2 :position-ids {:restart nil :seek nil}})
+      (events/event-handler {:event/type :show-clock/cue-ended :cell TL :run r2 :position-ids {:restart nil :seek nil}})
       (is (= (:playback before) (:playback (state/get-raw-state)))))))
 
 (deftest due-reports-keeps-separate-memories-test
@@ -280,9 +289,9 @@
       (is (= [{r 300.0} [r]] (show-time/due-reports sent [r] 300.0)) "300 ms later: again")
       (is (= [{} []] (show-time/due-reports sent [] 100.0)) "no longer pending: forgotten, so it goes at once if it comes back")))
   (testing "the step keeps its own (:sent) and leaves the rotation's (:vibe-sent, show-clock/tick!) alone"
-    (init! {[0 0] (timeline {})})
-    (handle! {:event/type :timeline/play :col 0 :row 0 :from 15.9})
-    (let [ended {:event/type :show-clock/cue-ended :cell [0 0] :run (run-id [0 0]) :position-ids {:restart nil :seek nil}}
+    (init! {} {tl (timeline {})})
+    (handle! {:event/type :timeline/play :show-id tl :from 15.9})
+    (let [ended {:event/type :show-clock/cue-ended :cell TL :run (run-id TL) :position-ids {:restart nil :seek nil}}
           vibe-sent {{:event/type :vibe/arm :from :vibe-1} 50.0}
           {rt1 :runtime r1 :reports} (step (assoc (run-at (:runtime start) 0.0) :vibe-sent vibe-sent) 100.0)
           {rt2 :runtime r2 :reports} (step rt1 200.0)]
@@ -318,10 +327,10 @@
 (defn- seek-of [cell] (get-in (state/get-raw-state) [:playback :active-cues cell :seek]))
 
 (deftest stop-fences-old-ends-and-holds-survivors-test
-  (init! {[0 0] short-timeline [1 0] circle})
+  (init! {[1 0] circle} {tl short-timeline})
   (handle! {:event/type :grid/trigger-cell :col 1 :row 0})
-  (handle! {:event/type :timeline/play :col 0 :row 0 :from 0.2})
-  (let [[a b] [[0 0] [1 0]]
+  (handle! {:event/type :timeline/play :show-id tl :from 0.2})
+  (let [[a b] [TL [1 0]]
         [r rb] [(run-id a) (run-id b)]
         b-intent (get-in (state/get-raw-state) [:playback :active-cues b])
         before (state/get-raw-state)
@@ -352,19 +361,19 @@
           "no undo step, still clean"))))
 
 (deftest seek-fences-an-end-on-the-same-run-test
-  (init! {[0 0] (timeline {})})
-  (handle! {:event/type :timeline/play :col 0 :row 0 :from 0.0})
+  (init! {} {tl (timeline {})})
+  (handle! {:event/type :timeline/play :show-id tl :from 0.0})
   (handle! {:event/type :transport/retrigger})
-  (let [a [0 0]
+  (let [a TL
         r (run-id a)
         k1 (restart-id)
         rt0 (run-at (:runtime start) 0.0)]
     (testing "example 4, by :timeline/seek: the end before a seek is no end of where it went"
-      (handle! {:event/type :timeline/seek :col 0 :row 0 :beat 15.9})
+      (handle! {:event/type :timeline/seek :show-id tl :beat 15.9})
       (let [s1 (:id (seek-of a))
             {rt1 :runtime queued :reports} (step (run-at rt0 0.0) 100.0)]
         (is (= [(ended a r k1 s1)] queued))
-        (handle! {:event/type :timeline/seek :col 0 :row 0 :beat 2.0})
+        (handle! {:event/type :timeline/seek :show-id tl :beat 2.0})
         (run! handle! queued)
         (is (= [true {a r} a] (transport)))
         (is (= 2.0 (:beat (seek-of a))) "still asked for")
@@ -373,11 +382,11 @@
           (is (= r (run-id a)) "the same run")
           (is (close? 2.0 (beats rt2 a)) "at beat 2 on a step that adds no time")
           (testing "by Play :from on the playing timeline, then a seek to the same beat: each its own"
-            (handle! {:event/type :timeline/play :col 0 :row 0 :from 15.9})
+            (handle! {:event/type :timeline/play :show-id tl :from 15.9})
             (let [s3 (:id (seek-of a))
                   {rt3 :runtime queued :reports} (step (run-at rt2 100.0) 200.0)]
               (is (= [(ended a r k1 s3)] queued))
-              (handle! {:event/type :timeline/seek :col 0 :row 0 :beat 15.9})
+              (handle! {:event/type :timeline/seek :show-id tl :beat 15.9})
               (run! handle! queued)
               (is (= [true {a r} a] (transport)))
               (let [s4 (:id (seek-of a))
@@ -390,11 +399,11 @@
                 (is (= [false {} nil] (transport)) "the end of where it is now")))))))))
 
 (deftest retrigger-fences-an-end-on-the-same-run-test
-  (init! {[0 0] short-timeline})
-  (handle! {:event/type :timeline/play :col 0 :row 0 :from 0.0})
+  (init! {} {tl short-timeline})
+  (handle! {:event/type :timeline/play :show-id tl :from 0.0})
   (handle! {:event/type :transport/retrigger})
-  (handle! {:event/type :timeline/seek :col 0 :row 0 :beat 0.2})
-  (let [a [0 0]
+  (handle! {:event/type :timeline/seek :show-id tl :beat 0.2})
+  (let [a TL
         r (run-id a)
         [k1 s1] [(restart-id) (:id (seek-of a))]
         rt0 (run-at (:runtime start) 0.0)
@@ -415,12 +424,12 @@
         (handle! e2)
         (is (= [false {} nil] (transport)) "the restarted run's own end"))))
   (testing "a new document asks for no restart, though the clock applied one before: an end names app state's"
-    (init! {[0 0] short-timeline})
-    (handle! {:event/type :timeline/play :col 0 :row 0 :from 0.2})
+    (init! {} {tl short-timeline})
+    (handle! {:event/type :timeline/play :show-id tl :from 0.2})
     (is (nil? (restart-id)))
     (let [rt (run-at (assoc-in (:runtime start) [:applied :restart] (random-uuid)) 0.0)
           {:keys [reports]} (step rt 50.0)]
-      (is (= [(ended [0 0] (run-id [0 0]) nil nil)] reports))
+      (is (= [(ended TL (run-id TL) nil nil)] reports))
       (run! handle! reports)
       (is (= [false {} nil] (transport))))))
 
@@ -490,6 +499,14 @@
 (def ^:private C [2 0])
 (def ^:private B [1 0])
 
+(def ^:private cs #uuid "00000000-0000-0000-0000-0000000000c0")
+
+(def ^:private CS
+  "C as a show: where a case edits or plays C with :timeline/* events, which
+   address only shows. C itself is a grid cell, as an older file's timeline
+   cell still is, for the cases the grid's own events reach."
+  (shows/play-key cs))
+
 (def ^:private follower
   "15 §7's cue: beat 0 at 3,600 s, locked at 120 BPM, 64 beats."
   (timeline {:timeline/chase :mtc :timeline/tc-start 3600.0 :timeline/tempo-bpm 120.0 :timeline/length 64.0}))
@@ -541,9 +558,10 @@
   (state/get-raw-state))
 
 (defn- follow!
-  "Follow Timecode switched on or off at cell, as the inspector does."
-  [cell on?]
-  (handle! {:event/type :timeline/apply-op :col (first cell) :row (second cell)
+  "Follow Timecode switched on or off for the show playing at k, as the
+   inspector does."
+  [k on?]
+  (handle! {:event/type :timeline/apply-op :show-id (shows/key-show-id k)
             :op {:op :set-chase :source (when on? :mtc)}}))
 
 (defn- drawn
@@ -611,24 +629,24 @@
 ;; Moved from frame_service_test (they called update-timing-accumulators!)
 
 (deftest timeline-cue-stops-at-end-test
-  (init! {[0 0] (timeline {:items [{:id :a :type :preset :preset-id :circle :track-id :t :enabled? true
+  (init! {} {tl (timeline {:items [{:id :a :type :preset :preset-id :circle :track-id :t :enabled? true
                                     :effects [] :timeline/start 0.0 :timeline/duration 4.0}]})})
-  (handle! {:event/type :timeline/play :col 0 :row 0 :from 3.5})
+  (handle! {:event/type :timeline/play :show-id tl :from 3.5})
   (let [{:keys [runtime reports]} (step (run-at (:runtime start) 1000.0) 1500.0)]
-    (is (true? (:ended? (run-of runtime [0 0]))) "past the last clip end (4 beats)")
+    (is (true? (:ended? (run-of runtime TL))) "past the last clip end (4 beats)")
     (is (= [:show-clock/cue-ended] (map :event/type reports)))
     (run! events/event-handler reports)
     (is (false? (get-in (state/get-raw-state) [:playback :playing?]))))
   (testing "with the loop on it keeps going"
-    (state/swap-state! assoc-in [:chains :cue-chains [0 0] :loop] {:enabled? true :start 0.0 :duration 4.0})
-    (handle! {:event/type :timeline/play :col 0 :row 0 :from 3.5})
-    (is (close? 0.5 (beats (run-at (:runtime start) 1000.0 1500.0) [0 0])))))
+    (state/swap-state! assoc-in [:chains :shows tl :loop] {:enabled? true :start 0.0 :duration 4.0})
+    (handle! {:event/type :timeline/play :show-id tl :from 3.5})
+    (is (close? 0.5 (beats (run-at (:runtime start) 1000.0 1500.0) TL)))))
 
 (deftest locked-tempo-ignores-global-bpm-test
-  (init! {[0 0] (timeline {:timeline/tempo-bpm 60.0 :timeline/length 100.0})})
+  (init! {} {tl (timeline {:timeline/tempo-bpm 60.0 :timeline/length 100.0})})
   (state/swap-state! assoc-in [:timing :bpm] 180.0)
-  (handle! {:event/type :timeline/play :col 0 :row 0 :from 0.0})
-  (is (close? 1.0 (beats (run-at (:runtime start) 1000.0 2000.0) [0 0]))
+  (handle! {:event/type :timeline/play :show-id tl :from 0.0})
+  (is (close? 1.0 (beats (run-at (:runtime start) 1000.0 2000.0) TL))
       "1 s at the locked 60 BPM = 1 beat, not 3"))
 
 (deftest chasing-timeline-follows-mtc-test
@@ -663,46 +681,46 @@
         (is (= (chase-id ra [0 0]) (chase-id rb [0 0])))))))
 
 (deftest non-chasing-cues-ignore-mtc-test
-  (init! {[0 0] (timeline {:timeline/length 100.0})})
-  (handle! {:event/type :timeline/play :col 0 :row 0 :from 2.0})
+  (init! {} {tl (timeline {:timeline/length 100.0})})
+  (handle! {:event/type :timeline/play :show-id tl :from 2.0})
   (let [mtc {:state :running :seconds 50.0 :fps 25}
         rt (:runtime (step (:runtime (step (:runtime start) 1000.0 mtc)) 1500.0 mtc))]
-    (is (close? 3.0 (beats rt [0 0])) "advanced by its own clock (+1 beat), not set to 100")
+    (is (close? 3.0 (beats rt TL)) "advanced by its own clock (+1 beat), not set to 100")
     (is (empty? (:chase rt)))))
 
 (deftest chase-takes-over-a-playing-cue-test
   (testing "a cue playing when Follow is switched on stops when no timecode runs"
-    (init! {[0 0] (timeline {:timeline/length 64.0})})
-    (handle! {:event/type :timeline/play :col 0 :row 0 :from 2.0})
-    (let [r1 (run-id [0 0])
+    (init! {} {tl (timeline {:timeline/length 64.0})})
+    (handle! {:event/type :timeline/play :show-id tl :from 2.0})
+    (let [r1 (run-id TL)
           rt (run-at (:runtime start) 0.0)]
-      (follow! [0 0] true)
-      (let [v (version [0 0])
+      (follow! TL true)
+      (let [v (version TL)
             {rt' :runtime reports :reports} (step rt 16.0 stopped)]
         (is (pos-int? v) "the edit gave the follower a version")
-        (is (= r1 (:run (intent [0 0]))) "and left the run for the clock to settle")
+        (is (= r1 (:run (intent TL))) "and left the run for the clock to settle")
         (is (empty? (:runs rt')) "the timecode drives it now")
         (is (empty? (show-time/active-runs (state/get-raw-state) rt')))
-        (is (= [(off-report [0 0] v [:run r1])] reports))
+        (is (= [(off-report TL v [:run r1])] reports))
         (deliver! rt' reports)
-        (is (nil? (intent [0 0])))
+        (is (nil? (intent TL)))
         (is (false? (get-in (state/get-raw-state) [:playback :playing?])) "its last cue"))))
   (testing "while timecode runs inside it, timecode takes it over"
-    (init! {[0 0] (timeline {:timeline/length 64.0})})
-    (handle! {:event/type :timeline/play :col 0 :row 0 :from 2.0})
-    (let [r1 (run-id [0 0])
+    (init! {} {tl (timeline {:timeline/length 64.0})})
+    (handle! {:event/type :timeline/play :show-id tl :from 2.0})
+    (let [r1 (run-id TL)
           rt (run-at (:runtime start) 0.0)]
-      (follow! [0 0] true)
-      (let [v (version [0 0])
+      (follow! TL true)
+      (let [v (version TL)
             {rt' :runtime reports :reports} (step rt 16.0 (running 10.0))
-            k (chase-id rt' [0 0])]
-        (is (close? 20.0 (chase-at rt' [0 0])))
+            k (chase-id rt' TL)]
+        (is (close? 20.0 (chase-at rt' TL)))
         (is (empty? (:runs rt')))
-        (is (= {[0 0] 1} (drawn rt')) "drawn once, at the timecode, before app state hears of it")
-        (is (= [(on-report [0 0] v [:run r1] k {:restart nil :allowed? true})] reports))
+        (is (= {TL 1} (drawn rt')) "drawn once, at the timecode, before app state hears of it")
+        (is (= [(on-report TL v [:run r1] k {:restart nil :allowed? true})] reports))
         (deliver! rt' reports)
-        (is (= (marker k) (intent [0 0])))
-        (is (= [true {[0 0] nil} [0 0]] (transport)))
+        (is (= (marker k) (intent TL)))
+        (is (= [true {TL nil} TL] (transport)))
         (is (= [] (:reports (step rt' 32.0 (running 10.016)))) "app state agrees")))))
 
 (deftest active-runs-keep-the-intents-order-test
@@ -779,15 +797,89 @@
 
 (defn- b-and-c-playing!
   "B's circle triggered, then C's follower taken by timecode at 3,605.55 s
-   (example 2's C:k1, B:b): the runtime of that tick."
-  []
-  (init! {C follower B circle})
-  (handle! {:event/type :grid/trigger-cell :col 1 :row 0})
-  (let [{rt :runtime reports :reports} (step (:runtime start) 70.0 (mtc-at 70))]
-    (deliver! rt reports)
-    rt))
+   (example 2's C:k1, B:b): the runtime of that tick. c is where the
+   follower is: the grid cell C, or a show's key (CS)."
+  ([] (b-and-c-playing! C))
+  ([c]
+   (if (shows/play-key? c)
+     (init! {B circle} {(shows/key-show-id c) follower})
+     (init! {c follower B circle}))
+   (handle! {:event/type :grid/trigger-cell :col 1 :row 0})
+   (let [{rt :runtime reports :reports} (step (:runtime start) 70.0 (mtc-at 70))]
+     (deliver! rt reports)
+     rt)))
 
-(deftest follow-off-clear-and-replace-prune-chase-test
+(deftest follow-off-and-replace-prune-chase-test
+  ;; The follower as a show: these cases edit and play it with :timeline/*
+  ;; events
+  (let [rt1 (b-and-c-playing! CS)
+        k1 (chase-id rt1 CS)
+        b (run-id B)
+        playing (state/get-raw-state)]
+    (is (= [true {B b CS nil} CS] (transport)) "C:k1, B:b")
+    (testing "example 2: Follow off while timecode runs, then Play from beat 3 before the next tick"
+      (follow! CS false)
+      (is (= [true {B b} B] (transport)) "only B is left, and plays on")
+      (is (nil? (version CS)))
+      (handle! {:event/type :timeline/play :show-id cs :from 3.0})
+      (let [r2 (run-id CS)
+            {rt :runtime reports :reports} (step rt1 100.0 (mtc-at 100))]
+        (is (= {:run r2 :timeline? true :start-beat 3.0} (intent CS)) "C has just r2")
+        (is (= [{} #{b r2}] [(:chase rt) (set (keys (:runs rt)))]))
+        (is (close? 3.0 (get (show-time/positions rt) CS)) "at its start")
+        (is (= [B CS] (map :cell (show-time/active-runs (state/get-raw-state) rt))))
+        (is (= {B 1 CS 1} (drawn rt)))
+        (is (= [] reports))
+        (let [before (state/get-raw-state)]
+          (is (identical? before (deliver! rt [(off-report CS nil [:chase k1])]))
+              "an old Off for k1 leaves both"))))
+    (testing "example 4: C's follower X replaced by Y, beat 0 at 3,604 s, while timecode runs at 3,605.55 s"
+      (state/reset-state! playing)
+      (let [{rt-x :runtime x-reports :reports} (step rt1 100.0 stopped)]
+        (is (= [(off-report CS 0 [:chase k1])] x-reports) "X's Off, held")
+        (handle! {:event/type :timeline/apply-op :show-id cs :op {:op :set-tc-start :seconds 3604.0}})
+        (let [v (version CS)
+              {rt :runtime reports :reports} (step rt1 100.0 (running 3605.55))
+              k2 (chase-id rt CS)]
+          (is (pos-int? v) "Y is another version")
+          (is (= (marker k1) (intent CS)) "the marker stays for the clock to rebind")
+          (is (close? 3.10 (chase-at rt CS)) "one Y, at beat 3.10")
+          (is (= [doc-id CS v] (subvec k2 0 3)) "a fresh episode")
+          (is (not= k1 k2))
+          (is (= {B 1 CS 1} (drawn rt)) "C drawn once, in its marker's place")
+          (is (= [(on-report CS v [:chase k1] k2 {:restart nil :allowed? true})] reports))
+          (let [before (state/get-raw-state)]
+            (is (identical? before (deliver! rt-x x-reports)) "X's Off fails the version guard"))
+          (deliver! rt reports)
+          (is (= (marker k2) (intent CS)))
+          (is (= [true {B b CS nil} CS] (transport)) "rebound: the focus and the transport as they were"))))
+    (testing "Follow off, then Undo and Redo: one edit; timecode takes C again only while it runs; reports aren't edits"
+      (state/reset-state! playing)
+      (let [undos (count (get-in (state/get-raw-state) [:history :undo-stack]))]
+        (follow! CS false)
+        (is (= (inc undos) (count (get-in (state/get-raw-state) [:history :undo-stack]))))
+        (is (= "Set Follow Timecode" (history/undo-label (:history (state/get-raw-state)))))
+        (handle! {:event/type :edit/undo})
+        (let [v (version CS)
+              undone (state/get-raw-state)]
+          (is (pos-int? v) "the follower back, as another version")
+          (is (= [true {B b} B] (transport)))
+          (is (= [] (:reports (step rt1 100.0 stopped))) "timecode stopped: nothing to take")
+          (let [{rt :runtime reports :reports} (step rt1 100.0 (mtc-at 100))
+                k (chase-id rt CS)]
+            (is (not= k1 k))
+            (is (= [(on-report CS v :none k {:restart nil :allowed? true})] reports))
+            (deliver! rt reports)
+            (is (= (marker k) (intent CS)))
+            (is (= ((juxt :history :project) undone) ((juxt :history :project) (state/get-raw-state)))
+                "the report changed neither the history nor the unsaved flag")
+            (handle! {:event/type :edit/redo})
+            (is (= [true {B b} B] (transport)) "Redo is Follow off again")
+            (is (nil? (version CS)))))))))
+
+(deftest clear-paste-and-move-prune-chase-test
+  ;; The follower as a grid cell (an older file's timeline cell): these
+  ;; cases change it with the grid's own events
   (let [rt1 (b-and-c-playing!)
         k1 (chase-id rt1 C)
         b (run-id B)
@@ -797,22 +889,6 @@
     (testing "a snapshot that lost C's cue but kept its marker: the Off for that marker"
       (is (= [(off-report C nil [:chase k1])]
              (:reports (show-time/step rt1 (update-in playing [:chains :cue-chains] dissoc C) (mtc-at 100) 100.0)))))
-    (testing "example 2: Follow off while timecode runs, then Play from beat 3 before the next tick"
-      (follow! C false)
-      (is (= [true {B b} B] (transport)) "only B is left, and plays on")
-      (is (nil? (version C)))
-      (handle! {:event/type :timeline/play :col 2 :row 0 :from 3.0})
-      (let [r2 (run-id C)
-            {rt :runtime reports :reports} (step rt1 100.0 (mtc-at 100))]
-        (is (= {:run r2 :timeline? true :start-beat 3.0} (intent C)) "C has just r2")
-        (is (= [{} #{b r2}] [(:chase rt) (set (keys (:runs rt)))]))
-        (is (close? 3.0 (get (show-time/positions rt) C)) "at its start")
-        (is (= [B C] (map :cell (show-time/active-runs (state/get-raw-state) rt))))
-        (is (= {B 1 C 1} (drawn rt)))
-        (is (= [] reports))
-        (let [before (state/get-raw-state)]
-          (is (identical? before (deliver! rt [(off-report C nil [:chase k1])]))
-              "an old Off for k1 leaves both"))))
     (testing "clearing C instead: no C position, nothing drawn there, no Off"
       (state/reset-state! playing)
       (handle! {:event/type :grid/clear-cell :col 2 :row 0})
@@ -822,26 +898,6 @@
         (is (= #{B} (positioned rt)))
         (is (= {B 1} (drawn rt)))
         (is (= [] reports) "Clear took the marker already")))
-    (testing "example 4: C's follower X replaced by Y, beat 0 at 3,604 s, while timecode runs at 3,605.55 s"
-      (state/reset-state! playing)
-      (let [{rt-x :runtime x-reports :reports} (step rt1 100.0 stopped)]
-        (is (= [(off-report C 0 [:chase k1])] x-reports) "X's Off, held")
-        (handle! {:event/type :timeline/apply-op :col 2 :row 0 :op {:op :set-tc-start :seconds 3604.0}})
-        (let [v (version C)
-              {rt :runtime reports :reports} (step rt1 100.0 (running 3605.55))
-              k2 (chase-id rt C)]
-          (is (pos-int? v) "Y is another version")
-          (is (= (marker k1) (intent C)) "the marker stays for the clock to rebind")
-          (is (close? 3.10 (chase-at rt C)) "one Y, at beat 3.10")
-          (is (= [doc-id C v] (subvec k2 0 3)) "a fresh episode")
-          (is (not= k1 k2))
-          (is (= {B 1 C 1} (drawn rt)) "C drawn once, in its marker's place")
-          (is (= [(on-report C v [:chase k1] k2 {:restart nil :allowed? true})] reports))
-          (let [before (state/get-raw-state)]
-            (is (identical? before (deliver! rt-x x-reports)) "X's Off fails the version guard"))
-          (deliver! rt reports)
-          (is (= (marker k2) (intent C)))
-          (is (= [true {B b C nil} C] (transport)) "rebound: the focus and the transport as they were"))))
     (testing "B's circle pasted over C: the follower's marker goes with it"
       (state/reset-state! playing)
       (handle! {:event/type :grid/copy-cell :col 1 :row 0})
@@ -873,29 +929,6 @@
         (deliver! rt reports)
         (is (= (marker kD) (intent D)))
         (is (= [true {B b D nil} D] (transport)))))
-    (testing "Follow off, then Undo and Redo: one edit; timecode takes C again only while it runs; reports aren't edits"
-      (state/reset-state! playing)
-      (let [undos (count (get-in (state/get-raw-state) [:history :undo-stack]))]
-        (follow! C false)
-        (is (= (inc undos) (count (get-in (state/get-raw-state) [:history :undo-stack]))))
-        (is (= "Set Follow Timecode" (history/undo-label (:history (state/get-raw-state)))))
-        (handle! {:event/type :edit/undo})
-        (let [v (version C)
-              undone (state/get-raw-state)]
-          (is (pos-int? v) "the follower back, as another version")
-          (is (= [true {B b} B] (transport)))
-          (is (= [] (:reports (step rt1 100.0 stopped))) "timecode stopped: nothing to take")
-          (let [{rt :runtime reports :reports} (step rt1 100.0 (mtc-at 100))
-                k (chase-id rt C)]
-            (is (not= k1 k))
-            (is (= [(on-report C v :none k {:restart nil :allowed? true})] reports))
-            (deliver! rt reports)
-            (is (= (marker k) (intent C)))
-            (is (= ((juxt :history :project) undone) ((juxt :history :project) (state/get-raw-state)))
-                "the report changed neither the history nor the unsaved flag")
-            (handle! {:event/type :edit/redo})
-            (is (= [true {B b} B] (transport)) "Redo is Follow off again")
-            (is (nil? (version C)))))))
     (testing "the only cue, cleared: the transport stops, once"
       (init! {C follower})
       (let [{rt :runtime reports :reports} (step (:runtime start) 70.0 (mtc-at 70))]
@@ -907,16 +940,16 @@
           (is (= [{} {} []] [(:chase rt') (show-time/positions rt') reports'])))))))
 
 (deftest stale-chase-off-cannot-retire-a-restart-test
-  (init! {C (timeline {:timeline/length 64.0})})
+  (init! {} {cs (timeline {:timeline/length 64.0})})
   ;; As the start-timeline trigger does (handlers/triggers.clj)
-  (handle! {:event/type :timeline/play :col 2 :row 0})
-  (let [r1 (run-id C)
+  (handle! {:event/type :timeline/play :show-id cs})
+  (let [r1 (run-id CS)
         rt0 (run-at (:runtime start) 0.0)
-        _ (follow! C true)
-        v1 (version C)
+        _ (follow! CS true)
+        v1 (version CS)
         queued (state/get-raw-state)
         {rt1 :runtime reports :reports} (step rt0 16.0 stopped)]
-    (is (= [(off-report C v1 [:run r1])] reports) "example 3: Follow on while timecode is stopped")
+    (is (= [(off-report CS v1 [:run r1])] reports) "example 3: Follow on while timecode is stopped")
     (testing "delivered now: r1 stops, and no C timing remains"
       (deliver! rt1 reports)
       (is (= [false {} nil] (transport)))
@@ -924,84 +957,84 @@
         (is (= [{} {} {}] [(:runs rt) (:chase rt) (show-time/positions rt)]))))
     (testing "delivered after Follow off, timeline Stop and Play, and Follow on again: the new run survives"
       (state/reset-state! queued)
-      (follow! C false)
-      (is (= r1 (:run (intent C))) "Follow off leaves a run alone")
-      (handle! {:event/type :timeline/stop :col 2 :row 0})
-      (handle! {:event/type :timeline/play :col 2 :row 0})
-      (follow! C true)
-      (let [r2 (run-id C)
+      (follow! CS false)
+      (is (= r1 (:run (intent CS))) "Follow off leaves a run alone")
+      (handle! {:event/type :timeline/stop :show-id cs})
+      (handle! {:event/type :timeline/play :show-id cs})
+      (follow! CS true)
+      (let [r2 (run-id CS)
             before (state/get-raw-state)]
         (is (not= r1 r2))
-        (is (= [true {C r2} C] (transport)))
-        (is (< v1 (version C)) "following again: another version")
+        (is (= [true {CS r2} CS] (transport)))
+        (is (< v1 (version CS)) "following again: another version")
         (is (identical? before (deliver! rt1 reports)) "its whole intent, the focus and the transport")))
     (testing "the owner guard alone: the same show, version and absent episode, another run in r1's place"
-      (state/reset-state! (assoc-in queued [:playback :active-cues C :run] (random-uuid)))
+      (state/reset-state! (assoc-in queued [:playback :active-cues CS :run] (random-uuid)))
       (let [before (state/get-raw-state)]
         (is (identical? before (deliver! rt1 reports)))))
     (testing "nor once a later episode took the cell over"
       (state/reset-state! queued)
       (let [{rt2 :runtime ons :reports} (step rt1 300.0 (running 10.0))
-            k (chase-id rt2 C)]
-        (is (= [(on-report C v1 [:run r1] k {:restart nil :allowed? true})] ons))
+            k (chase-id rt2 CS)]
+        (is (= [(on-report CS v1 [:run r1] k {:restart nil :allowed? true})] ons))
         (deliver! rt2 ons)
-        (is (= (marker k) (intent C)) "taken over")
+        (is (= (marker k) (intent CS)) "taken over")
         (let [before (state/get-raw-state)]
           (is (identical? before (deliver! rt2 reports)) "the clock on that episode")
           (is (identical? before (deliver! rt1 reports)) "the clock on none"))))
     (testing "a missing owner is no :none"
-      (state/reset-state! (update queued :playback cue-timing/deactivate-cue C))
+      (state/reset-state! (update queued :playback cue-timing/deactivate-cue CS))
       (let [{rt2 :runtime [on :as ons] :reports} (step rt1 300.0 (running 10.0))
             before (state/get-raw-state)]
         (is (= [:none {:restart nil :allowed? true}] ((juxt :expected-owner :start) on)))
         (is (identical? before (deliver! rt2 [(dissoc on :expected-owner)])))
         (deliver! rt2 ons)
-        (is (= (marker (:chase-id on)) (intent C)) "the same On, with its :none")
-        (is (= [true {C nil} C] (transport)))))
+        (is (= (marker (:chase-id on)) (intent CS)) "the same On, with its :none")
+        (is (= [true {CS nil} CS] (transport)))))
     (testing "a pending report goes again after 250 ms, a changed owner's at once"
       (state/reset-state! queued)
       (let [{rt-a :runtime a :reports} (step rt0 16.0 stopped)
             {rt-b :runtime b :reports} (step rt-a 200.0 stopped)
             {rt-c :runtime c :reports} (step rt-b 266.0 stopped)
             r2 (random-uuid)
-            _ (state/reset-state! (assoc-in queued [:playback :active-cues C :run] r2))
+            _ (state/reset-state! (assoc-in queued [:playback :active-cues CS :run] r2))
             {d :reports} (step rt-c 300.0 stopped)]
         (is (= [reports [] reports] [a b c]) "the same report, at 16 and 266 ms")
-        (is (= [(off-report C v1 [:run r2])] d) "34 ms later, for another run")))))
+        (is (= [(off-report CS v1 [:run r2])] d) "34 ms later, for another run")))))
 
 (deftest chase-reports-respect-explicit-stop-test
   (testing "example 5: B playing; C's first On held across Stop"
-    (init! {C follower B circle})
+    (init! {B circle} {cs follower})
     (handle! {:event/type :grid/trigger-cell :col 1 :row 0})
     (let [b (run-id B)
           {rt1 :runtime ons :reports} (step (:runtime start) 70.0 (mtc-at 70))
-          k1 (chase-id rt1 C)]
-      (is (= [(on-report C 0 :none k1 {:restart nil :allowed? true})] ons)
+          k1 (chase-id rt1 CS)]
+      (is (= [(on-report CS 0 :none k1 {:restart nil :allowed? true})] ons)
           "the start authority as timecode entered: the transport played")
       (handle! {:event/type :transport/stop})
       (is (= [false {B b} B] (transport)))
       (let [{rt2 :runtime retry :reports} (step rt1 330.0 (mtc-at 330))]
         (is (= ons retry) "its retry, past 250 ms, is the same report")
         (deliver! rt2 (concat ons retry))
-        (is (= [false {B b C nil} C] (transport)) "C is held, as B is: the gate stays closed")
-        (is (= (marker k1) (intent C)))
+        (is (= [false {B b CS nil} CS] (transport)) "C is held, as B is: the gate stays closed")
+        (is (= (marker k1) (intent CS)))
         (testing "; timecode running on past the retry interval reopens nothing"
           (let [{rt3 :runtime r3 :reports} (step rt2 600.0 (running 3606.0))
                 {rt4 :runtime r4 :reports} (step rt3 900.0 (running 3606.3))]
             (is (= [] r3 r4))
-            (is (= k1 (chase-id rt4 C)))
+            (is (= k1 (chase-id rt4 CS)))
             (testing "; a revision of C's cue rebinds its held marker, and the gate stays closed"
-              (handle! {:event/type :timeline/apply-op :col 2 :row 0 :op {:op :set-tempo :bpm 100.0}})
+              (handle! {:event/type :timeline/apply-op :show-id cs :op {:op :set-tempo :bpm 100.0}})
               (let [{rt5 :runtime r5 :reports} (step rt4 950.0 (running 3606.35))
-                    k2 (chase-id rt5 C)]
-                (is (= [(on-report C (version C) [:chase k1] k2 {:restart (restart-id) :allowed? false})] r5)
+                    k2 (chase-id rt5 CS)]
+                (is (= [(on-report CS (version CS) [:chase k1] k2 {:restart (restart-id) :allowed? false})] r5)
                     "authority frozen at its entry: Stop held B")
                 (deliver! rt5 r5)
-                (is (= (marker k2) (intent C)))
-                (is (= [false {B b C nil} C] (transport)))
+                (is (= (marker k2) (intent CS)))
+                (is (= [false {B b CS nil} CS] (transport)))
                 (testing "; timecode stops: its Off, twice, takes C out and leaves B held"
                   (let [{rt6 :runtime offs :reports} (step rt5 1500.0 stopped)]
-                    (is (= [(off-report C (version C) [:chase k2])] offs))
+                    (is (= [(off-report CS (version CS) [:chase k2])] offs))
                     (deliver! rt6 (concat offs offs))
                     (is (= [false {B b} B] (transport)))
                     (handle! {:event/type :transport/play})
@@ -1009,12 +1042,12 @@
                     (is (= [B] (map :cell (show-time/active-runs (state/get-raw-state) (run-at rt6 1516.0))))
                         "Play: exactly B"))))))))))
   (testing "the last cue: held, retired, then an empty Play"
-    (init! {C follower})
+    (init! {} {cs follower})
     (let [{rt1 :runtime ons :reports} (step (:runtime start) 70.0 (mtc-at 70))]
       (deliver! rt1 ons)
-      (is (= [true {C nil} C] (transport)) "timecode entering an idle transport plays")
+      (is (= [true {CS nil} CS] (transport)) "timecode entering an idle transport plays")
       (handle! {:event/type :transport/stop})
-      (is (= [false {C nil} C] (transport)))
+      (is (= [false {CS nil} CS] (transport)))
       (let [{rt2 :runtime offs :reports} (step rt1 670.0 (mtc-at 670))]
         (deliver! rt2 offs)
         (is (= [false {} nil] (transport)) "its removal, the last")
@@ -1027,34 +1060,34 @@
           (let [{rt3 :runtime ons' :reports} (step rt2 1000.0 (running 3610.0))]
             (is (= {:restart (restart-id) :allowed? true} (:start (first ons'))))
             (deliver! rt3 ons')
-            (is (= [true {C nil} C] (transport)))))))))
+            (is (= [true {CS nil} CS] (transport)))))))))
 
 (deftest stop-outlasts-an-old-end-and-a-chase-cleanup-test
   (testing "00-overview's 03 → 15 check: after Stop with two intents, an end from before it and a matching
             chase cleanup open nothing, and a newer run at the cleaned cell outlasts both"
-    (init! {[0 0] short-timeline C follower})
-    (handle! {:event/type :timeline/play :col 0 :row 0 :from 0.2})
-    (let [a [0 0]
+    (init! {} {tl short-timeline cs follower})
+    (handle! {:event/type :timeline/play :show-id tl :from 0.2})
+    (let [a TL
           r (run-id a)
           {rt1 :runtime ons :reports} (step (:runtime start) 0.0 (running 3605.55))
-          k1 (chase-id rt1 C)]
+          k1 (chase-id rt1 CS)]
       (deliver! rt1 ons)
       (let [{rt2 :runtime ends :reports} (step rt1 50.0 (running 3605.6))]
-        (is (= [true {a r C nil} C] (transport)) "two intents")
+        (is (= [true {a r CS nil} CS] (transport)) "two intents")
         (is (= [(ended a r nil nil)] ends) "A's end, seen before Stop")
         (handle! {:event/type :transport/stop})
         (run! handle! ends)
-        (is (= [false {a r C nil} C] (transport)) "the earlier completion: both held")
+        (is (= [false {a r CS nil} CS] (transport)) "the earlier completion: both held")
         (let [{rt3 :runtime cleanup :reports} (step rt2 60.0 stopped)]
-          (is (= [(off-report C 0 [:chase k1])] cleanup) "timecode stopped: C's cleanup")
+          (is (= [(off-report CS 0 [:chase k1])] cleanup) "timecode stopped: C's cleanup")
           (deliver! rt3 cleanup)
           (is (= [false {a r} a] (transport)) "the matching cleanup takes C out, and A stays held")
           (testing "; a newer run at C (Follow off, Play) outlasts both, delivered again"
-            (follow! C false)
-            (handle! {:event/type :timeline/play :col 2 :row 0})
-            (let [r2 (run-id C)
+            (follow! CS false)
+            (handle! {:event/type :timeline/play :show-id cs})
+            (let [r2 (run-id CS)
                   playback (:playback (state/get-raw-state))]
-              (is (= [true {a r C r2} C] (transport)) "Play is what plays")
+              (is (= [true {a r CS r2} CS] (transport)) "Play is what plays")
               (deliver! rt3 (concat ends cleanup))
               (is (= playback (:playback (state/get-raw-state)))))))))))
 

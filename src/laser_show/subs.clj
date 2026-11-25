@@ -265,20 +265,22 @@
   [context]
   (set (keys (fx/sub-val context get-in [:chains :shows]))))
 
-(defn- show-chain
-  "The show id (a timeline cue map), or nil."
+(defn show-cue
+  "The show id (a timeline cue map), or nil when the library has no such
+   show: the timeline editor's, which tells a show that went from an empty
+   one by it."
   [context id]
-  (fx/sub-val context get-in [:chains :shows id]))
+  (fx/sub-val context get-in (shows/show-path id)))
 
 (def ^:private timeline-view-defaults
   {:selection #{} :cursor-beat 0.0})
 
 (defn timeline-ui
-  "Timeline editor view state for the cue at [col row]
-   ({:selection :cursor-beat}), with defaults."
-  [context col row]
+  "Timeline editor view state for show show-id ({:selection :cursor-beat}),
+   with defaults."
+  [context show-id]
   (merge timeline-view-defaults
-         (fx/sub-val context get-in [:ui :timeline-editor [col row]])))
+         (fx/sub-val context get-in [:ui :timeline-editor show-id])))
 
 (defn timeline-prefs
   "Timeline editor preferences: {:snap {:enabled? :value} :add-panel {...} :inspector-open?
@@ -287,10 +289,11 @@
   (fx/sub-val context get-in [:ui :timeline-prefs]))
 
 (defn timeline-transport
-  "Transport status of the cue at [col row]: :stopped, :playing or :paused.
-   Changes only when that does, not on every timing tick."
-  [context col row]
-  (let [t (get (fx/sub-val context ex/active-cues) [col row])]
+  "Transport status of show show-id, playing under (shows/play-key
+   show-id): :stopped, :playing or :paused. Changes only when that does,
+   not on every timing tick."
+  [context show-id]
+  (let [t (get (fx/sub-val context ex/active-cues) (shows/play-key show-id))]
     (cond
       (nil? t) :stopped
       (:paused? t) :paused
@@ -1264,7 +1267,7 @@
   "The zones show id names (routing.refs/cue-refs), nil for none: that
    show's part of zones-in-use, as cue-zone-refs is a cue's."
   [context id]
-  (let [show (fx/sub-ctx context show-chain id)]
+  (let [show (fx/sub-ctx context show-cue id)]
     (when (map? show)
       (into #{} (filter targets/zone-ref?) (refs/cue-refs show)))))
 
@@ -1397,7 +1400,7 @@
    default included; a show has no column), nil for none: its part of
    cue-ref-sets."
   [context id]
-  (let [show (fx/sub-ctx context show-chain id)]
+  (let [show (fx/sub-ctx context show-cue id)]
     (when (map? show)
       (targets/cue-refs show nil (fx/sub-ctx context default-target)))))
 
@@ -1459,6 +1462,15 @@
                        (fx/sub-ctx context column-target col)
                        (fx/sub-ctx context default-target)
                        col))
+
+(defn show-target-explain
+  "How each level of show show-id resolves (routing.targets/explain-cue),
+   the show default included. A show has no grid column, so no column
+   level."
+  [context show-id]
+  (targets/explain-cue (fx/sub-ctx context show-cue show-id)
+                       nil
+                       (fx/sub-ctx context default-target)))
 
 
 ;; Level 2: Zone patterns (zones plan Z5)

@@ -108,18 +108,14 @@
 
 (defn- edited-cells
   "The playback keys of the cues whose editor is open (the cue chain
-   editor's [col row], the timeline editor's [col row] or, given a :show-id,
-   its show's key): their renders count each item's points, for the cue
-   warnings."
+   editor's [col row], the timeline editor's show's key): their renders
+   count each item's points, for the cue warnings."
   [state]
-  (into #{}
-        (keep (fn [dialog]
-                (let [{:keys [open? col row show-id]} (get-in state [:ui :dialogs dialog])]
-                  (cond
-                    (not open?) nil
-                    (and (= dialog :timeline-cue-editor) (some? show-id)) (shows/play-key show-id)
-                    (and (some? col) (some? row)) [col row]))))
-        [:cue-chain-editor :timeline-cue-editor]))
+  (let [{:keys [open? col row]} (get-in state [:ui :dialogs :cue-chain-editor])
+        {timeline-open? :open? :keys [show-id]} (get-in state [:ui :dialogs :timeline-cue-editor])]
+    (cond-> #{}
+      (and open? (some? col) (some? row)) (conj [col row])
+      (and timeline-open? (some? show-id)) (conj (shows/play-key show-id)))))
 
 (defn- render
   "The snapshot fields for runs (show-time/active-runs), or none while not

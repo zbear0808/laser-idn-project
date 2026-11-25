@@ -864,20 +864,51 @@
             (is (true? (:held? (fx/sub-ctx pressed subs/vibe-pad :hit))))
             (is (false? (:held? (fx/sub-ctx (release pressed :hit 1100) subs/vibe-pad :hit))))))))))
 
-(deftest timeline-dialog-subs-ignore-playback-and-other-cells-test
-  (let [ctx (context base-state)
-        chain (fx/sub-ctx ctx subs/cue-cell-chain 0 0)
-        ui (fx/sub-ctx ctx subs/timeline-ui 0 0)]
+(def ^:private dialog-u1 #uuid "00000000-0000-0000-0000-00000000d1a1")
+(def ^:private dialog-u2 #uuid "00000000-0000-0000-0000-00000000d1a2")
+
+(deftest timeline-dialog-subs-ignore-playback-and-other-shows-test
+  (let [ctx (context (assoc-in base-state [:chains :shows] {dialog-u1 {:editor-type :timeline :name "One" :items []}
+                                                            dialog-u2 {:editor-type :timeline :items []}}))
+        show (fx/sub-ctx ctx subs/show-cue dialog-u1)
+        ui (fx/sub-ctx ctx subs/timeline-ui dialog-u1)]
+    (is (= "One" (:name show)))
+    (is (= {:selection #{} :cursor-beat 0.0} ui))
     (testing "the show clock's status doesn't invalidate the dialog's subs"
       (let [ctx' (status-write ctx)]
-        (is (identical? chain (fx/sub-ctx ctx' subs/cue-cell-chain 0 0)))
-        (is (identical? ui (fx/sub-ctx ctx' subs/timeline-ui 0 0)))))
-    (testing "another cell's edits and view don't either"
+        (is (identical? show (fx/sub-ctx ctx' subs/show-cue dialog-u1)))
+        (is (identical? ui (fx/sub-ctx ctx' subs/timeline-ui dialog-u1)))))
+    (testing "another show's edits and view don't either"
       (let [ctx' (-> ctx
-                     (fx/swap-context assoc-in [:chains :cue-chains [1 0] :name] "Other")
-                     (fx/swap-context assoc-in [:ui :timeline-editor [1 0] :selection] #{:x}))]
-        (is (identical? chain (fx/sub-ctx ctx' subs/cue-cell-chain 0 0)))
-        (is (identical? ui (fx/sub-ctx ctx' subs/timeline-ui 0 0)))))))
+                     (fx/swap-context assoc-in [:chains :shows dialog-u2 :name] "Other")
+                     (fx/swap-context assoc-in [:ui :timeline-editor dialog-u2 :selection] #{:x}))]
+        (is (identical? show (fx/sub-ctx ctx' subs/show-cue dialog-u1)))
+        (is (identical? ui (fx/sub-ctx ctx' subs/timeline-ui dialog-u1)))))
+    (testing "a show that isn't there is nil, not an empty cue"
+      (is (nil? (fx/sub-ctx ctx subs/show-cue (random-uuid)))))))
+
+(deftest timeline-transport-reads-the-show-key-test
+  (let [ctx (context (-> base-state
+                         (assoc-in [:chains :shows dialog-u1] {:editor-type :timeline :items []})
+                         (assoc-in [:chains :cue-chains [0 0]] {:editor-type :timeline :items []})
+                         (assoc-in [:playback :active-cues [0 0]] {:run :r0 :timeline? true})))]
+    (is (= :stopped (fx/sub-ctx ctx subs/timeline-transport dialog-u1)) "a grid cell's run isn't the show's")
+    (is (= :playing (fx/sub-ctx (fx/swap-context ctx assoc-in [:playback :active-cues (shows/play-key dialog-u1)]
+                                                 {:run :r1 :timeline? true})
+                                subs/timeline-transport dialog-u1)))
+    (is (= :paused (fx/sub-ctx (fx/swap-context ctx assoc-in [:playback :active-cues (shows/play-key dialog-u1)]
+                                                {:run :r1 :timeline? true :paused? true})
+                               subs/timeline-transport dialog-u1)))))
+
+(deftest show-target-explain-has-no-column-test
+  (let [s0 (-> base-state
+               (assoc-in [:grid :column-targets 0] :zone/b)
+               (assoc-in [:chains :shows dialog-u1] {:editor-type :timeline :items []}))
+        cue-of #(:cue (fx/sub-ctx (context %) subs/show-target-explain dialog-u1))]
+    (is (= {:target :all :from :default} (cue-of s0)) "no show default: All, never column 0's")
+    (is (= {:target :zone/a :from :show} (cue-of (assoc-in s0 [:config :default-target] :zone/a))))
+    (is (= {:target :zone/c :from :cue} (cue-of (assoc-in s0 [:chains :shows dialog-u1 :target] :zone/c))))
+    (is (not-any? #(= :column (:from %)) (map cue-of [s0 (assoc-in s0 [:config :default-target] :zone/a)])))))
 
 (def ^:private playing-state
   "Three cues playing, started in no particular order: [0 1] (B1), [1 0] (A2)

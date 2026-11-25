@@ -78,7 +78,6 @@
       "trigger" (triggers/handle event)
       "vibe" (vibes/handle event)  ; Vibe mode's five roles
       "timeline" (timeline/handle event)  ; Timeline editor operations
-      "timeline-cue-editor" (timeline/handle event)  ; Timeline open with initialization
       "shows" (shows/handle event)  ; The timeline show library, playing shows by hand
       "history" (history/handle event)
       "addons" (addons/handle event)  ; Output drivers and add-ons
