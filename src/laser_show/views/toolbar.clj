@@ -115,9 +115,12 @@
 
 (defn bpm-display
   "BPM display with editable value. It sets the BPM on Enter or when it
-   loses focus; text that is no BPM puts the BPM back."
+   loses focus; text that is no BPM puts the BPM back. Disabled while the
+   app follows Link's tempo (Link on with Sync BPM): it shows Link's then,
+   and a typed one would change nothing."
   [{:keys [fx/context]}]
-  (let [bpm (fx/sub-ctx context subs/bpm)]
+  (let [bpm (fx/sub-ctx context subs/bpm)
+        following-link? (boolean (fx/sub-ctx context subs/link-sync-enabled?))]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
@@ -127,6 +130,7 @@
                 {:fx/type commit-field/commit-field
                  :id "bpm-input"
                  :text (format "%.1f" (double bpm))
+                 :disable following-link?
                  :pref-width 60
                  :style-class "text-field-dark-sm"
                  :on-commit (fn [typed]
@@ -135,10 +139,12 @@
                                  :bpm new-bpm}))}]}))
 
 (defn tap-tempo-button
-  "Tap tempo button."
+  "Tap tempo button. Disabled while the app follows Link's tempo (Link on
+   with Sync BPM): taps do nothing then, from any source."
   [{:keys [fx/context]}]
   {:fx/type :button
    :id "tap-tempo-btn"
+   :disable (boolean (fx/sub-ctx context subs/link-sync-enabled?))
    :pref-width 50
    :text "TAP"
    :graphic {:fx/type fa/icon
