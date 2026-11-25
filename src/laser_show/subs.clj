@@ -2837,6 +2837,21 @@
      :query-problem (shows/query-problem query scope)}))
 
 
+;; Shows: timecode (S4)
+
+(defn show-timecode-problem
+  "Why show show-id can't follow timecode yet (timeline.shows/
+   timecode-problem: {:reason :no-bpm}, {:reason :empty} or {:reason
+   :overlap :with :range}), for the TC column's ⚠ and the inspector; nil
+   when it can, when it already follows (TS-6 holds for it), or when there
+   is no such show."
+  [context show-id]
+  (let [library (fx/sub-val context get-in [:chains :shows])]
+    (when-not (= :mtc (get-in library [show-id :timeline/chase]))
+      (shows/timecode-problem library show-id))))
+
+
+
 ;; Shows: now playing (S5)
 ;; The now-playing bar and the status bar's Playing line (plans/2026-11-25-
 ;; timeline-shows 07 §4.7). No positions: the bar draws those from the show

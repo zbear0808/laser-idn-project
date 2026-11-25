@@ -214,6 +214,95 @@
       {:state (stop-show state (shows/play-key manual))})))
 
 
+;; Timecode (S4)
+
+
+(defn- timecode-order
+  "The show ids of ids in the library, in the order :shows/set-timecode
+   takes them: the Shows table's (shows/visible-ids), then the ones it
+   doesn't show, by (str id)."
+  [state ids]
+  (let [library (get-in state [:chains :shows])
+        ids (into #{} (filter #(contains? library %)) ids)
+        visible (filterv ids (shows/visible-ids state))]
+    (into visible (sort-by str (remove (set visible) ids)))))
+
+(defn- refusal-text
+  "The notice for the shows :shows/set-timecode couldn't enable: refused
+   [[id problem] …] (shows/timecode-problem's), library the shows checked
+   against (01 §4.2)."
+  [library refused]
+  (let [name-of #(str "'" (shows/title (get library %)) "'")]
+    (if (= 1 (count refused))
+      (let [[id {:keys [reason with range]}] (first refused)]
+        (str (name-of id)
+             (case reason
+               :no-bpm " needs a BPM to follow timecode"
+               :empty " is empty"
+               :overlap (str " overlaps " (name-of with) " (" (shows/tc-range-text range) ")"))))
+      (str (count refused) " shows not enabled: "
+           (str/join ", " (map (fn [[id {:keys [reason with]}]]
+                                 (str (name-of id) " ("
+                                      (case reason
+                                        :no-bpm "needs a BPM"
+                                        :empty "empty"
+                                        :overlap (str "overlaps " (name-of with)))
+                                      ")"))
+                               refused))))))
+
+(defn- enable-timecode
+  "Turn timecode on for ids (timecode-order), each checked against the
+   shows that follow already and the ones before it (TS-6). Those that pass
+   go on in one edit, \"Enable Timecode\"; any refused are named in a
+   notice. All refused: the notice only, so no undo step."
+  [state ids]
+  (let [[library on refused]
+        (reduce (fn [[library on refused :as acc] id]
+                  (let [show (get library id)]
+                    (if (= :mtc (:timeline/chase show))
+                      acc
+                      (if-let [p (shows/timecode-problem library id)]
+                        [library on (conj refused [id p])]
+                        [(assoc library id (model/apply-op show {:op :set-chase :source :mtc}))
+                         (conj on id)
+                         refused]))))
+                [(get-in state [:chains :shows]) [] []]
+                ids)
+        state' (assoc-in state [:chains :shows] library)]
+    (cond
+      (and (empty? on) (empty? refused)) {:state state}
+      (empty? on) (h/show-notice state (refusal-text library refused) :warning)
+      (empty? refused) {:state state' :history/description "Enable Timecode"}
+      :else (assoc (h/show-notice state' (refusal-text library refused) :warning)
+                   :history/description "Enable Timecode"))))
+
+(defn- disable-timecode
+  "Turn timecode off for ids: never refused. \"Disable Timecode\"."
+  [state ids]
+  (let [library (get-in state [:chains :shows])
+        library' (reduce (fn [library id]
+                           (if (= :mtc (get-in library [id :timeline/chase]))
+                             (update library id model/apply-op {:op :set-chase :source nil})
+                             library))
+                         library
+                         ids)]
+    (if (identical? library library')
+      {:state state}
+      {:state (assoc-in state [:chains :shows] library') :history/description "Disable Timecode"})))
+
+(defn- handle-set-timecode
+  "The TC column's tick: timecode on (:enabled? true) or off for the shows
+   :show-ids (or the one :show-id; :on? reads as :enabled?). On is checked
+   against TS-6 (enable-timecode); a show already so, or missing, is left
+   alone (07 §4.5)."
+  [{:keys [show-ids show-id enabled? on? state] :as event}]
+  (let [ids (timecode-order state (cond-> (set show-ids) (some? show-id) (conj show-id)))]
+    (if (if (contains? event :enabled?) enabled? on?)
+      (enable-timecode state ids)
+      (disable-timecode state ids))))
+
+
+
 ;; Transport (S5)
 ;; The now-playing bar's buttons (plans/2026-11-25-timeline-shows 01 §5,
 ;; 07 §4.5). Each acts on the show played by hand ([:ui :shows :manual]),
@@ -314,6 +403,7 @@
     :shows/toggle-run (handle-toggle-run event)
     :shows/play (handle-play event)
     :shows/stop (handle-stop event)
+    :shows/set-timecode (handle-set-timecode event)
     :shows/toggle-play (handle-toggle-play event)
     :shows/seek (handle-seek event)
     :shows/next (handle-step event 1)

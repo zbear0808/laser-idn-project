@@ -689,8 +689,9 @@
     (is (empty? (:chase rt)))))
 
 (deftest chase-takes-over-a-playing-cue-test
+  ;; Locked at the global 120 BPM: a show needs one to follow timecode (TS-6)
   (testing "a cue playing when Follow is switched on stops when no timecode runs"
-    (init! {} {tl (timeline {:timeline/length 64.0})})
+    (init! {} {tl (timeline {:timeline/length 64.0 :timeline/tempo-bpm 120.0})})
     (handle! {:event/type :timeline/play :show-id tl :from 2.0})
     (let [r1 (run-id TL)
           rt (run-at (:runtime start) 0.0)]
@@ -706,7 +707,7 @@
         (is (nil? (intent TL)))
         (is (false? (get-in (state/get-raw-state) [:playback :playing?])) "its last cue"))))
   (testing "while timecode runs inside it, timecode takes it over"
-    (init! {} {tl (timeline {:timeline/length 64.0})})
+    (init! {} {tl (timeline {:timeline/length 64.0 :timeline/tempo-bpm 120.0})})
     (handle! {:event/type :timeline/play :show-id tl :from 2.0})
     (let [r1 (run-id TL)
           rt (run-at (:runtime start) 0.0)]
@@ -940,7 +941,7 @@
           (is (= [{} {} []] [(:chase rt') (show-time/positions rt') reports'])))))))
 
 (deftest stale-chase-off-cannot-retire-a-restart-test
-  (init! {} {cs (timeline {:timeline/length 64.0})})
+  (init! {} {cs (timeline {:timeline/length 64.0 :timeline/tempo-bpm 120.0})})
   ;; As the start-timeline trigger does (handlers/triggers.clj)
   (handle! {:event/type :timeline/play :show-id cs})
   (let [r1 (run-id CS)
@@ -1325,3 +1326,41 @@
           (is (= (marker k2) (intent S1)))
           (is (= {} (stopped-for)) "the show's stop is over")
           (is (= {S1 1} (drawn rt3))))))))
+
+
+;; Timecode on and off (plans/2026-11-25-timeline-shows/07 §8, S4)
+
+(deftest turned-off-show-stops-next-tick-test
+  ;; Trace 1: u1 plays [3600, 3632) under timecode, u2 follows at [3632,
+  ;; 3664); an edit that makes u1 overlap u2 turns u1's timecode off
+  (init! {} {u1 follower u2 (assoc follower :timeline/tc-start 3632.0)})
+  (let [{rt1 :runtime reports1 :reports} (step (:runtime start) 70.0 (mtc-at 70))
+        k1 (chase-id rt1 S1)]
+    (is (= [S1] (map :cell reports1)) "u1 takes timecode at 3,605.55 s; u2 is outside it")
+    (deliver! rt1 reports1)
+    (is (= (marker k1) (intent S1)))
+    (handle! {:event/type :timeline/apply-op :show-id u1 :op {:op :set-length :beats 66.0}})
+    (testing "the edit turns u1's timecode off, and its marker and version go in the same event"
+      (is (nil? (get-in (state/get-raw-state) [:chains :shows u1 :timeline/chase])))
+      (is (= :mtc (get-in (state/get-raw-state) [:chains :shows u2 :timeline/chase])))
+      (is (nil? (intent S1)))
+      (is (nil? (version S1)))
+      (is (= [false {} nil] (transport))))
+    (testing "the next tick: no chase, no position and no report for u1"
+      (let [{rt2 :runtime reports2 :reports} (step rt1 100.0 (mtc-at 100))]
+        (is (not (contains? (:chase rt2) S1)))
+        (is (not (contains? (show-time/positions rt2) S1)))
+        (is (empty? (drawn rt2)))
+        (is (= [] reports2))))))
+
+(deftest looping-show-chases-without-looping-test
+  ;; 16 beats at 120 BPM from 0 s, looping over its first 4 beats: the chase
+  ;; plays it straight through [0, 16) beats, [0, 8) s
+  (init! {} {u1 (timeline {:timeline/chase :mtc :timeline/tc-start 0.0 :timeline/tempo-bpm 120.0
+                           :loop {:enabled? true :start 0.0 :duration 4.0}})})
+  (let [rt6 (:runtime (step (:runtime start) 0.0 (running 6.0)))]
+    (is (close? 12.0 (chase-at rt6 S1)) "beat 12, not wrapped into the loop's [0, 4)")
+    (is (= {S1 1} (drawn rt6)))
+    (let [rt8 (:runtime (step rt6 2000.0 (running 8.0)))]
+      (is (not (contains? (:chase rt8) S1)) "8 s is beat 16: outside its window, the loop or not")
+      (is (empty? (drawn rt8))))))

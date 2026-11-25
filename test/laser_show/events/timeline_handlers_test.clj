@@ -511,7 +511,9 @@
     (testing "through the pipeline: Follow on and off, undo and redo"
       (let [s0 (-> base-state
                    (assoc-in [:project :document-id] :d)
-                   (assoc-in [:chains :shows u] {:editor-type :timeline :items []}))
+                   ;; A show that may follow timecode (TS-6): a locked tempo and a length
+                   (assoc-in [:chains :shows u] {:editor-type :timeline :items []
+                                                 :timeline/tempo-bpm 120.0 :timeline/length 8.0}))
             pipe (fn [s event] (:state (events/handle-event-pipeline (assoc event :state s))))
             follow (fn [s src] (pipe s {:event/type :timeline/apply-op :show-id u :op {:op :set-chase :source src}}))
             version #(get-in % [:playback :chase-sources :cells [:show u]])
