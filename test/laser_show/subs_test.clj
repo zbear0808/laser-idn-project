@@ -3119,3 +3119,25 @@
     (is (= {:direct 1 :through 0 :zones []}
            (fx/sub-ctx (context (assoc-in s [:chains :shows] {})) subs/ref-usage :zone/k))
         "no show: no :shows")))
+;; Shows: timecode (plans/2026-11-25-timeline-shows 07 §4.7, S4)
+
+(deftest show-timecode-problem-test
+  (let [[a b c d] (map #(parse-uuid (str "00000000-0000-0000-0000-0000000000f" %)) (range 1 5))
+        show (fn [start len & {:as more}]
+               (merge {:editor-type :timeline :timeline/tempo-bpm 120.0 :timeline/tc-start start :timeline/tc-fps 25
+                       :items [{:id 1 :track-id 1 :timeline/start 0.0 :timeline/duration len}]}
+                      more))
+        library {a (show 0.0 600.0 :name "A" :timeline/chase :mtc)
+                 b (show 299.0 600.0 :name "B")
+                 c (dissoc (show 900.0 8.0) :timeline/tempo-bpm)
+                 d (show 300.0 600.0 :name "D")}
+        ctx (context (assoc-in base-state [:chains :shows] library))
+        problem #(fx/sub-ctx %1 subs/show-timecode-problem %2)]
+    (is (= {:reason :overlap :with a :range {:start 0.0 :end 300.0 :fps 25}} (problem ctx b)) "would overlap A")
+    (is (= {:reason :no-bpm} (problem ctx c)))
+    (is (nil? (problem ctx d)) "the ends touch")
+    (is (nil? (problem ctx a)) "already following: nothing to warn of")
+    (is (nil? (problem ctx #uuid "00000000-0000-0000-0000-0000000000ff")) "no such show")
+    (let [ctx' (fx/swap-context ctx assoc-in [:chains :shows a :timeline/chase] nil)]
+      (is (nil? (problem ctx' b)) "A off: B is free")
+      (is (= {:reason :empty} (problem (fx/swap-context ctx' assoc-in [:chains :shows b :items] []) b))))))

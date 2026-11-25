@@ -77,15 +77,18 @@
     :zones/set-label :zone-maps/create :zone-maps/duplicate :zone-maps/rename :zone-maps/set-lane
     :zone-maps/add-lane :zone-maps/remove-lane :zone-maps/set-override :zone-maps/request-delete
     :zone-maps/delete
-    ;; A show's tempo and TC start move what lights when, and deleting one
-    ;; can stop it mid-show (plans/2026-11-25-timeline-shows 00 §6); the
-    ;; table's edit of either is refused by commit-edit-refused?
-    :shows/set-bpm :shows/set-tc-start :shows/request-delete :shows/delete
     ;; Where a cue, an item, a track or a clip goes (zones plan Z4): as a
     ;; column's default, it re-routes the cue and can make it reach the
     ;; audience
     :cue-chain/set-target :cue-chain/set-item-target :timeline/set-track-target :timeline/set-clip-target
     :timeline/set-cue-target
+    ;; A show's timecode (timeline shows S4): it starts or stops light, as
+    ;; timecode runs through the show
+    :shows/set-timecode
+    ;; A show's tempo and TC start move what lights when, and deleting one
+    ;; can stop it mid-show (plans/2026-11-25-timeline-shows 00 §6); the
+    ;; table's edit of either is refused by commit-edit-refused?
+    :shows/set-bpm :shows/set-tc-start :shows/request-delete :shows/delete
     ;; A cue's zone pattern and a new pattern or Map cycle cell (zones plan
     ;; Z5): they move pictures between places, as a target does; a pattern
     ;; pad's setting and its key, as a map pad's. A pad's press, STEP, CYCLE,
