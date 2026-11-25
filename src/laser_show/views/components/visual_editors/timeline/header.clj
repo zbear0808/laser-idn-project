@@ -17,6 +17,7 @@
             [laser-show.events.core :as events]
             [laser-show.timeline.layout :as layout]
             [laser-show.timeline.model :as model]
+            [laser-show.timeline.shows :as shows]
             [laser-show.views.components.drag-drop-cell :as dd]
             [laser-show.views.components.list-dnd :as dnd]
             [laser-show.views.components.target-control :as target-control]
@@ -29,25 +30,25 @@
            [javafx.scene.shape Rectangle]))
 
 
-(defn- apply-op! [col row op]
-  (events/dispatch! {:event/type :timeline/apply-op :col col :row row :op op}))
+(defn- apply-op! [show-id op]
+  (events/dispatch! {:event/type :timeline/apply-op :show-id show-id :op op}))
 
 (defn- track-on-set
   "The Target event for row r: a choice adds :target."
-  [col row r]
-  {:event/type :timeline/set-track-target :col col :row row :track-id (:id r)})
+  [show-id r]
+  {:event/type :timeline/set-track-target :show-id show-id :track-id (:id r)})
 
 (defn- target-menu-items
   "The Target menu for row r (target-control), in the :track scope."
-  [{:keys [col row explain menu-ctx]} r]
+  [{:keys [show-id explain menu-ctx]} r]
   (target-control/menu-items
    (target-control/menu-model (assoc menu-ctx
                                      :scope :track
                                      :own (get-in r [:track :target])
                                      :inherited (get-in explain [:track-inherits (:id r)])))
-   (track-on-set col row r)))
+   (track-on-set show-id r)))
 
-(defn- context-menu [{:keys [col row swap-state] :as props} r]
+(defn- context-menu [{:keys [show-id swap-state] :as props} r]
   (let [folder? (= :folder (:kind r))
         muted? (true? (get-in r [:track :muted?]))]
     {:fx/type :context-menu
@@ -56,7 +57,7 @@
                       :on-action (fn [_] (swap-state assoc :renaming-id (:id r)))}
                      {:fx/type :menu-item
                       :text (if muted? "Unmute" "Mute")
-                      :on-action (fn [_] (apply-op! col row {:op :set-track-muted :track-id (:id r) :muted? (not muted?)}))}
+                      :on-action (fn [_] (apply-op! show-id {:op :set-track-muted :track-id (:id r) :muted? (not muted?)}))}
                      {:fx/type :menu
                       :text "Target"
                       :items (target-menu-items props r)}]
@@ -69,19 +70,19 @@
                                      :graphic {:fx/type :region
                                                :min-width 12 :min-height 12
                                                :style (str "-fx-background-color: " hex "; -fx-background-radius: 6;")}
-                                     :on-action (fn [_] (apply-op! col row {:op :set-track-color :track-id (:id r) :color hex}))})
+                                     :on-action (fn [_] (apply-op! show-id {:op :set-track-color :track-id (:id r) :color hex}))})
                                   model/track-palette)})
               folder?
               (conj {:fx/type :menu-item
                      :text "Add Track Inside"
-                     :on-action (fn [_] (apply-op! col row {:op :add-track :parent-id (:id r)}))})
+                     :on-action (fn [_] (apply-op! show-id {:op :add-track :parent-id (:id r)}))})
               true
               (conj {:fx/type :separator-menu-item}
                     {:fx/type :menu-item
                      :text (if folder? "Delete Folder" "Delete Track")
-                     :on-action (fn [_] (apply-op! col row {:op :delete-tracks :track-ids #{(:id r)}}))}))}))
+                     :on-action (fn [_] (apply-op! show-id {:op :delete-tracks :track-ids #{(:id r)}}))}))}))
 
-(defn- name-node [{:keys [col row renaming-id swap-state]} r]
+(defn- name-node [{:keys [show-id renaming-id swap-state]} r]
   (let [track (:track r)
         folder? (= :folder (:kind r))]
     (if (= renaming-id (:id r))
@@ -93,7 +94,7 @@
        :on-action (fn [e]
                     (let [text (.getText ^javafx.scene.control.TextField (.getSource e))]
                       (when (seq text)
-                        (apply-op! col row {:op :rename-track :track-id (:id r) :name text}))
+                        (apply-op! show-id {:op :rename-track :track-id (:id r) :name text}))
                       (swap-state assoc :renaming-id nil)))
        :on-key-pressed (fn [^KeyEvent e]
                          (when (= KeyCode/ESCAPE (.getCode e))
@@ -111,13 +112,13 @@
 
 (defn- target-chip
   "Row r's Target chip, compact: \"A\", \"(A)\" when the track inherits it."
-  [{:keys [col row explain]} idx r]
+  [{:keys [show-id explain]} idx r]
   {:fx/type target-control/target-chip
    :id (str "timeline-track-target-" idx)
    :scope :track
    :own (get-in r [:track :target])
    :inherited (get-in explain [:track-inherits (:id r)])
-   :on-set (track-on-set col row r)
+   :on-set (track-on-set show-id r)
    :compact? true
    :tooltip (if (= :folder (:kind r))
               "Where this folder's clips go, unless a track or a clip in it sets its own"
@@ -126,23 +127,23 @@
 (def ^:private drop-target-class (PseudoClass/getPseudoClass "drop-target"))
 
 (defn- header-drop
-  "The browser drop on this row, or nil. The row's cell and track are in its
+  "The browser drop on this row, or nil. The row's show and track are in its
    userData (set every render, so they're never stale)."
   [^Node node ^DragEvent e]
   (when-let [payload (dd/read-payload e :bank-item drop/valid-payload?)]
-    (let [{:keys [col row track-id]} (.getUserData node)]
-      (drop/drop-target payload {:type :header :track-id track-id} {:col col :row row}))))
+    (let [{:keys [show-id track-id]} (.getUserData node)]
+      (drop/drop-target payload {:type :header :track-id track-id} {:show-id show-id}))))
 
 (defn- track-list
-  "The list drag-and-drop's command address for the tracks of the cell in
+  "The list drag-and-drop's command address for the tracks of the show in
    node's userData (set every render): a row or the column the editor keeps
-   when it shows another cell reorders that cell's tracks."
+   when it shows another show reorders that show's tracks."
   [^Node node]
-  (when-let [{:keys [col row]} (.getUserData node)]
-    {:component-id [:timeline-tracks col row]
-     :items-path [:chains :cue-chains [col row] :tracks]
+  (when-let [show-id (:show-id (.getUserData node))]
+    {:component-id [:timeline-tracks show-id]
+     :items-path (conj (shows/show-path show-id) :tracks)
      :on-change-event :timeline/update-tracks
-     :on-change-params {:col col :row row}}))
+     :on-change-params {:show-id show-id}}))
 
 (defn- bank-drop-target!
   "Make a header row a drop target for browser drags. Uses addEventHandler:
@@ -171,7 +172,7 @@
                (.consume e)))))))
 
 (defn- header-row
-  [{:keys [col row selected-track-id swap-state] :as props} idx r]
+  [{:keys [show-id selected-track-id swap-state] :as props} idx r]
   (let [folder? (= :folder (:kind r))
         selected? (= selected-track-id (:id r))
         track-id (:id r)]
@@ -186,7 +187,7 @@
      :desc
      {:fx/type :label
       :id (str "timeline-track-header-" idx)
-      :user-data {:col col :row row :track-id track-id}
+      :user-data {:show-id show-id :track-id track-id}
       :content-display :graphic-only
       :padding 0
       :min-height (:h r) :pref-height (:h r) :max-height (:h r)
@@ -207,7 +208,7 @@
                             (if (= 2 (.getClickCount e))
                               (swap-state assoc :renaming-id track-id)
                               (events/dispatch! {:event/type :timeline/select-track
-                                                 :col col :row row :track-id track-id}))))
+                                                 :show-id show-id :track-id track-id}))))
       :children
       (filterv some?
                [{:fx/type :region
@@ -226,7 +227,7 @@
                              :size 10}
                    :tooltip {:fx/type :tooltip :text (if (get-in r [:track :collapsed?]) "Expand" "Collapse")}
                    :on-action (fn [_]
-                                (apply-op! col row {:op :set-collapsed :track-id track-id
+                                (apply-op! show-id {:op :set-collapsed :track-id track-id
                                                     :collapsed? (not (get-in r [:track :collapsed?]))}))}
                   {:fx/type :region :min-width 6 :pref-width 6})
                 (name-node props r)
@@ -239,14 +240,14 @@
                  :selected (true? (get-in r [:track :muted?]))
                  :tooltip {:fx/type :tooltip :text "Mute"}
                  :on-action (fn [_]
-                              (apply-op! col row {:op :set-track-muted :track-id track-id
+                              (apply-op! show-id {:op :set-track-muted :track-id track-id
                                                   :muted? (not (true? (get-in r [:track :muted?])))}))}])}}}))
 
 (defn header-column
-  "Props: :rows :view :col :row :tracks :selected-track-id :explain (how
-   the cue's levels resolve: subs/cue-target-explain) :renaming-id
+  "Props: :rows :view :show-id :tracks :selected-track-id :explain (how
+   the show's levels resolve: subs/show-target-explain) :renaming-id
    :swap-state :on-scroll"
-  [{:keys [fx/context rows view col row on-scroll] :as props}]
+  [{:keys [fx/context rows view show-id on-scroll] :as props}]
   (let [props (assoc props :menu-ctx (target-control/menu-context context))]
     {:fx/type :v-box
      :style-class "tl-header-column"
@@ -261,7 +262,7 @@
                    :focus-traversable false
                    :tooltip {:fx/type :tooltip :text "Add track"}
                    :graphic {:fx/type fa/icon :name :plus :size 11}
-                   :on-action {:event/type :timeline/add-track :col col :row row}}]}
+                   :on-action {:event/type :timeline/add-track :show-id show-id}}]}
       {:fx/type fx/ext-on-instance-lifecycle
        :v-box/vgrow :always
        :on-created (fn [^Region pane]
@@ -273,7 +274,7 @@
        :desc {:fx/type :pane
               :min-height 0
               :pref-height 0
-              :user-data {:col col :row row}
+              :user-data {:show-id show-id}
               :on-scroll on-scroll
               :children [{:fx/type :v-box
                           :spacing (:row-gap layout/metrics)

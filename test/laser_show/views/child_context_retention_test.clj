@@ -188,17 +188,19 @@
                   :params {:mirror-x? false :mirror-y? false :swap-axes? false}}])
       (selected [:projector-effects :p1] #{c})))
 
+(def ^:private show-id #uuid "6f1c0000-0000-4000-8000-000000000001")
+
 (defn- timeline-state
-  "The Timeline Editor open at [0 0]: its one clip, selected, has an
+  "The Timeline Editor open on show show-id: its one clip, selected, has an
    Intensity effect."
   [clip effect]
   (-> (initial-state)
-      (assoc-in [:ui :dialogs :timeline-cue-editor] {:open? true :col 0 :row 0})
-      (assoc-in [:chains :cue-chains [0 0]]
+      (assoc-in [:ui :dialogs :timeline-cue-editor] {:open? true :show-id show-id})
+      (assoc-in [:chains :shows show-id]
                 (model/convert-to-timeline {:items [{:id clip :type :preset :preset-id :circle :enabled? true
                                                      :effects [(intensity effect)]}]}
                                            {}))
-      (assoc-in [:ui :timeline-editor [0 0] :selection] #{clip})))
+      (assoc-in [:ui :timeline-editor show-id :selection] #{clip})))
 
 (def ^:private modulatable-choice
   "A choice that may follow a modulator (zones plan Z5), in the controls
@@ -339,7 +341,7 @@
                       :kept (h/kept-by-node (node-by-id root "timeline-canvas"))}))]
       (testing "every branch is there"
         (is (= #{@#'timeline-editor/editor-body} (set (map :fx/type inner))) "the local state's inner description")
-        (is (= #{[0 0]} (set (map (juxt :col :row) bodies))))
+        (is (= #{show-id} (set (map :show-id bodies))))
         (is (seq headers))
         (is (every? (set (map :scope chips)) [:track :clip :cue]) "a track's Target, the clip's and the cue's")
         (is (= #{effect} (set (map (comp :id :effect) cards))))

@@ -22,6 +22,7 @@
             [laser-show.timeline.layout :as layout]
             [laser-show.timeline.model :as model]
             [laser-show.timeline.playback :as playback]
+            [laser-show.timeline.shows :as shows]
             [laser-show.timeline.timecode :as tc]
             [laser-show.views.components.clock-view :as clock-view]
             [laser-show.views.components.drag-drop-cell :as dd]
@@ -367,23 +368,23 @@
    selection (unless a modifier is held) and selects that track."
   [mx my button value {:keys [modifiers]}]
   (when (= button MouseButton/PRIMARY)
-    (let [{:keys [col row view]} value
+    (let [{:keys [show-id view]} value
           h (hit value mx my)
           pointer (assoc modifiers :x mx :y my)
           g (gesture/start h pointer (:cue value) (gesture-view value))
           beat (max 0.0 (layout/x->beat view mx))
           select-track (when-let [r (:row h)]
-                         {:event/type :timeline/select-track :col col :row row :track-id (:id r)})
+                         {:event/type :timeline/select-track :show-id show-id :track-id (:id r)})
           events (case (:type h)
                    :clip (cond-> []
-                           (:press-select g) (conj (assoc (:press-select g) :event/type :timeline/select-items :col col :row row))
+                           (:press-select g) (conj (assoc (:press-select g) :event/type :timeline/select-items :show-id show-id))
                            select-track (conj select-track))
                    (:loop :end) []
-                   :ruler [{:event/type :timeline/seek :col col :row row :beat beat}]
+                   :ruler [{:event/type :timeline/seek :show-id show-id :beat beat}]
                    (cond-> []
                      (not (or (:shift? modifiers) (:shortcut? modifiers)))
-                     (conj {:event/type :timeline/clear-selection :col col :row row})
-                     true (conj {:event/type :timeline/set-cursor-beat :col col :row row :beat beat})
+                     (conj {:event/type :timeline/clear-selection :show-id show-id})
+                     true (conj {:event/type :timeline/set-cursor-beat :show-id show-id :beat beat})
                      select-track (conj select-track)))]
       (cond-> {:dispatch events}
         g (assoc :drag-start true
@@ -397,13 +398,13 @@
        :preview-value (preview-value value g)})))
 
 (defn- on-release [value {:keys [gesture]}]
-  (let [{:keys [col row]} value
+  (let [{:keys [show-id]} value
         {:keys [op select select-track seek]} (gesture/finish gesture)]
     {:dispatch (cond-> []
-                 seek (conj {:event/type :timeline/seek :col col :row row :beat seek})
-                 op (conj {:event/type :timeline/apply-op :col col :row row :op op})
-                 select (conj (assoc select :event/type :timeline/select-items :col col :row row))
-                 select-track (conj {:event/type :timeline/select-track :col col :row row :track-id select-track}))}))
+                 seek (conj {:event/type :timeline/seek :show-id show-id :beat seek})
+                 op (conj {:event/type :timeline/apply-op :show-id show-id :op op})
+                 select (conj (assoc select :event/type :timeline/select-items :show-id show-id))
+                 select-track (conj {:event/type :timeline/select-track :show-id show-id :track-id select-track}))}))
 
 (defn- on-hover [mx my value _]
   (let [h (hit value mx my)]
@@ -419,38 +420,38 @@
    the selection, arrows nudge (Shift = 1/4 beat), Ctrl/Cmd+D duplicates,
    Ctrl/Cmd+A selects every clip."
   [^KeyCode key-code shift? value {:keys [dragging? modifiers]}]
-  (let [{:keys [col row selection cue]} value
+  (let [{:keys [show-id selection cue]} value
         shortcut? (:shortcut? modifiers)]
     (cond
       (= key-code KeyCode/SPACE)
-      {:dispatch {:event/type :timeline/toggle-play :col col :row row} :consumed? true}
+      {:dispatch {:event/type :timeline/toggle-play :show-id show-id} :consumed? true}
 
       (= key-code KeyCode/ESCAPE)
       (if dragging?
         {:cancel-drag? true :consumed? true}
-        {:dispatch {:event/type :timeline/clear-selection :col col :row row} :consumed? true})
+        {:dispatch {:event/type :timeline/clear-selection :show-id show-id} :consumed? true})
 
       (and shortcut? (= key-code KeyCode/D))
       (when (seq selection)
-        {:dispatch {:event/type :timeline/apply-op :col col :row row
+        {:dispatch {:event/type :timeline/apply-op :show-id show-id
                     :op {:op :duplicate-clips :clip-ids selection}}
          :consumed? true})
 
       (and shortcut? (= key-code KeyCode/A))
-      {:dispatch {:event/type :timeline/select-items :col col :row row
+      {:dispatch {:event/type :timeline/select-items :show-id show-id
                   :ids (mapv :id (:items cue)) :mode :replace}
        :consumed? true}
 
       (or (= key-code KeyCode/DELETE) (= key-code KeyCode/BACK_SPACE))
-      {:dispatch {:event/type :timeline/delete-selection :col col :row row} :consumed? true}
+      {:dispatch {:event/type :timeline/delete-selection :show-id show-id} :consumed? true}
 
       (= key-code KeyCode/LEFT)
-      {:dispatch {:event/type :timeline/nudge-selection :col col :row row
+      {:dispatch {:event/type :timeline/nudge-selection :show-id show-id
                   :delta-beats (if shift? -0.25 -1.0)}
        :consumed? true}
 
       (= key-code KeyCode/RIGHT)
-      {:dispatch {:event/type :timeline/nudge-selection :col col :row row
+      {:dispatch {:event/type :timeline/nudge-selection :show-id show-id
                   :delta-beats (if shift? 0.25 1.0)}
        :consumed? true}
 
@@ -469,7 +470,7 @@
   (when-let [payload (dd/read-payload e :bank-item drop/valid-payload?)]
     (drop/drop-target payload
                       (assoc (hit value x y) :beat (layout/x->beat (:view value) x))
-                      {:col (:col value) :row (:row value)
+                      {:show-id (:show-id value)
                        :tracks (get-in value [:cue :tracks] [])
                        :snap (:snap value)})))
 
@@ -537,11 +538,11 @@
 
 (defn- redraw-overlay!
   "The overlay from the show clock's tick (clock-view, on the FX thread): the
-   cursor, the cue's playhead, and a page flip while following. It draws only
+   cursor, the show's playhead, and a page flip while following. It draws only
    when the playhead or the view moved, so a stopped or paused cue leaves the
    canvas alone."
-  [^Canvas canvas snapshot {:keys [col row view cursor-beat] :as data}]
-  (let [playhead (show-time/cue-beats snapshot [col row])
+  [^Canvas canvas snapshot {:keys [show-id view cursor-beat] :as data}]
+  (let [playhead (show-time/cue-beats snapshot (shows/play-key show-id))
         drawn [playhead view cursor-beat]
         props (.getProperties canvas)]
     (when (not= drawn (.get props ::drawn))
@@ -552,7 +553,7 @@
 (defn- overlay-canvas
   "Mouse-transparent canvas over the lanes. It draws the show clock's newest
    tick itself, so playback redraws two lines, not the timeline."
-  [{:keys [col row view cursor-beat follow? swap-state]}]
+  [{:keys [show-id view cursor-beat follow? swap-state]}]
   {:fx/type clock-view/ext-clock-redraw
    :redraw! #'redraw-overlay!
    :desc {:fx/type :canvas
@@ -561,7 +562,7 @@
           :mouse-transparent true
           :width (:width view)
           :height (:height view)
-          :user-data {:col col :row row :view view :cursor-beat cursor-beat
+          :user-data {:show-id show-id :view view :cursor-beat cursor-beat
                       :follow? follow? :swap-state swap-state}}})
 
 
@@ -598,8 +599,8 @@
   "The readout's labels from the show clock's tick (clock-view): the
    playhead's position while the tick has one for the cue, else the
    cursor's, which is also what cljfx renders."
-  [^HBox box snapshot {:keys [col row cue cursor-beat global-bpm]}]
-  (let [pos (or (show-time/cue-beats snapshot [col row]) cursor-beat 0.0)
+  [^HBox box snapshot {:keys [show-id cue cursor-beat global-bpm]}]
+  (let [pos (or (show-time/cue-beats snapshot (shows/play-key show-id)) cursor-beat 0.0)
         [bbs timecode] (readout-texts cue pos global-bpm)
         children (.getChildren box)
         ^Label bbs-label (.get children 0)
@@ -613,7 +614,7 @@
   "Position readout: bar.beat.sub and show timecode, from the playhead while
    playing, else the cursor. It follows the show clock's newest tick itself,
    so playback changes two labels, not the toolbar."
-  [{:keys [col row cue cursor-beat global-bpm]}]
+  [{:keys [show-id cue cursor-beat global-bpm]}]
   (let [[bbs timecode] (readout-texts cue (or cursor-beat 0.0) global-bpm)
         approx? (nil? (:timeline/tempo-bpm cue))]
     {:fx/type clock-view/ext-clock-redraw
@@ -621,7 +622,7 @@
      :desc {:fx/type :h-box
             :alignment :center-left
             :spacing 6
-            :user-data {:col col :row row :cue cue :cursor-beat cursor-beat :global-bpm global-bpm}
+            :user-data {:show-id show-id :cue cue :cursor-beat cursor-beat :global-bpm global-bpm}
             :children [{:fx/type :label
                         :id "timeline-readout"
                         :style-class "tl-readout"
@@ -671,7 +672,7 @@
                        "No MIDI timecode coming in")}}))
 
 (defn- toolbar
-  [{:keys [col row title view snap loop-enabled? follow? inspector-open? drawer-open?
+  [{:keys [show-id title view snap loop-enabled? follow? inspector-open? drawer-open?
            cursor-beat zoom-view! fit! swap-state cue global-bpm transport ruler-opts]}]
   (let [log2 #(/ (Math/log (double %)) (Math/log 2.0))
         options (snap-options ruler-opts)
@@ -688,17 +689,17 @@
                (icon-button {:id "timeline-to-start" :icon :backward-step
                              :tooltip (if chasing? chase-tip "Back to start")
                              :disable chasing?
-                             :on-action {:event/type :timeline/seek :col col :row row :beat 0.0}})
+                             :on-action {:event/type :timeline/seek :show-id show-id :beat 0.0}})
                (icon-button {:id "timeline-play" :icon (if playing? :pause :play)
                              :tooltip (cond chasing? chase-tip
                                             playing? "Pause (Space)"
                                             :else "Play from the cursor (Space)")
                              :disable chasing?
-                             :on-action {:event/type :timeline/toggle-play :col col :row row}})
+                             :on-action {:event/type :timeline/toggle-play :show-id show-id}})
                (icon-button {:id "timeline-stop" :icon :stop :tooltip (if chasing? chase-tip "Stop")
                              :disable (or chasing? (= :stopped transport))
-                             :on-action {:event/type :timeline/stop :col col :row row}})
-               {:fx/type readout :col col :row row :cue cue :cursor-beat cursor-beat :global-bpm global-bpm}
+                             :on-action {:event/type :timeline/stop :show-id show-id}})
+               {:fx/type readout :show-id show-id :cue cue :cursor-beat cursor-beat :global-bpm global-bpm}
                (when chasing? {:fx/type mtc-chip})
                (separator)
                {:fx/type :label
@@ -715,7 +716,7 @@
                           :text (if locked
                                   "Tempo locked: tap tempo and Link don't change this timeline. Click to follow the global BPM."
                                   "Follows the global BPM. Click to lock this timeline at the current tempo.")}
-                :on-action {:event/type :timeline/apply-op :col col :row row
+                :on-action {:event/type :timeline/apply-op :show-id show-id
                             :op {:op :set-tempo :bpm (when-not locked global-bpm)}}}
                {:fx/type :h-box
                 :children [{:fx/type :toggle-button
@@ -739,7 +740,7 @@
                 :text "+ Track"
                 :style-class ["button" "tl-icon-button"]
                 :focus-traversable false
-                :on-action {:event/type :timeline/add-track :col col :row row}}
+                :on-action {:event/type :timeline/add-track :show-id show-id}}
                {:fx/type :menu-button
                 :id "timeline-add-menu"
                 :style-class ["menu-button" "tl-icon-button"]
@@ -748,7 +749,7 @@
                 :items [{:fx/type :menu-item
                          :id "timeline-add-folder"
                          :text "Folder"
-                         :on-action {:event/type :timeline/add-folder :col col :row row}}]}
+                         :on-action {:event/type :timeline/add-folder :show-id show-id}}]}
                (separator)
                (toggle {:id "timeline-snap-toggle" :icon :magnet :tooltip "Snap to grid"
                         :selected (:enabled? snap)
@@ -765,7 +766,7 @@
                                         (events/dispatch! {:event/type :timeline/set-snap :value v}))))}
                (toggle {:id "timeline-loop-toggle" :icon :repeat :tooltip "Loop"
                         :selected loop-enabled?
-                        :on-action {:event/type :timeline/toggle-loop :col col :row row}})
+                        :on-action {:event/type :timeline/toggle-loop :show-id show-id}})
                (toggle {:id "timeline-follow-toggle" :icon :angles-right :tooltip "Follow playhead"
                         :selected follow?
                         :on-action (fn [_] (swap-state update :follow? not))})
@@ -811,7 +812,7 @@
    its effects as a row of cards. The strip on top drags to resize it: the
    drag previews in local state, and the release commits the height as an
    editor preference (one :timeline/set-detail-height per drag)."
-  [{:keys [height lanes-height swap-state inspector-props target col row]}]
+  [{:keys [height lanes-height swap-state inspector-props target show-id]}]
   (let [drag detail-drag
         drag-height (fn [^MouseEvent e]
                       (when-let [[y0 h0 lanes-h] @drag]
@@ -831,7 +832,7 @@
                            (when-let [h (drag-height e)]
                              (swap-state assoc :detail-h h)))
        ;; The preview stays after the release: clearing it would show the old
-       ;; height until the event lands. It's dropped on reopen or cell switch.
+       ;; height until the event lands. It's dropped on reopen or show switch.
        :on-mouse-released (fn [e]
                             (when-let [h (drag-height e)]
                               (swap-state assoc :detail-h h)
@@ -843,7 +844,7 @@
        :v-box/vgrow :always
        :children [(assoc inspector-props :fx/type inspector/inspector :target target)
                   {:fx/type device-chain/device-chain :h-box/hgrow :always
-                   :col col :row row :target target}]}]}))
+                   :show-id show-id :target target}]}]}))
 
 
 ;; ============================================================
@@ -868,16 +869,16 @@
     (.consume e)))
 
 (defn- editor-body
-  [{:keys [fx/context state swap-state col row cue timeline-ui timeline-prefs title]}]
+  [{:keys [fx/context state swap-state show-id cue timeline-ui timeline-prefs title]}]
   (let [{:keys [selection cursor-beat] :or {selection #{} cursor-beat 0.0}} timeline-ui
         snap (merge {:enabled? true :value 0.25} (:snap timeline-prefs))
         {drawer-open? :open? preset-tab :preset-tab effect-tab :effect-tab} (:add-panel timeline-prefs)
         inspector-open? (:inspector-open? timeline-prefs true)
         tracks (:tracks cue [])
         ;; Where each track and clip goes, and what each would inherit
-        explain (fx/sub-ctx context subs/cue-target-explain col row)
+        explain (fx/sub-ctx context subs/show-target-explain show-id)
         global-bpm (fx/sub-ctx context subs/bpm)
-        transport (fx/sub-ctx context subs/timeline-transport col row)
+        transport (fx/sub-ctx context subs/timeline-transport show-id)
         ruler-opts {:mode (:ruler-mode timeline-prefs :bars)
                     :bpm (playback/cue-bpm cue global-bpm)
                     :tc-start (:timeline/tc-start cue 0.0)
@@ -897,7 +898,7 @@
                                          (assoc :follow? false)))))
         fit! #(swap-state update :view (fn [v] (layout/clamp-view (layout/fit v content-beats) content-beats content-height)))
         wheel (partial on-wheel zoom-view! scroll-view!)
-        tracks-ui (fx/sub-ctx context subs/list-ui-state [:timeline-tracks col row])
+        tracks-ui (fx/sub-ctx context subs/list-ui-state [:timeline-tracks show-id])
         selected-track-id (let [id (first (:selected-ids tracks-ui))]
                             (when (and id (model/find-track tracks id)) id))
         insert-track-id (model/insert-track tracks selected-track-id)
@@ -908,7 +909,7 @@
      {:fx/type :border-pane
      :style-class "tl-root"
      :top {:fx/type toolbar
-           :col col :row row :title title :view view :snap snap
+           :show-id show-id :title title :view view :snap snap
            :loop-enabled? (boolean (get-in cue [:loop :enabled?]))
            :follow? follow? :inspector-open? inspector-open? :drawer-open? drawer-open?
            :cursor-beat cursor-beat :zoom-view! zoom-view! :fit! fit! :swap-state swap-state
@@ -919,7 +920,7 @@
       {:fx/type :h-box
        :children
        [{:fx/type header/header-column
-         :rows rows :view view :col col :row row :tracks tracks
+         :rows rows :view view :show-id show-id :tracks tracks
          :selected-track-id selected-track-id
          :explain explain
          :renaming-id (:renaming-id state) :swap-state swap-state
@@ -947,7 +948,7 @@
             :height (:height view)
             :cursor "default"
             :history-transaction? false
-            :value {:col col :row row
+            :value {:show-id show-id
                     :cue cue
                     :rows rows
                     :view view
@@ -970,7 +971,7 @@
             :on-drag-exited on-drop-exit
             :on-drag-dropped on-drop}
            {:fx/type overlay-canvas
-            :col col :row row :view view :cursor-beat cursor-beat
+            :show-id show-id :view view :cursor-beat cursor-beat
             :follow? follow? :swap-state swap-state}]}}
         {:fx/type :scroll-bar
          :id "timeline-vscroll"
@@ -1007,41 +1008,41 @@
       ;; cljfx needs these props absent, not nil
       drawer-open?
       (assoc :right {:fx/type browser/browser
-                     :col col :row row :preset-tab preset-tab :effect-tab effect-tab
+                     :show-id show-id :preset-tab preset-tab :effect-tab effect-tab
                      :cursor-label (bar-beat-sub (or cursor-beat 0.0))
                      :insert-track-id insert-track-id
                      :insert-track-name (:name (model/find-track tracks insert-track-id))
                      :target target})
       inspector-open?
       (assoc :bottom {:fx/type detail-panel
-                      :col col :row row :target target
+                      :show-id show-id :target target
                       ;; A drag in progress (or just released) wins over the pref
                       :height (or (:detail-h state)
                                   (:detail-height timeline-prefs)
                                   layout/default-detail-height)
                       :lanes-height (:height view)
                       :swap-state swap-state
-                      :inspector-props {:col col :row row :cue cue :tracks tracks
+                      :inspector-props {:show-id show-id :cue cue :tracks tracks
                                         :explain explain :global-bpm global-bpm}}))))
 
 (defn timeline-editor
   "Main timeline editor component.
    
    Props:
-   - :col, :row             — grid cell of the cue
-   - :cue                   — the cue chain ({:items :tracks :loop ...})
-   - :timeline-ui           — this cue's view state (subs/timeline-ui)
+   - :show-id               — the show's id in the library
+   - :cue                   — the show ({:items :tracks :loop ...}, subs/show-cue)
+   - :timeline-ui           — this show's view state (subs/timeline-ui)
    - :timeline-prefs        — editor preferences (subs/timeline-prefs)
    - :title                 — optional node shown at the left of the toolbar
    
-   Local state (viewport, follow, renaming) resets when :cell changes, since
+   Local state (viewport, follow, renaming) resets when :show-id changes, since
    it's part of :initial-state; the measured lane size carries over. The
    body gets the props without the editor's context: cljfx gives it its
    own."
-  [{:keys [col row] :as props}]
+  [{:keys [show-id] :as props}]
   {:fx/type fx/ext-state
-   ;; :cell is never read: it's here so a new cell resets the local state
-   :initial-state {:cell [col row] :view initial-view :follow? true :renaming-id nil}
+   ;; :show-id is never read: it's here so another show resets the local state
+   :initial-state {:show-id show-id :view initial-view :follow? true :renaming-id nil}
    ;; The lanes pane keeps its size across the reset, so its size listeners
    ;; won't fire again: keep the measured size, or the canvas stays 0x0
    :reset (fn [old new]

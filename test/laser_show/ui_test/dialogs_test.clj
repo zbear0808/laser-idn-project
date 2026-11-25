@@ -15,7 +15,9 @@
             [laser-show.events.core :as events]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
+            [laser-show.timeline.shows :as shows]
             [laser-show.ui-test.fixtures :as fixtures]
+            [laser-show.ui-test.show-editor :as show-editor]
             [laser-show.ui-test.testfx :as ui]
             [laser-show.views.root :as root])
   (:import [java.io File]
@@ -34,6 +36,11 @@
 (defn- dialog-open? [id] (true? (get-in (app-state) [:ui :dialogs id :open?])))
 
 (defn- cue-name [col row] (get-in (app-state) [:chains :cue-chains [col row] :name]))
+
+(defn- show-name
+  "The name of the show the timeline editor shows."
+  []
+  (get-in (app-state) (conj (shows/show-path (show-editor/dialog-show)) :name)))
 
 (defn- stage-titled
   "The showing window whose title starts with prefix."
@@ -143,8 +150,8 @@
     :open {:event/type :cue-chain/open-editor :col 0 :row 0}
     :title "Cue Chain Editor - Intro (Cell A1)"}
    {:id :timeline-cue-editor
-    :open {:event/type :timeline-cue-editor/open :col 1 :row 0}
-    :title "Timeline Editor - Cell A2"}
+    :open {:event/type :shows/new-from-cue :col 1 :row 0}
+    :title "Timeline Editor - Untitled"}
    {:id :zone-pattern-editor
     :open {:event/type :ui/open-dialog :dialog-id :zone-pattern-editor :data {:cue-key [0 0]}}
     :title "Zone Pattern — Cue A1 \"Intro\""}
@@ -220,11 +227,12 @@
     :focus "#step-grid-close"
     :edit {:event/type :cue-chain/set-name :col 0 :row 0}
     :value #(cue-name 0 0)}
-   {:open {:event/type :timeline-cue-editor/open :col 0 :row 0}
+   {:open {:event/type :shows/new-from-cue :col 0 :row 0}
     :title "Timeline Editor"
     :focus "Close"
-    :edit {:event/type :cue-chain/set-name :dialog-id :timeline-cue-editor :col 0 :row 0}
-    :value #(cue-name 0 0)}
+    ;; The show's id is known once it's open
+    :edit #(hash-map :event/type :timeline/set-name :show-id (show-editor/dialog-show))
+    :value show-name}
    {:open {:event/type :ui/open-dialog :dialog-id :trigger-editor :data {:col 0 :row 0 :cell-mode :cue}}
     :title "Triggers — Cue Cell A1"
     :focus "#trigger-editor-done"
@@ -250,7 +258,7 @@
         (ui/wait-for! #(some? (stage-titled title)))
         (let [before (value)
               after (str "Edited in " title)]
-          (events/dispatch! (assoc edit :name after))
+          (events/dispatch! (assoc (if (fn? edit) (edit) edit) :name after))
           (ui/wait-for! #(= after (value)))
           (let [stage (stage-titled title)
                 node (if (str/starts-with? focus "#") (in-stage stage focus) (button-in stage focus))]
@@ -270,8 +278,8 @@
 
 (deftest timeline-space-still-toggles-play-test
   (let [robot (ui/robot)
-        timing #(get-in (app-state) [:playback :active-cues [0 0]])]
-    (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
+        id (show-editor/new-show-from-cue! 0 0)
+        timing #(get-in (app-state) [:playback :active-cues (shows/play-key id)])]
     (ui/wait-for! #(some? (stage-titled "Timeline Editor")))
     (ui/assert-visible! "#timeline-lanes")
     ;; The canvas handles Space itself. A plain label leaves it to the
@@ -281,7 +289,7 @@
     (ui/wait-for! #(and (some? (timing)) (not (:paused? (timing)))))
     (push! robot KeyCode/SPACE)
     (ui/wait-for! #(true? (:paused? (timing))))
-    (testing "but Space typed into the cue's name is a space, and doesn't play"
+    (testing "but Space typed into the show's name is a space, and doesn't play"
       (let [stage (stage-titled "Timeline Editor")
             label (in-stage stage ".dialog-name-label")]
         (is (some? label))

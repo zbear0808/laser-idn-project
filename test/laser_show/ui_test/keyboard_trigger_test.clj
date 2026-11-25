@@ -9,7 +9,9 @@
             [laser-show.input.router :as router]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.state.core :as state]
+            [laser-show.timeline.shows :as shows]
             [laser-show.ui-test.fixtures :as fixtures]
+            [laser-show.ui-test.show-editor :as show-editor]
             [laser-show.ui-test.testfx :as ui])
   (:import [com.sun.javafx.stage WindowHelper]
            [com.sun.javafx.tk FocusCause]
@@ -281,7 +283,7 @@
   (events/write-state! assoc-in [:triggers :definitions :hold-square]
                        {:match {:source :keyboard :id :h} :behavior :momentary
                         :action {:type :trigger-cue :target [1 0]}})
-  (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
+  (show-editor/new-show-from-cue! 0 0)
   (let [robot (ui/focus! (ui/robot) "#timeline-canvas")]
     (while-held! robot KeyCode/H
                  (fn []
@@ -297,13 +299,14 @@
 
 (deftest timeline-window-keeps-its-own-space-test
   (bind! :space {:type :trigger-cue :target [1 0]})
-  (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
   ;; A label has no Space handling of its own: this is the timeline window's
-  ;; fallback Play shortcut. The editor plays A1, not the bound A2.
-  (let [robot (ui/focus! (ui/robot) "#timeline-readout")]
+  ;; fallback Play shortcut. The editor plays its show, not the bound A2.
+  (let [id (show-editor/new-show-from-cue! 0 0)
+        robot (ui/focus! (ui/robot) "#timeline-readout")]
     (ui/press! robot KeyCode/SPACE)
-    (ui/wait-for! #(some? (cue [0 0])))
+    (ui/wait-for! #(some? (cue (shows/play-key id))))
     (is (nil? (cue [1 0])))
+    (is (nil? (cue [0 0])) "nor the cell it was copied from")
     (is (empty? @*key-edges*))))
 
 (deftest focused-step-grid-keeps-its-space-test
