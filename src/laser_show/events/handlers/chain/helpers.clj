@@ -57,8 +57,9 @@
   "Is the owner of domain's entity-key gone: a :projector-effects chain
    (calibration) whose projector isn't in state? A write to it would make a
    chain for no projector, an orphan in the rig (reactivity plan 14,
-   follow-up B11), so a chain event for it does nothing ({}). Any other
-   domain's chain is its cell's or cue's own, made by its first write."
+   follow-ups B11, N7), so the :chain/*, :keyframe/* and :modulator/* events
+   for it do nothing ({}). Any other domain's chain is its cell's or cue's
+   own, made by its first write."
   [state domain entity-key]
   (and (= :projector-effects domain)
        (not (contains? (:projectors state) entity-key))))

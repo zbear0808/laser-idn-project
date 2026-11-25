@@ -15,8 +15,10 @@
    [clojure.string :as str]
    [laser-show.events.core :as events]
    [laser-show.events.handlers.projector :as projectors]
+   [laser-show.events.handlers.history :as history-handlers]
    [laser-show.events.handlers.rig :as rig-handlers]
    [laser-show.events.safety-guard :as guard]
+   [laser-show.events.show-lock :as show-lock]
    [laser-show.animation.fit-guard :as fit-guard]
    [laser-show.output.driver :as driver]
    [laser-show.routing.refs :as refs]
@@ -978,56 +980,73 @@
 
 (defn- with-zone [state id zone] (assoc-in state [:projectors id :safety] zone))
 
-(defn- set-safety [state id zone & {:as more}]
-  (projectors/handle (merge {:event/type :projectors/set-safety :projector-id id :safety zone :state state} more)))
+(defn- drag
+  "A drag's event on :p1's zone (the canvas's :projectors/drag-safety): the
+   numbers it moved of the rectangle at path (more: :row-version, …)."
+  [path coordinates & {:as more}]
+  (merge {:event/type :projectors/drag-safety :projector-id :p1 :path path :coordinates coordinates} more))
 
-(deftest set-safety-normalizes-test
-  (let [result (set-safety base-state :p0 {:limit [0.5 0.5 -0.5 -0.5]})]
-    (is (identical? base-state (:state result)) "a missing projector changes nothing"))
-  (let [s (assoc-in base-state [:projectors :p1] {:name "Laser L"})
-        stored (get-in (set-safety s :p1 {:limit [0.5 0.5 -0.5 -0.5] :blocked [[0 0 1/2 1/4]]})
-                       [:state :projectors :p1 :safety])]
-    (is (= {:limit [-0.5 -0.5 0.5 0.5] :blocked [[0.0 0.0 0.5 0.25]]} stored)))
-  (testing "a zone normalize can't read is refused"
-    (let [s (assoc-in base-state [:projectors :p1] {:name "Laser L"})]
-      (is (identical? s (:state (set-safety s :p1 {:limit [0 0]})))))))
+(defn- handled
+  "projectors/handle's effects for event on state."
+  [state event]
+  (projectors/handle (assoc event :state state)))
+
+(deftest a-drag-is-stored-as-normalize-stores-a-zone-test
+  (is (identical? base-state (:state (handled base-state (assoc (drag [:limit] {0 -0.5}) :projector-id :p0))))
+      "a missing projector changes nothing")
+  (let [s (assoc-in base-state [:projectors :p1] {:name "Laser L"})]
+    (is (= {:limit [-0.5 -1.0 1.0 0.25] :blocked []}
+           (get-in (handled s (drag [:limit] {0 -1/2 3 1/4})) [:state :projectors :p1 :safety]))
+        "the default zone, with the numbers it moved, as doubles")
+    (testing "one that isn't a zone as it is stored (an edge past the other) is refused"
+      (is (identical? s (:state (handled s (drag [:limit] {0 1 2 -1}))))))))
 
 (deftest shrinking-a-live-zone-applies-at-once-test
   (let [live (with-zone outputting-state :p1 small)
-        result (set-safety live :p1 {:limit [-0.4 -0.5 0.5 0.5]})]
+        result (handled live (drag [:limit] {0 -0.4}))]
     (is (= [-0.4 -0.5 0.5 0.5] (get-in result [:state :projectors :p1 :safety :limit])))
     (is (not (get-in result [:state :ui :dialogs :confirm :open?])))))
 
 (deftest growing-a-live-zone-asks-first-test
   (let [live (with-zone outputting-state :p1 small)
-        result (set-safety live :p1 {:limit [-0.6 -0.5 0.5 0.5]})]
+        result (handled live (drag [:limit] {0 -0.6}))]
     (is (= small (get-in result [:state :projectors :p1 :safety])) "nothing changes yet")
     (is (= "Allow light in a larger area?" (get-in result [:state :ui :dialogs :confirm :title])))
     (is (= "Laser L is on. Light can reach places it couldn't before."
            (get-in result [:state :ui :dialogs :confirm :message])))
     (is (= "Allow" (get-in result [:state :ui :dialogs :confirm :confirm-label])))
     (testing "while the question is open, another widening is dropped"
-      (let [again (set-safety (:state result) :p1 {:limit [-0.9 -0.9 0.9 0.9]})]
+      (let [again (handled (:state result) (drag [:limit] {0 -0.9 1 -0.9 2 0.9 3 0.9}))]
         (is (= (get-in result [:state :ui :dialogs :confirm]) (get-in again [:state :ui :dialogs :confirm])))
         (is (= small (get-in again [:state :projectors :p1 :safety])))))))
 
 (deftest parked-event-carries-no-state-test
   (let [live (with-zone outputting-state :p1 small)
-        parked (get-in (set-safety live :p1 {:limit [-0.6 -0.5 0.5 0.5]} :time 123 :fx/event "x")
-                       [:state :ui :dialogs :confirm :confirm-event])]
-    (is (= {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-0.6 -0.5 0.5 0.5]}
-            :confirmed? true}
-           parked))))
+        question (get-in (handled live (drag [:limit] {0 -0.6} :time 123 :fx/event "x" :interaction/type :stop
+                                             :history/gesture-id #uuid "00000000-0000-0000-0000-0000000000a6"))
+                         [:state :ui :dialogs :confirm])]
+    (is (= {:event/type :projectors/drag-safety :review-id (get-in question [:safety-review :id]) :confirmed? true}
+           (:confirm-event question))
+        "its Allow names its question, nothing else")
+    (is (= {:event/type :projectors/drag-safety :projector-id :p1 :path [:limit] :coordinates {0 -0.6}}
+           (get-in question [:safety-review :intent]))
+        "the edit it asks about, as plain data: no state, time, JavaFX event or press")))
 
-(deftest confirmed-growth-applies-test
-  (let [live (with-zone outputting-state :p1 small)]
+(deftest allowed-growth-applies-test
+  (let [live (with-zone outputting-state :p1 small)
+        asked (:state (handled live (drag [:limit] {0 -0.6})))]
     (is (= [-0.6 -0.5 0.5 0.5]
-           (get-in (set-safety live :p1 {:limit [-0.6 -0.5 0.5 0.5]} :confirmed? true)
-                   [:state :projectors :p1 :safety :limit])))))
+           (get-in (handled asked {:event/type :projectors/drag-safety :confirmed? true
+                                   :review-id (get-in asked [:ui :dialogs :confirm :safety-review :id])})
+                   [:state :projectors :p1 :safety :limit])))
+    (testing ":confirmed? true without its question is no permission: it asks"
+      (let [s (:state (handled live (drag [:limit] {0 -0.6} :confirmed? true)))]
+        (is (= small (get-in s [:projectors :p1 :safety])))
+        (is (true? (get-in s [:ui :dialogs :confirm :open?])))))))
 
 (deftest growing-an-off-laser-applies-at-once-test
   (let [off (with-zone (assoc-in outputting-state [:backend :streaming :running?] false) :p1 small)]
-    (is (= [-1.0 -1.0 1.0 1.0] (get-in (set-safety off :p1 {:limit [-1 -1 1 1]})
+    (is (= [-1.0 -1.0 1.0 1.0] (get-in (handled off (drag [:limit] {0 -1 1 -1 2 1 3 1}))
                                        [:state :projectors :p1 :safety :limit])))))
 
 (deftest add-blocked-area-test
@@ -1085,20 +1104,30 @@
             "its Allow, answering the question it asked (follow-up B3)")))))
 
 (deftest safety-events-on-a-missing-projector-change-nothing-test
-  (doseq [event [{:event/type :projectors/set-safety :projector-id :nope :safety small}
-                 {:event/type :projectors/add-blocked-area :projector-id :nope}
+  (doseq [event [{:event/type :projectors/add-blocked-area :projector-id :nope}
                  {:event/type :projectors/remove-blocked-area :projector-id :nope :index 0}
                  {:event/type :projectors/copy-safety :from :nope :to [:p1]}
                  {:event/type :projectors/set-safety-coordinate :projector-id :nope :path [:limit 0] :value -0.4}
+                 {:event/type :projectors/drag-safety :projector-id :nope :path [:limit] :coordinates {0 -0.4}}
                  {:event/type :projectors/reset-safety :projector-id :nope}]]
     (is (identical? outputting-state (:state (projectors/handle (assoc event :state outputting-state))))
         (str (:event/type event)))))
 
 (deftest a-drag-leaves-a-zone-that-cant-be-read-test
   ;; plans/2026-11-23-cljfx-reactivity/08 §4: Reset is its own event now, so
-  ;; a whole zone from the canvas never replaces one that can't be read
+  ;; nothing from the canvas replaces a zone that can't be read
   (let [s (with-zone (assoc-in outputting-state [:backend :streaming :running?] false) :p1 {:limit [0 0]})]
-    (is (identical? s (:state (set-safety s :p1 small))))))
+    (is (identical? s (:state (handled s (drag [:limit] {0 -0.5 1 -0.5 2 0.5 3 0.5})))))))
+
+(deftest whole-zone-writes-are-retired-test
+  ;; Follow-up N6: no event sets a zone whole any more, with a question that
+  ;; parks the whole zone and a :confirmed? that is its own permission
+  (let [live (with-zone outputting-state :p1 small)]
+    (doseq [event [{:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-1 -1 1 1]}}
+                   {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-1 -1 1 1]} :confirmed? true}]]
+      (is (= {} (handled live event)) (str "no handler takes " (pr-str (dissoc event :event/type)))))
+    (is (not (contains? show-lock/safety-edits :projectors/set-safety)))
+    (is (not (contains? history-handlers/event-descriptions :projectors/set-safety)))))
 
 
 ;; One coordinate of a zone (plans/2026-11-23-cljfx-reactivity/08)
@@ -1220,9 +1249,9 @@
             (is (= [[0.25 0.3 0.4 0.4]]
                    (:blocked (zone-of (run-pipeline removed (coord [:blocked 0 0] 0.25 :row-version (guard/rows-version removed :p1))))))
                 "an edit from the editor as it is now lands")))
-        (testing "after a whole zone with as many rows"
-          (untouched? (run-pipeline s0 {:event/type :projectors/set-safety :projector-id :p1
-                                        :safety (update two-rows :blocked (comp vec reverse))})
+        (testing "after a whole zone with as many rows (copied from another laser)"
+          (untouched? (run-pipeline (with-zone s0 :p2 (update two-rows :blocked (comp vec reverse)))
+                                    {:event/type :projectors/copy-safety :from :p2 :to [:p1]})
                       "replaced"))
         (testing "after Undo puts back the rows"
           (let [edited (run-pipeline s0 (coord [:blocked 1 2] 0.45 :row-version v0))
@@ -1230,9 +1259,10 @@
             (is (= v0 (guard/rows-version edited :p1)) "an edit of one number keeps the rows")
             (is (= two-rows (zone-of undone)))
             (untouched? undone "undone")))
-        (testing "a change to the limit only keeps the rows' layout"
-          (let [limited (run-pipeline s0 {:event/type :projectors/set-safety :projector-id :p1
-                                          :safety (assoc two-rows :limit [-0.6 -0.5 0.5 0.5])})]
+        (testing "a change to the limit only (a copied zone with the same blocked areas) keeps the rows' layout"
+          (let [limited (run-pipeline (with-zone s0 :p2 (assoc two-rows :limit [-0.6 -0.5 0.5 0.5]))
+                                      {:event/type :projectors/copy-safety :from :p2 :to [:p1]})]
+            (is (= [-0.6 -0.5 0.5 0.5] (:limit (zone-of limited))))
             (is (= v0 (guard/rows-version limited :p1)))
             (is (not= (guard/geometry-version s0 :p1) (guard/geometry-version limited :p1)))
             (is (= [[-0.3 -0.2 0.2 0.2] [0.3 0.3 0.4 0.4]] (:blocked (zone-of (run-pipeline limited old-edit))))
@@ -1256,12 +1286,6 @@
 ;; each names, judged against the zone stored now, and a question of its
 ;; own (follow-up B3)
 
-
-(defn- drag
-  "A drag's event on :p1's zone: the numbers it moved of the rectangle at
-   path (more: :row-version, …)."
-  [path coordinates & {:as more}]
-  (merge {:event/type :projectors/drag-safety :projector-id :p1 :path path :coordinates coordinates} more))
 
 (defn- allow
   "The confirm dialog's Allow of the safety question open in state."
@@ -1526,6 +1550,58 @@
     (testing "a projector that is there still takes them"
       (is (= items (get-in (piped-state s0 (first late)) [:chains :projector-effects test-projector-id :items])))
       (is (= 0.9 (get-in (piped-state s0 (second late)) [:chains :projector-effects test-projector-id :items 0 :params :gamma]))))))
+
+(deftest late-keyframe-and-modulator-writes-make-no-orphan-calibration-test
+  ;; Follow-up N7: the :keyframe/* writers took :projector-effects for any id
+  ;; as the :chain/* ones did (B11), so a late one could make a removed
+  ;; projector's chain again; the :modulator/* ones name their effect by its
+  ;; instance, and commit nothing for one that is gone either
+  (let [pin-id #uuid "00000000-0000-0000-0000-000000000002"
+        s0 (history/mark-clean state-with-projector)
+        removed (piped-state s0 {:event/type :projectors/remove :projector-id test-projector-id})
+        at {:domain :projector-effects :entity-key test-projector-id}
+        by-place (assoc at :effect-path [1])
+        by-instance (assoc at :effect-instance-id pin-id)
+        late [(merge by-place {:event/type :keyframe/toggle-enabled :enabled? true})
+              (merge by-place {:event/type :keyframe/update-setting :setting-key :period :fx/event 2.0})
+              (merge by-place {:event/type :keyframe/select :keyframe-idx 0})
+              (merge by-place {:event/type :keyframe/add :position 0.5})
+              (merge by-place {:event/type :keyframe/move :keyframe-idx 0 :new-position 0.2})
+              (merge by-place {:event/type :keyframe/delete :keyframe-idx 0})
+              (merge by-place {:event/type :keyframe/update-param :keyframe-idx 0 :param-key :tl-x :value -0.9})
+              (merge by-place {:event/type :keyframe/update-spatial-params :keyframe-idx 0 :point-id :tl :x -0.8 :y 0.8
+                               :param-map {:tl {:x :tl-x :y :tl-y}}})
+              (merge by-place {:event/type :keyframe/set-zone-value :keyframe-idx 0 :param-key :target-zone :value :zone/a})
+              (merge by-place {:event/type :keyframe/set-interpolation :keyframe-idx 0 :interpolation :step})
+              (merge by-place {:event/type :keyframe/set-driver :driver :pos-x})
+              (merge by-place {:event/type :keyframe/set-edge-behavior :edge-behavior :wrap})
+              (merge by-place {:event/type :keyframe/set-normalize :normalize? true})
+              (merge by-instance {:event/type :keyframe/update-color-param :keyframe-idx 0 :color [0.1 0.2 0.3]})
+              (merge by-instance {:event/type :modulator/toggle :param-key :tl-x :param-spec {:min -1.0 :max 1.0} :fx/event true})
+              (merge by-instance {:event/type :modulator/set-type :param-key :tl-x :mod-type :square
+                                  :param-spec {:min -1.0 :max 1.0}})
+              (merge by-instance {:event/type :modulator/update-param :param-key :tl-x :mod-param-key :max :fx/event 0.9})
+              (merge by-instance {:event/type :modulator/update-static-value :param-key :tl-x :fx/event 0.5})
+              (merge by-instance {:event/type :chain/update-color-param :color [0.1 0.2 0.3]})]]
+    (doseq [event late]
+      (testing (str (:event/type event))
+        (let [effects (events/handle-event-pipeline (assoc event :state removed :time 2000))
+              after (or (:state effects) removed)]
+          (is (nil? (:state effects)) "nothing to commit")
+          (is (not (contains? (get-in after [:chains :projector-effects]) test-projector-id)) "no orphan chain")
+          (is (= [(get-in removed [:project :dirty?]) (:history removed)] [(get-in after [:project :dirty?]) (:history after)])
+              "no unsaved change, no undo step"))))
+    (testing "nor into a chain an earlier build left for it"
+      (let [orphaned (assoc-in removed [:chains :projector-effects test-projector-id]
+                               (get-in s0 [:chains :projector-effects test-projector-id]))]
+        (doseq [event late]
+          (is (nil? (:state (events/handle-event-pipeline (assoc event :state orphaned :time 2000))))
+              (str (:event/type event))))))
+    (testing "a projector that is there still takes them"
+      (is (true? (get-in (piped-state s0 (first late))
+                         [:chains :projector-effects test-projector-id :items 1 :keyframe-modulator :enabled?])))
+      (is (= :sine (get-in (piped-state s0 (nth late 14))
+                           [:chains :projector-effects test-projector-id :items 1 :params :tl-x :type]))))))
 
 
 ;; Projector ids a show and the rig file can hold (follow-up B2)
@@ -1867,8 +1943,8 @@
   (let [live (-> (with-lsps)
                  (assoc-in [:projectors :b :safety] small)
                  (assoc-in [:backend :streaming :running?] true))
-        result (projectors/handle {:event/type :projectors/set-safety :projector-id :b
-                                   :safety {:limit [-1 -1 1 1]} :state live})]
+        result (projectors/handle {:event/type :projectors/drag-safety :projector-id :b :path [:limit]
+                                   :coordinates {0 -1.0 1 -1.0 2 1.0 3 1.0} :state live})]
     (is (guard/outputting? live :b) "01 §5.5: wanted without a host")
     (is (= small (get-in result [:state :projectors :b :safety])) "not applied yet")
     (is (true? (get-in result [:state :ui :dialogs :confirm :open?])) "Z1 asks first")))

@@ -450,8 +450,9 @@
   "state with the show's safety zone (through safety/normalize) and
    calibration for projector-id, a laser here (Use the show's…): nothing
    else of it changes. nil when the show has no laser with its stable id,
-   or the show's zone can't be read (refused, as set-safety refuses it). A
-   show's laser with no zone or calibration gives it none."
+   or the show's zone can't be read (refused, as every safety edit refuses
+   a zone it can't read). A show's laser with no zone or calibration gives
+   it none."
   [state hardware chains projector-id]
   (when-let [s (and (contains? (:projectors state) projector-id)
                     (some (fn [[s r]] (when (= r projector-id) s)) (pin-map state hardware)))]

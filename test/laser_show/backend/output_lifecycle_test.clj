@@ -310,7 +310,7 @@
     (dispatch! {:event/type :projectors/update-settings :projector-id :a :updates {:name "Renamed"}})
     (testing "zones plan Z3: nor do the fit guard, the safety limit or the rig's order"
       (dispatch! {:event/type :projectors/set-fit :projector-id :a :key :min-fps :value 30})
-      (dispatch! {:event/type :projectors/set-safety :projector-id :a :safety {:limit [-0.5 -0.5 0.5 0.5]}})
+      (dispatch! {:event/type :projectors/set-safety-coordinate :projector-id :a :path [:limit 0] :value -0.5})
       (dispatch! {:event/type :rig/move-projector :projector-id :a :target :b :side :before}))
     (is (= [:all :left] (get-in (state/get-raw-state) [:projectors :a :zone-groups])))
     (is (= 30 (get-in (state/get-raw-state) [:projectors :a :fit :min-fps])))

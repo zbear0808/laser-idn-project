@@ -369,17 +369,19 @@
                (assoc-in [:projectors :p1 :safety] small)
                (assoc-in [:projectors :p2 :safety] {:limit [-0.9 -0.9 0.9 0.9] :blocked []})
                (history/mark-clean))
-        zone #(get-in % [:projectors :p1 :safety])]
+        zone #(get-in % [:projectors :p1 :safety])
+        drag (fn [coordinates & {:as more}]
+               (merge {:event/type :projectors/drag-safety :projector-id :p1 :path [:limit] :coordinates coordinates} more))
+        whole {0 -1.0 1 -1.0 2 1.0 3 1.0}]
     (testing "smaller goes through"
-      (doseq [event [{:event/type :projectors/set-safety :projector-id :p1
-                      :safety (assoc small :limit [-0.4 -0.5 0.5 0.5])}
+      (doseq [event [(drag {0 -0.4})
                      {:event/type :projectors/add-blocked-area :projector-id :p1}]]
         (let [s (run (lock s0) event)]
           (is (not= small (zone s)) (str (:event/type event) " applied"))
           (is (nil? (get-in s [:ui :show-lock-notice])) (str (:event/type event) ": no notice")))))
     (testing "larger is refused, and says why"
-      (doseq [event [{:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-1 -1 1 1]}}
-                     {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-1 -1 1 1]} :confirmed? true}
+      (doseq [event [(drag whole)
+                     (drag whole :confirmed? true)
                      {:event/type :projectors/remove-blocked-area :projector-id :p1 :index 0}
                      {:event/type :projectors/copy-safety :from :p2 :to [:p1]}]]
         (let [effects (handle (lock s0) event)
@@ -393,14 +395,14 @@
         (is (= small (get-in s [:projectors :p2 :safety])))))
     (testing "Allow on a question asked before the lock went on is refused too"
       (let [live (-> s0 (assoc-in [:backend :streaming :running?] true))
-            asked (run live {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-1 -1 1 1]}})
+            asked (run live (drag whole))
             _ (is (get-in asked [:ui :dialogs :confirm :open?]) "unlocked and live, it asks")
-            allowed (run (lock asked) {:event/type :ui/confirm})]
+            allowed (run (lock asked) {:event/type :ui/confirm
+                                       :review-id (get-in asked [:ui :dialogs :confirm :safety-review :id])})]
         (is (= small (zone allowed)))
         (is (= "Larger safety zone refused" (get-in allowed [:ui :show-lock-notice :text])))))
     (testing "unlocked, a larger area on a laser that isn't streaming applies at once"
-      (is (= [-1.0 -1.0 1.0 1.0] (:limit (zone (run s0 {:event/type :projectors/set-safety :projector-id :p1
-                                                         :safety {:limit [-1 -1 1 1]}}))))))))
+      (is (= [-1.0 -1.0 1.0 1.0] (:limit (zone (run s0 (drag whole)))))))))
 
 (deftest coordinate-and-reset-respect-current-review-test
   ;; plans/2026-11-23-cljfx-reactivity/08 §6, §7 examples 3-5: a coordinate

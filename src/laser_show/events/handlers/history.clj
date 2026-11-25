@@ -257,7 +257,6 @@
    :projectors/add-manual "Add Projector"
    :projectors/submit-manual-form "Add Projector"
    :projectors/remove "Remove Projector"
-   :projectors/set-safety "Change Safety Zone"
    :projectors/set-safety-coordinate "Change Safety Zone"
    :projectors/drag-safety "Change Safety Zone"
    :projectors/reset-safety "Reset Safety Zone"
