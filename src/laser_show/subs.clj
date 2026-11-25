@@ -398,6 +398,37 @@
   [context col row]
   (chains/stored-effect-content (fx/sub-val context get-in [:chains :effect-chains [col row] :items])))
 
+;; What the selectors about the whole effects grid read of it (follow-up
+;; R3): which cells there are, and each cell's own part, so a cell switched
+;; on or off, or an effect's parameter, runs none of them again
+
+(defn- effect-cells
+  "The effects cells there are, as a set of [col row]: only a cell added or
+   taken away changes it, not what one holds or its switch."
+  [context]
+  (set (keys (fx/sub-val context get-in [:chains :effect-chains]))))
+
+(defn- effect-cell-stores
+  "What the effects cell at [col row] stores, on or off, in disabled groups
+   too (stored-effect-cell): {:effect? (an effect, but for a cell whose one
+   effect is a Master: effects-grid-empty?) :zone-pattern? :map-cycle?}.
+   Only that cell's items."
+  [context col row]
+  (let [leaves (:leaves (fx/sub-ctx context stored-effect-cell col row))
+        ids (into #{} (map :effect-id) leaves)]
+    {:effect? (boolean (and (seq leaves)
+                            (not (and (= 1 (count leaves))
+                                      (faders/master-only?
+                                       {:items (fx/sub-val context get-in [:chains :effect-chains [col row] :items])})))))
+     :zone-pattern? (contains? ids :zone-pattern)
+     :map-cycle? (contains? ids :zone-map-cycle)}))
+
+(defn- some-effect-cell?
+  "Does an effects cell store k (a key of effect-cell-stores)?"
+  [context k]
+  (boolean (some (fn [[col row]] (k (fx/sub-ctx context effect-cell-stores col row)))
+                 (fx/sub-ctx context effect-cells))))
+
 (defn effect-cell-display-data
   "Computed display data for an effects grid cell.
    
@@ -444,13 +475,9 @@
    (vibes.faders/master-only?) doesn't count, so a new project's grid, which
    has one, still says what effect cells are for. A Master with a disabled
    effect beside it, or disabled itself, counts. Only the Effects tab's
-   hint follows it."
+   hint follows it. Each cell's part is its own (effect-cell-stores)."
   [context]
-  (not-any? (fn [cell]
-              (let [leaves (:leaves (chains/stored-effect-content (:items cell)))]
-                (and (seq leaves)
-                     (not (and (= 1 (count leaves)) (faders/master-only? cell))))))
-            (vals (fx/sub-val context get-in [:chains :effect-chains]))))
+  (not (some-effect-cell? context :effect?)))
 
 
 ;; Level 2: The effect and modulator registries, as data
@@ -1412,24 +1439,32 @@
   [context zones]
   (zone-patterns/fold-text (fx/sub-ctx context pattern-fold-world) {:zones zones} (fx/sub-ctx context fold-names)))
 
-(defn- holds-effect?
-  "Does an effects cell's chain store an effect-id, on or off, in a
-   disabled group or not (chains/stored-effect-content)?"
-  [effect-id chain]
-  (boolean (some #(= effect-id (:effect-id %)) (:leaves (chains/stored-effect-content (:items chain))))))
+(defn- cue-cells
+  "The cue cells there are, as a set of [col row]: only a cue added or taken
+   away changes it."
+  [context]
+  (set (keys (fx/sub-val context get-in [:chains :cue-chains]))))
+
+(defn- cue-has-zone-patterns?
+  "Does the cue at [col row] have a zone pattern, on or off?"
+  [context col row]
+  (boolean (seq (fx/sub-val context get-in [:chains :cue-chains [col row] :zone-patterns]))))
 
 (defn zone-patterns-in-use?
   "Does the show have a zone pattern anywhere, on or off: on a cue, or in
-   an effects cell (07 §7.3)? The pattern pads show then."
+   an effects cell (07 §7.3)? The pattern pads show then. Each cue's and
+   each cell's part is its own (cue-has-zone-patterns?, effect-cell-stores):
+   a cue renamed or a cell switched on or off runs it not again."
   [context]
   (boolean
-   (or (some (comp seq :zone-patterns) (vals (fx/sub-val context get-in [:chains :cue-chains])))
-       (some #(holds-effect? :zone-pattern %) (vals (fx/sub-val context get-in [:chains :effect-chains]))))))
+   (or (some (fn [[col row]] (fx/sub-ctx context cue-has-zone-patterns? col row))
+             (fx/sub-ctx context cue-cells))
+       (some-effect-cell? context :zone-pattern?))))
 
 (defn- map-cycles?
   "Is there a Map cycle in an effects cell, on or off?"
   [context]
-  (boolean (some #(holds-effect? :zone-map-cycle %) (vals (fx/sub-val context get-in [:chains :effect-chains])))))
+  (some-effect-cell? context :map-cycle?))
 
 (defn zone-map-pads-shown?
   "Do the zone map pads show: while the show draws into a zone (Z4-Q1 A),

@@ -4,6 +4,7 @@
    [cljfx.api :as fx]
    [clojure.core.cache :as cache]
    [clojure.test :refer [deftest is testing]]
+   [laser-show.animation.chains :as chains]
    [laser-show.animation.effects :as effects]
    [laser-show.animation.effects.calibration]
    [laser-show.animation.effects.color]
@@ -230,6 +231,50 @@
             "a pattern and a scale in a disabled group")
         (is (true? (empty? (assoc-in mastered [:chains :effect-chains [2 0]] {:items [{:type :group :items []}]})))
             "a group alone: no effect yet")))))
+
+(deftest grid-content-selectors-read-only-the-cells-that-change-test
+  ;; Follow-up R3: effects-grid-empty?, zone-patterns-in-use? and the Map
+  ;; cycle check read the whole of each grid, so a cell switched on or off,
+  ;; an effect's parameter or another cue's name ran them again, and walked
+  ;; every effects cell (chains/stored-effect-content) each time
+  (let [runs (atom {})
+        walks (atom 0)
+        counted (fn [k v] (let [f @v] (fn [& args] (swap! runs update k (fnil inc 0)) (apply f args))))
+        stored-effect-content chains/stored-effect-content]
+    (with-redefs-fn {#'subs/effects-grid-empty? (counted :empty? #'subs/effects-grid-empty?)
+                     #'subs/zone-patterns-in-use? (counted :patterns? #'subs/zone-patterns-in-use?)
+                     #'subs/map-cycles? (counted :cycles? #'subs/map-cycles?)
+                     #'chains/stored-effect-content (fn [items] (swap! walks inc) (stored-effect-content items))}
+      #(let [s (-> (templates/apply-starter-effects (domains/build-initial-state))
+                   (assoc-in [:chains :effect-chains [1 0]] {:active? true :items [{:id :sc :effect-id :scale :enabled? true
+                                                                                    :params {:x-scale 1.0}}]})
+                   (assoc-in [:chains :effect-chains [2 0]] {:active? false :items [(assoc (zone-patterns/cycle-instance) :id :cy)]})
+                   (assoc-in [:chains :cue-chains [0 0]] {:name "Intro" :items [{:id :c :type :preset :preset-id :circle}]}))
+             shown (fn [ctx] [(fx/sub-ctx ctx subs/effects-grid-empty?)
+                              (fx/sub-ctx ctx subs/zone-patterns-in-use?)
+                              (fx/sub-ctx ctx subs/zone-map-pads-shown?)])
+             step (fn [ctx f]
+                    (reset! runs {})
+                    (reset! walks 0)
+                    (let [ctx' (fx/swap-context ctx f)]
+                      [ctx' {:shown (shown ctx') :runs @runs :walks @walks}]))
+             ctx0 (context s)
+             _ (is (= [false false true] (shown ctx0)) "an effect and a Map cycle stored, no pattern")
+             [ctx1 switched] (step ctx0 (fn [s] (assoc-in s [:chains :effect-chains [1 0] :active?] false)))
+             [ctx2 tuned] (step ctx1 (fn [s] (assoc-in s [:chains :effect-chains [1 0] :items 0 :params :x-scale] 1.5)))
+             [ctx3 renamed] (step ctx2 (fn [s] (assoc-in s [:chains :cue-chains [0 0] :name] "Verse")))
+             [ctx4 patterned] (step ctx3 (fn [s] (assoc-in s [:chains :cue-chains [0 0] :zone-patterns]
+                                                           [(assoc (zone-patterns/preset-instance :alternate :cue) :id :zp)])))
+             [_ emptied] (step ctx4 (fn [s] (update-in s [:chains :effect-chains] dissoc [1 0] [2 0])))]
+         (testing "a cell switched off: no selector runs, no cell is walked"
+           (is (= {:shown [false false true] :runs {} :walks 0} switched)))
+         (testing "an effect's parameter: that cell walked again, no selector runs"
+           (is (= {:shown [false false true] :runs {} :walks 1} tuned)))
+         (testing "a cue renamed: nothing"
+           (is (= {:shown [false false true] :runs {} :walks 0} renamed)))
+         (testing "what the grids store still counts, on or off (plan 11)"
+           (is (= [false true true] (:shown patterned)) "a cue's pattern: the pattern pads show")
+           (is (= [true true true] (:shown emptied)) "the Master alone left among the effects; the map pads show for the cue's pattern"))))))
 
 
 ;; Both grids: an edit builds again only the cells it changes
