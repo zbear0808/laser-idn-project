@@ -30,9 +30,12 @@
 ;; succeeded (:file/confirm-save). Open's chooser comes back later, so its
 ;; result carries the permission it was opened with (discard-authorization),
 ;; and :file/project-loaded asks again when that no longer covers the show
-;; open by then (may-discard?), parked as an Open of the file picked. So does
-;; an Exit that comes back later: Try again's, once the rig is written, and
-;; Exit's own, once it has waited for the rig writer (wait-for-the-rig).
+;; open by then (may-discard?), parked as an Open of the file picked; while
+;; the dialog asks something else, that Open waits behind the question
+;; ([:ui :dialogs :unsaved-confirm :queued], ask-again) and comes back once
+;; it is answered (then-queued). So does an Exit that comes back later: Try
+;; again's, once the rig is written, and Exit's own, once it has waited for
+;; the rig writer (wait-for-the-rig).
 
 (def ^:private confirm-path [:ui :dialogs :unsaved-confirm])
 
@@ -60,6 +63,12 @@
        (rig-autosave/writable? state)
        (< (get-in state [:rig-file :written] 0) (get-in state [:rig-file :requested] 0))))
 
+(defn- parked-request
+  "event as the dialog keeps it: what it is, and its :file-path when it has
+   one."
+  [event]
+  (select-keys event [:event/type :file-path]))
+
 (defn- ask-first
   "Open the unsaved-changes dialog for event (ignored if it is already open),
    parked with its :file-path when it has one."
@@ -68,7 +77,37 @@
     {:state state}
     {:state (update-in state confirm-path assoc
                        :open? true
-                       :pending (select-keys event [:event/type :file-path]))}))
+                       :pending (parked-request event))}))
+
+(defn- ask-again
+  "ask-first for an Open asked about again once its chooser came back
+   (handle-file-project-loaded). While the dialog asks something else, it
+   isn't dropped: it waits behind that question, once, in :queued, carrying
+   a permission that throws away no unsaved changes, so when it comes back
+   after the answer (then-queued) it opens only a show with nothing
+   unsaved, and asks again otherwise."
+  [state event]
+  (let [{:keys [open? pending queued]} (get-in state confirm-path)
+        parked (parked-request event)]
+    (cond
+      (not open?) (ask-first state event)
+      (or (= parked (parked-request pending)) (some #(= parked (parked-request %)) queued)) {:state state}
+      :else (do (log/info "Asking about" (:event/type parked) (:file-path parked) "once the question open now is answered")
+                {:state (update-in state (conj confirm-path :queued) (fnil conj [])
+                                   (assoc parked :authorized {:document-id (h/document-id state) :dirty? false}))}))))
+
+(defn- then-queued
+  "effects of an answer to the dialog's question, and after them the
+   requests that waited in state's dialog for it (ask-again), in the order
+   they came: each is sent again as it was, so it asks its own question, if
+   it still has one, once the answer has done what it does."
+  [effects state]
+  (if-let [queued (seq (get-in state (conj confirm-path :queued)))]
+    (let [{answer :dispatch} effects]
+      (-> effects
+          (dissoc :dispatch)
+          (assoc :dispatch-n (into (if answer [answer] []) queued))))
+    effects))
 
 (defn- discard-authorization
   "The permission to throw the open show away, as it was when given (Open's
@@ -108,7 +147,7 @@
                                  :authorized (or authorized (discard-authorization state))})}))
 
 (defn- close-confirm [state]
-  (update-in state confirm-path #(-> % (assoc :open? false :pending nil) (dissoc :reason :error))))
+  (update-in state confirm-path #(-> % (assoc :open? false :pending nil) (dissoc :reason :error :queued))))
 
 (defn- handle-file-new-project
   "Replace the document with a fresh starter project.
@@ -197,11 +236,12 @@
    it was replaced, or has unsaved changes it didn't have when the chooser
    opened), nothing is replaced either: the unsaved-changes dialog asks
    again, parked as an Open of file-path, so Don't Save and Save go on to
-   that file."
+   that file; while it asks something else, after that question
+   (ask-again)."
   [{:keys [state file-path contents authorized]}]
   (if (and authorized (not (may-discard? state authorized)))
     (do (log/info "The show changed while" (file-name file-path) "was being chosen: asking before opening it")
-        (ask-first state {:event/type :file/open-result :file-path file-path}))
+        (ask-again state {:event/type :file/open-result :file-path file-path}))
     (if-let [opened (try
                       (prepare-open state contents file-path)
                       (catch Exception e
@@ -334,39 +374,47 @@
   (get-in state (conj confirm-path :pending)))
 
 (defn- handle-file-confirm-cancel
-  "Cancel: drop the parked action; the document stays as it is."
+  "Cancel: drop the parked action; the document stays as it is. A request
+   that waited for the answer comes back (then-queued)."
   [{:keys [state]}]
-  {:state (close-confirm state)})
+  (then-queued {:state (close-confirm state)} state))
 
 (defn- handle-file-confirm-discard
-  "Don't Save: carry on with the parked action, unsaved changes and all."
+  "Don't Save: carry on with the parked action, unsaved changes and all,
+   then with the requests that waited for the answer (then-queued)."
   [{:keys [state]}]
   (let [pending (pending-action state)]
-    (cond-> {:state (close-confirm state)}
-      pending (assoc :dispatch (assoc pending :force? true)))))
+    (then-queued (cond-> {:state (close-confirm state)}
+                   pending (assoc :dispatch (assoc pending :force? true)))
+                 state)))
 
 (defn- handle-file-confirm-save
   "Save: write the project (asking for a file name first if it has none), then
    carry on with the parked action once the write has succeeded. Cancelling the
-   file chooser or a failed write ends the chain with nothing lost."
+   file chooser or a failed write ends the chain with nothing lost. The
+   requests that waited for the answer come back after the save's own
+   effects (then-queued)."
   [{:keys [state] :as event}]
   (let [pending (pending-action state)
         closed (close-confirm state)]
-    (if pending
-      (handle-file-save (assoc event
-                               :state closed
-                               :then (assoc pending :force? true)))
-      {:state closed})))
+    (then-queued (if pending
+                   (handle-file-save (assoc event
+                                            :state closed
+                                            :then (assoc pending :force? true)))
+                   {:state closed})
+                 state)))
 
 (defn- handle-file-confirm-retry
   "The rig's question, Try again: write the rig now, and carry on with the
    parked Exit once it is written; that Exit asks about an edit made
    meanwhile (its :authorized). Another failure ends the chain, with the
-   rig's status line saying why."
+   rig's status line saying why. The requests that waited for the answer
+   come back (then-queued)."
   [{:keys [state]}]
   (let [pending (pending-action state)]
-    (cond-> {:state (close-confirm state)}
-      pending (assoc :dispatch {:event/type :rig/retry-write :then (assoc pending :force? true)}))))
+    (then-queued (cond-> {:state (close-confirm state)}
+                   pending (assoc :dispatch {:event/type :rig/retry-write :then (assoc pending :force? true)}))
+                 state)))
 
 
 ;; Edit Menu Events

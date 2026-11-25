@@ -15,11 +15,12 @@
    release with none (a learn caught the press, it played nothing, or it
    was retired) ends nothing. A source that can't send its releases any
    more retires its keys' activations (:trigger/retire): a MIDI input
-   disconnected or MIDI switched off, the OSC server stopped or OSC switched
-   off (handlers/input.clj). The keyboard's and the gamepad's releases
-   still come when they are switched off or lose their window or
-   controller, and New or Open forgets every activation
-   (state.persistent/reset-session)."
+   disconnected or MIDI switched off, the OSC server stopped, moved to
+   another port or OSC switched off (handlers/input.clj), and MIDI's All
+   Notes Off, which says every key is up (handlers/input_mapper.clj). The
+   keyboard's and the gamepad's releases still come when they are switched
+   off or lose their window or controller, and New or Open forgets every
+   activation (state.persistent/reset-session)."
   (:refer-clojure :exclude [bound?])
   (:require [clojure.tools.logging :as log]
             [laser-show.input.events :as input-events]
@@ -273,7 +274,8 @@
 
 (defn- handle-retire
   "Retire the activations of source's keys, whose releases can't come any
-   more (handlers/input.clj: its device disconnected or switched off). What
+   more (handlers/input.clj: its device disconnected or switched off, the
+   OSC server moved; MIDI's All Notes Off, handlers/input_mapper.clj). What
    each holds lets go now, quietly: a momentary cell's release, a vibe role
    let go of as :vibe/release-all does (so it neither switches nor locks
    nor goes on to the next vibe). Nothing else plays: a toggled cue stays

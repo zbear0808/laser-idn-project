@@ -39,19 +39,24 @@
 (defn- py [y]
   (+ 10.0 (* (/ (- 1.0 y) 2.0) 240.0)))
 
+(defn- mouse-event!
+  "Fire one primary-button mouse event at node's local (x, y), as a real
+   mouse sends it, on the FX thread this runs on."
+  [^Node node event-type x y]
+  (let [scene (.localToScene node (double x) (double y))
+        screen (.localToScreen node (double x) (double y))]
+    (Event/fireEvent node
+                     (MouseEvent. event-type (.getX scene) (.getY scene) (.getX screen) (.getY screen)
+                                  MouseButton/PRIMARY 1 false false false false
+                                  (not= event-type MouseEvent/MOUSE_RELEASED) false false
+                                  false false false nil))))
+
 (defn- fire-canvas!
   "Fire one primary-button mouse event at the canvas's local (x, y), as a
    real mouse sends it (headless, a robot drag loses its button)."
   [event-type x y]
   (let [^Node node (ui/query "#safety-canvas")]
-    (ui/on-fx-thread
-     #(let [scene (.localToScene node (double x) (double y))
-            screen (.localToScreen node (double x) (double y))]
-        (Event/fireEvent node
-                         (MouseEvent. event-type (.getX scene) (.getY scene) (.getX screen) (.getY screen)
-                                      MouseButton/PRIMARY 1 false false false false
-                                      (not= event-type MouseEvent/MOUSE_RELEASED) false false
-                                      false false false nil))))
+    (ui/on-fx-thread #(mouse-event! node event-type x y))
     (ui/sync-fx!)))
 
 (defn- fire-press-and-drag!
@@ -127,6 +132,57 @@
     (is (< (Math/abs x0) 1e-6) "it moved right by 24 px (0.2): from -0.2 to 0")
     (is (< (Math/abs (- 0.4 (- x1 x0))) 1e-6) "its size stayed")
     (is (= [-0.2 0.2] [y0 y1]))))
+
+(deftest a-field-and-a-drag-from-one-render-both-stay-test
+  ;; Follow-up B3: a drag sends the numbers it moves, never the zone it was
+  ;; drawn with, so a field's edit that lands after that render stays
+  (with-projector! {:limit [-0.8 -0.8 0.8 0.8] :blocked []})
+  (ui/click! (ui/robot) "#projectors-tab")
+  (ui/wait-for! #(some? (ui/query "#safety-canvas")))
+  (testing "Enter in x0, then a drag of the right edge in, before the editor shows the first"
+    (in-one-render! (fn [find]
+                      (enter! (find "#safety-limit-x0") "-0.6")
+                      (let [canvas (find "#safety-canvas")]
+                        (mouse-event! canvas MouseEvent/MOUSE_PRESSED (px 0.8) (py 0.0))
+                        (doseq [i (range 1 5)]
+                          (mouse-event! canvas MouseEvent/MOUSE_DRAGGED (- (px 0.8) (* 10.0 i)) (py 0.0)))
+                        (mouse-event! canvas MouseEvent/MOUSE_RELEASED (- (px 0.8) 40.0) (py 0.0)))))
+    (ui/wait-for! #(< (get-in (zone) [:limit 2]) 0.5))
+    (ui/wait-for! #(nil? (get-in (app-state) [:history :transaction])))
+    (is (= -0.6 (get-in (zone) [:limit 0])) "the field's edit stays")
+    (is (< 0.4 (get-in (zone) [:limit 2]) 0.5) "and the drag moved its edge")
+    (is (= [-0.8 0.8] [(get-in (zone) [:limit 1]) (get-in (zone) [:limit 3])]))
+    (is (= ["Change Safety Zone" "Change Safety Zone"] (mapv :description (get-in (app-state) [:history :undo-stack])))
+        "one undo step each")
+    (ui/assert-text! "#safety-limit-x0" "-0.60")))
+
+(deftest a-drag-out-asks-and-its-allow-gives-only-that-zone-test
+  ;; Follow-up B3: the drag's question is one of its own; its Allow applies
+  ;; only to the zone it asked about
+  (let [robot (ui/robot)
+        question "Allow light in a larger area?"]
+    (with-projector! {:limit [-0.8 -0.8 0.8 0.8] :blocked []} :running? true)
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(some? (ui/query "#safety-canvas")))
+    (testing "a drag out asks on release, and Allow sets the edge it moved"
+      (fire-canvas-drag! [(px 0.8) (py 0.0)] [(+ (px 0.8) 18.0) (py 0.0)])
+      (ui/wait-for! #(some #{question} (ui/window-titles)))
+      (is (= [-0.8 -0.8 0.8 0.8] (:limit (zone))) "nothing changes before the answer")
+      (ui/click! robot "#confirm-ok")
+      (ui/wait-for! #(< 0.9 (get-in (zone) [:limit 2])))
+      (is (= [-0.8 -0.8 0.8] (mapv #(get-in (zone) [:limit %]) [0 1 3])))
+      (ui/wait-for! #(not (some #{question} (ui/window-titles)))))
+    (testing "an edit of the zone while it asks: the old Allow writes nothing, and says so"
+      (with-projector! {:limit [-0.8 -0.8 0.8 0.8] :blocked []} :running? true)
+      (ui/wait-for! #(= "0.80" (ui/node-text "#safety-limit-x1")))
+      (fire-canvas-drag! [(px 0.8) (py 0.0)] [(+ (px 0.8) 18.0) (py 0.0)])
+      (ui/wait-for! #(some #{question} (ui/window-titles)))
+      (events/dispatch! {:event/type :projectors/set-safety-coordinate :projector-id :a :path [:limit 0] :value -0.6})
+      (ui/wait-for! #(= -0.6 (get-in (zone) [:limit 0])))
+      (ui/click! robot "#confirm-ok")
+      (ui/wait-for! #(= "Safety zone changed; review the edit again" (get-in (app-state) [:ui :notice :text])))
+      (is (= {:limit [-0.6 -0.8 0.8 0.8] :blocked []} (zone)) "the newer edit stays, and the drag doesn't land")
+      (ui/wait-for! #(not (some #{question} (ui/window-titles)))))))
 
 (deftest add-and-remove-a-blocked-area-test
   (let [robot (ui/robot)]

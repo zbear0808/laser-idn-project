@@ -204,6 +204,28 @@
         (is (= "9100" (port-text)))
         (is (not (ui/enabled? "#osc-port-field")) "listening: the port can't be edited")))))
 
+(defn- status-text [] (ui/node-text "#osc-server-status"))
+
+(deftest the-status-shows-where-the-server-listens-test
+  ;; Reactivity follow-up B13: a port set while listening (programmatically:
+  ;; the field is disabled then) waits for the next Start, which moves the
+  ;; server there (input.devices)
+  (with-fake-osc-server
+    (fn [opened]
+      (open-settings!)
+      ;; Fired, not clicked: the card can be below the tab's scrolled view
+      (ui/on-fx-thread #(.fire ^Button (first (ui/query-all "#osc-server-button"))))
+      (ui/wait-for! #(= "Listening on port 9000" (status-text)))
+      (events/dispatch! {:event/type :input/osc-set-port :port 9100})
+      (is (events/flush!))
+      (ui/wait-for! #(= "9100" (port-text)))
+      (is (= "Listening on port 9000" (status-text)) "the server still listens on 9000")
+      (is (= {:midi #{} :osc 9000} (devices/open-ports)))
+      (events/dispatch! {:event/type :input/osc-start-server})
+      (ui/wait-for! #(= "Listening on port 9100" (status-text)))
+      (is (= [9000 9100] @opened) "the next Start moved it")
+      (is (= {:midi #{} :osc 9100} (devices/open-ports))))))
+
 (deftest port-field-takes-only-a-port-test
   (let [robot (ui/robot)]
     (open-settings!)

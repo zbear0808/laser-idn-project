@@ -102,18 +102,21 @@
 
 (def ^:private instance-addressed
   "The events that name their effect by its instance, not by its place: a
-   modulator's field edits (reactivity plan 07,
-   chain-helpers/resolve-effect-instance-path)."
-  #{:modulator/update-param :modulator/set-type :modulator/update-static-value})
+   modulator's toggle and its field edits (reactivity plan 07,
+   chain-helpers/resolve-effect-instance-path), and an effect's colour
+   edits (follow-up N2)."
+  #{:modulator/toggle :modulator/update-param :modulator/set-type :modulator/update-static-value
+    :chain/update-color-param :keyframe/update-color-param})
 
 (defn pattern-edit?
   "Is event an edit of a zone pattern or a Map cycle (zones plan Z5): a
    chain, modulator or keyframe event on a cue's patterns (the domain
    :cue-zone-patterns, the pattern window's), or on a zone pattern or Map
-   cycle in an effects cell (the item at :effect-path, or for a modulator's
-   field edit the effect with its instance's id, wherever it is now)? Where
-   the pictures go is structure, as a target is (Z4-Q4 A); a point
-   effect's edit in a cell goes through, as before."
+   cycle in an effects cell (the item at :effect-path, or for an edit that
+   names its effect by its instance, instance-addressed, the effect with
+   that id, wherever it is now)? Where the pictures go is structure, as a
+   target is (Z4-Q4 A); a point effect's edit in a cell goes through, as
+   before."
   [{:keys [event/type domain entity-key effect-path state] :as event}]
   (boolean
    (and (keyword? type)
@@ -132,16 +135,18 @@
 
 (def safety-edits
   "The safety zone edits (zones plan Z1). The lock refuses one only when it
-   would make a zone larger: a coordinate edit or Reset by the change it
-   proposes (reviewed-widening), the others by a dry run (widens-a-zone?)."
-  #{:projectors/set-safety :projectors/set-safety-coordinate :projectors/reset-safety
+   would make a zone larger: a coordinate edit, Reset, a drag, a blocked
+   area's removal or a Copy by the change it proposes (reviewed-widening),
+   adding a blocked area by a dry run (widens-a-zone?)."
+  #{:projectors/set-safety-coordinate :projectors/reset-safety :projectors/drag-safety
     :projectors/add-blocked-area :projectors/remove-blocked-area :projectors/copy-safety})
 
 (def ^:private reviewed-edits
   "The safety edits whose handler trusts no :confirmed? on the event, only an
-   answer to their own question (safety-guard/review-answer): a dry run
-   with :confirmed? true would only ask."
-  #{:projectors/set-safety-coordinate :projectors/reset-safety})
+   answer to their own question (safety-guard/review-answer): judged by the
+   change they propose, as a dry run would only ask."
+  #{:projectors/set-safety-coordinate :projectors/reset-safety :projectors/drag-safety
+    :projectors/remove-blocked-area :projectors/copy-safety})
 
 (def ^:private larger-zone-refused "Larger safety zone refused")
 
@@ -164,29 +169,34 @@
   (true? (get-in state [:ui :show-lock?])))
 
 (defn- widens-a-zone?
-  "Would event, answered yes, give any projector a larger safety zone? The
-   handler is pure, so it runs once more here with :confirmed? true."
+  "Would event give any projector a larger safety zone? The handler is
+   pure, so it runs once more here."
   [handler {:keys [state] :as event}]
-  (let [after (:state (handler (assoc event :confirmed? true)))]
+  (let [after (:state (handler event))]
     (boolean (some (fn [id] (safety/widens? (get-in state [:projectors id :safety])
                                             (get-in after [:projectors id :safety])))
                    (keys (:projectors after))))))
 
 (defn- reviewed-widening
-  "The state to refuse a coordinate edit or Reset from when the change it
-   proposes now (guard/zone-edit-proposal) makes its zone larger, outputting
-   or not; else nil. An answer to its own open question is judged by the
-   intent the question asked about, and refused from the state with that
-   question closed, so the dialog doesn't stay open. A stale answer goes on
-   to its handler, which writes nothing."
+  "The state to refuse a reviewed edit from (a coordinate edit, Reset, a
+   drag, a blocked area's removal, a Copy) when the change it proposes now
+   (guard/proposal-widens?) makes a zone larger, outputting or not; else
+   nil. An answer to its own open question is judged by the intent the
+   question asked about, and refused from the state with that question
+   closed, so the dialog doesn't stay open. A stale answer goes on to its
+   handler, which writes nothing."
   [{:keys [state review-id] :as event}]
-  (let [widens? (fn [intent]
-                  (let [{:keys [before after same?] :as proposal} (guard/zone-edit-proposal state intent)]
-                    (and proposal (not same?) (safety/widens? before after))))]
-    (if (some? review-id)
-      (when-let [{:keys [intent closed stale?]} (guard/review-answer state event)]
-        (when (and (not stale?) (widens? intent)) closed))
-      (when (widens? event) state))))
+  (if (some? review-id)
+    (when-let [{:keys [intent closed stale?]} (guard/review-answer state event)]
+      (when (and (not stale?) (guard/proposal-widens? state intent)) closed))
+    (when (guard/proposal-widens? state event) state)))
+
+(defn- answered
+  "state with the question event answers closed when it is the Allow of its
+   own open safety question (guard/review-answer: an Undo's or a Redo's), so
+   a refused answer leaves no dialog open; else state."
+  [state event]
+  (or (:closed (guard/review-answer state event)) state))
 
 (defn- refuse
   "state with the notice that the lock refused an event of type: under the
@@ -198,12 +208,15 @@
 (defn wrap-show-lock
   "The pipeline's innermost wrapper around handler: while the lock is on, a
    blocked event's result is the notice and nothing else, and so is a safety
-   zone edit that would make a zone larger."
+   zone edit that would make a zone larger. A paste back from the OS
+   clipboard for a show New or Open has replaced (h/stale-paste?) is
+   nothing at all, as it is with the lock off: no refusal, no notice."
   [handler]
   (fn [{:keys [state event/type] :as event}]
     (cond
       (not (locked? state)) (handler event)
-      (contains? blocked-events type) (refuse state type (refused-text type))
+      (h/stale-paste? state event) {}
+      (contains? blocked-events type) (refuse (answered state event) type (refused-text type))
       (pattern-edit? event) (refuse state type pattern-edit-refused)
       (contains? reviewed-edits type) (if-let [from (reviewed-widening event)]
                                         (refuse from type larger-zone-refused)

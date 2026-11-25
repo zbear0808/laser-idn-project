@@ -3,7 +3,9 @@
    keeps the frame of its last driver call that returned normally, and when
    it returned (streaming-engine/thumbnail), owned by the run and session
    that made the call; output-runtime/thumbnail-observation reads it by
-   projector id. Through the real registry, sanitizer, streaming loop and
+   projector id. The same runs own the errors its status shows (follow-up
+   B10): a stopped run's late call reports nothing for the run after it.
+   Through the real registry, sanitizer, streaming loop and
    error branch, with a recording driver whose sends the test holds and
    releases, a scripted provider, a frame signal released by hand and a fake
    observation clock (timing/nanotime). A return says that the call
@@ -416,3 +418,60 @@
           (output-runtime/drain! 2000)
           (is (= :off (observation :p)))
           (is (= :off (observation :q))))))))
+
+(deftest a-stopped-run-s-late-outcome-isn-t-its-replacement-s-error-test
+  ;; Follow-up B10: driver errors went under [:engine id] whichever run made
+  ;; the call, so a replacement engine's status showed what a stopped one's
+  ;; late send threw, a stopped one's late return cleared the replacement's
+  ;; own error, and an error the old run left showed until the new one sent
+  (let [{:keys [frame pulse!] :as p} (lane :p)
+        projectors {:p (projector :p)}
+        state-of (fn [] (get-in (output-runtime/status) [:projectors :p :state]))
+        engine-error? (fn [] (contains? (output-errors/snapshot) [:engine :p]))
+        stop! (fn []
+                (output-runtime/submit-stop!)
+                (eventually #(and (empty? (output-runtime/registry)) (= :off (observation :p)))))
+        start! (fn []
+                 (output-runtime/submit-sync! projectors)
+                 (opened! :p))
+        held-across-a-restart! (fn [step]
+                                 (let [entered (promise)
+                                       release (gate)
+                                       ^Thread old-thread @(:thread (engine-of :p))]
+                                   (script! p (assoc step :entered entered :gate release))
+                                   (pulse!)
+                                   (is (deref entered 3000 false) "the send is held in the driver")
+                                   (is (stop!) "Stop gives up on it after its bounded join")
+                                   (is (start!) "the same id, a new engine")
+                                   [release old-thread]))]
+    (reset! frame (lit 0.0))
+    (with-lanes [p]
+      (fn []
+        (is (start!))
+        (is (returned! p))
+        (testing "a stopped engine's send that throws late reports nothing for the new run"
+          (let [[release ^Thread old-thread] (held-across-a-restart! {:fail true})]
+            (is (returned! p))
+            (is (= :streaming (state-of)))
+            (deliver release true)
+            (is (eventually #(not (.isAlive old-thread))) "the old thread ends")
+            (is (not (engine-error?)) "its error isn't the new run's")
+            (is (= :streaming (state-of)))))
+        (testing "a stopped engine's send that returns late clears nothing of the new run's"
+          (let [[release ^Thread old-thread] (held-across-a-restart! {})]
+            (script! p {:fail true})
+            (pulse!)
+            (is (eventually engine-error?) "the new run's own send fails")
+            (is (= :error (state-of)))
+            (deliver release true)
+            (is (eventually #(not (.isAlive old-thread))))
+            (is (engine-error?) "its error stays until its own send returns")
+            (is (= :error (state-of)))))
+        (testing "an error the old run left isn't the new run's"
+          (is (engine-error?))
+          (is (stop!))
+          (is (start!))
+          (is (not (engine-error?)))
+          (is (= :starting (state-of)) "until it sends")
+          (is (returned! p))
+          (is (= :streaming (state-of))))))))

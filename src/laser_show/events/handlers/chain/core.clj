@@ -16,13 +16,10 @@
 ;; Main Dispatch Router
 
 
-(defn handle
-  "Handle generic chain events that work across all chain types.
-   
-   These events use :domain and :entity-key to create a config and
-   delegate to chain-handlers functions.
-   
-   This is the main entry point for :chain/* events from the dispatcher."
+(defn- handle-chain-event
+  "A generic chain event (handle), by its :event/type: :domain and
+   :entity-key make its config, and its writer is the chain-handlers
+   function for it."
   [{:keys [event/type domain entity-key state] :as event}] 
   (log/trace "chain/handle ENTER - type:" type "domain:" domain "entity-key:" entity-key)
   (let [config (helpers/chain-config domain entity-key)]
@@ -36,7 +33,7 @@
       
       ;; UI mode -> params module
       :chain/set-ui-mode
-      {:state (params/handle-set-ui-mode state config (:effect-path event) (:mode event))}
+      {:state (params/handle-set-ui-mode state config (params/ui-mode-key event) (:mode event))}
       
       ;; Param events -> params module
       :chain/add-curve-point
@@ -77,3 +74,18 @@
       (do
         (log/warn "Unknown chain event type:" type)
         {}))))
+
+(defn handle
+  "Handle generic chain events that work across all chain types.
+   
+   These events use :domain and :entity-key to create a config and
+   delegate to chain-handlers functions. One for a projector's calibration
+   whose projector is gone (helpers/missing-owner?), a late one, does
+   nothing ({}).
+   
+   This is the main entry point for :chain/* events from the dispatcher."
+  [{:keys [event/type domain entity-key state] :as event}]
+  (if (helpers/missing-owner? state domain entity-key)
+    (do (log/debug "Ignoring" type "for a projector that is gone:" entity-key)
+        {})
+    (handle-chain-event event)))

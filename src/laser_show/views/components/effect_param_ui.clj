@@ -39,6 +39,14 @@
 ;; Custom Parameter Renderer with Visual Editors
 
 
+(defn- effect-address
+  "The effect a visual editor's events edit, from spatial-event-keys: its
+   :domain, :entity-key and :effect-path, and its instance
+   (:effect-instance-id, and :owner-id for an owned effect), by which each
+   event finds it where it is when it's handled (follow-up N14)."
+  [spatial-event-keys]
+  (select-keys spatial-event-keys [:domain :entity-key :effect-path :effect-instance-id :owner-id]))
+
 (defn custom-param-renderer
   "Renders effect parameters with custom UI and mode toggle.
    
@@ -61,22 +69,19 @@
    
    Event template props (for visual editors):
    - :spatial-event-template - Base event for spatial param updates (translate, corner-pin)
-   - :spatial-event-keys - Additional keys to pass through (e.g., :col, :row, :effect-path)
+   - :spatial-event-keys - Additional keys to pass through: the effect,
+     :domain, :entity-key, :effect-path and :effect-instance-id (and
+     :owner-id), which the other visual editors' events (RGB curves, the
+     zone selector, scale, the resets) name it by too (effect-address)
    
    Event template props (for param controls):
    - :on-change-event - Event template for param value changes
    - :on-text-event - Event template for text field updates
    - :on-mode-change-event - Event template for visual/numeric mode toggle
-   - :modulator-event-base - Base event template for modulator operations (domain, entity-key, effect-path)
-   
-   RGB Curves props:
-   - :rgb-domain - Domain for RGB curves (:effect-chains, :item-effects, etc.)
-   - :rgb-entity-key - Entity key for RGB curves
-   - :rgb-effect-path - Effect path for RGB curves"
+   - :modulator-event-base - Base event template for modulator operations (domain, entity-key, effect-path)"
   [{:keys [effect-def current-params ui-mode params-map dialog-data
            spatial-event-template spatial-event-keys
            on-change-event on-text-event on-mode-change-event modulator-event-base
-           rgb-domain rgb-entity-key rgb-effect-path
            enable-modulators? on-color-change-event]}]
   (let [;; Build canvas fx/key that includes keyframe index when in keyframe mode
         ;; This ensures the canvas is recreated when switching keyframes
@@ -85,6 +90,7 @@
         canvas-fx-key (if keyframe-idx
                         [effect-path :kf keyframe-idx]
                         effect-path)
+        address (effect-address spatial-event-keys)
 
         ui-hints (:ui-hints effect-def)
         renderer-type (:renderer ui-hints)
@@ -115,10 +121,7 @@
       (= renderer-type :rgb-curves)
       {:fx/type custom-renderers/rgb-curves-visual-editor
        :current-params current-params
-       :event-template {:event/type :chain/update-curve-point
-                        :domain rgb-domain
-                        :entity-key rgb-entity-key
-                        :effect-path rgb-effect-path}
+       :event-template (assoc address :event/type :chain/update-curve-point)
        :dialog-data dialog-data}
 
       ;; Zone Selector is visual-only - the timeline UI doesn't translate to numeric sliders
@@ -127,9 +130,7 @@
       {:fx/type custom-renderers/zone-selector-visual-editor
        :fx/key canvas-fx-key
        :current-params current-params
-       :event-template {:domain (get spatial-event-keys :domain)
-                        :entity-key (get spatial-event-keys :entity-key)
-                        :effect-path effect-path}}
+       :event-template address}
 
       ;; Other custom renderers have mode toggle
       :else
@@ -203,10 +204,7 @@
                                       :current-params current-params
                                       :param-specs (:parameters effect-def)
                                       :event-template on-change-event
-                                      :reset-event {:event/type :chain/reset-params
-                                                    :domain (get spatial-event-keys :domain)
-                                                    :entity-key (get spatial-event-keys :entity-key)
-                                                    :effect-path effect-path}
+                                      :reset-event (assoc address :event/type :chain/reset-params)
                                       :fx-key canvas-fx-key
                                       ;; Modulator support for single-param visual editor
                                       :enable-modulator? enable-modulators?
@@ -217,14 +215,8 @@
                                  :fx/key canvas-fx-key
                                  :current-params current-params
                                  :param-specs (:parameters effect-def)
-                                 :event-template {:event/type :chain/update-scale-params
-                                                  :domain (get spatial-event-keys :domain)
-                                                  :entity-key (get spatial-event-keys :entity-key)
-                                                  :effect-path effect-path}
-                                 :reset-event {:event/type :chain/reset-params
-                                               :domain (get spatial-event-keys :domain)
-                                               :entity-key (get spatial-event-keys :entity-key)
-                                               :effect-path effect-path}
+                                 :event-template (assoc address :event/type :chain/update-scale-params)
+                                 :reset-event (assoc address :event/type :chain/reset-params)
                                  :fx-key canvas-fx-key}
 
                       :hue-slider {:fx/type custom-renderers/hue-visual-editor

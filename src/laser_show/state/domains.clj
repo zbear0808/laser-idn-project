@@ -84,6 +84,8 @@
                        them once :hold? is false."}
    :chase-sources {:default {:next 1 :cells {}}
                    :doc "{:next n :cells {[col row] version}}: which version of each cue that follows timecode the show clock may chase (timeline.playback/source-version). The edit that makes or changes a follower gives it the next version, one that removes it or stops it following drops its entry (events.handlers.timeline/reconcile-chase-sources, on every changed cue, undo and redo too); :next never goes back. A new show's followers are 0. Session only: not saved, undone or compared for unsaved changes"}
+   :chase-stopped {:default {}
+                   :doc "{[col row] chase-id}: a cue that follows timecode which a grid press stopped while the show clock chased it as that episode (events.handlers.grid): the clock neither draws nor reports the episode, and its On is ignored (:show-clock/apply-chase), until a new episode begins there, which plays; pressed again, it follows again. Session only: not saved, undone or compared for unsaved changes; New and Open start without"}
    :requests {:default {}
               :doc "{:restart {:id} :align {:id} :shift {:id :offset}}: the show clock applies each id once (Stop and Retrigger, tap tempo, Link)"}
    :pulses {:default {}
@@ -105,7 +107,7 @@
    :held-inputs {:default #{}
                  :doc "Input identities currently held"}
    :activations {:default {}
-                 :doc "Key -> the action its press played, until the key's release ends it (events/handlers/triggers.clj), whatever the key is bound to by then. A key as lookup-key names it, for every source: {:source :midi :channel :note} (channels 0-15), {:source :osc|:gamepad|:keyboard :id}. Retired, without its release, when its source can't send releases any more (:trigger/retire: a MIDI input disconnected or MIDI off, the OSC server stopped or OSC off), and with every other on New and Open"}
+                 :doc "Key -> the action its press played, until the key's release ends it (events/handlers/triggers.clj), whatever the key is bound to by then. A key as lookup-key names it, for every source: {:source :midi :channel :note} (channels 0-15), {:source :osc|:gamepad|:keyboard :id}. Retired, without its release, when its source can't send releases any more (:trigger/retire: a MIDI input disconnected, MIDI off or MIDI's All Notes Off, the OSC server stopped or moved to another port, OSC off), and with every other on New and Open"}
    :last-input-time {:default nil
                      :doc "Timestamp of the most recent discrete input"}})
 
@@ -550,7 +552,8 @@
                             :cc-mappings {}}           ; Optional CC remapping
                      :osc {:enabled? false
                            :server-running? false      ; The device worker's server is listening
-                           :port 9000                  ; The port Start Server listens on (while listening: the one it listens on)
+                           :listening-port nil         ; The port it listens on, as the device worker answered the latest Start (nil: not listening)
+                           :port 9000                  ; The port Start Server listens on: the next Start's (set while listening, it waits for one)
                            :requests {}                ; {:server id}: the latest Start or Stop, until its result is in
                            :address-mappings {}}       ; Map of OSC address -> event config
                      :mtc {:state :stopped :fps nil :text nil} ; the show clock's status of laser-show.input.mtc, see mirror-status
@@ -568,12 +571,12 @@
    :link {:default {:carabiner-connected? false    ;; Carabiner daemon connected (auto on startup)
                     :link-enabled? false           ;; Link sync enabled (user toggles via button)
                     :sync-enabled? false           ;; Whether to apply Link BPM to app
-                    :beat-sync? true               ;; Whether to sync downbeat alignment
+                    :beat-sync? true               ;; Whether to sync downbeat alignment (not applied: beat-carabiner gives no Link beat, input.link/get-link-beat-position)
                     :auto-connect? true            ;; Auto-connect Carabiner on startup
                     :latency-ms 0                  ;; Latency compensation
                     :link-bpm nil                  ;; Current Link session BPM
                     :link-peers 0}                 ;; Number of Link peers
-          :doc "Ableton Link state. Carabiner auto-connects on startup. Button toggles Link sync mode."}})
+          :doc "Ableton Link state. Carabiner auto-connects on startup. Button toggles Link sync mode. Plain data: the connection and its status listener belong to their owner (laser-show.input.link), which reports their status back as events"}})
 
 
 (defstate history

@@ -35,7 +35,8 @@
      attempt's waiter (input.learn), :dispatch-later, :rig/flush's wait;
      the FX thread: file chooser; the output runtime's status thread; the
      rig writer; the input device worker, input.devices, which owns the
-     MIDI inputs and the OSC server)
+     MIDI inputs and the OSC server; the Link thread, input.link, which
+     owns the Carabiner connection)
      only do their side effect there. Their result goes through the
      dispatch fn the effect was given, which queues it on the agent behind the
      current event
@@ -83,6 +84,7 @@
             [laser-show.state.persistent :as persistent]
             [laser-show.state.rig-store :as rig-store]
             [laser-show.events.handlers :as handlers]
+            [laser-show.events.handlers.chain.helpers :as chain-helpers]
             [laser-show.events.handlers.history :as history-handlers]
             [laser-show.events.handlers.input :as input-handlers]
             [laser-show.events.handlers.rig-autosave :as rig-autosave]
@@ -361,21 +363,40 @@
     (when on-failed
       (run-inline (assoc on-failed :file-path file-path) dispatch))))
 
+(defn- carried-then
+  "The event that waited for a rig write (Exit's Try again), from the rig
+   writer's :then ({:event :instance}, effect-rig-write), when it came from
+   instance, the app instance this write is for. A newer rig takes the
+   place of an older one whichever app submitted it, and an event of an app
+   that was stopped mustn't run in the app after it: nil then (logged)."
+  [waiting instance]
+  (when waiting
+    (if (identical? instance (:instance waiting))
+      (:event waiting)
+      (log/info "Dropped" (:event/type (:event waiting)) "waiting for the rig file: its app instance"
+                (:id (:instance waiting)) "was stopped"))))
+
 (defn- effect-rig-write
   "Effect that hands the rig to the rig writer (state.rig-store/submit!): it
    writes the newest one half a second after the last change (at once with
    :now?), on its own thread, so a drag never waits for the disk. The result
-   comes back later through dispatch, as :rig/written (with :then, the event
-   to continue with) or :rig/write-failed.
+   comes back later through dispatch, as :rig/written or :rig/write-failed.
+   :then, the event to continue with once the rig is written, goes with the
+   rig and its app instance: when a newer rig takes its place before it is
+   written, that one carries it on, and :rig/written brings it back for the
+   same app instance only (carried-then).
    Args: {:path :doc :seq :then :now?}"
   [{:keys [path doc seq then now?]} dispatch]
-  (rig-store/submit! path doc
-                     (fn [{:keys [at error]}]
-                       (dispatch (if error
-                                   {:event/type :rig/write-failed :path path :seq seq :error error}
-                                   (cond-> {:event/type :rig/written :path path :seq seq :at at}
-                                     then (assoc :then then)))))
-                     (if now? 0 rig-store/write-delay-ms)))
+  (let [instance (current-instance)]
+    (rig-store/submit! path doc
+                       (fn [{:keys [at error] waiting :then}]
+                         (dispatch (if error
+                                     {:event/type :rig/write-failed :path path :seq seq :error error}
+                                     (let [then (carried-then waiting instance)]
+                                       (cond-> {:event/type :rig/written :path path :seq seq :at at}
+                                         then (assoc :then then))))))
+                       (if now? 0 rig-store/write-delay-ms)
+                       (when then {:event then :instance instance}))))
 
 (defn- effect-rig-flush
   "Effect that waits, off the event thread (in a future), for the rig writer
@@ -466,6 +487,14 @@
    continues with a phase correction."
   [_ dispatch]
   (link/sync-to-downbeat! #(run-inline % dispatch) (show-time/global-beats)))
+
+(defn- effect-link-connect
+  "Effect that has the Link owner connect to Carabiner on its own thread
+   (input.link/connect!): :timing/carabiner-connected, then the status
+   listener's reports, come back through dispatch, the dispatcher of the
+   app this effect is for."
+  [request dispatch]
+  (link/connect! request dispatch))
 
 ;; Show Clock Effects
 
@@ -839,10 +868,13 @@
 
 (def handle-event-pipeline
   "Event handler pipeline: the show lock (innermost: while it is on, the
-   events it refuses change [:ui] only, events/show_lock.clj), the step
-   grid window's control target (just outside the lock: the window's
-   parameter controls name its pattern, found where it is now before the
-   lock classifies it, handlers/step_grid.clj), timeline
+   events it refuses change [:ui] only, events/show_lock.clj), an effect
+   edit's target (just outside the lock: an edit that names its effect by
+   its instance is found where it is now before the lock classifies it,
+   chain-helpers/wrap-effect-instance-target), the step grid window's
+   control target (the window's parameter controls name its pattern,
+   found where it is now before the lock classifies it,
+   handlers/step_grid.clj), timeline
    invariants enforced on changed cue chains (so history sees normalized
    state), undo history for undoable document edits, then the
    unsaved-changes flag derived for every event
@@ -865,6 +897,7 @@
    co-effects and effects, so it runs on the cljfx agent."
   (-> handlers/handle-event
       show-lock/wrap-show-lock
+      chain-helpers/wrap-effect-instance-target
       step-grid-handlers/wrap-step-grid-control-target
       timeline-handlers/wrap-normalize-timelines
       history-handlers/wrap-history
@@ -939,7 +972,11 @@
    - :history/gesture-alarm - keep the open press's one wake-up: cancel
      its, arm the next; it dispatches :history/gesture-timeout (later,
      wake-up thread)
-   - :link/sync-to-downbeat - align phase to Link's downbeat (inline)
+   - :link/sync-to-downbeat - align phase to Link's downbeat (inline; while
+     Link's beat isn't known, which beat-carabiner 8.0.0 never gives, nothing)
+   - :link/connect - connect to Carabiner on the Link thread (input.link);
+     :timing/carabiner-connected and the status listener's reports come
+     back (later, Link thread and Carabiner's)
    - :show-clock/read - continue :on-read with the show clock's beats, or
      with :chase-cell its timecode episode there (inline)
    - :input/sync-learn - the router's learn slot to the active learn
@@ -987,6 +1024,7 @@
     :dispatch-later effect-dispatch-later
     :history/gesture-alarm effect-gesture-alarm
     :link/sync-to-downbeat effect-link-sync-to-downbeat
+    :link/connect effect-link-connect
     :show-clock/read effect-show-clock-read
     :input/sync-learn effect-sync-learn
     ;; Input devices (on the device worker)

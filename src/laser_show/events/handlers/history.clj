@@ -44,15 +44,21 @@
    Undo, Redo and a press's abort. The effect cells the vibe engine
    switched on stay its own where the restore takes their on/off
    (history/effect-cell-sources, on the state before it; refs/restore-fx),
-   so the next vibe and Save still switch them off. The projector UI lets go
+   so the next vibe and Save still switch them off, and so do the vibe's
+   refusal and what a held key switched on; a cell a move had replaced
+   goes back to what owned it then (history/replaced-effect-cells, the
+   snapshot's :effect-owners). The projector UI lets go
    of a projector or virtual projector the restore took away
    (h/prune-projector-ui), and selects nothing: Redo of an Add brings the
-   projector back unselected (reactivity plans 22, 23, 14)."
+   projector back unselected (reactivity plans 22, 23, 14; follow-up B8)."
   [state snapshot]
-  (-> state
-      (history/restore-snapshot snapshot)
-      (refs/restore-fx (history/effect-cell-sources state (:document-state snapshot)))
-      (h/prune-projector-ui)))
+  (let [document (:document-state snapshot)]
+    (-> state
+        (history/restore-snapshot snapshot)
+        (refs/restore-fx (history/effect-cell-sources state document)
+                         (history/replaced-effect-cells state document)
+                         (:effect-owners snapshot))
+        (h/prune-projector-ui))))
 
 (defn handle-begin-transaction
   "A press's transaction, on mouse down: :history/gesture-id is the press's
@@ -138,19 +144,41 @@
 
 (defn- ask-first-if-it-grows
   "result (an Undo or Redo's restore), unless it would give a projector whose
-   light is going out a larger safety zone and event isn't :confirmed?: then
-   the shared confirm asks first, and nothing changes (zones plan Z1, D-28)."
-  [state event result verb]
-  (let [grown (guard/growing state (:state result))]
-    (cond
-      (or (:confirmed? event) (empty? grown)) result
-      (guard/asking? state) {:state state}
-      :else {:state (guard/ask state {:message (str verb " gives "
-                                                    (guard/names-text (map #(guard/projector-name state %) grown))
-                                                    " a larger area while "
-                                                    (if (= 1 (count grown)) "it is" "they are") " on.")
-                                      :confirm-label verb
-                                      :event event})})))
+   light is going out a larger safety zone (zones plan Z1, D-28): then the
+   shared confirm asks first, in a question of its own (guard/ask-review),
+   and nothing changes. Its Allow comes back with :review-id (and
+   :confirmed? true, which alone is no permission): it restores only while
+   the larger areas are the ones it asked about (the same projectors, from
+   the same zones to the same zones), and closes the question whatever
+   happens; after any change to them nothing is restored, and a notice says
+   to review it again (follow-up B3)."
+  [state {:keys [review-id] :as event} result verb]
+  (if (some? review-id)
+    (if-let [{:keys [closed stale? zones]} (guard/review-answer state event)]
+      (if (and (not stale?) (= zones (guard/growth state (:state result))))
+        (update result :state assoc-in [:ui :dialogs :confirm] {:open? false})
+        (h/show-notice closed guard/zone-changed-text :warning))
+      {:state state})
+    (let [grown (guard/growing state (:state result))]
+      (cond
+        (empty? grown) result
+        (guard/asking? state) {:state state}
+        :else {:state (guard/ask-review state {:message (str verb " gives "
+                                                             (guard/names-text (map #(guard/projector-name state %) grown))
+                                                             " a larger area while "
+                                                             (if (= 1 (count grown)) "it is" "they are") " on.")
+                                               :confirm-label verb
+                                               :intent {:event/type (:event/type event)}
+                                               :zones (guard/growth state (:state result))})}))))
+
+(defn- nothing-to-restore
+  "{:state state} when there is no step to undo or redo; when event is the
+   Allow of its own open question (an earlier Undo's or Redo's), with that
+   question closed and the notice that the step it asked about is gone."
+  [state event]
+  (if-let [{:keys [closed]} (guard/review-answer state event)]
+    (h/show-notice closed guard/zone-changed-text :warning)
+    {:state state}))
 
 (defn handle-undo
   "Undo the last action, the open press's step sealed first (so Undo while
@@ -165,7 +193,7 @@
                              "Undo")
       (do
         (log/debug "Undo requested but stack is empty")
-        {:state state}))))
+        (nothing-to-restore state event)))))
 
 (defn handle-redo
   "Redo the last undone action, the open press's step sealed first. One
@@ -179,7 +207,7 @@
                              "Redo")
       (do
         (log/debug "Redo requested but stack is empty")
-        {:state state}))))
+        (nothing-to-restore state event)))))
 
 (defn handle-clear
   "Clear all undo/redo history; an open press's transaction is dropped with
@@ -225,6 +253,9 @@
    :cue-chain/set-name "Rename Cue"
    :cue-chain/set-target "Change Cue Target"
    :cue-chain/set-item-target "Change Target"
+   :cue-chain/update-preset-param "Edit Preset"
+   :cue-chain/update-preset-param-from-text "Edit Preset"
+   :cue-chain/update-preset-color "Change Preset Color"
    :cue-chain/set-trigger-mode "Change Trigger Mode"
    :timeline/add-track "Add Track"
    :timeline/add-folder "Add Folder"
@@ -235,8 +266,8 @@
    :projectors/add-manual "Add Projector"
    :projectors/submit-manual-form "Add Projector"
    :projectors/remove "Remove Projector"
-   :projectors/set-safety "Change Safety Zone"
    :projectors/set-safety-coordinate "Change Safety Zone"
+   :projectors/drag-safety "Change Safety Zone"
    :projectors/reset-safety "Reset Safety Zone"
    :projectors/add-blocked-area "Add Blocked Area"
    :projectors/remove-blocked-area "Remove Blocked Area"

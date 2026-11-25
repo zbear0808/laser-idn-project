@@ -13,6 +13,8 @@
    
    Link Architecture:
    - Carabiner daemon auto-connects on app startup
+     (:timing/carabiner-auto-connect); the connection and its status
+     listener are input.link's, app state has only their status
     - Link and following its tempo are separate local controls
    - UI shows both Carabiner and Link status"
   (:require [laser-show.animation.cue-timing :as cue-timing]
@@ -143,7 +145,9 @@
   "Synchronize playback to Link's next downbeat.
    Uses phase-offset-target mechanism for smooth correction.
    The Link query runs in the :link/sync-to-downbeat effect, which reads the
-   show clock's beats and dispatches :timing/set-phase-offset-target."
+   show clock's beats and dispatches :timing/set-phase-offset-target. Nothing
+   sends this event, and while Link's beat isn't known (beat-carabiner 8.0.0
+   gives none: link/get-link-beat-position) it corrects nothing."
   [_event]
   {:link/sync-to-downbeat {}})
 
@@ -230,7 +234,10 @@
    playback/source-version) and the same owner there (:expected-owner,
    playback/intent-owner, :none for an empty cell); then
    - On (:active? true): the cue follows timecode and the clock is still on
-     the report's episode (:chase-id): its marker goes in (install-chase);
+     the report's episode (:chase-id): its marker goes in (install-chase),
+     unless a grid press stopped the cue for that very episode
+     ([:playback :chase-stopped], follow-up B7); another episode ends that
+     stop;
    - Off (:active? false): the clock chases nothing there: a chase marker
      goes, its cue gone or not; a run only while its cue follows timecode.
      It stops as any cue stops (cue-timing/deactivate-cue): the last one
@@ -243,6 +250,7 @@
         owner (playback/intent-owner intent)
         version (playback/source-version state cell)
         observed (:chase-id clock)
+        stopped (get-in state [:playback :chase-stopped])
         holds? (and (some? document-id)
                     (h/same-document? state event)
                     (contains? event :source-version)
@@ -254,8 +262,9 @@
       (not holds?) {}
 
       (true? active?)
-      (if (and (some? version) (some? chase-id) (= chase-id observed))
-        {:state (update state :playback install-chase cell owner chase-id start)}
+      (if (and (some? version) (some? chase-id) (= chase-id observed) (not= chase-id (get stopped cell)))
+        {:state (cond-> (update state :playback install-chase cell owner chase-id start)
+                  (contains? stopped cell) (update-in [:playback :chase-stopped] dissoc cell))}
         {})
 
       (and (false? active?)
@@ -331,14 +340,29 @@
   [{:keys [state peers]}]
   {:state (assoc-in state [:backend :link :link-peers] (or peers 0))})
 
+(defn- handle-timing-carabiner-auto-connect
+  "At start-up (app/start!): connect to the Carabiner daemon unless
+   [:backend :link :auto-connect?] is false. The Link owner (input.link)
+   connects off the event thread and says how it went with
+   :timing/carabiner-connected, through this app's dispatcher."
+  [{:keys [state]}]
+  (if (get-in state [:backend :link :auto-connect?] true)
+    {:link/connect {}}
+    {}))
+
 (defn- handle-timing-carabiner-connected
-  "Update Carabiner connection status (app/connect-link!'s result at
-   start-up), and the status listener when the event has one. The other
-   link keys are kept."
-  [{:keys [state connected? listener]}]
-  {:state (update-in state [:backend :link]
-                     #(cond-> (assoc % :carabiner-connected? connected?)
-                        listener (assoc :listener listener)))})
+  "Update Carabiner connection status: whether the Link owner
+   (input.link) is connected, its answer to :link/connect, and its word
+   when the connection closes. Disconnected, Link can't stay enabled (it
+   needs Carabiner, link/enable-link!): it is off, and Link's tempo and
+   peers are forgotten; following its tempo stays selected for when Link is
+   enabled again. The other link keys are kept. The connection and its
+   listeners are the owner's, never app state."
+  [{:keys [state connected?]}]
+  {:state (if connected?
+            (assoc-in state [:backend :link :carabiner-connected?] true)
+            (update-in state [:backend :link] assoc
+                       :carabiner-connected? false :link-enabled? false :link-bpm nil :link-peers 0))})
 
 (defn- handle-timing-link-enabled
   "Update Link enabled status (internal event from link service)."
@@ -403,6 +427,7 @@
     :timing/link-peers-changed (handle-timing-link-peers-changed event)
     
     ;; Internal Link events
+    :timing/carabiner-auto-connect (handle-timing-carabiner-auto-connect event)
     :timing/carabiner-connected (handle-timing-carabiner-connected event)
     :timing/link-enabled (handle-timing-link-enabled event)
     

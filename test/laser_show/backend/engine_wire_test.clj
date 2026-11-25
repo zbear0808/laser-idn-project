@@ -231,6 +231,29 @@
           (is (every? #(= dark-then-lit (:samples %)) (concat (take 3 fs) (drop 4 fs)))))
         (se/stop! engine)))))
 
+(deftest failed-sends-leave-the-config-due-test
+  (testing "Stream §2.2: sends that fail while the config falls due (the network went away) don't
+            count as sending it, so the first frame once they work again carries it"
+    (breaks! :sequence)
+    (let [failing? (atom false)
+          send-packet-to hello/send-packet-to]
+      (with-redefs [hello/send-packet-to (fn [& args]
+                                           (if @failing?
+                                             (throw (java.net.SocketException. "test: Network is unreachable"))
+                                             (apply send-packet-to args)))]
+        (start-engine! (constantly [[-0.5 0.0 0.0 0.0 0.0] [0.5 0.0 1.0 1.0 1.0]])
+                       :id :wire-outage :output-config oc/standard-config)
+        (is (dac/wait-for! #(:has-config? (first (dac/frames *dac*))) 3000) "the first frame carries it")
+        ;; From just after it, for longer than its resend interval: it falls due while sends fail
+        (reset! failing? true)
+        (Thread/sleep 300)
+        (let [recovered (System/nanoTime)]
+          (reset! failing? false)
+          (is (dac/wait-for! #(seq (dac/frames *dac* :since-ns recovered)) 2000) "frames come back")
+          (is (:has-config? (first (dac/frames *dac* :since-ns recovered)))
+              "with the config, 300 ms after the last one the DAC got"))))
+    (oe/clear!)))
+
 
 ;; Phase 5: timing on the monotonic clock
 

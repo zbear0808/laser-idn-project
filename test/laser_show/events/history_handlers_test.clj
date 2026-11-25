@@ -279,9 +279,11 @@
 (def ^:private grid-session #uuid "00000000-0000-0000-0000-0000000016d2")
 (def ^:private grid-target {:domain :cue-zone-patterns :entity-key [0 0] :effect-instance-id grid-id})
 
-(defn- grid-press-events
-  "Valid step grid press events (with their :state): they do nothing ({})
-   without the window open on the grid, and :paint without its press."
+(defn- valid-events
+  "Valid events (with their :state) for the labels whose handlers rightly do
+   nothing ({}) without what they name: the step grid's press events,
+   without the window open on the grid, and :paint without its press; the
+   ∿ toggle, without its effect (follow-up B6)."
   []
   (let [s (-> (test-state)
               (assoc-in [:chains :cue-chains [0 0] :zone-patterns] [(assoc (zp/preset-instance :steps :cue) :id grid-id)])
@@ -289,10 +291,21 @@
         press {:editor-id grid-session :target grid-target :history/gesture-id press-g}
         pressed (run s (assoc press :event/type :step-grid/paint-start :row 0 :step 0))]
     {:step-grid/paint-start (assoc press :state s :row 0 :step 1)
-     :step-grid/paint (assoc press :state pressed :row 0 :step 2)}))
+     :step-grid/paint (assoc press :state pressed :row 0 :step 2)
+     :modulator/toggle (assoc grid-target :state s :param-key :offset :param-spec {:min -64.0 :max 64.0} :fx/event true)}))
 
 (deftest history-labels-name-real-events-test
-  (let [valid (grid-press-events)]
+  (let [preset {:state (test-state) :col 0 :row 0 :item-id item-id}
+        valid (assoc (valid-events)
+                     ;; It does nothing ({}) for an item that isn't there
+                     :cue-chain/set-item-target {:state (test-state) :col 0 :row 0 :item-id item-id :target :zone/a}
+                     ;; Nor do a preset's edits (follow-up N10)
+                     :cue-chain/update-preset-param (assoc preset :param-key :size :value 2.0)
+                     :cue-chain/update-preset-param-from-text (assoc preset :param-key :size :min 0.0 :max 10.0 :is-int? false
+                                                                     :text "2.0")
+                     :cue-chain/update-preset-color (assoc preset :color [0.5 0.5 0.5])
+                     ;; Nor does a bank's add, for an item that isn't there (follow-up N14)
+                     :cue-chain/add-effect-from-bank {:state (test-state) :col 0 :row 0 :owner-id item-id :item-id :scale})]
     (doseq [event-type (keys history-handlers/event-descriptions)]
       (let [event (get valid event-type {:state (test-state)})
             result (try (handlers/handle-event (assoc event :event/type event-type))
@@ -518,7 +531,7 @@
         initial (assoc-in (test-state) path before)
         {:keys [state dispatch dispatch-later]}
         (pipeline {:event/type :modulator/toggle :state initial :domain :effect-chains :entity-key [1 0]
-                   :effect-path [0] :param-key :amount :param-spec {:min 0.0 :max 1.0}
+                   :effect-instance-id item-id :param-key :amount :param-spec {:min 0.0 :max 1.0}
                    :current-value 0.3 :fx/event true}) ; stale value from the keyframe editor
         toggled (cond-> (or state initial) dispatch (run dispatch))
         ;; Undo before delivering any timer the toggle scheduled. No clock or sleep involved.
@@ -758,7 +771,7 @@
                  (assoc-in [:projectors :p1] {:name "Laser L" :host "10.0.0.5" :port 7255 :enabled? true
                                               :zone-groups [:all] :safety {:limit [-0.5 -0.5 0.5 0.5] :blocked []}})
                  (assoc-in [:backend :streaming :running?] true))
-        shrunk (run live {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-0.3 -0.5 0.5 0.5]}})
+        shrunk (run live {:event/type :projectors/set-safety-coordinate :projector-id :p1 :path [:limit 0] :value -0.3})
         zone #(get-in % [:projectors :p1 :safety :limit])]
     (is (= [-0.3 -0.5 0.5 0.5] (zone shrunk)) "shrinking applied at once")
     (let [asked (pipeline {:event/type :edit/undo :state shrunk})]
@@ -768,7 +781,8 @@
              (get-in asked [:state :ui :dialogs :confirm :message])))
       (is (= "Undo" (get-in asked [:state :ui :dialogs :confirm :confirm-label])))
       (testing "a confirmed Undo restores"
-        (let [undone (run (:state asked) {:event/type :ui/confirm})]
+        (let [undone (run (:state asked) {:event/type :ui/confirm
+                                          :review-id (get-in asked [:state :ui :dialogs :confirm :safety-review :id])})]
           (is (= [-0.5 -0.5 0.5 0.5] (zone undone)))
           (testing "and Redo, which shrinks it again, doesn't ask"
             (is (= [-0.3 -0.5 0.5 0.5] (zone (run undone {:event/type :edit/redo}))))))))
@@ -776,9 +790,74 @@
       (let [off (assoc-in shrunk [:backend :streaming :running?] false)]
         (is (= [-0.5 -0.5 0.5 0.5] (zone (run off {:event/type :edit/undo}))))))))
 
+(deftest undo-allow-gives-only-what-it-asked-test
+  ;; Follow-up B3: the question an Undo or Redo asks is its own, and its
+  ;; Allow restores only the larger areas it asked about
+  (let [live (-> (test-state)
+                 (assoc-in [:projectors :p1] {:name "Laser L" :host "10.0.0.5" :port 7255 :enabled? true
+                                              :zone-groups [:all] :safety {:limit [-0.5 -0.5 0.5 0.5] :blocked []}})
+                 (assoc-in [:backend :streaming :running?] true))
+        shrunk (run live {:event/type :projectors/set-safety-coordinate :projector-id :p1 :path [:limit 0] :value -0.3})
+        asked (run shrunk {:event/type :edit/undo})
+        id (get-in asked [:ui :dialogs :confirm :safety-review :id])
+        allow {:event/type :ui/confirm :review-id id}
+        zone #(get-in % [:projectors :p1 :safety :limit])
+        question #(get-in % [:ui :dialogs :confirm])
+        changed "Safety zone changed; review the edit again"]
+    (is (= {:id id :intent {:event/type :edit/undo}
+            :zones {:p1 {:limit [-0.5 -0.5 0.5 0.5] :blocked []}}
+            :geometries {:p1 (get-in shrunk [:projector-ui :safety-versions :by-id :p1 :geometry])}}
+           (:safety-review (question asked))))
+    (is (= {:event/type :edit/undo :review-id id :confirmed? true} (:confirm-event (question asked))))
+    (testing "a tighter zone while it asks, then the Allow: nothing is undone, and it says so"
+      (let [tightened (run asked {:event/type :projectors/set-safety-coordinate :projector-id :p1 :path [:limit 0] :value -0.2})
+            stale (run tightened allow)]
+        (is (= [-0.2 -0.5 0.5 0.5] (zone tightened)) "the tighter zone applies while it asks")
+        (is (= [-0.2 -0.5 0.5 0.5] (zone stale)))
+        (is (= (undo-count tightened) (undo-count stale)) "no step taken back")
+        (is (= {:open? false} (question stale)))
+        (is (= changed (get-in stale [:ui :notice :text])))))
+    (testing "another edit while it asks: the Allow would take back that one instead, so it takes back none"
+      (let [renamed (run asked {:event/type :projectors/update-settings :projector-id :p1 :updates {:name "Stage L"}})
+            stale (run renamed allow)]
+        (is (= ["Stage L" [-0.3 -0.5 0.5 0.5]] [(get-in stale [:projectors :p1 :name]) (zone stale)]))
+        (is (= {:open? false} (question stale)))
+        (is (= changed (get-in stale [:ui :notice :text])))))
+    (testing "a bare :confirmed? is no permission: it asks"
+      (let [s (run shrunk {:event/type :edit/undo :confirmed? true})]
+        (is (= [-0.3 -0.5 0.5 0.5] (zone s)))
+        (is (true? (:open? (question s))))))
+    (testing "Cancel, or the old answer again, takes back nothing"
+      (let [cancelled (run asked {:event/type :ui/close-dialog :dialog-id :confirm :review-id id})]
+        (is (= {:open? false} (question cancelled)))
+        (is (= cancelled (run cancelled allow)))
+        (is (= cancelled (run cancelled {:event/type :edit/undo :review-id id :confirmed? true})))))
+    (testing "the lock on between the question and the Allow: refused, and the question closed"
+      (let [locked (run (assoc-in asked [:ui :show-lock?] true) allow)]
+        (is (= [-0.3 -0.5 0.5 0.5] (zone locked)))
+        (is (= {:open? false} (question locked)))
+        (is (= "Undo refused" (get-in locked [:ui :show-lock-notice :text])))))
+    (testing "nothing changed: its Allow restores"
+      (let [undone (run asked allow)]
+        (is (= [-0.5 -0.5 0.5 0.5] (zone undone)))
+        (is (= {:open? false} (question undone)))))
+    (testing "Redo asks the same way"
+      (let [widened (run (assoc-in live [:backend :streaming :running?] false)
+                         {:event/type :projectors/set-safety-coordinate :projector-id :p1 :path [:limit 0] :value -0.8})
+            undone (run widened {:event/type :edit/undo})
+            asked-redo (run (assoc-in undone [:backend :streaming :running?] true) {:event/type :edit/redo})
+            redo-id (get-in asked-redo [:ui :dialogs :confirm :safety-review :id])
+            tightened (run asked-redo {:event/type :projectors/set-safety-coordinate :projector-id :p1
+                                       :path [:limit 1] :value -0.4})]
+        (is (= [-0.5 -0.5 0.5 0.5] (zone asked-redo)) "it asks first")
+        (is (= {:event/type :edit/redo} (get-in asked-redo [:ui :dialogs :confirm :safety-review :intent])))
+        (is (= [-0.8 -0.5 0.5 0.5] (zone (run asked-redo {:event/type :ui/confirm :review-id redo-id}))) "its Allow redoes")
+        (is (= [-0.5 -0.4 0.5 0.5] (zone (run tightened {:event/type :ui/confirm :review-id redo-id})))
+            "after a change to the zone, nothing")))))
+
 (deftest safety-events-have-undo-labels-test
-  (doseq [[event-type label] [[:projectors/set-safety "Change Safety Zone"]
-                              [:projectors/set-safety-coordinate "Change Safety Zone"]
+  (doseq [[event-type label] [[:projectors/set-safety-coordinate "Change Safety Zone"]
+                              [:projectors/drag-safety "Change Safety Zone"]
                               [:projectors/reset-safety "Reset Safety Zone"]
                               [:projectors/add-blocked-area "Add Blocked Area"]
                               [:projectors/remove-blocked-area "Remove Blocked Area"]

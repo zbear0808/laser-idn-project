@@ -15,8 +15,9 @@
    - :step-list - A step grid's steps (zones plan Z6): how many
    
    Note: Color parameters are now handled as separate :red, :green, :blue floats
-   for modulator support. Use param-color-picker directly when you need a unified
-   color picker interface that reads/writes these separate RGB params.
+   for modulator support. Use param-color-picker (or color-picker, without its
+   label) when you need a unified color picker interface that reads/writes
+   these separate RGB params; it sends the picked colour as plain data.
    
    Usage:
    ```clojure
@@ -35,7 +36,10 @@
             [laser-show.views.components.applied-value :as applied-value]
             [laser-show.views.components.commit-field :as commit-field]
             [laser-show.views.components.gesture :as gesture]
-            [laser-show.views.components.target-control :as target-control]))
+            [laser-show.views.components.target-control :as target-control])
+  (:import [javafx.event ActionEvent]
+           [javafx.scene.control ColorPicker]
+           [javafx.scene.paint Color]))
 
 
 ;; Parameter Spec Conversion
@@ -73,11 +77,35 @@
    :style style
    :on-commit (fn [typed] (assoc event :text typed))})
 
+(defn slider-source-id
+  "What a parameter's slider stands for, as its press's :source-id
+   (gesture/slider): kind and key, and what its event template names: the
+   chain (:domain :entity-key, or a cue's :col :row), the effect by its
+   instance (:effect-instance-id, with :owner-id) or a cue item by its
+   :item-id (the preset editor's), or by its place (:effect-path) for a
+   template that names neither, the keyframe it edits (:keyframe-idx) and,
+   for a modulator's field, the parameter (:param-key). Re-rendered for
+   another effect or item under the same label, the slider stands for
+   another control, so its press ends (reactivity plan 16); moved with its
+   effect, it doesn't."
+  [kind k template]
+  [kind k (select-keys template (if (or (some? (:effect-instance-id template)) (some? (:item-id template)))
+                                  [:domain :entity-key :col :row :owner-id :effect-instance-id :item-id :keyframe-idx :param-key]
+                                  [:domain :entity-key :effect-path :keyframe-idx :param-key]))])
+
+(def int-slider
+  "What a slider for a whole number (an :int parameter, or an :int field of
+   a modulator) adds to its props: it stops at each whole number and
+   nowhere between (no minor ticks: JavaFX's default three let it stop at
+   quarters), and an arrow key moves it by one. The handlers round what it
+   sends mid-drag as well (params/param-number)."
+  {:snap-to-ticks true :major-tick-unit 1.0 :minor-tick-count 0 :block-increment 1.0})
+
 (defn param-slider
   "Slider control for numeric parameters with editable text field.
    
    Supports both :float and :int parameter types.
-   Int parameters use snap-to-ticks and display as integers.
+   Int parameters step by whole numbers (int-slider) and display as integers.
    
    Defensively handles modulator config maps by extracting static values.
    This can happen in edge cases where keyframes/modulation state gets out of sync.
@@ -119,16 +147,17 @@
                  :property :value
                  :address [on-change-event param-key]
                  :value (double value)
-                 :desc {:fx/type gesture/slider
-                        :id (str "param-" (name param-key) "-slider")
-                        :min min
-                        :max max
-                        :pref-width 150
-                        :snap-to-ticks is-int?
-                        :major-tick-unit (if is-int? 1.0 (/ (- max min) 10.0))
-                        :gesture {:label (str "Adjust " display-label)
-                                  :source-id [:slider param-key]
-                                  :on-value-changed (assoc on-change-event :param-key param-key)}}}
+                 :desc (cond-> {:fx/type gesture/slider
+                                :id (str "param-" (name param-key) "-slider")
+                                :min min
+                                :max max
+                                :pref-width 150
+                                :snap-to-ticks false
+                                :major-tick-unit (/ (- max min) 10.0)
+                                :gesture {:label (str "Adjust " display-label)
+                                          :source-id (slider-source-id :slider param-key on-change-event)
+                                          :on-value-changed (assoc on-change-event :param-key param-key)}}
+                         is-int? (merge int-slider))}
                 {:fx/type number-field
                  :id (str "param-" (name param-key) "-field")
                  :text (if is-int?
@@ -212,39 +241,86 @@
                         :id (str "param-" (str/replace (name param-key) "?" "") "-check")
                         :text display-label}}]}))
 
+(defn color-channel
+  "A colour channel's value as the colour controls show it, 0.0-1.0: a
+   number, clamped; a modulator that is off, its static value (the :value
+   it keeps, else the middle of its range, as reg/get-static-value); one
+   that is on, the middle of its range, which it moves about, else its
+   :value; full (1.0) for nothing there or anything else.
+   
+   Example: (color-channel {:type :sine :active? false :min 0.0 :max 1.0 :value 0.25}) => 0.25"
+  ^double [v]
+  (let [middle (fn [{lo :min hi :max}]
+                 (when (and (number? lo) (number? hi)) (/ (+ (double lo) (double hi)) 2.0)))
+        kept #(let [x (:value %)] (when (number? x) x))
+        x (cond
+            (number? v) v
+            (reg/active-modulator? v) (or (middle v) (kept v))
+            (reg/modulated? v) (or (kept v) (middle v))
+            :else nil)]
+    (if (and (number? x) (Double/isFinite (double x)))
+      (max 0.0 (min 1.0 (double x)))
+      1.0)))
+
+(defn- normalized-color
+  "The colour of red, green and blue, as color-channel shows each."
+  ^Color [red green blue]
+  (Color/color (color-channel red) (color-channel green) (color-channel blue)))
+
+(defn- send-picked-color!
+  "A colour picker's action, its user's pick (a square of its palette, or
+   Use or Save in its custom colour dialog): event with the picker's colour
+   as plain data, :color [red green blue], read here on the FX thread."
+  [event ^ActionEvent e]
+  (let [^Color c (.getValue ^ColorPicker (.getSource e))]
+    (when c
+      (events/dispatch! (assoc event :color [(.getRed c) (.getGreen c) (.getBlue c)])))))
+
+(defn color-picker
+  "A colour picker showing the colour of :red, :green and :blue in
+   :current-params (normalized, 0.0-1.0). The user's pick sends :event
+   with that colour as :color [red green blue] (send-picked-color!): plain
+   data, never the picker or its ActionEvent. A colour it shows while its
+   palette or custom colour dialog is open is a preview, not an edit. After
+   a pick the app refused, or that changed nothing, it shows the colour
+   that applies again (applied-value).
+   Props: :current-params, :event, and the :color-picker's own (:id,
+   :style, :pref-width)."
+  [{:keys [current-params event] :as props}]
+  (let [{:keys [red green blue]} current-params]
+    {:fx/type applied-value/applied-control
+     :property :value
+     :address [event :color]
+     :value (normalized-color red green blue)
+     :desc (-> props
+               (dissoc :current-params :event :fx/context)
+               (assoc :fx/type :color-picker
+                      :on-action #(send-picked-color! event %)))}))
+
 (defn param-color-picker
-  "Color picker for RGB color parameters.
+  "Color picker for RGB color parameters (color-picker), with its label.
    
    Reads color from separate :red, :green, :blue values in current-params map
    with NORMALIZED 0.0-1.0 components.
-   The color picker displays/edits using the native JavaFX color picker.
    
    Props:
    - :current-params - Map containing :red, :green, :blue values (0.0-1.0)
-   - :on-change-event - Event template for color changes (no :param-key needed)
+   - :on-change-event - Event template for color changes (no :param-key
+     needed): sent with the picked :color [red green blue]
    - :label-width - Optional label width (default 80)"
   [{:keys [current-params on-change-event label-width]}]
-  (let [;; Read separate RGB values from params map
-        r (get current-params :red 1.0)
-        g (get current-params :green 1.0)
-        b (get current-params :blue 1.0)
-        label-w (or label-width 80)
-        ;; Create JavaFX Color object from normalized values
-        color-value (javafx.scene.paint.Color/color
-                     (max 0.0 (min 1.0 (double r)))
-                     (max 0.0 (min 1.0 (double g)))
-                     (max 0.0 (min 1.0 (double b))))]
-    {:fx/type :h-box
-     :spacing 8
-     :alignment :center-left
-     :children [{:fx/type :label
-                 :text "Color"
-                 :pref-width label-w
-                 :style-class ["label-secondary"]}
-                {:fx/type :color-picker
-                 :value color-value
-                 :pref-width 100
-                 :on-action on-change-event}]}))
+  {:fx/type :h-box
+   :spacing 8
+   :alignment :center-left
+   :children [{:fx/type :label
+               :text "Color"
+               :pref-width (or label-width 80)
+               :style-class ["label-secondary"]}
+              {:fx/type color-picker
+               :id "param-color-picker"
+               :current-params current-params
+               :event on-change-event
+               :pref-width 100}]})
 
 
 ;; Refs: where a zone pattern moves pictures (zones plan Z5)

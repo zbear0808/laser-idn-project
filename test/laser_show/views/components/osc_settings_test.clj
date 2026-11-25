@@ -36,3 +36,13 @@
         (is (nil? (commit typed)) (pr-str typed))))
     (is (true? (:disable (node (card {:port 9100 :server-running? true :enabled? true}) "osc-port-field")))
         "listening: the port is the server's, so it can't be edited")))
+
+(deftest the-status-says-where-the-server-listens-test
+  ;; Reactivity follow-up B13: the port set for the next Start can differ
+  ;; from the one the server listens on, after a programmatic change
+  (let [status #(:text (node (card %) "osc-server-status"))]
+    (is (= "Listening on port 9000" (status {:port 9100 :server-running? true :enabled? true :listening-port 9000}))
+        "the device worker's answer, not the port set since")
+    (is (= "9100" (:text (node (card {:port 9100 :server-running? true :enabled? true :listening-port 9000}) "osc-port-field")))
+        "the field shows the port the next Start listens on")
+    (is (= "Server stopped" (status {:port 9100 :server-running? false :listening-port nil})))))

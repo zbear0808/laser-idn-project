@@ -15,7 +15,6 @@
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [laser-show.animation.presets :as presets]
-            [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
             [laser-show.events.core :as events]
             [laser-show.views.components.list :as list]
@@ -36,19 +35,21 @@
 
 
 (defn- effect-bank-tabs
-  "Tabbed effect bank using data-driven effect-bank component."
-  [{:keys [col row item-path active-effect-tab]}]
-  (let [effects-parent-path (vec (concat item-path [:effects]))]
-    {:fx/type effect-bank/effect-bank
-     :active-tab (or active-effect-tab :shape)
-     :on-tab-change {:event/type :cue-chain/set-effect-tab}
-     ;; Data-driven event template - the handler receives :item-id, the effect's id
-     :item-event-template {:event/type :cue-chain/add-effect-from-bank
-                           :col col
-                           :row row
-                           :parent-path effects-parent-path}
-     ;; An item's effects: no zone pattern (a cue has its own, zones plan Z5)
-     :scope :item}))
+  "Tabbed effect bank using data-driven effect-bank component, adding to
+   the item :item-id: its click names the item by its id, never its place
+   (follow-up N14)."
+  [{:keys [col row item-id active-effect-tab]}]
+  {:fx/type effect-bank/effect-bank
+   :active-tab (or active-effect-tab :shape)
+   :on-tab-change {:event/type :cue-chain/set-effect-tab}
+   ;; Data-driven event template - the handler receives :item-id, the
+   ;; effect's id, and finds the item it adds to by :owner-id
+   :item-event-template {:event/type :cue-chain/add-effect-from-bank
+                         :col col
+                         :row row
+                         :owner-id item-id}
+   ;; An item's effects: no zone pattern (a cue has its own, zones plan Z5)
+   :scope :item})
 
 
 ;; Parameter Editor for Effects (using shared component)
@@ -56,8 +57,9 @@
 
 (defn- item-effect-parameter-editor
   "Parameter editor for the selected effect within an item.
-   Uses the shared effect-parameter-editor component with keyframe support."
-  [{:keys [col row item-path item selected-effect-ids dialog-data]}]
+   Uses the shared effect-parameter-editor component with keyframe support,
+   with the effect's definition as published (subs/effect-descriptor)."
+  [{:keys [fx/context col row item-path item selected-effect-ids dialog-data]}]
   (let [item-effects (:effects item [])
         first-selected-id (first selected-effect-ids)
         ;; Use hierarchical path finding for nested effects
@@ -67,14 +69,16 @@
         selected-effect (when effect-path
                           (chains/get-item-at-path item-effects effect-path))
         effect-def (when selected-effect
-                     (effects/get-effect (:effect-id selected-effect)))]
+                     (fx/sub-ctx context subs/effect-descriptor (:effect-id selected-effect)))]
     (if selected-effect
-      ;; Use shared effect parameter editor component with item-path for cue chains
+      ;; Use shared effect parameter editor component: its edits name the
+      ;; effect and the item by their ids (follow-up N14); item-path is
+      ;; where it shows the effect
       {:fx/type effect-param-editor/effect-parameter-editor
        :domain :cue-chains
        :entity-key [col row]
        :effect-path effect-path
-       :item-path item-path  ;; Important: pass item-path for cue chains domain
+       :item-path item-path
        :owner-id (:id item)
        :effect selected-effect
        :effect-def effect-def
@@ -125,13 +129,14 @@
 
 (defn- item-menu-target
   "What the Target menu of item-id in the cue at [col row] reads of the
-   item: {:item-path :own (its own target) :group?}, nil once it is gone.
-   The menu renders again when this does, not for each change to the cue."
+   item: {:own (its own target) :group?}, nil once it is gone. The menu
+   renders again when this does, not for each change to the cue, nor when
+   the item moves: its choice names the item (follow-up R2)."
   [context col row item-id]
   (let [items (:items (fx/sub-ctx context subs/cue-cell-chain col row))]
     (when-let [item-path (chains/find-path-by-id items item-id)]
       (let [item (get-in items item-path)]
-        {:item-path item-path :own (:target item) :group? (chains/group? item)}))))
+        {:own (:target item) :group? (chains/group? item)}))))
 
 (defn- item-target-menu
   "The menu of the item or group item-id of the cue at [col row]: Target ▸,
@@ -139,7 +144,7 @@
    what only the menu reads (the zones the show uses, the groups) renders
    it again, not the list's rows."
   [{:keys [fx/context col row item-id]}]
-  (let [{:keys [item-path own group?] :as target} (fx/sub-ctx context item-menu-target col row item-id)
+  (let [{:keys [own group?] :as target} (fx/sub-ctx context item-menu-target col row item-id)
         explain (fx/sub-ctx context subs/cue-target-explain col row)]
     {:fx/type :context-menu
      :items (if target
@@ -152,7 +157,7 @@
                   :items (target-control/menu-items rows {:event/type :cue-chain/set-item-target
                                                           :col col
                                                           :row row
-                                                          :item-path item-path})}])
+                                                          :item-id item-id})}])
               [])}))
 
 (defn- cue-chain-context-menu
@@ -167,9 +172,9 @@
 
 (defn- middle-section
   "Middle section with preset bank and parameter editor, for the selected
-   item (:selected-item, at :selected-item-path; nil when none or several
-   are selected)."
-  [{:keys [fx/context col row active-preset-tab selected-item-path selected-item]}]
+   item (:selected-item; nil when none or several are selected). It doesn't
+   take the item's place: its edits name the item (R2, N10)."
+  [{:keys [fx/context col row active-preset-tab selected-item]}]
   (let [is-preset? (and selected-item (= :preset (:type selected-item)))
         is-group? (and selected-item (chains/group? selected-item))
         explain (fx/sub-ctx context subs/cue-target-explain col row)
@@ -180,7 +185,7 @@
                        :scope scope
                        :own (:target selected-item)
                        :inherited (get-in explain [:item-inherits (:id selected-item)])
-                       :on-set {:event/type :cue-chain/set-item-target :col col :row row :item-path selected-item-path}
+                       :on-set {:event/type :cue-chain/set-item-target :col col :row row :item-id (:id selected-item)}
                        :tooltip (if (= :group scope)
                                   "Where the group's content goes, unless an item in it sets its own"
                                   "Where this preset goes")})]
@@ -206,7 +211,6 @@
                                {:fx/type preset-param-editor/preset-param-editor
                                 :v-box/vgrow :always
                                 :cell [col row]
-                                :preset-path selected-item-path
                                 :preset-instance selected-item}]}
                    (when is-group?
                      {:fx/type :v-box
@@ -288,6 +292,8 @@
         label-ctx {:names (fx/sub-ctx context subs/names-ctx)
                    :zone-map (fx/sub-ctx context subs/active-zone-map)
                    :explain (fx/sub-ctx context subs/cue-target-explain col row)}
+        ;; The item effects' names, as published (data for that list)
+        effect-descriptors (fx/sub-ctx context subs/effect-descriptors)
 
         ;; Get chain name for header
         chain-name (:name cue-chain)
@@ -349,17 +355,18 @@
                                                      [{:fx/type list/list-editor
                                                        :v-box/vgrow :always
                                                        :items item-effects
-                                                       ;; Use stable component-id without the path to avoid state fragmentation
-                                                       ;; The item-path is passed via event params instead
+                                                       ;; Use stable component-id without the item to avoid state fragmentation
                                                        :component-id [:item-effects col row]
                                                        :item-id-key :effect-id
-                                                       :item-registry-fn effects/get-effect
+                                                       :item-registry-fn [get effect-descriptors]
                                                        :fallback-label "Unknown Effect"
+                                                       ;; The item by its id, never its place: a change made before
+                                                       ;; a reorder or a delete lands on its own item, or on none
+                                                       ;; (follow-up N14)
                                                        :on-change-event :cue-chain/set-item-effects
-                                                       :on-change-params {:col col :row row :item-path first-selected-path}
-                                                       ;; Direct path to items in state for async drag-drop
-                                                       ;; Path: [:chains :cue-chains [col row] :items <first-selected-path...> :effects]
-                                                       :items-path (vec (concat [:chains :cue-chains [col row] :items] first-selected-path [:effects]))
+                                                       :on-change-params {:col col :row row :item-id first-selected-id}
+                                                       ;; Its effects, found where the item is when an input is handled
+                                                       :items-path {:domain :cue-chains :entity-key [col row] :owner-id first-selected-id}
                                                        :header-label "ITEM EFFECTS"
                                                        :empty-text "No effects\nAdd from bank →"
                                                        :allow-groups? true}]
@@ -381,14 +388,13 @@
                                                  {:fx/type middle-section
                                                   :col col :row row
                                                   :active-preset-tab active-preset-tab
-                                                  :selected-item-path first-selected-path
                                                   :selected-item selected-item}
 
                                                  ;; Effect bank (when item selected)
                                                  (when has-item?
                                                    {:fx/type effect-bank-tabs
                                                     :col col :row row
-                                                    :item-path first-selected-path
+                                                    :item-id first-selected-id
                                                     :active-effect-tab active-effect-tab})
 
                                                  ;; Effect parameter editor (when effect selected)

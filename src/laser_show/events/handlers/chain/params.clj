@@ -8,7 +8,9 @@
   (:require
    [clojure.tools.logging :as log]
    [laser-show.animation.effects :as effects]
+   [laser-show.animation.presets :as presets]
    [laser-show.events.helpers :as h]
+   [laser-show.events.handlers.chain.helpers :as chain-helpers]
    [laser-show.events.handlers.effect-params :as effect-params]))
 
 ;; Effect Parameter Operations (Delegate to effect-params)
@@ -37,11 +39,14 @@
         params-path (vec (concat items-path effect-path [:params]))]
     (effect-params/remove-curve-point state params-path channel point-idx)))
 
+(declare ui-mode-key)
+
 (defn handle-set-active-curve-channel
   "Thin wrapper that delegates to effect-params.
-   Extracts UI path from config and effect-path, then calls effect-params."
-  [state config {:keys [effect-path tab-id]}]
-  (let [ui-path (conj (:ui-path config) :ui-modes effect-path)]
+   Extracts UI path from config and the key the effect's UI modes are kept
+   under (ui-mode-key), then calls effect-params."
+  [state config {:keys [tab-id] :as event}]
+  (let [ui-path (conj (:ui-path config) :ui-modes (ui-mode-key event))]
     (effect-params/set-active-curve-channel state ui-path tab-id)))
 
 (defn handle-update-spatial-params
@@ -78,9 +83,13 @@
       (assoc-in state (conj path :clamp-after?) value)
       state)))
 
+(declare param-spec param-number)
+
 (defn handle-update-param
   "Update an effect parameter value.
-   Extracts value from :value or :fx/event.
+   Extracts value from :value or :fx/event; a number for an :int parameter
+   is stored as a whole one (param-number, by its definition: param-spec),
+   so a slider's mid-drag 25.6 is 26.
    
    Parameters:
    - state: Application state
@@ -89,7 +98,8 @@
    
    Returns: Updated state"
   [state config {:keys [effect-path param-key] :as event}]
-  (let [value (h/first-some (:fx/event event) (:value event))
+  (let [value (param-number (param-spec state config effect-path param-key)
+                            (h/first-some (:fx/event event) (:value event)))
         items-path (:items-path config)
         items-vec (vec (get-in state items-path []))
         updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) value)]
@@ -114,14 +124,34 @@
       (assoc-in state items-path updated-items))
     state))
 
+(defn- item-parameters
+  "The parameter definitions of item: an effect's, the effect registry's for
+   its :effect-id; a cue item's or a clip's, its preset's (:preset-id);
+   nil for anything else."
+  [item]
+  (cond
+    (:effect-id item) (:parameters (effects/get-effect (:effect-id item)))
+    (:preset-id item) (:parameters (presets/presets-by-id (:preset-id item)))))
+
 (defn param-spec
-  "The definition of param-key in the effect registry's entry for the effect
-   at effect-path (a path under config's :items-path), or nil when the
-   registry has no such effect or parameter."
+  "The definition of param-key for the item at effect-path (a path under
+   config's :items-path): an effect's from the effect registry, a cue
+   item's or a clip's from its preset (item-parameters); nil when there is
+   no such item, definition or parameter."
   [state config effect-path param-key]
-  (let [effect (get-in state (into (:items-path config) effect-path))]
-    (some #(when (= param-key (:key %)) %)
-          (:parameters (effects/get-effect (:effect-id effect))))))
+  (let [item (get-in state (into (:items-path config) effect-path))]
+    (some #(when (= param-key (:key %)) %) (item-parameters item))))
+
+(defn param-number
+  "value as a parameter of spec holds it: for an :int parameter a finite
+   number rounded to a whole number, a long, as h/parse-number-text reads
+   a typed one; any other value, or another parameter's, as it is.
+   
+   Example: (param-number {:key :kpps :type :int} 25.6) => 26"
+  [spec value]
+  (if (and (= :int (:type spec)) (h/finite-number? value))
+    (Math/round (double value))
+    value))
 
 (defn numeric-spec?
   "Does a parameter of spec hold a number: :float or :int, or no :type (a
@@ -129,43 +159,75 @@
   [spec]
   (contains? #{:float :int} (:type spec :float)))
 
-(defn handle-update-color-param
-  "Update color parameters from ColorPicker's ActionEvent.
-   Extracts the color from the ColorPicker source and converts to normalized RGB.
+(defn color-value
+  "The colour a colour edit sets: its :color, [red green blue] as the
+   colour picker reads it on the FX thread (parameter-controls/color-picker),
+   each a finite number, clamped to 0.0-1.0; nil for anything else, such
+   as the picker's ActionEvent, which is never read here.
    
-   Updates :red, :green, :blue as separate parameters for modulator support.
+   Example: (color-value {:color [1.0 0.5 0.0]}) => [1.0 0.5 0.0]"
+  [event]
+  (let [c (:color event)]
+    (when (and (vector? c) (= 3 (count c)) (every? h/finite-number? c))
+      (mapv #(max 0.0 (min 1.0 (double %))) c))))
+
+(defn write-color
+  "state with the item at path (a path under config's :items-path) given
+   rgb, [red green blue] (color-value), as its :red, :green and :blue
+   parameters: separate parameters for modulator support.
    
    NOTE: Uses NORMALIZED values (0.0-1.0), not 8-bit (0-255).
    All color effects in laser-show use normalized color values internally.
    
+   Returns: Updated state (unchanged without rgb, or without an item at
+   path)"
+  [state config path rgb]
+  (let [items-path (:items-path config)
+        items-vec (vec (get-in state items-path []))
+        path (vec path)
+        params-path (conj path :params)]
+    (if-let [[red green blue] (when (and (seq path) (map? (get-in items-vec path))) rgb)]
+      (do (log/debug "write-color: path=" path "rgb=" [red green blue])
+          (assoc-in state items-path (-> items-vec
+                                         (assoc-in (conj params-path :red) red)
+                                         (assoc-in (conj params-path :green) green)
+                                         (assoc-in (conj params-path :blue) blue))))
+      state)))
+
+(defn handle-update-color-param
+  "Update the color parameters of the effect the event names by its
+   instance (and owner), where that effect is now
+   (chain-helpers/resolve-effect-instance-path), to the event's :color
+   (color-value): write-color. A cue item's own colour, the preset
+   editor's, is :cue-chain/update-preset-color (follow-up N10).
+   
    Parameters:
    - state: Application state
    - config: Configuration map with :items-path
-   - event: Map with :effect-path and :fx/event (ActionEvent)
+   - event: Map with :domain, :entity-key, :effect-instance-id (and
+     :owner-id for an owned effect) and :color [red green blue]
    
-   Returns: Updated state"
-  [state config {:keys [effect-path] :as event}]
-  (let [action-event (:fx/event event)
-        color-picker (.getSource action-event)
-        color (.getValue color-picker)
-        ;; Use normalized values (0.0-1.0) for color effects
-        red (.getRed color)
-        green (.getGreen color)
-        blue (.getBlue color)
-        items-path (:items-path config)
-        items-vec (vec (get-in state items-path []))
-        params-path (conj (vec effect-path) :params)
-        updated-items (-> items-vec
-                          (assoc-in (conj params-path :red) red)
-                          (assoc-in (conj params-path :green) green)
-                          (assoc-in (conj params-path :blue) blue))]
-    (log/debug "handle-update-color-param: effect-path=" effect-path
-               "rgb=" [red green blue])
-    (assoc-in state items-path updated-items)))
+   Returns: Updated state (unchanged without a colour, or once the effect
+   is gone)"
+  [state config event]
+  (if-let [path (chain-helpers/resolve-effect-instance-path state event)]
+    (write-color state config path (color-value event))
+    state))
 
 
 ;; UI Mode Operations
 
+
+(defn ui-mode-key
+  "The key an effect's UI modes are kept under in its editor's :ui-modes
+   (its visual or numeric mode, the RGB curves' channel): its instance's
+   id, :effect-instance-id, which a reorder doesn't change, so a mode stays
+   with its effect (follow-up N15); else, for an event that names none,
+   its :effect-path. The editors read them by the same key.
+   
+   Example: (ui-mode-key {:effect-path [1] :effect-instance-id a}) => a"
+  [{:keys [effect-instance-id effect-path]}]
+  (if (some? effect-instance-id) effect-instance-id effect-path))
 
 (defn handle-set-ui-mode
   "Set visual/numeric mode for effect parameter UI.
@@ -173,9 +235,9 @@
    Parameters:
    - state: Application state
    - config: Configuration map with :ui-path
-   - effect-path: Path to the effect
+   - k: The key the effect's modes are kept under (ui-mode-key)
    - mode: :visual or :numeric
    
    Returns: Updated state"
-  [state config effect-path mode]
-  (assoc-in state (conj (:ui-path config) :ui-modes effect-path) mode))
+  [state config k mode]
+  (assoc-in state (conj (:ui-path config) :ui-modes k) mode))

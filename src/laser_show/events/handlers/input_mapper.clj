@@ -4,7 +4,9 @@
    Listens to all global input events from the generic router and:
    1. Continuous events (MIDI CC, OSC floats) -> updates fast input store (`laser-show.input.store`);
       MIDI's All Notes Off and All Sound Off (CC 123, 120) also let go of
-      every vibe role (:vibe/release-all)
+      every vibe role (:vibe/release-all) and end what MIDI keys hold
+      (:trigger/retire {:source :midi}, handlers/triggers.clj): their
+      note-offs may never come
    2. Discrete events (Note ON, Key pressed) -> performs O(1) lookup in `[:config :input :trigger-map]`
       and invokes the mapped action, unless it is a press marked
       :learn-only?: one the router offered to a learn attempt that binds a
@@ -76,12 +78,15 @@
   [event]
   (cond
     ;; Continuous Events. All Notes Off and All Sound Off also let go of
-    ;; every vibe role, keys and pads alike (beyond-vibe engine/mod.rs:291)
+    ;; every vibe role, keys and pads alike (beyond-vibe engine/mod.rs:291),
+    ;; then retire what MIDI keys hold (a While-held cell lets go): a key's
+    ;; next press plays again, and a note-off that still comes ends nothing
     (input-events/control-change? event)
     (let [val (double (or (:value event) 0.0))]
       (run! #(update-input-value! % val) (store-keys event))
       (when-let [dispatch (and (all-notes-off? event) @*dispatch-fn)]
-        (dispatch {:event/type :vibe/release-all :input-time (:timestamp event)})))
+        (dispatch {:event/type :vibe/release-all :input-time (:timestamp event)})
+        (dispatch {:event/type :trigger/retire :source :midi})))
 
     ;; Discrete triggers are resolved by the normal application event pipeline.
     (or (input-events/note-on? event)

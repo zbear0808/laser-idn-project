@@ -62,19 +62,29 @@
           new-state (:state result)]
       (is (false? (get-in new-state [:backend :link :carabiner-connected?]))))))
 
-(deftest carabiner-connected-keeps-the-listener-test
-  (let [before (assoc (get-in base-state [:backend :link]) :carabiner-connected? false :link-peers 2 :auto-connect? true)
+(deftest carabiner-connected-is-plain-status-test
+  (let [before (assoc (get-in base-state [:backend :link])
+                      :carabiner-connected? false :link-peers 2 :auto-connect? true :sync-enabled? true)
         state (assoc-in base-state [:backend :link] before)
-        link-after #(get-in (:state (timing/handle (assoc % :state state :event/type :timing/carabiner-connected)))
-                            [:backend :link])]
-    (testing "a connect: the flag and the listener, the other link keys kept"
-      (is (= (assoc before :carabiner-connected? true :listener ::listener)
-             (link-after {:connected? true :listener ::listener}))))
-    (testing "a connect that failed: no listener"
-      (is (= before (link-after {:connected? false}))))
-    (testing "no :listener in the event: the flag only, as before"
+        handled #(:state (timing/handle (assoc % :state state :event/type :timing/carabiner-connected)))
+        link-after #(get-in (handled %) [:backend :link])]
+    (testing "a connect: the flag, the other link keys kept"
+      (is (= (assoc before :carabiner-connected? true) (link-after {:connected? true}))))
+    (testing "not connected (a connect that failed, or the connection closed, follow-up N5): Link is off, its tempo and peers forgotten"
+      (is (= (assoc before :link-enabled? false :link-bpm nil :link-peers 0) (link-after {:connected? false}))
+          "following Link's tempo stays selected, for when Link is enabled again")
+      (is (= (:timing state) (:timing (handled {:connected? false}))) "the app keeps its tempo"))
+    (testing "no listener in app state, even from an event that has one: the connection is the Link owner's (input.link)"
       (is (= (assoc before :carabiner-connected? true)
-             (link-after {:connected? true}))))))
+             (link-after {:connected? true :listener ::listener}))))))
+
+(deftest carabiner-auto-connect-asks-the-link-owner-test
+  (let [auto-connect #(timing/handle {:event/type :timing/carabiner-auto-connect :state %})]
+    (is (= {:link/connect {}} (auto-connect base-state))
+        "start-up connects: the Link owner does, off the event thread")
+    (is (= {:link/connect {}} (auto-connect (assoc-in base-state [:backend :link :auto-connect?] true))))
+    (is (= {} (auto-connect (assoc-in base-state [:backend :link :auto-connect?] false)))
+        "Auto-connect off: nothing connects")))
 
 
 ;; Link Enabled Status Tests

@@ -8,8 +8,8 @@
   (:require [cljfx.api :as fx]
             [clj-font-awesome.core :as fa]
             [laser-show.animation.chains :as chains]
-            [laser-show.animation.effects :as effects]
             [laser-show.events.core :as events]
+            [laser-show.subs :as subs]
             [laser-show.views.components.drag-drop-cell :as dd]
             [laser-show.views.components.effect-parameter-editor :as param-editor]
             [laser-show.views.components.visual-editors.timeline.drop :as drop]
@@ -36,9 +36,10 @@
     id (assoc :id id)))
 
 (defn- effect-card
+  "An effect's card, its definition as published (subs/effect-descriptor)."
   [{:keys [fx/context col row target idx n effect]}]
   (let [group? (chains/group? effect)
-        effect-def (when-not group? (effects/get-effect (:effect-id effect)))
+        effect-def (when-not group? (fx/sub-ctx context subs/effect-descriptor (:effect-id effect)))
         enabled? (:enabled? effect true)
         domain (if (= :clip (:kind target)) :timeline-items :timeline-tracks)
         ui-key (if (= :clip (:kind target)) :items :tracks)

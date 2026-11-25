@@ -7,17 +7,19 @@
    A press (mouse or touch) switches to the pad's map: at once without a
    running clock, else on the next beat, or the bar with Shift or the pad's
    Switch on the bar (:zone-map/pointer, events/handlers/zone_maps.clj).
-   The map in use is lit blue; one a switch waits for is amber, and blinks
-   at 4 Hz from the show clock's newest tick (redraw-blink!), steady without
-   a clock. Right-click: Switch on the bar, learn or clear its control, Edit
-   maps…. A pad never takes the keyboard focus, so Space or Enter can't
-   press it.
+   The manual map's pad is lit blue while no Map cycle runs (the Manual
+   mark, subs/manual-map-marker-id); one a switch waits for is amber, and
+   blinks at 4 Hz from the show clock's newest tick (redraw-blink!), steady
+   without a clock. Right-click: Switch on the bar, learn or clear its
+   control, Edit maps…. A pad never takes the keyboard focus, so Space or
+   Enter can't press it.
 
    After the maps, CYCLE (zones plan Z5, 07 §7.4): lit while a Map cycle
    cell picks the map, paused once a map pad's press lands, dim with no
    cycle cell on. Its press carries the cycle on, on the beat like any
-   pad's. While it runs no map pad is the one in use, and the map it shows
-   now is marked ↻ (the :cycling pseudo-class), from the newest tick."
+   pad's. While it runs no map pad is lit as the manual map, and the map
+   it shows now is marked ↻ (the :cycling pseudo-class), from the newest
+   tick."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.animation.show-time :as show-time]
@@ -87,7 +89,7 @@
 
 (defn- chip-tooltip [{:keys [name active? pending bar? bindings]}]
   (str (cond
-         active? (str name ": the zone map in use")
+         active? (str name ": the manual map")
          pending (str name ": switching on the next " (if (= :bar pending) "bar" "beat"))
          :else (str "Switch to " name " on the next " (if bar? "bar" "beat (Shift: the bar)")))
        (when (seq bindings) (str " · " (keys-text bindings)))))
@@ -137,8 +139,8 @@
 (defn map-pad
   "The pad of the map map-id (props :map-id :size): :large on Perform (its
    name, now / next beat / next bar, its control), :small in the Grid tab's
-   strip (\"● Left / Right\" in use, \"Odd / Even ◌\" waiting). Its children
-   don't take the mouse, so a press reaches the pad itself."
+   strip (\"● Left / Right\" the manual map, \"Odd / Even ◌\" waiting). Its
+   children don't take the mouse, so a press reaches the pad itself."
   [{:keys [fx/context map-id size]}]
   (let [{:keys [name active? pending learning? bindings] :as pad} (fx/sub-ctx context subs/map-pad map-id)
         learn (fx/sub-ctx context subs/learn-for-target {:type :zone-map :target map-id})

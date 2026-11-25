@@ -37,7 +37,8 @@
             [laser-show.events.safety-guard :as guard]
             [laser-show.output.driver :as driver]
             [laser-show.routing.refs :as refs]
-            [laser-show.routing.rig :as rig]))
+            [laser-show.routing.rig :as rig]
+            [laser-show.state.rig-file :as rig-file]))
 
 
 (def DEFAULT_PROJECTOR_EFFECTS
@@ -230,6 +231,16 @@
           (update :projectors #(-> (merge new-projectors %) move upgrade))
           (update-in [:chains :projector-effects] #(merge new-effects %))))))
 
+(defn- follow-renames
+  "state with the selection following each projector renamed to an id that
+   reads back (rig/readable-renames, {old new}); what else of the projector
+   UI named an old id lets go of it (h/prune-projector-ui)."
+  [state renames]
+  (let [selected (get-in state [:projector-ui :active-projector])]
+    (cond-> state
+      (contains? renames selected) (assoc-in [:projector-ui :active-projector] (get renames selected))
+      (seq renames) (h/prune-projector-ui))))
+
 (defn- handle-projectors-scan-complete
   "Handle scan completion: the discovered devices list, and each output found
    matched to a projector by its stable id (routing.rig/match-discovered):
@@ -245,6 +256,11 @@
    :warnings (a discoverer that failed or timed out, a device left out) show
    as one :warning notice, after any move's.
    
+   A projector whose id doesn't read back as EDN, which an earlier build
+   made from an IPv6 host (:projector-fe80::1-0: no show or rig file can
+   hold it), takes one that does first (rig/readable-renames), wherever it
+   is named (rig-file/rename-projectors), and stays selected.
+   
    Discovery isn't a user edit: all of it is backfilled into undo history and
    the saved baseline, so it is never undone and never counts as an unsaved
    change. The result of a scan that isn't the one in progress
@@ -253,20 +269,25 @@
   (if-not (current-scan? state event)
     (do (log/info "Ignoring the result of a scan that is over or was replaced")
         {})
-    (let [{:keys [moves upgrades new notices]} (rig/match-discovered (:projectors state) devices)
+    (let [renames (rig/readable-renames (:projectors state))
+          rename #(rig-file/rename-projectors % renames)
+          {:keys [moves upgrades new notices]} (rig/match-discovered (:projectors (rename state)) devices)
           new-projectors (into {} (map (fn [output] [(:id output) (discovered-projector state output)])) new)
           new-effects (into {} (map (fn [id] [id {:items (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS)}]))
                             (keys new-projectors))
-          found (found-in-scan new-projectors new-effects moves upgrades)
+          found (comp (found-in-scan new-projectors new-effects moves upgrades) rename)
           new-state (-> (found state)
+                        (follow-renames renames)
                         (scan-over)
                         (assoc-in [:projector-ui :discovered-devices] (vec devices))
                         (assoc-in [:rig-ui :scanned?] true))]
+      (when (seq renames)
+        (log/info "Projector ids that couldn't be saved now read back:" renames))
       (cond-> (cond
                 (seq warnings) (h/show-notice new-state (str/join " " (conj (vec notices) (str/join "; " warnings))) :warning)
                 (seq notices) (h/show-notice new-state (str/join " " notices) :info)
                 :else {:state new-state})
-        (or (seq new-projectors) (seq moves) (seq upgrades))
+        (or (seq new-projectors) (seq moves) (seq upgrades) (seq renames))
         (assoc :history/backfill found)))))
 
 
@@ -352,9 +373,14 @@
    another laser, and it starts at the driver's default scan rate. An
    unnamed one is its driver's short name and a number
    (driver/default-projector-name: \"LSPS 1\"), so its card doesn't say its
-   settings twice; an unnamed IDN one is named after its host."
-  [{:keys [name host port driver driver-config state]}]
-  (let [projector-id (keyword (str "projector-" (System/currentTimeMillis)))]
+   settings twice; an unnamed IDN one is named after its host.
+   
+   Its id is :projector-<time> (the event's :time), with -2, -3 … added
+   while another projector has it (rig/unique-projector-id), so two adds in
+   one millisecond add two projectors."
+  [{:keys [name host port driver driver-config state] :as event}]
+  (let [projector-id (rig/unique-projector-id (:projectors state)
+                                              (keyword (str "projector-" (h/current-time-ms event))))]
     (if (and driver (not= :idn driver))
       (let [descriptor (descriptor-of state driver)
             {:keys [config errors]} (driver/coerce-config (:fields descriptor) driver-config)]
@@ -428,10 +454,10 @@
    second submit queued behind the first) nothing is added. A form that
    can't be added (no host; a driver field that doesn't coerce, or a driver
    that isn't installed) adds nothing, and the dialog stays open as typed."
-  [{:keys [state]}]
+  [{:keys [state time]}]
   (let [form (get-in state manual-dialog-path)]
     (if-let [add (and (:open? form) (manual-form-add form))]
-      (handle-projectors-add-manual (assoc add :state state))
+      (handle-projectors-add-manual (assoc add :state state :time time))
       {:state state})))
 
 
@@ -772,69 +798,65 @@
 
 (defn- write-zone
   "state with projector-id's safety zone set to zone, asking first while its
-   light is going out and zone would let light somewhere new (D-28). zone
-   is normalized; one normalize can't read is refused. While the question is
-   open, another widening is dropped. With review, the plain intent of a
-   coordinate edit or Reset, the question is that intent's own
-   (guard/ask-review) and event's :confirmed? counts for nothing: only the
-   question's answer does (handle-reviewed-zone-edit)."
-  ([state projector-id zone event message]
-   (write-zone state projector-id zone event message nil))
-  ([state projector-id zone {:keys [confirmed?] :as event} message review]
-   (let [old (get-in state [:projectors projector-id :safety])
-         new (try (safety/normalize zone) (catch clojure.lang.ExceptionInfo _ ::unreadable))]
-     (cond
-       (= ::unreadable new) {:state state}
+   light is going out and zone would let light somewhere new (D-28), in a
+   question of intent's own (guard/ask-review): intent is the plain data of
+   the edit, a coordinate edit, Reset, a drag or a blocked area's removal.
+   While a question is open, another widening is dropped. zone is
+   normalized; one normalize can't read is refused. Without intent, this is
+   that question's Allow, which handle-reviewed-zone-edit has matched to
+   its question: the zone is written."
+  [state projector-id zone message intent]
+  (let [old (get-in state [:projectors projector-id :safety])
+        new (try (safety/normalize zone) (catch clojure.lang.ExceptionInfo _ ::unreadable))]
+    (cond
+      (= ::unreadable new) {:state state}
 
-       (and (not (and confirmed? (nil? review)))
-            (guard/outputting? state projector-id)
-            (safety/widens? old new))
-       (cond
-         (guard/asking? state) {:state state}
-         review {:state (guard/ask-review state {:message message :intent review})}
-         :else {:state (guard/ask state {:message message :event event})})
+      (and intent (guard/outputting? state projector-id) (safety/widens? old new))
+      (if (guard/asking? state)
+        {:state state}
+        {:state (guard/ask-review state {:message message :intent intent})})
 
-       :else {:state (assoc-in state [:projectors projector-id :safety] new)}))))
+      :else {:state (assoc-in state [:projectors projector-id :safety] new)})))
 
 (defn- live-message [state projector-id]
   (str (guard/projector-name state projector-id) " is on. Light can reach places it couldn't before."))
 
-(defn- handle-projectors-set-safety
-  "Set a projector's safety zone (a drag on the safety editor's canvas). A
-   zone stored now that can't be read stays as it is: only Reset
-   (:projectors/reset-safety) replaces one."
-  [{:keys [projector-id safety state] :as event}]
-  (if (or (not (contains? (:projectors state) projector-id))
-          (nil? (try (safety/normalize (get-in state [:projectors projector-id :safety]))
-                     (catch clojure.lang.ExceptionInfo _ nil))))
-    {:state state}
-    (write-zone state projector-id safety event (live-message state projector-id))))
+(def ^:private reviewed-keys
+  "What the plain intent of a reviewed edit keeps of its event: what it is,
+   which projector, and the change it names."
+  [:event/type :projector-id :path :value :coordinates :index :row-version])
 
-(def ^:private zone-changed-text "Safety zone changed; review the edit again")
+(defn- question-message
+  "What the question about intent, a reviewed edit, says."
+  [state {:keys [event/type projector-id index]}]
+  (if (= :projectors/remove-blocked-area type)
+    (str (guard/projector-name state projector-id) " is on. Light can reach Blocked " (inc index) " again.")
+    (live-message state projector-id)))
 
 (defn- handle-reviewed-zone-edit
-  "A coordinate edit or Reset: the change guard/zone-edit-proposal finds
-   against the zone stored now, through write-zone, at once unless it would
-   let a live projector's light somewhere new: then it asks, in a question of
-   its own. Its Allow comes back with :review-id (and :confirmed? true,
-   which alone is no permission): it continues only its own open question,
-   and closes it whatever happens. The intent it asked about applies while
-   the zone is still the one it asked about; after any change to that zone
-   nothing is written, and a notice says to review the edit again."
+  "A coordinate edit, Reset, a drag on the canvas or a blocked area's
+   removal: the change guard/zone-edit-proposal finds against the zone
+   stored now, through write-zone, at once unless it would let a live
+   projector's light somewhere new: then it asks, in a question of its own.
+   Its Allow comes back with :review-id (and :confirmed? true, which alone is
+   no permission): it continues only its own open question, and closes it
+   whatever happens. The intent it asked about applies while the zone is
+   still the one it asked about; after any change to that zone nothing is
+   written, and a notice says to review the edit again."
   [{:keys [state review-id] :as event}]
   (if (some? review-id)
     (if-let [{:keys [intent closed stale?]} (guard/review-answer state event)]
       (let [{:keys [projector-id after same?] :as proposal}
             (when-not stale? (guard/zone-edit-proposal closed intent))]
         (cond
-          stale? (h/show-notice closed zone-changed-text :warning)
-          (and proposal (not same?)) (write-zone closed projector-id after {:confirmed? true} nil)
+          stale? (h/show-notice closed guard/zone-changed-text :warning)
+          (and proposal (not same?)) (write-zone closed projector-id after nil nil)
           :else {:state closed}))
       {:state state})
-    (let [intent (select-keys event [:event/type :projector-id :path :value :row-version])
+    (let [intent (select-keys event reviewed-keys)
           {:keys [projector-id after same?] :as proposal} (guard/zone-edit-proposal state intent)]
       (if (and proposal (not same?))
-        (write-zone state projector-id after intent (live-message state projector-id) intent)
+        (write-zone state projector-id after (question-message state intent) intent)
         {:state state}))))
 
 (defn- handle-projectors-set-safety-coordinate
@@ -842,6 +864,16 @@
    safety editor): {:projector-id :path [:limit k] or [:blocked i k] :value}
    and a blocked area's :row-version, set in the zone stored now, so two
    fields committed from one render both apply (handle-reviewed-zone-edit)."
+  [event]
+  (handle-reviewed-zone-edit event))
+
+(defn- handle-projectors-drag-safety
+  "A drag on the safety editor's canvas: {:projector-id :path [:limit] or
+   [:blocked i] :coordinates {k v}}, the numbers it moved of the rectangle it
+   grabbed, with a blocked area's :row-version (the layout it was grabbed
+   in), set in the zone stored now, so an edit that landed since the editor
+   last drew stays (follow-up B3). Asking, its Allow applies only to the zone
+   it asked about (handle-reviewed-zone-edit)."
   [event]
   (handle-reviewed-zone-edit event))
 
@@ -870,41 +902,44 @@
         {:state (assoc-in state [:projectors projector-id :safety] (update zone :blocked conj area))}))))
 
 (defn- handle-projectors-remove-blocked-area
-  "Remove a blocked area. That lets light into it again, so it asks first
-   while the projector's light is going out."
-  [{:keys [projector-id index state] :as event}]
-  (let [zone (try (safety/normalize (get-in state [:projectors projector-id :safety]))
-                  (catch clojure.lang.ExceptionInfo _ nil))]
-    (if (or (not (contains? (:projectors state) projector-id)) (nil? zone)
-            (not (< -1 (or index -1) (count (:blocked zone)))))
-      {:state state}
-      (write-zone state projector-id
-                  (update zone :blocked #(into (subvec % 0 index) (subvec % (inc index))))
-                  event
-                  (str (guard/projector-name state projector-id) " is on. Light can reach Blocked "
-                       (inc index) " again.")))))
+  "Remove a blocked area, :index, in the layout its button showed
+   (:row-version, when it sends one). That lets light into it again, so it
+   asks first while the projector's light is going out, and the Allow
+   removes it only from the zone it asked about (handle-reviewed-zone-edit)."
+  [event]
+  (handle-reviewed-zone-edit event))
 
 (defn- handle-projectors-copy-safety
   "Copy (or mirror left to right) one projector's safety zone to others, in
-   one undo step. If it would give live projectors a larger area, one
-   question for all of them first."
-  [{:keys [from to mirror? confirmed? state] :as event}]
-  (let [zone (try (safety/normalize (get-in state [:projectors from :safety]))
-                  (catch clojure.lang.ExceptionInfo _ nil))
-        targets (filterv #(and (contains? (:projectors state) %) (not= from %)) to)]
-    (if (or (not (contains? (:projectors state) from)) (nil? zone) (empty? targets))
-      {:state state}
-      (let [new-zone (if mirror? (safety/mirror-x zone) zone)
-            after (reduce #(assoc-in %1 [:projectors %2 :safety] new-zone) state targets)
-            grown (guard/growing state after)]
-        (cond
-          (or confirmed? (empty? grown)) {:state after}
-          (guard/asking? state) {:state state}
-          :else {:state (guard/ask state {:title (str "Allow light in a larger area on "
-                                                      (guard/names-text (map #(guard/projector-name state %) grown))
-                                                      "?")
-                                          :message "They are on. Light can reach places it couldn't before."
-                                          :event event})})))))
+   one undo step: guard/copy-proposal, against the zones stored now. If it
+   would give live projectors a larger area, one question for all of them
+   first, a question of its own (guard/ask-review). Its Allow comes back
+   with :review-id (and :confirmed? true, which alone is no permission): it
+   copies only while the larger areas are the ones it asked about (the same
+   projectors, from the same zones to the same zone), and closes the
+   question whatever happens; after any change to them nothing is copied,
+   and a notice says to review the edit again."
+  [{:keys [review-id state] :as event}]
+  (if (some? review-id)
+    (if-let [{:keys [intent closed stale? zones]} (guard/review-answer state event)]
+      (let [after (:after (guard/copy-proposal closed intent))]
+        (if (and after (not stale?) (= zones (guard/growth closed after)))
+          {:state after}
+          (h/show-notice closed guard/zone-changed-text :warning)))
+      {:state state})
+    (let [intent (select-keys event [:event/type :from :to :mirror?])
+          after (:after (guard/copy-proposal state intent))
+          grown (when after (guard/growing state after))]
+      (cond
+        (nil? after) {:state state}
+        (empty? grown) {:state after}
+        (guard/asking? state) {:state state}
+        :else {:state (guard/ask-review state {:title (str "Allow light in a larger area on "
+                                                           (guard/names-text (map #(guard/projector-name state %) grown))
+                                                           "?")
+                                               :message "They are on. Light can reach places it couldn't before."
+                                               :intent intent
+                                               :zones (guard/growth state after)})}))))
 
 
 ;; Calibration Mode
@@ -982,8 +1017,8 @@
     :projectors/remove (handle-projectors-remove event)
     :projectors/identify (handle-projectors-identify event)
     :projectors/identify-ended (handle-projectors-identify-ended event)
-    :projectors/set-safety (handle-projectors-set-safety event)
     :projectors/set-safety-coordinate (handle-projectors-set-safety-coordinate event)
+    :projectors/drag-safety (handle-projectors-drag-safety event)
     :projectors/reset-safety (handle-projectors-reset-safety event)
     :projectors/add-blocked-area (handle-projectors-add-blocked-area event)
     :projectors/remove-blocked-area (handle-projectors-remove-blocked-area event)

@@ -200,14 +200,23 @@
 (defn- handle-osc-started
   "The latest Start's result. Listening, the server lets its messages in:
    one switch, as the server without :enabled? drops every message
-   (osc/create-osc-handler). A port that won't open leaves OSC off, and a
-   notice says so; what OSC keys held (on a server it replaced) lets go."
+   (osc/create-osc-handler); :listening-port is where. Moved there from
+   another port (a Start after the port changed), it can't hear the
+   releases its controls send to the port it left: what OSC keys hold lets
+   go (:trigger/retire, handlers/triggers.clj). A port that won't open
+   leaves OSC off, and a notice says so; what OSC keys held (on a server it
+   replaced) lets go."
   [{:keys [state server-running? port error] :as event}]
   (if (latest? state :osc :server event)
-    (let [state (answered state :osc :server)]
+    (let [state (answered state :osc :server)
+          {:keys [listening-port] listening? :server-running?} (get-osc-state state)
+          moved? (and listening? (some? listening-port) (not= listening-port port))]
       (if server-running?
-        {:state (update-in state (osc-path) assoc :server-running? true :port port :enabled? true)}
-        (assoc (h/show-notice (update-in state (osc-path) assoc :server-running? false :enabled? false)
+        (cond-> {:state (update-in state (osc-path) assoc
+                                   :server-running? true :listening-port port :enabled? true)}
+          moved? (assoc :dispatch {:event/type :trigger/retire :source :osc}))
+        (assoc (h/show-notice (update-in state (osc-path) assoc
+                                         :server-running? false :listening-port nil :enabled? false)
                               (or error (str "Could not listen for OSC on port " port))
                               :error)
                :dispatch {:event/type :trigger/retire :source :osc})))
@@ -229,14 +238,17 @@
   (if (latest? state :osc :server event)
     {:state (-> state
                 (answered :osc :server)
-                (assoc-in (osc-path :server-running?) false))}
+                (update-in (osc-path) assoc :server-running? false :listening-port nil))}
     {}))
 
 (defn- handle-osc-set-port
   "Set the port Start Server listens on: an integer from 1 to 65535 (else
    nothing changes). It takes effect at the next Start: the Port field
    applies it on Enter or when it loses focus, so a click on Start applies
-   what the field shows first."
+   what the field shows first. Set while the server listens (not from the
+   field, disabled then), it waits for a Start, which moves the server
+   there; until then the card says where the server listens
+   (:listening-port, the device worker's answer)."
   [{:keys [state port]}]
   (if (and (int? port) (<= 1 port 65535))
     {:state (assoc-in state (osc-path :port) port)}

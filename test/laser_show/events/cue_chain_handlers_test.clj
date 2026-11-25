@@ -6,7 +6,10 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [laser-show.animation.effects :as registry]
+   [laser-show.animation.effects.intensity]
    [laser-show.animation.effects.shape]
+   [laser-show.events.core :as events]
+   [laser-show.events.handlers.history :as history-handlers]
    [laser-show.state.history :as history]
    [laser-show.events.handlers.cue-chain :as cue-chain]
    [laser-show.events.handlers.chain :as chain]
@@ -356,9 +359,10 @@
 
 (deftest add-effect-from-bank-reads-the-registry-test
   (let [scale (registry/get-effect :scale)
+        state (assoc-in sample-state-with-item [:chains :cue-chains [0 0] :items 0 :id] :circle)
         add (fn [event]
-              (cue-chain/handle (merge {:event/type :cue-chain/add-effect-from-bank :col 0 :row 0 :parent-path [0 :effects]
-                                        :state sample-state-with-item}
+              (cue-chain/handle (merge {:event/type :cue-chain/add-effect-from-bank :col 0 :row 0 :owner-id :circle
+                                        :state state}
                                        event)))]
     (try
       (registry/register-effect! (assoc-in scale [:parameters 0 :default] 7.0))
@@ -372,7 +376,7 @@
                dispatch)))
       (finally
         (registry/register-effect! scale)))
-    (is (= {:state sample-state-with-item} (add {:item-id :no-such-effect})) "an id no effect has: nothing")))
+    (is (= {:state state} (add {:item-id :no-such-effect})) "an id no effect has: nothing")))
 
 
 ;; Remove Item Tests (using cue-chain/handle with :cue-chain/set-item-effects)
@@ -380,14 +384,18 @@
 ;; which calls :cue-chain/set-item-effects with the updated effects array.
 
 
+(def ^:private with-effect
+  "sample-state-with-effect, its item Circle by its id."
+  (assoc-in sample-state-with-effect [:chains :cue-chains [0 0] :items 0 :id] :circle))
+
 (deftest handle-set-item-effects
   (testing "Setting item effects replaces the effects array"
     (let [new-effects [{:id (java.util.UUID/randomUUID) :effect-id :rotate :enabled? true :params {}}]
           event {:event/type :cue-chain/set-item-effects
                  :col 0 :row 0
-                 :item-path [0]
+                 :item-id :circle
                  :items new-effects
-                 :state sample-state-with-effect}
+                 :state with-effect}
           result (cue-chain/handle event)]
       (is (= 1 (count (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects]))))
       (is (= :rotate (:effect-id (first (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects])))))
@@ -397,9 +405,9 @@
   (testing "Setting empty effects array clears effects"
     (let [event {:event/type :cue-chain/set-item-effects
                  :col 0 :row 0
-                 :item-path [0]
+                 :item-id :circle
                  :items []
-                 :state sample-state-with-effect}
+                 :state with-effect}
           result (cue-chain/handle event)]
       (is (empty? (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects])))
       (is (history/derive-dirty (:state event) (:state result))))))
@@ -408,37 +416,47 @@
 ;; Targets (zones plan Z4): one :target on the cue, its items and groups
 
 
-(defn- set-item-target [state item-path target]
-  (cue-chain/handle {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-path item-path :target target :state state}))
+(def ^:private with-items
+  "The cue at [0 0]: Circle, then the group Pair holding Star."
+  (assoc-in sample-state-with-item [:chains :cue-chains [0 0] :items]
+            [{:type :preset :id :circle :preset-id :circle :params {:size 100} :effects []}
+             {:type :group :id :pair :name "Pair" :items [{:type :preset :id :star :preset-id :star :params {}}]}]))
+
+(defn- set-item-target [state item-id target]
+  (cue-chain/handle {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-id item-id :target target :state state}))
 
 (deftest set-item-target-test
   (testing "an item's own target, in normal form"
-    (let [result (set-item-target sample-state-with-item [0] :zone/a)]
+    (let [result (set-item-target with-items :circle :zone/a)]
       (is (= :zone/a (get-in result [:state :chains :cue-chains [0 0] :items 0 :target])))
-      (is (history/derive-dirty sample-state-with-item (:state result)) "an edit")
-      (is (= [:zone/a :zone/b] (get-in (set-item-target sample-state-with-item [0] [:zone/b :zone/a :zone/b])
+      (is (history/derive-dirty with-items (:state result)) "an edit")
+      (is (= [:zone/a :zone/b] (get-in (set-item-target with-items :circle [:zone/b :zone/a :zone/b])
                                        [:state :chains :cue-chains [0 0] :items 0 :target])))))
   (testing "a group and its child, each its own"
-    (let [state (assoc-in sample-state-with-item [:chains :cue-chains [0 0] :items]
-                          [{:type :group :id :g :name "Pair" :items [{:type :preset :id :c :preset-id :circle :params {}}]}])
-          group (:state (set-item-target state [0] [:zone/a :zone/b]))
-          child (:state (set-item-target group [0 :items 0] :graphics))]
-      (is (= [:zone/a :zone/b] (get-in child [:chains :cue-chains [0 0] :items 0 :target])))
-      (is (= :graphics (get-in child [:chains :cue-chains [0 0] :items 0 :items 0 :target])))))
+    (let [group (:state (set-item-target with-items :pair [:zone/a :zone/b]))
+          child (:state (set-item-target group :star :graphics))]
+      (is (= [:zone/a :zone/b] (get-in child [:chains :cue-chains [0 0] :items 1 :target])))
+      (is (= :graphics (get-in child [:chains :cue-chains [0 0] :items 1 :items 0 :target])))))
   (testing "from a picker's choice (:fx/event)"
-    (is (= :graphics (get-in (cue-chain/handle {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-path [0]
-                                                 :fx/event {:id :graphics :name "Graphics"} :state sample-state-with-item})
+    (is (= :graphics (get-in (cue-chain/handle {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-id :circle
+                                                 :fx/event {:id :graphics :name "Graphics"} :state with-items})
                              [:state :chains :cue-chains [0 0] :items 0 :target]))))
-  (testing "an item that isn't there: nothing changes"
-    (is (= {:state sample-state-with-item} (set-item-target sample-state-with-item [5] :zone/a)))
-    (is (= {:state base-state} (cue-chain/handle {:event/type :cue-chain/set-item-target :state base-state})))))
+  (testing "the item where it is when the choice is handled (follow-up R2): one made before a reorder sets its own item"
+    (let [reordered (update-in with-items [:chains :cue-chains [0 0] :items] (comp vec reverse))]
+      (is (= [[:pair nil] [:circle :zone/b]]
+             (map (juxt :id :target) (get-in (set-item-target reordered :circle :zone/b) [:state :chains :cue-chains [0 0] :items]))))))
+  (testing "an item that isn't there, in another cue or none: nothing ({})"
+    (is (= {} (set-item-target with-items :gone :zone/a)))
+    (is (= {} (cue-chain/handle {:event/type :cue-chain/set-item-target :col 1 :row 0 :item-id :circle :target :zone/a
+                                 :state with-items})))
+    (is (= {} (cue-chain/handle {:event/type :cue-chain/set-item-target :state base-state})))))
 
 (deftest inherit-removes-the-target-test
-  (let [with-target (assoc-in sample-state-with-item [:chains :cue-chains [0 0] :items 0 :target] :zone/a)]
+  (let [with-target (assoc-in with-items [:chains :cue-chains [0 0] :items 0 :target] :zone/a)]
     (doseq [target [nil [] :inherit]]
-      (let [item (get-in (set-item-target with-target [0] target) [:state :chains :cue-chains [0 0] :items 0])]
+      (let [item (get-in (set-item-target with-target :circle target) [:state :chains :cue-chains [0 0] :items 0])]
         (is (not (contains? item :target)) (str (pr-str target) ": no key, it inherits"))))
-    (is (not (contains? (get-in (cue-chain/handle {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-path [0]
+    (is (not (contains? (get-in (cue-chain/handle {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-id :circle
                                                    :fx/event {:id :inherit :name "Inherit"} :state with-target})
                                 [:state :chains :cue-chains [0 0] :items 0])
                         :target))
@@ -453,6 +471,248 @@
       (is (not (contains? (get-in cleared [:state :chains :cue-chains [0 0]]) :target)) "nil: none, it inherits"))
     (is (= {:state sample-state-with-item} (set-target {:col 4})) "a cell with no cue: nothing")
     (is (= {:state base-state} (cue-chain/handle {:event/type :cue-chain/set-target :state base-state})))))
+
+
+;; A preset's parameters (follow-up N10): by the item's id, as its target
+
+
+(def ^:private presets
+  "The cue at [0 0]: Circle, Square, then the group Pair holding Star."
+  (assoc-in sample-state-with-item [:chains :cue-chains [0 0] :items]
+            [{:type :preset :id :circle :preset-id :circle :params {:radius 0.5 :red 1.0 :green 1.0 :blue 1.0} :effects []}
+             {:type :preset :id :square :preset-id :square :params {:size 0.5 :red 1.0 :green 1.0 :blue 1.0} :effects []}
+             {:type :group :id :pair :name "Pair" :items [{:type :preset :id :star :preset-id :star :params {:spikes 5}}]}]))
+
+(defn- preset-edit
+  "What the preset editor sends for item-id of the cue at [col row], of
+   type (:cue-chain/update-preset-param, -param-from-text, update-preset-color)."
+  [state type item-id & {:as more}]
+  (cue-chain/handle (merge {:event/type type :col 0 :row 0 :item-id item-id :state state} more)))
+
+(defn- params-of
+  "The params of the preset item-id of the cue at [0 0] in state."
+  [state item-id]
+  (let [items (get-in state [:chains :cue-chains [0 0] :items])]
+    (:params (some #(when (= item-id (:id %)) %) (tree-seq map? #(concat (:items %)) {:items items})))))
+
+(deftest preset-edits-find-their-item-test
+  (let [reordered (update-in presets [:chains :cue-chains [0 0] :items] (fn [[c s p]] [s p c]))]
+    (testing "a value, typed text and a colour, each on its item"
+      (is (= 0.3 (:radius (params-of (:state (preset-edit presets :cue-chain/update-preset-param :circle :param-key :radius :fx/event 0.3)) :circle))))
+      (is (= 0.25 (:radius (params-of (:state (preset-edit presets :cue-chain/update-preset-param-from-text :circle :param-key :radius
+                                                           :min 0.1 :max 1.0 :is-int? false :text "0.25"))
+                                      :circle))))
+      (is (= {:red 0.0 :green 0.5 :blue 1.0}
+             (select-keys (params-of (:state (preset-edit presets :cue-chain/update-preset-color :circle :color [0.0 0.5 1.0])) :circle)
+                          [:red :green :blue]))))
+    (testing "one in a group, and an :int parameter's number whole (follow-up N1)"
+      (is (= 7 (:spikes (params-of (:state (preset-edit presets :cue-chain/update-preset-param :star :param-key :spikes :fx/event 6.7)) :star)))))
+    (testing "made before a reorder, handled after it: its own item, where it is now; the others as they were"
+      (doseq [[type more] [[:cue-chain/update-preset-param {:param-key :radius :fx/event 0.3}]
+                           [:cue-chain/update-preset-param-from-text {:param-key :radius :min 0.1 :max 1.0 :is-int? false :text "0.3"}]
+                           [:cue-chain/update-preset-color {:color [0.0 0.5 1.0]}]]]
+        (let [after (:state (apply preset-edit reordered type :circle (mapcat identity more)))]
+          (is (not= (params-of reordered :circle) (params-of after :circle)) (str type ": Circle, now last"))
+          (is (= (params-of reordered :square) (params-of after :square)) (str type ": Square, now first, as it was"))
+          (is (= (update-in reordered [:chains :cue-chains [0 0] :items 2] dissoc :params)
+                 (update-in after [:chains :cue-chains [0 0] :items 2] dissoc :params))
+              (str type ": nothing else")))))
+    (testing "an item that is gone, another cue's, a group or none: nothing ({})"
+      (let [deleted (update-in presets [:chains :cue-chains [0 0] :items] (comp vec rest))]
+        (doseq [[type more] [[:cue-chain/update-preset-param {:param-key :radius :fx/event 0.3}]
+                             [:cue-chain/update-preset-param-from-text {:param-key :radius :min 0.1 :max 1.0 :is-int? false :text "0.3"}]
+                             [:cue-chain/update-preset-color {:color [0.0 0.5 1.0]}]]]
+          (is (= {} (apply preset-edit deleted type :circle (mapcat identity more))) (str type ": Circle deleted, Square in its place"))
+          (is (= {} (apply preset-edit presets type :circle :col 1 (mapcat identity more))) (str type ": another cell"))
+          (is (= {} (apply preset-edit presets type :pair (mapcat identity more))) (str type ": a group"))
+          (is (= {} (apply preset-edit presets type nil (mapcat identity more))) (str type ": no item named")))))
+    (testing "what changes nothing: nothing ({})"
+      (is (= {} (preset-edit presets :cue-chain/update-preset-param :circle :param-key :radius :fx/event 0.5)) "the value it has")
+      (is (= {} (preset-edit presets :cue-chain/update-preset-param-from-text :circle :param-key :radius
+                             :min 0.1 :max 1.0 :is-int? false :text "abc"))
+          "text that isn't a number")
+      (is (= {} (preset-edit presets :cue-chain/update-preset-color :circle :fx/event (javafx.event.ActionEvent.)))
+          "a colour edit with no colour"))
+    (testing "through the pipeline: one undo step, Edit Preset"
+      (let [s0 (history/mark-clean presets)
+            after (:state (events/handle-event-pipeline {:event/type :cue-chain/update-preset-param :col 0 :row 0 :item-id :circle
+                                                         :param-key :radius :fx/event 0.3 :state s0}))]
+        (is (= 0.3 (:radius (params-of after :circle))))
+        (is (= "Edit Preset" (history/undo-label (:history after))))))))
+
+
+;; An item's effects (follow-up N14): its effects list's changes and the
+;; effect bank's adds name the item by its id, as its target and its
+;; preset's parameters do (R2, N10)
+
+
+(def ^:private fx-a {:id :fx-a :effect-id :intensity :enabled? true :params {:amount 1.0}})
+(def ^:private fx-b {:id :fx-b :effect-id :scale :enabled? true :params {:x-scale 1.0 :y-scale 1.0 :uniform? false}})
+(def ^:private fx-c {:id :fx-c :effect-id :intensity :enabled? true :params {:amount 0.5}})
+
+(def ^:private with-item-effects
+  "The cue at [0 0]: Circle with the effects A and B, Square with C, then
+   the group Pair holding Star, which has none; saved."
+  (-> sample-state-with-item
+      (assoc-in [:chains :cue-chains [0 0] :items]
+                [{:type :preset :id :circle :preset-id :circle :params {} :effects [fx-a fx-b]}
+                 {:type :preset :id :square :preset-id :square :params {} :effects [fx-c]}
+                 {:type :group :id :pair :name "Pair" :effects []
+                  :items [{:type :preset :id :star :preset-id :star :params {} :effects []}]}])
+      (history/mark-clean)))
+
+(defn- effects-of
+  "The ids of the effects of the item or group item-id of the cue at [0 0]
+   in state."
+  [state item-id]
+  (let [items (get-in state [:chains :cue-chains [0 0] :items])]
+    (some #(when (= item-id (:id %)) (mapv :id (:effects %))) (tree-seq map? #(concat (:items %)) {:items items}))))
+
+(defn- run
+  "state after event and what it dispatches inline, through the pipeline
+   (events/handle-event-pipeline), as the agent runs them."
+  [state event]
+  (let [effects (events/handle-event-pipeline (assoc event :state state :time 1000))
+        s (or (:state effects) state)]
+    (if-let [next-event (:dispatch effects)]
+      (run s next-event)
+      s)))
+
+(defn- item-effects-event
+  "An input in the item effects list of the cue at [0 0] while it shows the
+   effects of item-id, with the address the cue chain editor gives it."
+  [type item-id & {:as more}]
+  (merge {:event/type type :component-id [:item-effects 0 0]
+          :items-path {:domain :cue-chains :entity-key [0 0] :owner-id item-id}
+          :on-change-event :cue-chain/set-item-effects
+          :on-change-params {:col 0 :row 0 :item-id item-id}}
+         more))
+
+(deftest item-effects-find-their-item-test
+  (let [reordered (update-in with-item-effects [:chains :cue-chains [0 0] :items] (fn [[c s p]] [s p c]))
+        set-effects (fn [state item-id items & {:as more}]
+                      (cue-chain/handle (merge {:event/type :cue-chain/set-item-effects :col 0 :row 0 :item-id item-id
+                                                :items items :state state}
+                                               more)))
+        add (fn [state owner-id & {:as more}]
+              (cue-chain/handle (merge {:event/type :cue-chain/add-effect-from-bank :col 0 :row 0 :owner-id owner-id
+                                        :item-id :rotation :state state}
+                                       more)))]
+    (testing "the list's change: the effects of its own item, a group's, an item's in a group"
+      (is (= [:fx-b :fx-a] (effects-of (:state (set-effects with-item-effects :circle [fx-b fx-a])) :circle)))
+      (is (= [:fx-c] (effects-of (:state (set-effects with-item-effects :pair [fx-c])) :pair)))
+      (is (= [:fx-c] (effects-of (:state (set-effects with-item-effects :star [fx-c])) :star))))
+    (testing "the bank's add: on its own item, the new effect selected"
+      (let [{:keys [state dispatch]} (add with-item-effects :star)
+            [added] (get-in state [:chains :cue-chains [0 0] :items 2 :items 0 :effects])]
+        (is (= :rotation (:effect-id added)))
+        (is (= {:event/type :list/select-item :component-id [:item-effects 0 0] :item-id (:id added) :mode :single}
+               dispatch))))
+    (testing "made before a reorder, handled after it: its own item, where it is now; the others as they were"
+      (let [changed (:state (set-effects reordered :circle [fx-b fx-a]))
+            added (:state (add reordered :circle))]
+        (is (= [:fx-b :fx-a] (effects-of changed :circle)) "Circle's, now last")
+        (is (= [:fx-a :fx-b] (pop (effects-of added :circle))) "Circle's, and one more")
+        (is (= :rotation (:effect-id (peek (get-in added [:chains :cue-chains [0 0] :items 2 :effects])))))
+        (doseq [s [changed added]]
+          (is (= [:fx-c] (effects-of s :square)) "Square's, now first, as they were")
+          (is (= [] (effects-of s :star))))))
+    (testing "an item that is gone, another cue's or none: nothing ({})"
+      (let [deleted (update-in with-item-effects [:chains :cue-chains [0 0] :items] (comp vec rest))]
+        (is (= {} (set-effects deleted :circle [fx-b fx-a])) "Circle deleted, Square in its place")
+        (is (= {} (add deleted :circle)))
+        (is (= {} (set-effects with-item-effects :circle [] :col 1)) "another cell")
+        (is (= {} (add with-item-effects :circle :col 1)))
+        (is (= {} (set-effects with-item-effects nil [])) "no item named")
+        (is (= {} (add with-item-effects nil)))))
+    (testing "through the pipeline, as the editor sends them, behind a reorder: one undo step each"
+      (let [s0 (assoc-in reordered [:list-ui [:item-effects 0 0]] {:selected-ids #{:fx-a} :last-selected-id :fx-a})
+            dropped (run s0 (item-effects-event :list/perform-drop :circle :dragging-ids #{:fx-a} :target-id :fx-b
+                                                :drop-position :after))
+            deleted (run s0 (item-effects-event :list/delete-selected :circle))
+            added (run s0 {:event/type :cue-chain/add-effect-from-bank :col 0 :row 0 :owner-id :circle :item-id :rotation})]
+        (is (= [:fx-b :fx-a] (effects-of dropped :circle)))
+        (is (= "Reorder Items" (history/undo-label (:history dropped))))
+        (is (= [:fx-b] (effects-of deleted :circle)))
+        (is (= "Delete Item(s)" (history/undo-label (:history deleted))))
+        (is (= 3 (count (effects-of added :circle))))
+        (is (= "Add Effect" (history/undo-label (:history added))))
+        (doseq [s [dropped deleted added]]
+          (is (= 1 (count (get-in s [:history :undo-stack]))) "one undo step")
+          (is (= [:fx-c] (effects-of s :square)) "Square's as they were")))
+      (testing "; for an item deleted since: nothing, and no undo step"
+        (let [gone (-> reordered
+                       (update-in [:chains :cue-chains [0 0] :items] #(filterv (fn [i] (not= :circle (:id i))) %))
+                       (assoc-in [:list-ui [:item-effects 0 0]] {:selected-ids #{:fx-a} :last-selected-id :fx-a}))]
+          (doseq [event [(item-effects-event :list/perform-drop :circle :dragging-ids #{:fx-a} :target-id :fx-b
+                                             :drop-position :after)
+                         (item-effects-event :list/delete-selected :circle)
+                         {:event/type :cue-chain/add-effect-from-bank :col 0 :row 0 :owner-id :circle :item-id :rotation}]]
+            (is (= {} (events/handle-event-pipeline (assoc event :state gone :time 1000))) (str (:event/type event)))))))))
+
+
+;; The selected effect's editor (follow-up N14): its edits name the effect
+;; by its instance and its item by its id (:effect-instance-id, :owner-id),
+;; which the pipeline finds where they are (chain-helpers/
+;; wrap-effect-instance-target)
+
+
+(defn- effect-of
+  "The effect effect-id of the item item-id of the cue at [0 0] in state."
+  [state item-id effect-id]
+  (let [items (get-in state [:chains :cue-chains [0 0] :items])
+        item (some #(when (= item-id (:id %)) %) (tree-seq map? #(concat (:items %)) {:items items}))]
+    (some #(when (= effect-id (:id %)) %) (:effects item))))
+
+(deftest item-effect-edits-find-their-effect-test
+  ;; The editor rendered A at [0 :effects 0] (Circle first, A its first
+  ;; effect) and B at [0 :effects 1]. Since, Circle is last with its
+  ;; effects [B A], and Square's C is where A was
+  (let [moved (-> with-item-effects
+                  (update-in [:chains :cue-chains [0 0] :items] (fn [[c s p]] [s p (update c :effects (comp vec reverse))]))
+                  (history/mark-clean))
+        now {:fx-a [:chains :cue-chains [0 0] :items 2 :effects 1]
+             :fx-b [:chains :cue-chains [0 0] :items 2 :effects 0]}
+        edit (fn [type effect-id rendered-at & {:as more}]
+               (merge {:event/type type :domain :cue-chains :entity-key [0 0] :effect-path rendered-at
+                       :effect-instance-id effect-id :owner-id :circle}
+                      more))
+        edits [(edit :chain/update-param :fx-a [0 :effects 0] :param-key :amount :value 0.4)
+               (edit :chain/update-param-from-text :fx-a [0 :effects 0] :param-key :amount :min 0.0 :max 3.0
+                     :is-int? false :text "0.4")
+               (edit :keyframe/toggle-enabled :fx-a [0 :effects 0] :enabled? true)
+               (edit :chain/set-clamp-after :fx-b [0 :effects 1] :value false)]]
+    (testing "each lands on its own effect, where it is now, and on nothing else: one undo step"
+      (doseq [event edits]
+        (let [after (run moved event)
+              id (:effect-instance-id event)]
+          (is (not= (effect-of moved :circle id) (effect-of after :circle id)) (str (:event/type event) ": its effect"))
+          (is (= (:chains moved) (:chains (assoc-in after (now id) (get-in moved (now id)))))
+              (str (:event/type event) ": nothing else (Square's C as it was)"))
+          (is (= 1 (count (get-in after [:history :undo-stack]))) (str (:event/type event) ": one undo step"))
+          (is (= (if (= :chain/set-clamp-after (:event/type event))
+                   "Change Transform Clamping"
+                   (history-handlers/format-event-description (:event/type event)))
+                 (history/undo-label (:history after)))
+              "labelled as before"))))
+    (testing "its UI mode is kept under its id, so it stays with the effect (follow-up N15)"
+      (is (= :numeric (get-in (run moved (edit :chain/set-ui-mode :fx-a [0 :effects 0] :mode :numeric))
+                              [:ui :dialogs :cue-chain-editor :ui-modes :fx-a]))))
+    (testing "once its effect is gone, or its item, or another item is named: nothing ({})"
+      (let [no-a (update-in moved [:chains :cue-chains [0 0] :items 2 :effects] #(filterv (fn [e] (not= :fx-a (:id e))) %))
+            no-circle (update-in moved [:chains :cue-chains [0 0] :items] (comp vec butlast))
+            a-edits (conj (pop edits) (edit :chain/set-ui-mode :fx-a [0 :effects 0] :mode :numeric))]
+        (doseq [[s events why] [[no-a a-edits "A deleted, C where it was rendered"]
+                                [no-circle edits "Circle deleted"]
+                                [moved (map #(assoc % :owner-id :square) edits) "Square named"]]
+                event events]
+          (is (= {} (events/handle-event-pipeline (assoc event :state s :time 1000)))
+              (str (:event/type event) ": " why)))))
+    (testing "one that names no instance goes by its place, as before"
+      (is (= 0.4 (get-in (run moved {:event/type :chain/update-param :domain :cue-chains :entity-key [0 0]
+                                     :effect-path [0 :effects 0] :param-key :amount :value 0.4})
+                         [:chains :cue-chains [0 0] :items 0 :effects 0 :params :amount]))
+          "Square's C, at that place"))))
 
 (deftest list-editor-component-rendering-test
   (testing "list-editor component description can be constructed with context menu"

@@ -65,6 +65,11 @@
                 [(assoc (zone-patterns/preset-instance :steps :cue) :id (:effect-instance-id b1-grid))])
       (run {:event/type :step-grid/open :target b1-grid})))
 
+(def ^:private a1-item
+  "The id locked-blocks-structure-edits-test gives the item of the cue at
+   A1: an item's Target names it (follow-up R2)."
+  #uuid "00000000-0000-0000-0000-0000000000a1")
+
 (def ^:private structure-edits
   "One real edit of each kind the lock refuses, on starter."
   [{:event/type :grid/move-cell :from-col 0 :from-row 0 :to-col 5 :to-row 2}
@@ -121,7 +126,7 @@
    ;; Where a cue, an item, a track or a clip goes (zones plan Z4): as a
    ;; column's default, they re-route it, and can make it reach the audience
    {:event/type :cue-chain/set-target :col 0 :row 0 :target :zone/a}
-   {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-path [0] :target :zone/b}
+   {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-id a1-item :target :zone/b}
    {:event/type :timeline/set-track-target :col 6 :row 3 :track-id :t1 :target :zone/a}
    {:event/type :timeline/set-clip-target :col 6 :row 3 :item-id :c1 :target :graphics}
    ;; A cue's zone pattern and a new pattern cell move pictures between
@@ -152,6 +157,8 @@
                (assoc-in [:projectors :p1 :zone-groups] [:graphics])
                (assoc-in [:projectors :p1 :tags] #{:graphics})
                (assoc-in [:chains :cue-chains [7 3]] {:items [] :target :auto.laser/p9})
+               ;; the item of the cue at A1, by an id the events name
+               (assoc-in [:chains :cue-chains [0 0] :items 0 :id] a1-item)
                (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 50}] {:type :zone-map :target :map/odd-even})
                ;; a pattern pad's key (zones plan Z5)
                (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 51}] {:type :pattern-pad :target :chase})
@@ -222,6 +229,38 @@
                                        :clipboard/system {:type :cue-chain :data {:items []} :copied-at 1}})]
         (is (= #{:state :dispatch-later} (set (keys effects))))
         (is (nil? (get-in effects [:state :chains :cue-chains [5 2]])))))))
+
+(deftest locked-paste-back-for-a-replaced-show-says-nothing-test
+  ;; Follow-up B12 (a): a paste waiting for the OS clipboard when New or
+  ;; Open replaced its show does nothing at all once it is back. With the
+  ;; lock on by then, the lock refused it first, and said so, about a show
+  ;; that was gone
+  (let [s0 (-> (starter)
+               (assoc-in [:project :document-id] (random-uuid))
+               (assoc-in [:ui :clipboard] nil)
+               (with-b1-grid)
+               (assoc-in [:ui :active-tab] :grid)
+               (assoc-in [:grid :selected-cell] [5 2])
+               (history/mark-clean))
+        clip {:type :cue-chain :data {:items []} :copied-at 1}
+        replacements [["New" {:event/type :file/new-project}]
+                      ["Open" {:event/type :file/project-loaded :file-path "/tmp/other.zip"
+                               :contents (persistent/project-files (starter))}]]]
+    (doseq [event [{:event/type :grid/paste-cell :col 5 :row 2}
+                   {:event/type :effects/paste-cell :col 5 :row 2}
+                   {:event/type :edit/paste}
+                   {:event/type :step-grid/paste :target b1-grid}]
+            [label replace] replacements]
+      (testing (str (:event/type event) " back after " label)
+        (let [back (assoc (get-in (handle s0 event) [:clipboard/read :then]) :clipboard/system clip)
+              replaced (lock (run s0 replace))]
+          (is (= (get-in s0 [:project :document-id]) (:document-id back)) "stamped for the show it came from")
+          (is (not= (:document-id back) (get-in replaced [:project :document-id])) "which is gone")
+          (is (= {} (handle replaced back)) "nothing at all: no notice, no state")
+          (testing "; back in the same show, the lock refuses it, and says so"
+            (let [effects (handle (lock s0) back)]
+              (is (= #{:state :dispatch-later} (set (keys effects))))
+              (is (= (:event/type back) (get-in effects [:state :ui :show-lock-notice :event]))))))))))
 
 (deftest locked-allows-performance-events-test
   (let [s0 (starter)
@@ -300,7 +339,10 @@
      :step-grid/paint (assoc press :state pressed :row 0 :step 2)}))
 
 (deftest blocked-events-name-real-events-test
-  (let [valid (grid-press-events)]
+  (let [valid (assoc (grid-press-events)
+                     ;; It does nothing ({}) for an item that isn't there
+                     :cue-chain/set-item-target {:state (assoc-in (starter) [:chains :cue-chains [0 0] :items 0 :id] a1-item)
+                                                 :col 0 :row 0 :item-id a1-item :target :zone/b})]
     (doseq [type show-lock/blocked-events]
       ;; A chooser's result without a file is the one that does nothing (cancelled)
       (let [event (get valid type {:state (starter) :file-path "x.zip"})
@@ -359,17 +401,19 @@
                (assoc-in [:projectors :p1 :safety] small)
                (assoc-in [:projectors :p2 :safety] {:limit [-0.9 -0.9 0.9 0.9] :blocked []})
                (history/mark-clean))
-        zone #(get-in % [:projectors :p1 :safety])]
+        zone #(get-in % [:projectors :p1 :safety])
+        drag (fn [coordinates & {:as more}]
+               (merge {:event/type :projectors/drag-safety :projector-id :p1 :path [:limit] :coordinates coordinates} more))
+        whole {0 -1.0 1 -1.0 2 1.0 3 1.0}]
     (testing "smaller goes through"
-      (doseq [event [{:event/type :projectors/set-safety :projector-id :p1
-                      :safety (assoc small :limit [-0.4 -0.5 0.5 0.5])}
+      (doseq [event [(drag {0 -0.4})
                      {:event/type :projectors/add-blocked-area :projector-id :p1}]]
         (let [s (run (lock s0) event)]
           (is (not= small (zone s)) (str (:event/type event) " applied"))
           (is (nil? (get-in s [:ui :show-lock-notice])) (str (:event/type event) ": no notice")))))
     (testing "larger is refused, and says why"
-      (doseq [event [{:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-1 -1 1 1]}}
-                     {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-1 -1 1 1]} :confirmed? true}
+      (doseq [event [(drag whole)
+                     (drag whole :confirmed? true)
                      {:event/type :projectors/remove-blocked-area :projector-id :p1 :index 0}
                      {:event/type :projectors/copy-safety :from :p2 :to [:p1]}]]
         (let [effects (handle (lock s0) event)
@@ -383,14 +427,14 @@
         (is (= small (get-in s [:projectors :p2 :safety])))))
     (testing "Allow on a question asked before the lock went on is refused too"
       (let [live (-> s0 (assoc-in [:backend :streaming :running?] true))
-            asked (run live {:event/type :projectors/set-safety :projector-id :p1 :safety {:limit [-1 -1 1 1]}})
+            asked (run live (drag whole))
             _ (is (get-in asked [:ui :dialogs :confirm :open?]) "unlocked and live, it asks")
-            allowed (run (lock asked) {:event/type :ui/confirm})]
+            allowed (run (lock asked) {:event/type :ui/confirm
+                                       :review-id (get-in asked [:ui :dialogs :confirm :safety-review :id])})]
         (is (= small (zone allowed)))
         (is (= "Larger safety zone refused" (get-in allowed [:ui :show-lock-notice :text])))))
     (testing "unlocked, a larger area on a laser that isn't streaming applies at once"
-      (is (= [-1.0 -1.0 1.0 1.0] (:limit (zone (run s0 {:event/type :projectors/set-safety :projector-id :p1
-                                                         :safety {:limit [-1 -1 1 1]}}))))))))
+      (is (= [-1.0 -1.0 1.0 1.0] (:limit (zone (run s0 (drag whole)))))))))
 
 (deftest coordinate-and-reset-respect-current-review-test
   ;; plans/2026-11-23-cljfx-reactivity/08 §6, §7 examples 3-5: a coordinate
@@ -560,6 +604,43 @@
         (is (= {:open? false} (question allowed-back)))
         (is (= changed (get-in allowed-back [:ui :notice :text])))))))
 
+(deftest locked-drags-removals-and-copies-only-make-zones-smaller-test
+  ;; Follow-up B3: a drag on the canvas, a blocked area's removal and a Copy
+  ;; are judged by the change they propose now, outputting or not, and so
+  ;; are their questions' answers
+  (let [z {:limit [-0.5 -0.5 0.5 0.5] :blocked [[-0.1 -0.1 0.1 0.1]]}
+        s0 (-> (starter)
+               (assoc-in [:projectors :p1 :safety] z)
+               (assoc-in [:projectors :p2 :safety] {:limit [-0.9 -0.9 0.9 0.9] :blocked []})
+               (history/mark-clean))
+        live (assoc-in s0 [:backend :streaming :running?] true)
+        zone #(get-in % [:projectors :p1 :safety])
+        question #(get-in % [:ui :dialogs :confirm])
+        allow (fn [s] {:event/type :ui/confirm :review-id (get-in s [:ui :dialogs :confirm :safety-review :id])})
+        drag (fn [coordinates] {:event/type :projectors/drag-safety :projector-id :p1 :path [:limit] :coordinates coordinates})
+        larger [(drag {2 0.75})
+                {:event/type :projectors/remove-blocked-area :projector-id :p1 :index 0 :row-version 0}
+                {:event/type :projectors/copy-safety :from :p2 :to [:p1]}]
+        refused (fn [type] {:text "Larger safety zone refused" :event type})]
+    (testing "locked, outputting or not: larger is refused with the lock's notice, a drag in applies"
+      (doseq [[label s] [["off" s0] ["outputting" live]]]
+        (testing label
+          (doseq [event larger]
+            (let [effects (handle (lock s) event)]
+              (is (= (lock s) (without-notices (:state effects))) (str (:event/type event) ": no question, no edit"))
+              (is (= (refused (:event/type event)) (get-in effects [:state :ui :show-lock-notice])))))
+          (let [smaller (run (lock s) (drag {2 0.4}))]
+            (is (= [-0.5 -0.5 0.4 0.5] (:limit (zone smaller))))
+            (is (nil? (get-in smaller [:ui :show-lock-notice])))))))
+    (testing "the lock on between a question and its Allow: refused, and the question closed"
+      (doseq [event larger]
+        (let [asked (run live event)
+              allowed (run (lock asked) (allow asked))]
+          (is (true? (:open? (question asked))) (str (:event/type event) " asks"))
+          (is (= z (zone allowed)))
+          (is (= {:open? false} (question allowed)))
+          (is (= (refused (:event/type event)) (get-in allowed [:ui :show-lock-notice]))))))))
+
 
 (deftest driver-config-edit-is-refused-while-locked-test
   (let [s0 (-> (starter)
@@ -650,8 +731,8 @@
                  {:event/type :chain/set-items :domain :cue-zone-patterns :entity-key [0 0] :items []}
                  {:event/type :chain/update-param :domain :effect-chains :entity-key [4 2] :effect-path [0] :param-key :zones :value [:zone/a]}
                  {:event/type :chain/update-param :domain :effect-chains :entity-key [5 2] :effect-path [0] :param-key :rate :value 1.0}
-                 {:event/type :modulator/toggle :domain :cue-zone-patterns :entity-key [0 0] :effect-path [0] :param-key :offset
-                  :param-spec {:min -64.0 :max 64.0} :fx/event true}
+                 {:event/type :modulator/toggle :domain :cue-zone-patterns :entity-key [0 0] :effect-instance-id :p1
+                  :param-key :offset :param-spec {:min -64.0 :max 64.0} :fx/event true}
                  ;; a step grid's steps, edited as any parameter (zones plan Z6)
                  {:event/type :chain/update-param :domain :cue-zone-patterns :entity-key [0 0] :effect-path [0] :param-key :steps
                   :value [[:zone/a] []]}]]
@@ -731,7 +812,8 @@
 (deftest lock-classifies-reordered-modulator-target-test
   ;; Reactivity plan 07: a modulator's field edits name their effect by its
   ;; instance, so the lock judges the effect they edit where it is now, not
-  ;; what holds the place it had when its editor rendered
+  ;; what holds the place it had when its editor rendered; and so does its
+  ;; toggle (follow-up B6)
   (let [pattern-id #uuid "0000000a-0000-0000-0000-000000000001"
         point-id #uuid "0000000a-0000-0000-0000-000000000002"
         wave {:type :triangle :active? true :period 7.0 :min 0.2 :max 0.8}
@@ -748,9 +830,11 @@
                        :param-key param :effect-path [rendered-at]}
                       more))
         pattern-edits [(edit :modulator/update-param pattern-id :offset 1 :mod-param-key :max :fx/event 8.0)
-                       (edit :modulator/set-type pattern-id :offset 1 :mod-type :square :param-spec {:min -64.0 :max 64.0})]
+                       (edit :modulator/set-type pattern-id :offset 1 :mod-type :square :param-spec {:min -64.0 :max 64.0})
+                       (edit :modulator/toggle pattern-id :offset 1 :param-spec {:min -64.0 :max 64.0} :fx/event false)]
         point-edits [(edit :modulator/update-param point-id :amount 0 :mod-param-key :max :fx/event 0.9)
-                     (edit :modulator/set-type point-id :amount 0 :mod-type :square :param-spec {:min 0.0 :max 3.0})]]
+                     (edit :modulator/set-type point-id :amount 0 :mod-type :square :param-spec {:min 0.0 :max 3.0})
+                     (edit :modulator/toggle point-id :amount 0 :param-spec {:min 0.0 :max 3.0} :fx/event false)]]
     (doseq [event pattern-edits]
       (testing (str "the pattern's " (:event/type event) ", now where the point effect was rendered")
         (is (not= (history/extract-document-state s0) (history/extract-document-state (run s0 event))) "unlocked, a real edit")
@@ -767,3 +851,104 @@
           (is (= (history/extract-document-state (run s0 event)) (history/extract-document-state s)) "as it does unlocked")
           (is (= pattern (get-in s [:chains :effect-chains [4 2] :items 0]))
               "on the point effect, where it is now: the pattern is untouched"))))))
+
+(deftest lock-classifies-reordered-colour-target-test
+  ;; Follow-up N2: a colour edit names its effect by its instance, as the
+  ;; modulator's do, so the lock judges the effect it edits where it is now:
+  ;; a Set Color's colour isn't refused because a pattern now holds the
+  ;; place it was rendered at
+  (let [colour-id #uuid "0000000a-0000-0000-0000-0000000000c1"
+        white {:red 1.0 :green 1.0 :blue 1.0}
+        pattern (assoc (zone-patterns/preset-instance :swap :cell) :id #uuid "0000000a-0000-0000-0000-0000000000c2")
+        set-color {:id colour-id :effect-id :set-color :enabled? true :params white
+                   :keyframe-modulator {:enabled? false :selected-keyframe 1
+                                        :keyframes [{:position 0.0 :params white} {:position 1.0 :params white}]}}
+        ;; Rendered as [set-color pattern]; swapped since
+        s0 (-> (starter)
+               (assoc-in [:chains :effect-chains [4 2]] {:active? false :items [pattern set-color]})
+               (history/mark-clean))
+        base {:domain :effect-chains :entity-key [4 2] :effect-instance-id colour-id :effect-path [0] :color [0.0 0.5 1.0]}
+        colour-of #(select-keys (get-in % [:chains :effect-chains [4 2] :items 1 :params]) [:red :green :blue])
+        frame-of #(select-keys (get-in % [:chains :effect-chains [4 2] :items 1 :keyframe-modulator :keyframes 1 :params])
+                               [:red :green :blue])]
+    (doseq [[event read] [[(assoc base :event/type :chain/update-color-param) colour-of]
+                          [(assoc base :event/type :keyframe/update-color-param :keyframe-idx 1) frame-of]]]
+      (testing (str (:event/type event) ", the Set Color's, now where the pattern was rendered")
+        (let [s (run (lock s0) event)]
+          (is (nil? (get-in s [:ui :show-lock-notice])) "goes through")
+          (is (= {:red 0.0 :green 0.5 :blue 1.0} (read s)) "on the Set Color, where it is now")
+          (is (= pattern (get-in s [:chains :effect-chains [4 2] :items 0])) "the pattern is untouched"))))))
+
+(deftest lock-classifies-reordered-parameter-target-test
+  ;; Follow-up N14: the effect parameter editor's edits name their effect by
+  ;; its instance (the pipeline finds it, chain-helpers/
+  ;; wrap-effect-instance-target), so the lock judges the effect they edit
+  ;; where it is now, as it does a modulator's and a colour's: a pattern's
+  ;; edit is refused though a point effect holds the place it was rendered
+  ;; at, and a point effect's goes through though a pattern holds its place
+  (let [pattern-id #uuid "0000000a-0000-0000-0000-0000000000e1"
+        point-id #uuid "0000000a-0000-0000-0000-0000000000e2"
+        pattern (assoc (zone-patterns/preset-instance :swap :cell) :id pattern-id)
+        point {:id point-id :effect-id :intensity :enabled? true :params {:amount 1.0}}
+        ;; Rendered as [point pattern]; swapped since
+        s0 (-> (starter)
+               (assoc-in [:chains :effect-chains [4 2]] {:active? false :items [pattern point]})
+               (history/mark-clean))
+        edit (fn [type id rendered-at & {:as more}]
+               (merge {:event/type type :domain :effect-chains :entity-key [4 2] :effect-instance-id id
+                       :effect-path [rendered-at]}
+                      more))
+        pattern-edits [(edit :chain/update-param pattern-id 1 :param-key :rate :value 2.0)
+                       (edit :chain/update-param-from-text pattern-id 1 :param-key :rate :min -8.0 :max 8.0 :is-int? false
+                             :text "2")
+                       (edit :keyframe/toggle-enabled pattern-id 1 :enabled? true)]
+        point-edits [(edit :chain/update-param point-id 0 :param-key :amount :value 0.5)
+                     (edit :chain/update-param-from-text point-id 0 :param-key :amount :min 0.0 :max 3.0 :is-int? false
+                           :text "0.5")
+                     (edit :keyframe/toggle-enabled point-id 0 :enabled? true)]]
+    (doseq [event pattern-edits]
+      (testing (str "the pattern's " (:event/type event) ", now where the point effect was rendered")
+        (is (not= (history/extract-document-state s0) (history/extract-document-state (run s0 event))) "unlocked, a real edit")
+        (let [s (run (lock s0) event)]
+          (is (= (lock s0) (without-notices s)) "locked, only the notice")
+          (is (= {:text "Zone pattern edit refused" :event (:event/type event)} (get-in s [:ui :show-lock-notice]))))))
+    (doseq [event point-edits]
+      (testing (str "the point effect's " (:event/type event) ", now where the pattern was rendered")
+        (let [s (run (lock s0) event)]
+          (is (nil? (get-in s [:ui :show-lock-notice])) "goes through")
+          (is (not= (history/extract-document-state s0) (history/extract-document-state s)) "a real edit")
+          (is (= (history/extract-document-state (run s0 event)) (history/extract-document-state s)) "as it does unlocked")
+          (is (= pattern (get-in s [:chains :effect-chains [4 2] :items 0]))
+              "on the point effect, where it is now: the pattern is untouched"))))
+    (testing "a cue item's effect's edit goes through, as before: a cue's items aren't patterns"
+      (let [p #uuid "0000000a-0000-0000-0000-0000000000e3"
+            s1 (-> (starter)
+                   (assoc-in [:chains :cue-chains [0 0] :items 0 :id] p)
+                   (assoc-in [:chains :cue-chains [0 0] :items 0 :effects] [point])
+                   (history/mark-clean))
+            event {:event/type :chain/update-param :domain :cue-chains :entity-key [0 0] :effect-path [0 :effects 0]
+                   :effect-instance-id point-id :owner-id p :param-key :amount :value 0.5}
+            s (run (lock s1) event)]
+        (is (nil? (get-in s [:ui :show-lock-notice])))
+        (is (= 0.5 (get-in s [:chains :cue-chains [0 0] :items 0 :effects 0 :params :amount])))))))
+
+(deftest locked-preset-edits-go-through-test
+  ;; Follow-up N10: the preset editor's edits name the item by its id
+  ;; (:cue-chain/update-preset-*). Like the :chain/* edits they replace, they
+  ;; change no structure: the lock lets them through, as unlocked
+  (let [circle-id #uuid "0000000a-0000-0000-0000-0000000000d1"
+        s0 (-> (starter)
+               (assoc-in [:chains :cue-chains [0 0] :items 0 :id] circle-id)
+               (history/mark-clean))
+        circle #(select-keys (get-in % [:chains :cue-chains [0 0] :items 0 :params]) [:radius :red :green :blue])
+        item {:col 0 :row 0 :item-id circle-id}]
+    (doseq [event [(assoc item :event/type :cue-chain/update-preset-param :param-key :radius :fx/event 0.3)
+                   (assoc item :event/type :cue-chain/update-preset-param-from-text :param-key :radius
+                          :min 0.1 :max 1.0 :is-int? false :text "0.3")
+                   (assoc item :event/type :cue-chain/update-preset-color :color [0.0 0.5 1.0])]]
+      (testing (str (:event/type event))
+        (let [s (run (lock s0) event)]
+          (is (nil? (get-in s [:ui :show-lock-notice])) "goes through")
+          (is (not= (circle s0) (circle s)) "a real edit")
+          (is (= (history/extract-document-state (run s0 event)) (history/extract-document-state s))
+              "as it does unlocked"))))))

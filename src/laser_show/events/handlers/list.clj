@@ -7,9 +7,12 @@
    State is stored directly in [:list-ui component-id]
    
    Item operations (delete, copy, paste, group, etc.) read items from state
-   using :items-path to avoid stale closure issues."
+   using :items-path to avoid stale closure issues. An item effects list's
+   :items-path names its item by its id instead of its place
+   (with-items-path, follow-up N14)."
   (:require [clojure.tools.logging :as log]
             [laser-show.animation.chains :as chains]
+            [laser-show.events.handlers.chain.helpers :as chain-helpers]
             [laser-show.events.handlers.list.helpers :as helpers]
             [laser-show.events.helpers :as h]
             [laser-show.state.extractors :as ex]
@@ -86,6 +89,17 @@
                                   {:selected-ids #{} :last-selected-id nil}))
                       state-with-selection)]
     {:state state-final}))
+
+(defn- handle-select-for-menu
+  "The :context mode of :list/select-item, for a right-click or a row's
+   menu asked for: nothing changes while the selection has item-id (a
+   right-click in a multi-selection keeps it, and the item effects selected
+   in it), else item-id is selected alone. By the selection when it is
+   handled, so after the clicks before it (follow-up B1)."
+  [{:keys [component-id item-id state] :as event}]
+  (if (contains? (get-in state [:list-ui component-id :selected-ids]) item-id)
+    {:state state}
+    (handle-select-item (assoc event :mode :single))))
 
 (defn- handle-select-all
   "Select all items in the component: the list's items in the state."
@@ -419,7 +433,7 @@
 ;; Public API
 
 
-(defn handle
+(defn- handle-list-event
   "Dispatch list events to their handlers.
    
    Accepts events with :event/type in the :list/* namespace.
@@ -456,7 +470,9 @@
   [{:keys [event/type] :as event}]
   (case type
     ;; Selection
-    :list/select-item (handle-select-item event)
+    :list/select-item (if (= :context (:mode event))
+                        (handle-select-for-menu event)
+                        (handle-select-item event))
     :list/select-all (handle-select-all event)
     :list/clear-selection (handle-clear-selection event)
 
@@ -486,4 +502,28 @@
     :list/auto-select-single-item (handle-auto-select-single-item event)
 
     ;; Unknown event in this domain
+    {}))
+
+(defn- with-items-path
+  "event, its :items-path where the list's items are when it is handled. A
+   path stays as it is. The cue chain editor's item effects list names its
+   item instead, {:domain :entity-key :owner-id} (chain-helpers/
+   owner-effects-path): a reorder, an insert or a delete can move the item
+   before an input in its list is handled (follow-up N14). That becomes the
+   path to the item's :effects where the item is now, the address kept as
+   :items-owner, so a paste that waits for the OS clipboard finds them
+   again when it goes on; nil once the item is gone."
+  [{:keys [items-path items-owner state] :as event}]
+  (if-let [owner (or items-owner (when (map? items-path) items-path))]
+    (when-let [path (chain-helpers/owner-effects-path state owner)]
+      (assoc event :items-path path :items-owner owner))
+    event))
+
+(defn handle
+  "Handle a list event (handle-list-event) with its list's items where they
+   are now (with-items-path): an event in an item's effects list for an
+   item that is gone does nothing ({})."
+  [event]
+  (if-let [event (with-items-path event)]
+    (handle-list-event event)
     {}))

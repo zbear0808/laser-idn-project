@@ -71,24 +71,25 @@
           stop (handle (:state started) {:event/type :input/osc-stop-server})
           stopped (handle (:state stop) (answer stop :input/osc-stop :input/osc-stopped :server-running? false))]
       (testing "Start Server listens and lets the messages in: there is no second switch to find"
-        (is (= {:port 9100 :server-running? true :enabled? true}
-               (select-keys (osc-of (:state started)) [:port :server-running? :enabled?])))
+        (is (= {:port 9100 :listening-port 9100 :server-running? true :enabled? true}
+               (select-keys (osc-of (:state started)) [:port :listening-port :server-running? :enabled?])))
         (is (empty? (:requests (osc-of (:state started)))) "the request is over")
-        (is (nil? (get-in started [:state :ui :notice]))))
+        (is (nil? (get-in started [:state :ui :notice])))
+        (is (nil? (:dispatch started)) "it didn't move: nothing to retire"))
       (testing "Stop Server does both the other way: the messages stop at once, then the server"
         (is (= {:request-id (get-in stop [:state :backend :input :osc :requests :server])} (:input/osc-stop stop)))
         (is (= {:event/type :trigger/retire :source :osc} (:dispatch stop))
             "and what OSC keys hold lets go, as their releases can't come in (reactivity plan 26)")
         (is (= {:server-running? true :enabled? false} (select-keys (osc-of (:state stop)) [:server-running? :enabled?])))
-        (is (= {:server-running? false :enabled? false}
-               (select-keys (osc-of (:state stopped)) [:server-running? :enabled?])))))
+        (is (= {:server-running? false :listening-port nil :enabled? false}
+               (select-keys (osc-of (:state stopped)) [:server-running? :listening-port :enabled?])))))
     (testing "a port that won't open: still off, and a notice says so"
       (let [result (handle (:state start) (answer start :input/osc-start :input/osc-started
                                                   :server-running? false :port 9100
                                                   :error "Could not listen for OSC on port 9100"))
             {:keys [id] :as notice} (get-in result [:state :ui :notice])]
-        (is (= {:server-running? false :enabled? false}
-               (select-keys (osc-of (:state result)) [:server-running? :enabled?])))
+        (is (= {:server-running? false :listening-port nil :enabled? false}
+               (select-keys (osc-of (:state result)) [:server-running? :listening-port :enabled?])))
         (is (= {:text "Could not listen for OSC on port 9100" :level :error} (dissoc notice :id)))
         (is (= {:event {:event/type :ui/clear-notice :id id} :delay-ms 6000}
                (:dispatch-later result)))))))
@@ -99,6 +100,29 @@
       (is (= port (get-in (handle port) [:state :backend :input :osc :port]))))
     (doseq [bad [0 65536 70000 -1 nil "9100" 9100.5]]
       (is (= {} (handle bad)) (str (pr-str bad) ": no port, so nothing changes (no commit)")))))
+
+(deftest a-port-set-while-listening-is-the-next-starts-test
+  ;; Reactivity follow-up B13: the port set and the port listened on are
+  ;; two things; only the device worker's answer moves the second
+  (let [osc-of #(select-keys (get-in % [:backend :input :osc]) [:port :listening-port :server-running?])
+        handle (fn [state event] (input/handle (assoc event :state state)))
+        start (handle (initial-state) {:event/type :input/osc-start-server})
+        listening (:state (handle (:state start) (answer start :input/osc-start :input/osc-started :server-running? true :port 9000)))
+        set-port (:state (handle listening {:event/type :input/osc-set-port :port 9100}))]
+    (is (= {:port 9000 :listening-port 9000 :server-running? true} (osc-of listening)))
+    (is (= {:port 9100 :listening-port 9000 :server-running? true} (osc-of set-port))
+        "set while listening: still listening on 9000")
+    (testing "the next Start asks the worker for it (it moves the server, input.devices)"
+      (let [restart (handle set-port {:event/type :input/osc-start-server})
+            moved (:state (handle (:state restart) (answer restart :input/osc-start :input/osc-started :server-running? true :port 9100)))]
+        (is (= 9100 (get-in restart [:input/osc-start :port])))
+        (is (= {:port 9100 :listening-port 9000 :server-running? true} (osc-of (:state restart))) "not before it answers")
+        (is (= {:port 9100 :listening-port 9100 :server-running? true} (osc-of moved)))))
+    (testing "a port set while a Start waits for its answer stays set: the answer says only where the server listens"
+      (let [start (handle (initial-state) {:event/type :input/osc-start-server})
+            typed (:state (handle (:state start) {:event/type :input/osc-set-port :port 9200}))
+            answered (:state (handle typed (answer start :input/osc-start :input/osc-started :server-running? true :port 9000)))]
+        (is (= {:port 9200 :listening-port 9000 :server-running? true} (osc-of answered)))))))
 
 (deftest stale-device-completion-is-ignored-test
   (let [pipe (fn [state event] (events/handle-event-pipeline (merge {:time 0} event {:state state})))

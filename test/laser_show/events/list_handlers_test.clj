@@ -201,6 +201,32 @@
       (is (nil? (get-in result [:state :list-ui [:item-effects 0 0] :last-selected-id]))))))
 
 
+(deftest select-item-for-a-menu-test
+  ;; Follow-up B1: a right-click, or a row's menu asked for (:context),
+  ;; keeps a selection that has the item and selects another item alone, by
+  ;; the selection when the event is handled
+  (let [state {:list-ui {[:cue-chain 0 0] {:selected-ids #{:a :b} :last-selected-id :b}
+                         [:item-effects 0 0] {:selected-ids #{:e} :last-selected-id :e}}}
+        for-menu (fn [state item-id]
+                   (:state (list-handlers/handle {:event/type :list/select-item
+                                                  :component-id [:cue-chain 0 0]
+                                                  :item-id item-id
+                                                  :mode :context
+                                                  :state state})))]
+    (testing "on a selected item nothing changes, nor the item effects selected in it"
+      (is (identical? state (for-menu state :a))))
+    (testing "on another item, it alone, as a click selects it"
+      (let [after (for-menu state :c)]
+        (is (= {:selected-ids #{:c} :last-selected-id :c} (get-in after [:list-ui [:cue-chain 0 0]])))
+        (is (= #{} (get-in after [:list-ui [:item-effects 0 0] :selected-ids])))
+        (testing "and again, as the menu and then its click ask: the same"
+          (is (identical? after (for-menu after :c))))))
+    (testing "after a Ctrl-click that added the item, the multi-selection stays"
+      (let [added (:state (list-handlers/handle {:event/type :list/select-item :component-id [:cue-chain 0 0]
+                                                 :item-id :c :mode :ctrl :state state}))]
+        (is (= #{:a :b :c} (get-in (for-menu added :c) [:list-ui [:cue-chain 0 0] :selected-ids])))))))
+
+
 (deftest select-all-test
   (testing "Select all selects the list's items in the state, not IDs the event brings"
     (let [state {:chains {:effect-chains {[1 0] {:items [{:id :x} {:id :y}]}}}
@@ -570,8 +596,9 @@
          on-change))
 
 (def ^:private item-fx-paste
-  (effect-list-paste [:item-effects 0 0] [:chains :cue-chains [0 0] :items 0 :effects]
-                     {:on-change-event :cue-chain/set-item-effects :on-change-params {:col 0 :row 0 :item-path [0]}}))
+  ;; The item's effects by its id, as the cue chain editor addresses them (follow-up N14)
+  (effect-list-paste [:item-effects 0 0] {:domain :cue-chains :entity-key [0 0] :owner-id id-a}
+                     {:on-change-event :cue-chain/set-item-effects :on-change-params {:col 0 :row 0 :item-id id-a}}))
 
 (def ^:private fx-chain-paste
   (effect-list-paste [:effect-chain 0 0] [:chains :effect-chains [0 0] :items]
@@ -720,3 +747,85 @@
       (is (= [:circle :square] (mapv :preset-id (get-in s3 [:chains :cue-chains [0 0] :items])))
           "one undo brings the items back")
       (is (= [:circle] (mapv :preset-id (get-in s3 [:ui :clipboard :items]))) "and the clip stays"))))
+
+
+;; An item's effects list names its item by its id, never its place
+;; (follow-up N14): the cue chain editor's, whose item a reorder or a delete
+;; handled before its input can move or remove
+
+
+(def ^:private fx-1 {:id #uuid "00000000-0000-0000-0000-0000000014e1" :effect-id :scale :enabled? true :params {}})
+(def ^:private fx-2 {:id #uuid "00000000-0000-0000-0000-0000000014e2" :effect-id :rotation :enabled? true :params {}})
+(def ^:private fx-3 {:id #uuid "00000000-0000-0000-0000-0000000014e3" :effect-id :intensity :enabled? true :params {}})
+
+(defn- owned-state
+  "Cue [0 0] holding B (effect 3), then A (effects 1 and 2, 1 selected in
+   the item effects list): A was first when its list last rendered. The
+   slot holds clip."
+  [clip]
+  {:chains {:cue-chains {[0 0] {:items [{:id id-b :type :preset :preset-id :square :effects [fx-3]}
+                                        {:id id-a :type :preset :preset-id :circle :effects [fx-1 fx-2]}]}}}
+   :list-ui {[:item-effects 0 0] {:selected-ids #{(:id fx-1)} :last-selected-id (:id fx-1)}}
+   :ui {:clipboard clip}})
+
+(defn- a-effects-event
+  "An input in the item effects list while it shows A's effects, with the
+   address the cue chain editor gives it."
+  [type state & {:as more}]
+  (merge {:event/type type :component-id [:item-effects 0 0]
+          :items-path {:domain :cue-chains :entity-key [0 0] :owner-id id-a}
+          :on-change-event :cue-chain/set-item-effects
+          :on-change-params {:col 0 :row 0 :item-id id-a}
+          :state state :time 1763650000003}
+         more))
+
+(defn- a-change
+  "The change A's effects list sends: A's effects as items, by A's id."
+  [items description]
+  {:event/type :cue-chain/set-item-effects :col 0 :row 0 :item-id id-a :items items :history/description description})
+
+(deftest an-item-effects-list-acts-on-its-own-item-test
+  (let [s (owned-state nil)]
+    (testing "its changes are A's effects, where A is now, and name A"
+      (is (= (a-change [fx-2] "Delete Item(s)") (:dispatch (list-handlers/handle (a-effects-event :list/delete-selected s)))))
+      (is (= (a-change [fx-2 fx-1] "Reorder Items")
+             (:dispatch (list-handlers/handle (a-effects-event :list/perform-drop s :dragging-ids #{(:id fx-1)}
+                                                               :target-id (:id fx-2) :drop-position :after)))))
+      (is (= (a-change [fx-1 (assoc fx-2 :enabled? false)] "Enable/Disable Item")
+             (:dispatch (list-handlers/handle (a-effects-event :list/set-enabled s :item-id (:id fx-2) :enabled? false))))))
+    (testing "its selection ranges over A's effects"
+      (is (= #{(:id fx-1) (:id fx-2)}
+             (get-in (list-handlers/handle (a-effects-event :list/select-all s)) [:state :list-ui [:item-effects 0 0] :selected-ids])))
+      (is (= #{(:id fx-1) (:id fx-2)}
+             (get-in (list-handlers/handle (a-effects-event :list/select-item s :item-id (:id fx-2) :mode :shift))
+                     [:state :list-ui [:item-effects 0 0] :selected-ids]))))
+    (testing "its copy is A's effect; its paste goes after it, in A's"
+      (is (= [:scale] (mapv :effect-id (get-in (list-handlers/handle (a-effects-event :list/copy-selected s))
+                                               [:state :ui :clipboard :effects]))))
+      (let [clip (clipboard/list-clip :item-effects [fx-3] 1)
+            pasted (:items (:dispatch (list-handlers/handle (a-effects-event :list/paste-items (owned-state clip)))))]
+        (is (= [:scale :intensity :rotation] (mapv :effect-id pasted)))))
+    (testing "a paste that waits for the OS clipboard pastes into A where A is when it goes on"
+      (let [then (get-in (list-handlers/handle (a-effects-event :list/paste-items s)) [:clipboard/read :then])
+            moved-back (update-in s [:chains :cue-chains [0 0] :items] (comp vec reverse))
+            clip (clipboard/list-clip :item-effects [fx-3] 1)
+            result (list-handlers/handle (assoc then :state moved-back :clipboard/system clip))]
+        (is (some? then))
+        (is (= [:scale :intensity :rotation] (mapv :effect-id (get-in result [:dispatch :items]))))
+        (is (= id-a (get-in result [:dispatch :item-id])))))
+    (testing "once A is gone (B in its place): nothing ({})"
+      (let [gone (update-in s [:chains :cue-chains [0 0] :items] (comp vec butlast))
+            clip-state (assoc-in gone [:ui :clipboard] (clipboard/list-clip :item-effects [fx-3] 1))]
+        (doseq [event [(a-effects-event :list/delete-selected gone)
+                       (a-effects-event :list/cut-selected gone)
+                       (a-effects-event :list/perform-drop gone :dragging-ids #{(:id fx-1)} :target-id (:id fx-2)
+                                        :drop-position :after)
+                       (a-effects-event :list/start-drag gone :item-id (:id fx-1))
+                       (a-effects-event :list/set-enabled gone :item-id (:id fx-1) :enabled? false)
+                       (a-effects-event :list/commit-rename gone :item-id (:id fx-1) :new-name "x")
+                       (a-effects-event :list/group-selected gone)
+                       (a-effects-event :list/create-empty-group gone)
+                       (a-effects-event :list/select-all gone)
+                       (a-effects-event :list/copy-selected gone)
+                       (a-effects-event :list/paste-items clip-state)]]
+          (is (= {} (list-handlers/handle event)) (str (:event/type event))))))))

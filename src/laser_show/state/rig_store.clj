@@ -12,9 +12,9 @@
      session; the OS lets go of it if the app dies). Another window uses the
      rig read only.
    - The writer: one daemon thread, rig-writer. submit! keeps only the newest
-     rig and writes it write-delay-ms after the last submit; flush! writes the
-     pending one now and waits for the one running (Exit, app/stop!, and a
-     shutdown hook)."
+     rig, with what waited for one it replaced, and writes it write-delay-ms
+     after the last submit; flush! writes the pending one now and waits for
+     the one running (Exit, app/stop!, and a shutdown hook)."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -267,7 +267,7 @@
   !writer
   (delay (java.util.concurrent.Executors/newSingleThreadScheduledExecutor (daemon-factory "rig-writer"))))
 
-(defonce ^{:private true :doc "{:path :doc :on-result :n :task}: the newest rig not written yet, the nth submitted (!submitted)."}
+(defonce ^{:private true :doc "{:path :doc :on-result :then :n :task}: the newest rig not written yet, the nth submitted (!submitted), and what waits for it to be written (submit!'s then)."}
   !pending
   (atom nil))
 
@@ -276,12 +276,13 @@
   (atom 0))
 
 (defn- write-pending!
-  "Take the pending rig and write it (on the rig-writer thread)."
+  "Take the pending rig and write it (on the rig-writer thread). Its
+   on-result gets the result, with :then when something waits for it."
   []
-  (when-let [{:keys [path doc on-result]} (first (swap-vals! !pending (constantly nil)))]
+  (when-let [{:keys [path doc on-result then]} (first (swap-vals! !pending (constantly nil)))]
     (let [result (write! path doc)]
       (when on-result
-        (try (on-result result)
+        (try (on-result (cond-> result (some? then) (assoc :then then)))
              (catch Throwable t
                (log/error t "The rig writer's result could not be reported")))))))
 
@@ -289,17 +290,27 @@
   "Keep doc as the rig to write to path, in place of one not written yet,
    and write it delay-ms (write-delay-ms) after the last submit, on the
    rig-writer thread. on-result gets {:at ms} or {:error reason} there; a
-   superseded rig's never does. The rig is kept before its write is
-   scheduled, so a write due at once (delay-ms 0) that starts straight away
-   finds it."
+   superseded rig's never does. then, when given, is what waits for this
+   rig to be written (Exit's Try again), which on-result gets as the
+   result's :then. A rig that takes the place of one with a then takes the
+   then over too, unless it has its own, so what waited goes on once the
+   newer rig is written; only one is ever kept. The rig is kept before its
+   write is scheduled, so a write due at once (delay-ms 0) that starts
+   straight away finds it."
   ([path doc on-result] (submit! path doc on-result write-delay-ms))
-  ([path doc on-result delay-ms]
+  ([path doc on-result delay-ms] (submit! path doc on-result delay-ms nil))
+  ([path doc on-result delay-ms then]
    (let [^ScheduledExecutorService writer @!writer]
      (locking !pending
        (when-let [^ScheduledFuture task (:task @!pending)]
          (.cancel task false))
        (let [n (swap! !submitted inc)]
-         (reset! !pending {:path path :doc doc :on-result on-result :n n})
+         ;; One step, so the writer can't take the rig in between: a then is
+         ;; reported with the rig the writer took, or carried on here, never both
+         (swap! !pending (fn [superseded]
+                           (let [then (if (some? then) then (:then superseded))]
+                             (cond-> {:path path :doc doc :on-result on-result :n n}
+                               (some? then) (assoc :then then)))))
          (let [task (.schedule writer ^Runnable write-pending! (long delay-ms) TimeUnit/MILLISECONDS)]
            ;; unless the writer has taken it already
            (swap! !pending #(cond-> % (= n (:n %)) (assoc :task task)))))))))

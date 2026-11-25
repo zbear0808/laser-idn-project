@@ -144,11 +144,17 @@
 ;; Parameter Helpers
 
 
+(defn default-params
+  "An effect definition's default parameter values, {key default}: a
+   registered one's, or its descriptor's (laser-show.animation.registries)."
+  [effect-def]
+  (u/map-into :key :default (:parameters effect-def)))
+
 (defn get-default-params
   "Get default parameter values for an effect."
   [effect-id]
   (when-let [effect-def (get-effect effect-id)]
-    (u/map-into :key :default (:parameters effect-def))))
+    (default-params effect-def)))
 
 
 

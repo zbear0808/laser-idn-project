@@ -25,17 +25,28 @@
     (str "Rig saved " (.format at (DateTimeFormatter/ofPattern (if today? "HH:mm" "d MMM HH:mm") Locale/ENGLISH)))))
 
 (defn status-line
-  "What the line says of rig-file ([:rig-file]) at now in zone:
-   {:text :tone (:muted :normal :error :warning) :retry? :banner?}, or nil
-   without a rig file (tests, the REPL)."
-  [{:keys [path status read-only? written-at error requested written]} now zone]
+  "What the line says of shown (rig-file-shown, what it reads of
+   [:rig-file]) at now in zone: {:text :tone (:muted :normal :error
+   :warning) :retry? :banner?}, or nil without a rig file (tests, the
+   REPL)."
+  [{:keys [path status read-only? written-at error saving?]} now zone]
   (when path
     (cond
       read-only? {:text (get banners status (:locked banners)) :tone :warning :banner? true}
       (= :write-failed status) {:text (str "Rig not saved: " error) :tone :error :retry? true}
-      (< (or written 0) (or requested 0)) {:text "Saving rig…" :tone :normal}
+      saving? {:text "Saving rig…" :tone :normal}
       written-at {:text (saved-text written-at now zone) :tone :muted}
       :else {:text "Rig saves automatically" :tone :muted})))
+
+(defn- rig-file-shown
+  "What the line shows of [:rig-file]: its :path :status :read-only?
+   :written-at and :error, and :saving? (a write asked for and not yet
+   done). Not the counts themselves or the group copy, which change with
+   every rig edit (follow-up R3)."
+  [context]
+  (let [{:keys [requested written] :as rig-file} (fx/sub-val context :rig-file)]
+    (assoc (select-keys rig-file [:path :status :read-only? :written-at :error])
+           :saving? (< (or written 0) (or requested 0)))))
 
 (defn path-text
   "The rig file's path for its tooltip, the home folder as ~."
@@ -58,8 +69,8 @@
    its right, while an open show has ⚠ rows, What doesn't fit (n), which
    reopens its report. Takes no room when there is nothing to say."
   [{:keys [fx/context]}]
-  (let [rig-file (fx/sub-val context :rig-file)
-        {:keys [text tone retry? banner?] :as line} (status-line rig-file (System/currentTimeMillis) (ZoneId/systemDefault))
+  (let [shown (fx/sub-ctx context rig-file-shown)
+        {:keys [text tone retry? banner?] :as line} (status-line shown (System/currentTimeMillis) (ZoneId/systemDefault))
         warnings (fx/sub-ctx context rig-report/warning-count)]
     (if (and (nil? line) (zero? warnings))
       {:fx/type :region :managed false :visible false}
@@ -73,7 +84,7 @@
                                :wrap-text true
                                :min-height :use-pref-size
                                :style (tone-style tone)
-                               :tooltip {:fx/type :tooltip :text (path-text (:path rig-file))}})
+                               :tooltip {:fx/type :tooltip :text (path-text (:path shown))}})
                    retry? (conj {:fx/type :button
                                  :id "rig-file-retry"
                                  :text "Retry"

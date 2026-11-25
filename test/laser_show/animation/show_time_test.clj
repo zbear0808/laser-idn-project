@@ -11,6 +11,7 @@
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
+            [laser-show.state.persistent :as persistent]
             [laser-show.state.templates :as templates]))
 
 (def ^:private circle
@@ -1053,3 +1054,73 @@
               (is (= [true {a r C r2} C] (transport)) "Play is what plays")
               (deliver! rt3 (concat ends cleanup))
               (is (= playback (:playback (state/get-raw-state)))))))))))
+
+(deftest a-press-stops-a-chased-cue-until-timecode-enters-again-test
+  ;; Follow-up B7, decided as "stop until timecode re-enters". Before, a
+  ;; press on a cue following running timecode took its marker out, and the
+  ;; clock's next On put it back: it couldn't be turned off
+  (let [rt1 (b-and-c-playing!)
+        k1 (chase-id rt1 C)
+        b (run-id B)
+        press! (fn [cell] (handle! {:event/type :grid/trigger-cell :col (first cell) :row (second cell)}))
+        stopped-for #(get-in (state/get-raw-state) [:playback :chase-stopped])
+        history-and-dirty #((juxt :history (comp :dirty? :project)) (state/get-raw-state))
+        before-press (history-and-dirty)]
+    (is (= [true {B b C nil} C] (transport)) "C:k1 follows timecode, B plays")
+    (press! C)
+    (let [pressed (state/get-raw-state)]
+      (is (= [true {B b} B] (transport)) "pressed: C stops, B plays on")
+      (is (= {C k1} (stopped-for)) "for k1, its episode")
+      (is (= before-press (history-and-dirty)) "no edit: no undo step, nothing unsaved")
+      (testing "timecode runs on: the same episode, which the clock neither reports nor draws"
+        (let [{rt2 :runtime r2 :reports} (step rt1 370.0 (mtc-at 370))
+              {rt3 :runtime r3 :reports} (step rt2 700.0 (running 3606.2))]
+          (is (= k1 (chase-id rt2 C) (chase-id rt3 C)))
+          (is (= [[] []] [r2 r3]))
+          (is (= [{B 1} {B 1}] [(drawn rt2) (drawn rt3)]))
+          (is (not-any? #(contains? (show-time/positions %) C) [rt2 rt3]))
+          (is (identical? pressed (deliver! rt3 [(on-report C 0 :none k1 {:restart nil :allowed? true})]))
+              "a late On for k1 changes nothing")))
+      (testing "timecode stops, then runs again: a new episode, which plays"
+        (state/reset-state! pressed)
+        (let [{rt2 :runtime offs :reports} (step rt1 670.0 (mtc-at 670))
+              {rt3 :runtime ons :reports} (step rt2 1000.0 (running 3610.0))
+              k2 (chase-id rt3 C)]
+          (is (= [] offs) "nothing to take out")
+          (is (not= k1 k2))
+          (is (= [(on-report C 0 :none k2 {:restart nil :allowed? true})] ons))
+          (deliver! rt3 ons)
+          (is (= (marker k2) (intent C)))
+          (is (= [true {B b C nil} C] (transport)))
+          (is (= {} (stopped-for)) "C's stop is over")
+          (is (= {B 1 C 1} (drawn rt3)))))
+      (testing "pressed again while stopped: it follows k1 again, from the next tick"
+        (state/reset-state! pressed)
+        (press! C)
+        (is (= {} (stopped-for)))
+        (is (= [true {B b} B] (transport)) "until the clock says where timecode is")
+        (let [{rt2 :runtime ons :reports} (step rt1 370.0 (mtc-at 370))]
+          (is (= [(on-report C 0 :none k1 {:restart nil :allowed? true})] ons))
+          (deliver! rt2 ons)
+          (is (= (marker k1) (intent C)))
+          (is (= [true {B b C nil} C] (transport)))
+          (is (= {B 1 C 1} (drawn rt2)))
+          (is (= before-press (history-and-dirty)))))
+      (testing "the only cue: its stop closes the transport, and k1 doesn't open it again"
+        (state/reset-state! pressed)
+        (press! B)
+        (is (= [false {} nil] (transport)) "B stopped, the last")
+        (is (= {C k1} (stopped-for)) "C's stop is C's")
+        (let [{rt2 :runtime r2 :reports} (step rt1 370.0 (mtc-at 370))]
+          (is (= [] r2))
+          (is (= [false {} nil] (transport))))
+        (press! B)
+        (is (= [true {B (run-id B)} B] (transport)) "a cue that doesn't follow timecode toggles as before")
+        (is (= {C k1} (stopped-for))))
+      (testing "New and Open let go of it"
+        (doseq [[label event] [["New" {:event/type :file/new-project}]
+                               ["Open" {:event/type :file/project-loaded :file-path "/tmp/show.zip"
+                                        :contents (persistent/project-files pressed)}]]]
+          (state/reset-state! pressed)
+          (handle! event)
+          (is (= {} (stopped-for)) label))))))
