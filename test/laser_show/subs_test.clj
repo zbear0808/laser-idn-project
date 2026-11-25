@@ -3088,3 +3088,76 @@
     (let [ctx' (fx/swap-context ctx assoc-in [:chains :shows a :timeline/chase] nil)]
       (is (nil? (problem ctx' b)) "A off: B is free")
       (is (= {:reason :empty} (problem (fx/swap-context ctx' assoc-in [:chains :shows b :items] []) b))))))
+
+
+
+;; Shows: now playing (S5), plans/2026-11-25-timeline-shows 07 §4.7, §7.4
+
+(def ^:private np-u #uuid "00000000-0000-0000-0000-0000000005b1")
+(def ^:private np-v #uuid "00000000-0000-0000-0000-0000000005b2")
+
+(def ^:private np-show
+  {:name "One More Time" :editor-type :timeline :show/info {:artist "Daft Punk"}
+   :timeline/tempo-bpm 122.7 :timeline/tc-start 3600.0 :timeline/tc-fps 25
+   :tracks [] :items [] :timeline/length 656.0})
+
+(defn- np-state [manual intents playing?]
+  (-> base-state
+      (assoc-in [:chains :shows] {np-u np-show
+                                  np-v (assoc np-show :name "Strobe" :show/info {} :timeline/chase :mtc)})
+      (assoc-in [:ui :shows :manual] manual)
+      (assoc-in [:playback :active-cues] intents)
+      (assoc-in [:playback :playing?] playing?)))
+
+(deftest now-playing-examples-test
+  (let [r #uuid "00000000-0000-0000-0000-0000000005c1"
+        ku (shows/play-key np-u)
+        kv (shows/play-key np-v)
+        np (fn [manual intents & [playing?]]
+             (fx/sub-ctx (context (np-state manual intents (if (some? playing?) playing? true))) subs/now-playing))]
+    (is (nil? (np nil {})) ":manual nil, no intents: nil")
+    (is (= {:show-id np-u :title "One More Time" :artist "Daft Punk"
+            :source :manual :state :playing :held? false
+            :length 656.0 :bpm 122.7 :approx? false
+            :tc-start 3600.0 :fps 25 :loop? false}
+           (np np-u {ku {:run r}}))
+        ":manual u with an intent: the whole shape")
+    (is (= :paused (:state (np np-u {ku {:run r :paused? true}}))))
+    (is (= {:show-id np-v :source :timecode :state :playing}
+           (select-keys (np np-u {kv {:chasing? true :timeline? true}}) [:show-id :source :state]))
+        ":manual u ended, timecode drives v")
+    (is (= {:show-id np-u :source :manual :state :stopped :held? false}
+           (select-keys (np np-u {}) [:show-id :source :state :held?]))
+        ":manual u ended, nothing else")
+    (is (true? (:held? (np np-u {ku {:run r}} false))) "Stop holds it")
+    (testing "the show played by hand wins over timecode while it plays"
+      (is (= :manual (:source (np np-u {ku {:run r} kv {:chasing? true}})))))
+    (testing "the first show timecode drives, in key-order, when several are"
+      (is (= np-u (:show-id (np nil {kv {:chasing? true} ku {:chasing? true}})))))
+    (testing "an unlocked show: the global BPM, approximate; untitled; looping"
+      (let [s (-> (np-state np-u {ku {:run r}} true)
+                  (update-in [:chains :shows np-u] dissoc :timeline/tempo-bpm :name)
+                  (assoc-in [:chains :shows np-u :loop] {:enabled? true :start 0.0 :duration 4.0})
+                  (assoc-in [:timing :bpm] 128.0))]
+        (is (= {:bpm 128.0 :approx? true :title "Untitled" :loop? true}
+               (select-keys (fx/sub-ctx (context s) subs/now-playing) [:bpm :approx? :title :loop?])))))
+    (testing ":manual names a show that's gone: nil"
+      (is (nil? (np #uuid "00000000-0000-0000-0000-0000000005ff" {})))))
+  (testing "a position change inside the intent leaves it identical"
+    (let [r #uuid "00000000-0000-0000-0000-0000000005c1"
+          ku (shows/play-key np-u)
+          ctx (context (np-state np-u {ku {:run r}} true))
+          v1 (fx/sub-ctx ctx subs/now-playing)
+          ctx' (fx/swap-context ctx assoc-in [:playback :active-cues ku :seek] {:id r :beat 4.0})]
+      (is (identical? v1 (fx/sub-ctx ctx' subs/now-playing))))))
+
+(deftest playing-shows-test
+  (let [r #uuid "00000000-0000-0000-0000-0000000005c1"
+        ku (shows/play-key np-u)
+        kv (shows/play-key np-v)
+        ps #(fx/sub-ctx (context %) subs/playing-shows)]
+    (is (= [{:show-id np-u :title "One More Time"} {:show-id np-v :title "Strobe"}]
+           (ps (np-state nil {kv {:chasing? true} ku {:run r} [0 0] {:run r}} true)))
+        "shows only, in key-order")
+    (is (= [] (ps (np-state nil {ku {:run r}} false))) "none while Stop holds them")
+    (is (= [] (ps (np-state nil {} true))))))

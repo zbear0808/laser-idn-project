@@ -47,6 +47,8 @@
             [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.routing.zone-patterns :as zone-patterns]
             [laser-show.timeline.shows :as shows]
+            [laser-show.timeline.model :as model]
+            [laser-show.timeline.timecode :as tc]
             [laser-show.dev-config :as dev-config]))
 
 
@@ -2847,3 +2849,88 @@
   (let [library (fx/sub-val context get-in [:chains :shows])]
     (when-not (= :mtc (get-in library [show-id :timeline/chase]))
       (shows/timecode-problem library show-id))))
+
+
+
+;; Shows: now playing (S5)
+;; The now-playing bar and the status bar's Playing line (plans/2026-11-25-
+;; timeline-shows 07 §4.7). No positions: the bar draws those from the show
+;; clock's tick itself (views/components/now_playing.clj).
+
+(defn- show-play-state
+  "How show id plays, from its intent: nil (none), :chasing (timecode
+   drives it), :paused or :playing. A seek or a new run leaves it equal."
+  [state id]
+  (when-let [intent (get (ex/active-cues state) (shows/play-key id))]
+    (cond (:chasing? intent) :chasing
+          (:paused? intent) :paused
+          :else :playing)))
+
+(defn- first-chased-show
+  "The first show (in shows/key-order) timecode drives, by its id, or nil."
+  [state]
+  (->> (ex/active-cues state)
+       (keep (fn [[k intent]] (when (and (shows/play-key? k) (:chasing? intent)) k)))
+       (sort shows/key-order)
+       first
+       shows/key-show-id))
+
+(defn- now-playing-show
+  "What the bar shows of show id: its title (\"Untitled\" without one),
+   artist, length in beats, tempo (locked, else the global BPM, :approx?),
+   timecode start and rate, and whether it loops. nil when it isn't there."
+  [context id]
+  (when-let [show (fx/sub-ctx context show-cue id)]
+    (let [locked (:timeline/tempo-bpm show)
+          locked (when (and (number? locked) (pos? locked)) (double locked))
+          global (fx/sub-ctx context bpm)
+          artist (get-in show [:show/info :artist])
+          start (:timeline/tc-start show)]
+      {:show-id id
+       :title (or (fx/sub-ctx context show-title id) "Untitled")
+       :artist (when (and (string? artist) (not (str/blank? artist))) artist)
+       :length (max 0.0 (double (or (model/effective-length show) 0.0)))
+       :bpm (or locked (if (and (number? global) (pos? global)) (double global) 120.0))
+       :approx? (nil? locked)
+       :tc-start (if (number? start) (double start) 0.0)
+       :fps (tc/cue-fps show)
+       :loop? (boolean (get-in show [:loop :enabled?]))})))
+
+(defn now-playing
+  "The show the now-playing bar shows, in this order of choice: the show
+   played by hand ([:ui :shows :manual]) while it has an intent (:source
+   :manual); else the first show timecode drives (:source :timecode); else
+   the one played by hand, stopped or ended (:source :manual :state
+   :stopped); else nil. As now-playing-show's map, with :source, :state
+   (:playing, :paused or :stopped) and :held? (it has an intent while Stop
+   holds the output). It changes when a show starts, pauses or stops, a
+   chase marker comes or goes, the show is edited, or Stop holds or Play
+   resumes; never with its position."
+  [context]
+  (let [manual (fx/sub-val context get-in [:ui :shows :manual])
+        manual-state (when (some? manual) (fx/sub-val context show-play-state manual))
+        chased (fx/sub-val context first-chased-show)
+        held? (not (fx/sub-ctx context playing?))
+        with (fn [id source state]
+               (when-let [show (fx/sub-ctx context now-playing-show id)]
+                 (assoc show :source source :state state
+                        :held? (and held? (not= :stopped state)))))]
+    (or (when (#{:playing :paused} manual-state) (with manual :manual manual-state))
+        (when (some? chased) (with chased :timecode :playing))
+        (when (some? manual) (with manual :manual :stopped)))))
+
+(defn playing-shows
+  "The shows that play, [{:show-id :title}] (\"Untitled\" without one), in
+   shows/key-order: by hand, by a trigger or by timecode. None while Stop
+   holds them, as playing-cues."
+  [context]
+  (if (fx/sub-ctx context playing?)
+    (->> (fx/sub-ctx context active-cue-cells)
+         (filter shows/play-key?)
+         (sort shows/key-order)
+         (keep (fn [k]
+                 (let [id (shows/key-show-id k)]
+                   (when (some? (fx/sub-ctx context show-cue id))
+                     {:show-id id :title (or (fx/sub-ctx context show-title id) "Untitled")}))))
+         vec)
+    []))

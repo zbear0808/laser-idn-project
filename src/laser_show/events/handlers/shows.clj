@@ -302,6 +302,94 @@
       (disable-timecode state ids))))
 
 
+
+;; Transport (S5)
+;; The now-playing bar's buttons (plans/2026-11-25-timeline-shows 01 §5,
+;; 07 §4.5). Each acts on the show played by hand ([:ui :shows :manual]),
+;; and does nothing while timecode drives it. They change only
+;; [:playback] and [:ui], so they're never undo steps.
+
+
+(defn- by-hand?
+  "Can show id be played by hand: it is there and doesn't follow timecode?"
+  [state id]
+  (let [show (show-at state id)]
+    (and (some? show) (not (playback/chases-mtc? show)))))
+
+(defn- manual-intent [state manual]
+  (get-in state [:playback :active-cues (shows/play-key manual)]))
+
+(defn- handle-toggle-play
+  "⏯: pause or resume the show played by hand; play it again from beat 0
+   once it has stopped or ended. With none played by hand yet, play the
+   first selected show the table shows, else its first show, that doesn't
+   follow timecode."
+  [{:keys [state] :as event}]
+  (let [manual (get-in state [:ui :shows :manual])
+        intent (when (some? manual) (manual-intent state manual))]
+    (cond
+      (and (some? manual) (not (by-hand? state manual)))
+      {:state state}
+
+      (some? intent)
+      {:state (update-in state [:playback :active-cues (shows/play-key manual) :paused?] not)}
+
+      (some? manual)
+      (handle-play (assoc event :show-id manual))
+
+      :else
+      (let [visible (shows/visible-ids state)
+            selected (get-in state [:ui :shows :selected] #{})
+            pick (->> (concat (filter selected visible) visible)
+                      (filter #(by-hand? state %))
+                      first)]
+        (if pick
+          (handle-play (assoc event :show-id pick))
+          {:state state})))))
+
+(defn- handle-seek
+  "Move the show played by hand to :beat, at the show clock's next tick.
+   Only while it plays or is paused, and when :show-id, if given, is still
+   that show: a release that comes after another show took over seeks
+   nothing."
+  [{:keys [show-id beat state]}]
+  (let [manual (get-in state [:ui :shows :manual])
+        intent (when (some? manual) (manual-intent state manual))]
+    (if (and (some? intent)
+             (not (:chasing? intent))
+             (number? beat)
+             (or (nil? show-id) (= show-id manual))
+             (by-hand? state manual))
+      {:state (update-in state [:playback :active-cues (shows/play-key manual)]
+                         cue-timing/request-seek beat (random-uuid))}
+      {:state state})))
+
+(defn- neighbour
+  "The show after (step 1) or before (step -1) the one played by hand in
+   the table's order, skipping shows that follow timecode; the first (or
+   last) such show when the one played by hand isn't shown; nil at either
+   end."
+  [state step]
+  (let [visible (shows/visible-ids state)
+        manual (get-in state [:ui :shows :manual])
+        i (.indexOf ^java.util.List visible manual)
+        candidates (cond
+                     (neg? i) (if (pos? step) visible (rseq visible))
+                     (pos? step) (subvec visible (inc i))
+                     :else (rseq (subvec visible 0 i)))]
+    (first (filter #(by-hand? state %) candidates))))
+
+(defn- handle-step
+  "⏭ (step 1) and ⏮ (step -1): play the neighbouring show (neighbour)."
+  [{:keys [state] :as event} step]
+  (let [manual (get-in state [:ui :shows :manual])]
+    (if (and (some? manual) (some? (show-at state manual)) (not (by-hand? state manual)))
+      {:state state}
+      (if-let [id (neighbour state step)]
+        (handle-play (assoc event :show-id id))
+        {:state state}))))
+
+
 ;; Public API
 
 
@@ -316,6 +404,10 @@
     :shows/play (handle-play event)
     :shows/stop (handle-stop event)
     :shows/set-timecode (handle-set-timecode event)
+    :shows/toggle-play (handle-toggle-play event)
+    :shows/seek (handle-seek event)
+    :shows/next (handle-step event 1)
+    :shows/previous (handle-step event -1)
     (do
       (log/warn "Unknown shows event:" type)
       {})))

@@ -4,7 +4,8 @@
    ▶ (play it) and ✎ (open it in the timeline editor). The preview stays
    beside it (views/root.clj)."
   (:require [cljfx.api :as fx]
-            [laser-show.subs :as subs]))
+            [laser-show.subs :as subs]
+            [laser-show.views.components.now-playing :as now-playing]))
 
 (defn- count-label [n]
   (str n (if (= 1 n) " show" " shows")))
@@ -87,4 +88,5 @@
    :spacing 8
    :children [{:fx/type header}
               {:fx/type show-list
-               :v-box/vgrow :always}]})
+               :v-box/vgrow :always}
+              {:fx/type now-playing/now-playing-bar}]})
