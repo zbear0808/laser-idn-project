@@ -62,8 +62,8 @@ A show is a timeline cue map, the same shape `timeline/model.clj:1-22` and `:462
 | `tc-overlap?` | `[a b]` → half-open overlap in seconds, with a 1 µs tolerance (§4.1) |
 | `timecode-problem` | `[shows id]` → nil, `{:reason :no-bpm}`, `{:reason :empty}` or `{:reason :overlap :with id2 :range {…}}` for enabling `id` against the other enabled shows |
 | `rows` | `[shows]` → a vector of row maps (§3.1). No global BPM: an unlocked show's duration is worked out where it's shown |
-| `filter-rows` | `[rows query scope]` → rows (§3.4) |
-| `sort-rows` | `[rows {:keys [column dir]}]` → rows (§3.3) |
+| `filter-rows` | `[rows query scope global-bpm]` → rows (§3.4); the BPM is for unlocked shows' durations |
+| `sort-rows` | `[rows {:keys [column dir]} global-bpm]` → rows (§3.3). Columns are row keys (`:duration-s`, not `:duration`). TC: ascending puts ticked rows first, descending last |
 | `visible-ids` | `[state]` → the ids in table order: `(->> (rows …) (filter-rows …) (sort-rows …) (mapv :id))`, the same functions as `subs/visible-show-rows` over memoized rows (`06` §4.4). Shared by the subscription and the next/previous handlers |
 | `invalid-timecode-ids` | `[shows changed-ids]` → `[[id problem] …]` for the changed, enabled shows that break TS-6 (§4.3) |
 | `invariant-violations` | `[shows]` → the pairs or shows that break TS-6. For tests |
